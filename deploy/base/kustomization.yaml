@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The application and nothing else: an overlay supplies the environment's
+# config.env and secrets.env (as simple-host-config and simple-host-secrets),
+# the ingress hosts, the image, and, through components, a database and a
+# bucket or the coordinates of managed ones.
+namespace: simple-host
+
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+  - backup-assets-cronjob.yaml
+  - cronjob-prune.yaml
+
+images:
+  - name: simple-host
+    newName: simple-host
+    newTag: latest

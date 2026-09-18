@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Install Simple Host</title>
+<style>
+  :root {
+    --ps-blue-900: #002061;
+    --ps-blue-800: #003087;
+    --ps-blue-700: #004CB3;
+    --ps-blue-600: #006FCD;
+    --ps-blue-100: #E6F0FA;
+    --canvas: #FAFBFE;
+    --surface: #FFFFFF;
+    --surface-line: #DCE3ED;
+    --ink: #0A1530;
+    --ink-soft: #475569;
+    --ink-muted: #8B9AB0;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    color: var(--ink);
+    background: var(--canvas);
+    -webkit-font-smoothing: antialiased;
+  }
+  .container {
+    width: 100%;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+  header.site-header {
+    border-bottom: 1px solid var(--surface-line);
+    padding: 20px 0;
+    margin-bottom: 56px;
+  }
+  header.site-header .container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .wordmark {
+    font-weight: 700;
+    color: var(--ps-blue-900);
+    text-decoration: none;
+    font-size: 15px;
+    letter-spacing: -0.01em;
+  }
+  .site-header nav a {
+    color: var(--ink-soft);
+    text-decoration: none;
+    font-size: 14px;
+    margin-left: 24px;
+  }
+  .site-header nav a:hover { color: var(--ps-blue-700); }
+  main { padding-bottom: 80px; }
+  .page-intro {
+    max-width: 640px;
+    margin: 0 auto 64px;
+  }
+  .eyebrow {
+    margin: 0 0 18px;
+    color: var(--ps-blue-800);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+  h1 {
+    margin: 0 0 20px;
+    color: var(--ps-blue-900);
+    font-size: clamp(34px, 5.5vw, 46px);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.08;
+  }
+  .intro {
+    margin: 0;
+    color: var(--ink-soft);
+    font-size: clamp(16px, 2vw, 18px);
+    line-height: 1.6;
+  }
+  section.numbered {
+    padding: 36px 0;
+    border-top: 1px solid var(--surface-line);
+  }
+  section.numbered .num {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--ps-blue-600);
+    letter-spacing: 0.1em;
+    margin-bottom: 10px;
+  }
+  section.numbered h2 {
+    margin: 0 0 14px;
+    color: var(--ink);
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+  }
+  section.numbered p {
+    margin: 0 0 12px;
+    color: var(--ink-soft);
+    font-size: 15.5px;
+    line-height: 1.7;
+    max-width: 66ch;
+  }
+  section.numbered p:last-child { margin-bottom: 0; }
+  section.numbered ul, section.numbered ol {
+    margin: 0 0 12px;
+    padding-left: 1.2em;
+    color: var(--ink-soft);
+    font-size: 15.5px;
+    line-height: 1.7;
+  }
+  section.numbered li + li { margin-top: 6px; }
+  section.numbered ol { max-width: 66ch; }
+  code, .mono {
+    font-family: var(--font-mono);
+    font-size: 0.92em;
+    background: var(--ps-blue-100);
+    color: var(--ps-blue-900);
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
+  }
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--surface-line);
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin-top: 16px;
+  }
+  .callout p { margin: 0; }
+  .callout p + p { margin-top: 8px; }
+  .checklist {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 12px;
+  }
+  .checklist li {
+    position: relative;
+    padding-left: 30px;
+    margin-bottom: 14px;
+    font-size: 15.5px;
+    line-height: 1.6;
+    color: var(--ink-soft);
+    max-width: 62ch;
+  }
+  .checklist li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 2px;
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--ps-blue-600);
+    border-radius: 4px;
+  }
+  .checklist li strong { color: var(--ink); }
+  .checklist li .or {
+    display: block;
+    color: var(--ink-muted);
+    font-size: 14px;
+    margin-top: 2px;
+  }
+  .prompt-box {
+    background: var(--ps-blue-900);
+    color: #E9F1FB;
+    border-radius: 10px;
+    padding: 20px 22px;
+    margin: 16px 0;
+    overflow-x: auto;
+  }
+  .prompt-box pre {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .prompt-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+  }
+  .prompt-label span {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+  }
+  .agent-badges {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+  .agent-badges span {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: none;
+    background: var(--ps-blue-100);
+    color: var(--ps-blue-900);
+    padding: 3px 9px;
+    border-radius: 999px;
+  }
+  .cta {
+    margin-top: 8px;
+    display: inline-block;
+    background: var(--ps-blue-800);
+    color: #fff;
+    text-decoration: none;
+    font-size: 14.5px;
+    font-weight: 600;
+    padding: 12px 22px;
+    border-radius: 8px;
+  }
+  .cta:hover { background: var(--ps-blue-900); }
+  .cta.secondary {
+    background: var(--surface);
+    color: var(--ps-blue-800);
+    border: 1px solid var(--surface-line);
+    margin-left: 10px;
+  }
+  .cta.secondary:hover { background: var(--ps-blue-100); }
+  main a { color: var(--ps-blue-700); text-decoration: underline; text-underline-offset: 2px; }
+  main a:hover { color: var(--ps-blue-800); }
+  .command-block {
+    background: var(--surface);
+    border: 1px solid var(--surface-line);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin: 10px 0 16px;
+    overflow-x: auto;
+  }
+  .command-block pre {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 13.5px;
+    line-height: 1.7;
+    color: var(--ink);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .command-block .comment { color: var(--ink-muted); }
+  footer {
+    border-top: 1px solid var(--surface-line);
+    padding: 28px 0;
+    color: var(--ink-muted);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  @media (max-width: 600px) {
+    .container { padding: 0 20px; }
+    header.site-header nav a { margin-left: 14px; font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <span class="wordmark">Simple Host</span>
+      <nav>
+        <a href="index.html">Enterprise</a>
+        <a href="#agent">Install with your agent</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="container">
+      <div class="page-intro">
+        <p class="eyebrow">Install</p>
+        <h1>Bring up Simple Host on a cluster you already have</h1>
+        <p class="intro">Three ways to read this page: check what you need, paste one prompt into a coding agent and let it drive the checkout for you, or run the commands yourself. All three follow the same path documented in <code>docs/install.md</code> in the package repository.</p>
+      </div>
+
+      <section class="numbered" id="what-you-need">
+        <span class="num">1 — What you need</span>
+        <h2>A short checklist a platform team prepares first</h2>
+        <ul class="checklist">
+          <li><strong>A Kubernetes cluster and a <code>kubectl</code> context that reaches it.</strong> Docker Desktop or minikube for a first look; anything real for production.</li>
+          <li><strong>A Postgres you can reach.</strong><span class="or">Or: no Postgres yet — the package ships an in-cluster overlay (<code>deploy/components/postgres-incluster</code>) for a first look.</span></li>
+          <li><strong>An S3-compatible bucket.</strong><span class="or">Or: no bucket yet — the package ships an in-cluster MinIO overlay (<code>deploy/components/minio</code>) for a first look.</span></li>
+          <li><strong>A wildcard DNS name for the base host, and a way to issue its certificate.</strong> A real domain plus a cert-manager DNS-01 <code>ClusterIssuer</code> for production; for a first look, a public wildcard name that already resolves to loopback (<code>nip.io</code> or <code>sslip.io</code>) plus <code>mkcert</code> needs nothing from DNS at all.</li>
+          <li><strong>An OIDC client from your identity provider</strong> — Google, Okta, Entra ID, or any other OpenID Connect provider your company already runs — with its issuer URL, client ID, and client secret, and the ability to register a redirect URI shaped <code>https://&lt;base-host&gt;/auth/callback</code>.</li>
+        </ul>
+        <p>Nothing else. No cloud account is required to try the package end to end; sections 2 and 3 below cover both a first look and a real install.</p>
+      </section>
+
+      <section class="numbered" id="agent">
+        <span class="num">2 — Install with your agent</span>
+        <h2>Paste this into Claude Code, Codex, or Cursor</h2>
+        <p>Run this from a checkout of the package repository. It tells your agent to read the real install guide, ask you for exactly the checklist above and nothing more, and then drive the install using only files and commands that exist in the repository today.</p>
+        <div class="prompt-box">
+          <div class="prompt-label">
+            <div class="agent-badges"><span>Claude Code</span><span>Codex</span><span>Cursor</span></div>
+            <span>Copy and paste</span>
+          </div>
+          <pre>You are installing Simple Host for enterprises from this checkout of the
+repository. Do not skip reading the docs, and do not invent a file, a
+Makefile target, or a default value that isn't already in this tree.
+
+1. Read docs/install.md in full before touching anything.
+
+2. Ask me for exactly these values, and nothing else, before making any
+   change:
+   a. Which kubectl context should you use, and does
+      `kubectl --context &lt;that context&gt; cluster-info` succeed?
+   b. Do I have a Postgres you can reach, or should you deploy the
+      in-cluster overlay (deploy/components/postgres-incluster)?
+   c. Do I have an S3-compatible bucket you can reach, or should you
+      deploy the in-cluster MinIO overlay (deploy/components/minio)?
+   d. What wildcard hostname should the base host use, and how will its
+      certificate be issued: mkcert against a local nip.io/sslip.io
+      hostname, or a named cert-manager ClusterIssuer for a real domain?
+   e. My OIDC provider's issuer URL, client ID, and client secret, and
+      whether I have already registered the redirect URI
+      https://&lt;base-host&gt;/auth/callback with it.
+
+3. If I said "no" to (b) and (c) and gave a nip.io/sslip.io hostname in
+   (d), follow docs/install.md sections 2-4 (the local-cluster path):
+   run `make local-tools`, then `make local` (add
+   CLUSTER_CONTEXT=minikube and tell me to run `minikube tunnel` if I'm
+   on minikube) — these are the exact Makefile targets in this
+   repository; do not substitute your own kubectl/kustomize sequence
+   where a target already exists.
+
+4. Otherwise, follow docs/install.md section 5 (the real-cluster path):
+   - Copy deploy/overlays/byo/config.env.example to config.env and
+     deploy/overlays/byo/secrets.env.example to secrets.env; fill in only
+     the values I gave you in step 2, plus anything docs/configuration.md
+     marks required — never invent a value I didn't give you.
+   - Place my database's CA bundle at deploy/overlays/byo/db-ca.crt.
+   - Edit deploy/overlays/byo/ingress-patch.yaml with my real hostnames
+     and ClusterIssuer name.
+   - Edit deploy/overlays/byo/kustomization.yaml's images: digest to the
+     image reference I give you; ask me for it rather than guessing a tag
+     if I haven't built one. Use `make build` and/or `make image` only if
+     I ask you to build it yourself.
+   - Apply with `kustomize build deploy/overlays/byo | kubectl apply -f -`,
+     then `kubectl -n simple-host rollout status deploy/simple-host`.
+
+5. Either way, verify readiness through the ingress, not by
+   port-forwarding around it:
+   `curl https://&lt;base-host&gt;/readyz`
+   (add `--cacert "$(mkcert -CAROOT)/rootCA.pem"` only on the local
+   mkcert path) and confirm it returns {"status":"ok"}.
+
+6. Verify a first sign-in: open https://&lt;base-host&gt;/auth/login
+   yourself, or walk me through opening it, and confirm the dashboard
+   loads with a key-minting form.
+
+7. Report back: the dashboard URL, which path you took, and anything
+   from docs/install.md's troubleshooting section you actually hit along
+   the way.
+
+8. Restricted sites, the site-facing state/asset API, and the audit/
+   access-log trail are all built — docs/install.md sections 6, 7, and 8
+   have real steps if I ask you to verify any of them, including reading
+   GET /api/audit and GET /api/access back and, if I'm an admin, trying
+   the CSV/JSONL export at GET /api/admin/export.</pre>
+        </div>
+        <p>The agent should stop and ask if any answer in step 2 is missing — it should never guess a hostname, a provider, or a database.</p>
+      </section>
+
+      <section class="numbered" id="by-hand">
+        <span class="num">3 — Install by hand</span>
+        <h2>The same path, as commands, on one screen</h2>
+        <p>The quickest way to see the whole thing working, no cloud account needed:</p>
+        <div class="command-block">
+<pre><span class="comment"># 1. Check tools and cluster reachability</span>
+make local-tools
+
+<span class="comment"># 2. Bring up ingress-nginx, cert-manager, Postgres, MinIO, Dex, and the app</span>
+make local
+<span class="comment"># minikube instead of Docker Desktop: make local CLUSTER_CONTEXT=minikube
+# (run `minikube tunnel` in another terminal first)</span>
+
+<span class="comment"># 3. Confirm it's ready</span>
+curl --cacert "$(mkcert -CAROOT)/rootCA.pem" \
+  https://simple-host.127-0-0-1.nip.io/readyz
+
+<span class="comment"># 4. Sign in — open in a browser</span>
+https://simple-host.127-0-0-1.nip.io/auth/login
+<span class="comment"># admin@example.com / adminpass, or person@example.com / personpass</span>
+
+<span class="comment"># 5. Run the end-to-end check</span>
+make smoke
+
+<span class="comment"># 6. Tear it down when you're done — data is disposable</span>
+make local-down</pre>
+        </div>
+        <p>For a real cluster with your own Postgres, bucket, and domain, the same six steps become section 5 of <code>docs/install.md</code> — the file the agent prompt above reads for you.</p>
+      </section>
+    </div>
+  </main>
+
+  <footer>
+    <div class="container">Simple Host for enterprises</div>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,2354 @@
+openapi: 3.0.3
+info:
+  title: Simple Host API
+  description: |
+    Internal static website hosting at `/sites/{user}/{sitename}/`. Uploads may
+    be gzip-compressed tar or ZIP archives; nested regular-file downloads such
+    as ZIP and DMG artifacts are supported.
+
+    A canonical site can be shared with registered editors while keeping one
+    owner, URL, stored copy, analytics history, and version history. Editor
+    mutations use owner-qualified collaboration routes and optimistic `ETag` /
+    `If-Match` protection. Editors are trusted collaborators: an editor can
+    deploy JavaScript, and hosted pages still share an origin with management
+    surfaces.
+
+    Shared state is public and unauthenticated. Its Referer-path check is
+    forgeable attribution, not access control, and hosted pages share an origin
+    with the control pages and API. Browser session cookies are ambient API
+    credentials on that origin, so hosted JavaScript can send authenticated
+    requests in a signed-in browser even though it cannot read HttpOnly cookies.
+    Never store secrets or PII in state or uploaded files.
+
+    Rate-limited operations return `429` with an integer-seconds
+    `Retry-After` header. These limits are process-local and reset when the
+    service process restarts.
+
+    API-key-authenticated management requests must identify either a supported
+    agent skill with `X-Skill-Version: <major.minor.patch>` or an intentional
+    non-skill integration with `X-Simple-Host-Client: api`. The first-party
+    account page uses the reserved `control-ui` value. Missing, malformed, or
+    unsupported skill versions return `400 skill_version_required` after valid
+    authentication; invalid keys still return `401`. Accepted management
+    responses advertise latest/minimum/update metadata in headers without
+    changing response bodies.
+
+    The public, unauthenticated `/.well-known/agent-skills/` namespace exposes
+    only the discovery index and three fixed skill archives documented below.
+    `GET` or `HEAD` for any other artifact in that namespace returns a fixed
+    `404 Not Found`; methods other than `GET` and `HEAD` on a fixed discovery
+    path return `405 Method Not Allowed`. The SHA-256 digests are integrity
+    checks over the exact same-origin archive bytes, not signatures.
+  version: 2.5.0
+
+servers:
+  - url: https://simple-host.example.com
+    description: Production
+  - url: http://localhost:8080
+    description: Local development
+
+paths:
+  /.well-known/agent-skills/index.json:
+    description: Public, unauthenticated fixed discovery-index path. Methods other than GET and HEAD return 405 Method Not Allowed.
+    get:
+      operationId: getAgentSkillsDiscoveryIndex
+      summary: Get the agent skill discovery index
+      description: Returns the draft discovery document and its three fixed archive entries. The response body is non-empty JSON.
+      tags: [Skills]
+      security: []
+      responses:
+        '200':
+          $ref: '#/components/responses/AgentSkillsDiscoveryIndexGET'
+    head:
+      operationId: headAgentSkillsDiscoveryIndex
+      summary: Get agent skill discovery index headers
+      description: 'Returns the same 200 status, `Content-Type: application/json`, `Cache-Control`, and `Content-Length` headers as GET, with no response body.'
+      tags: [Skills]
+      security: []
+      responses:
+        '200':
+          $ref: '#/components/responses/AgentSkillsDiscoveryIndexHEAD'
+
+  /.well-known/agent-skills/simple-host.zip:
+    description: Public, unauthenticated fixed archive path. Methods other than GET and HEAD return 405 Method Not Allowed; unlisted artifacts under the discovery namespace return 404 Not Found.
+    get:
+      operationId: getSimpleHostAgentSkillArchive
+      summary: Download the simple-host skill archive
+      description: Returns the non-empty ZIP archive whose exact bytes are hashed by the matching discovery entry.
+      tags: [Skills]
+      security: []
+      responses:
+        '200':
+          $ref: '#/components/responses/AgentSkillArchiveGET'
+    head:
+      operationId: headSimpleHostAgentSkillArchive
+      summary: Get simple-host skill archive headers
+      description: 'Returns the same 200 status, `Content-Type: application/zip`, `Cache-Control`, and `Content-Length` headers as GET, with no response body.'
+      tags: [Skills]
+      security: []
+      responses:
+        '200':
+          $ref: '#/components/responses/AgentSkillArchiveHEAD'
+
+  /.well-known/agent-skills/simple-host-builder.zip:
+    description: Public, unauthenticated fixed archive path. Methods other than GET and HEAD return 405 Method Not Allowed; unlisted artifacts under the discovery namespace return 404 Not Found.
+    get:
+      operationId: getSimpleHostBuilderAgentSkillArchive
+      summary: Download the simple-host-builder skill archive
+      description: Returns the non-empty ZIP archive whose exact bytes are hashed by the matching discovery entry.
+      tags: [Skills]
+      security: []
+      responses:
+        '200':
+          $ref: '#/components/responses/AgentSkillArchiveGET'
+    head:
+      operationId: headSimpleHostBuilderAgentSkillArchive
+      summary: Get simple-host-builder skill archive headers
+      description: 'Returns the same 200 status, `Content-Type: application/zip`, `Cache-Control`, and `Content-Length` headers as GET, with no response body.'
+      tags: [Skills]
+      security: []
+      responses:
+        '200':
+          $ref: '#/components/responses/AgentSkillArchiveHEAD'
+
+  /.well-known/agent-skills/fix-paths-for-subpath-hosting.zip:
+    description: Public, unauthenticated fixed archive path. Methods other than GET and HEAD return 405 Method Not Allowed; unlisted artifacts under the discovery namespace return 404 Not Found.
+    get:
+      operationId: getFixPathsForSubpathHostingAgentSkillArchive
+      summary: Download the fix-paths-for-subpath-hosting skill archive
+      description: Returns the non-empty ZIP archive whose exact bytes are hashed by the matching discovery entry.
+      tags: [Skills]
+      security: []
+      responses:
+        '200':
+          $ref: '#/components/responses/AgentSkillArchiveGET'
+    head:
+      operationId: headFixPathsForSubpathHostingAgentSkillArchive
+      summary: Get fix-paths-for-subpath-hosting skill archive headers
+      description: 'Returns the same 200 status, `Content-Type: application/zip`, `Cache-Control`, and `Content-Length` headers as GET, with no response body.'
+      tags: [Skills]
+      security: []
+      responses:
+        '200':
+          $ref: '#/components/responses/AgentSkillArchiveHEAD'
+
+  /skills/sha256/{digest}/skills.zip:
+    get:
+      summary: Download a bundle by content digest
+      description: Serves the skill bundle only when {digest} is the SHA-256 of the bundle this deployment produces; any other digest returns 404. Because the URL names the bytes, the response is safely cacheable forever. Read immutable_bundle_url from /skills/version rather than constructing this path.
+      tags: [Skills]
+      security: []
+      parameters:
+        - name: digest
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-f0-9]{64}$'
+      responses:
+        '200':
+          description: The bundle matching this digest
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [public, max-age=31536000, immutable]
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: No deployed bundle has this digest. Not cached, since a later deployment may serve it.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum: [no-store]
+
+  /skills/version:
+    get:
+      summary: Get the current skill bundle manifest
+      description: Publishes metadata for a permissioned, SHA-256-verified skill update. The checksum is an integrity check from the same origin, not a code-signing signature.
+      tags: [Skills]
+      security: []
+      responses:
+        '200':
+          description: Current bundle manifest
+          headers:
+            Cache-Control:
+              description: Prevents caching across skill releases.
+              schema:
+                type: string
+                enum: [no-store]
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillVersionManifest'
+
+  /api/auth:
+    post:
+      summary: Authenticate or register
+      description: Enter an email. A first-time user receives a new API key; an approved reset can claim a replacement key. An existing account with a current key returns 409. Username is derived from the email local part (for example, alice.smith@company.com becomes alice.smith).
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: alice.smith@company.com
+      responses:
+        '200':
+          description: Replacement key issued after an approved reset
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '201':
+          description: New user created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Account already has a current key; use the reset-request flow if it was lost
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Request body is too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/me:
+    get:
+      summary: Get current user info
+      tags: [Auth]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+      responses:
+        '200':
+          description: Current user
+          headers:
+            X-Simple-Host-Latest-Skill-Version:
+              $ref: '#/components/headers/LatestSkillVersion'
+            X-Simple-Host-Minimum-Skill-Version:
+              $ref: '#/components/headers/MinimumSkillVersion'
+            X-Simple-Host-Update-URL:
+              $ref: '#/components/headers/SkillUpdateURL'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  username:
+                    type: string
+                  is_admin:
+                    type: boolean
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/sites:
+    get:
+      summary: List sites
+      description: Returns the authenticated user's sites with daily server-side analytics. Admins see all sites.
+      tags: [Sites]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+      responses:
+        '200':
+          description: List of sites
+          headers:
+            X-Simple-Host-Latest-Skill-Version:
+              $ref: '#/components/headers/LatestSkillVersion'
+            X-Simple-Host-Minimum-Skill-Version:
+              $ref: '#/components/headers/MinimumSkillVersion'
+            X-Simple-Host-Update-URL:
+              $ref: '#/components/headers/SkillUpdateURL'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Site'
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/sites/{sitename}:
+    post:
+      summary: Create a new site
+      description: |
+        Upload a gzip-compressed tar or ZIP archive. The compressed request is
+        limited to 100 MiB; each regular file and all files in aggregate are
+        limited to 500 MiB of bytes actually read; at most 50,000 entries are
+        accepted. Complete gzip/TAR output is independently limited to 768 MiB,
+        including framing, extended metadata, padding, and trailing bytes;
+        unique path-tracking metadata is limited to 64 MiB. Entries must be
+        regular files or directories with canonical, confined paths. Symlinks
+        and special files are rejected.
+
+        Extensions use a denylist, not an allowlist: `.sh`, `.bash`, `.zsh`,
+        `.fish`, `.bat`, `.cmd`, `.ps1`, `.py`, `.pyc`, `.rb`, `.pl`, `.go`,
+        `.php`, and `.exe` are rejected case-insensitively. Other regular files,
+        including nested ZIP and DMG downloads, are supported, except entries
+        whose basename is `.DS_Store` or starts with `._`; those macOS metadata
+        files are omitted. The response's `url` is the site's address; use it as
+        returned rather than composing `/sites/{username}/{sitename}/` by hand,
+        because the canonical address is changing.
+      tags: [Sites]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/sitename'
+      requestBody:
+        required: true
+        content:
+          application/gzip:
+            schema:
+              type: string
+              format: binary
+          application/zip:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '201':
+          description: Site created
+          headers:
+            X-Simple-Host-Latest-Skill-Version:
+              $ref: '#/components/headers/LatestSkillVersion'
+            X-Simple-Host-Minimum-Skill-Version:
+              $ref: '#/components/headers/MinimumSkillVersion'
+            X-Simple-Host-Update-URL:
+              $ref: '#/components/headers/SkillUpdateURL'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteWithNote'
+        '400':
+          $ref: '#/components/responses/ManagementBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Site already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Compressed archive request exceeds 100 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+    put:
+      summary: Update an existing site
+      description: Upload a new gzip-compressed tar or ZIP version using the same archive safety, type, path, denylist, and size/count limits as site creation. Creates a new version number. Versions beyond the newest 5 are automatically cleaned up. For backward compatibility `If-Match` is optional while the site has no editors; once shared, it is required and stale older clients fail safely.
+      tags: [Sites]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/sitename'
+        - name: If-Match
+          in: header
+          required: false
+          description: Required when this site currently has one or more editors.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/gzip:
+            schema:
+              type: string
+              format: binary
+          application/zip:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Site updated
+          headers:
+            X-Simple-Host-Latest-Skill-Version:
+              $ref: '#/components/headers/LatestSkillVersion'
+            X-Simple-Host-Minimum-Skill-Version:
+              $ref: '#/components/headers/MinimumSkillVersion'
+            X-Simple-Host-Update-URL:
+              $ref: '#/components/headers/SkillUpdateURL'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteWithNote'
+        '400':
+          $ref: '#/components/responses/ManagementBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Site not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '413':
+          description: Compressed archive request exceeds 100 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+    delete:
+      summary: Delete a site
+      description: Deletes the site and all its versions from disk and database.
+      tags: [Sites]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/sitename'
+      responses:
+        '204':
+          description: Site deleted
+          headers:
+            X-Simple-Host-Latest-Skill-Version:
+              $ref: '#/components/headers/LatestSkillVersion'
+            X-Simple-Host-Minimum-Skill-Version:
+              $ref: '#/components/headers/MinimumSkillVersion'
+            X-Simple-Host-Update-URL:
+              $ref: '#/components/headers/SkillUpdateURL'
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Site not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/sites/{sitename}/versions:
+    get:
+      summary: List versions
+      description: Returns all versions of a site, newest first.
+      tags: [Sites]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/sitename'
+      responses:
+        '200':
+          description: List of versions
+          headers:
+            X-Simple-Host-Latest-Skill-Version:
+              $ref: '#/components/headers/LatestSkillVersion'
+            X-Simple-Host-Minimum-Skill-Version:
+              $ref: '#/components/headers/MinimumSkillVersion'
+            X-Simple-Host-Update-URL:
+              $ref: '#/components/headers/SkillUpdateURL'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Version'
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Site not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/sites/{sitename}/rollback:
+    post:
+      summary: Rollback to a previous version
+      description: Rollback a site to a specific version. The version must exist on disk and in the database. `If-Match` is required when the site currently has editors.
+      tags: [Sites]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/sitename'
+        - name: If-Match
+          in: header
+          required: false
+          description: Required when this site currently has one or more editors.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version:
+                  type: integer
+                  minimum: 1
+                  example: 1
+      responses:
+        '200':
+          description: Rollback successful
+          headers:
+            X-Simple-Host-Latest-Skill-Version:
+              $ref: '#/components/headers/LatestSkillVersion'
+            X-Simple-Host-Minimum-Skill-Version:
+              $ref: '#/components/headers/MinimumSkillVersion'
+            X-Simple-Host-Update-URL:
+              $ref: '#/components/headers/SkillUpdateURL'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Site'
+        '400':
+          $ref: '#/components/responses/ManagementBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Site or version not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '413':
+          description: Request body exceeds 16 KiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/sites/{sitename}/visibility:
+    post:
+      summary: Set Showcase visibility
+      description: Owner-only. The canonical direct URL remains reachable; `public=true` opts the active HTML into Showcase and public search, while `public=false` removes it from new discovery queries.
+      tags: [Sites]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/sitename'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [public]
+              properties:
+                public:
+                  type: boolean
+      responses:
+        '200':
+          description: Visibility updated
+          headers:
+            X-Simple-Host-Latest-Skill-Version:
+              $ref: '#/components/headers/LatestSkillVersion'
+            X-Simple-Host-Minimum-Skill-Version:
+              $ref: '#/components/headers/MinimumSkillVersion'
+            X-Simple-Host-Update-URL:
+              $ref: '#/components/headers/SkillUpdateURL'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteWithNote'
+        '400':
+          $ref: '#/components/responses/ManagementBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/collaboration/sites:
+    get:
+      summary: List owned and shared sites
+      description: |
+        Returns canonical sites the authenticated user owns or may edit. A
+        shared site keeps its owner's URL and is never copied into the editor's
+        namespace. Legacy `GET /api/sites` remains owned-only for normal users.
+      tags: [Collaboration]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+      responses:
+        '200':
+          description: Owned and shared sites
+          headers:
+            X-Simple-Host-Latest-Skill-Version:
+              $ref: '#/components/headers/LatestSkillVersion'
+            X-Simple-Host-Minimum-Skill-Version:
+              $ref: '#/components/headers/MinimumSkillVersion'
+            X-Simple-Host-Update-URL:
+              $ref: '#/components/headers/SkillUpdateURL'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CollaborationSite'
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/collaboration/sites/{owner}/{sitename}:
+    get:
+      summary: Get an accessible canonical site
+      description: Resolves the owner-qualified site and the caller's owner/editor role.
+      tags: [Collaboration]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+      responses:
+        '200':
+          description: Accessible site metadata
+          headers:
+            ETag:
+              $ref: '#/components/headers/SiteETag'
+            X-Simple-Host-Latest-Skill-Version:
+              $ref: '#/components/headers/LatestSkillVersion'
+            X-Simple-Host-Minimum-Skill-Version:
+              $ref: '#/components/headers/MinimumSkillVersion'
+            X-Simple-Host-Update-URL:
+              $ref: '#/components/headers/SkillUpdateURL'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CollaborationSite'
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    put:
+      summary: Deploy a new canonical-site version
+      description: |
+        Owner/editor operation. Uploads a complete gzip-compressed TAR or ZIP
+        artifact under the resource owner's existing namespace. Capture the
+        ETag before editing and send it in `If-Match`; never refresh the ETag
+        immediately before uploading a stale local snapshot. A stale validator
+        returns 412 and must be reconciled deliberately.
+      tags: [Collaboration]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/gzip:
+            schema:
+              type: string
+              format: binary
+          application/zip:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Version deployed
+          headers:
+            ETag:
+              $ref: '#/components/headers/SiteETag'
+            X-Simple-Host-Latest-Skill-Version:
+              $ref: '#/components/headers/LatestSkillVersion'
+            X-Simple-Host-Minimum-Skill-Version:
+              $ref: '#/components/headers/MinimumSkillVersion'
+            X-Simple-Host-Update-URL:
+              $ref: '#/components/headers/SkillUpdateURL'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CollaborationSite'
+        '400':
+          $ref: '#/components/responses/ManagementBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '413':
+          description: Compressed archive request exceeds 100 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/collaboration/sites/{owner}/{sitename}/versions:
+    get:
+      summary: List retained canonical-site versions
+      description: Owner/editor operation. Uploader attribution contains a username only.
+      tags: [Collaboration]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+      responses:
+        '200':
+          description: Retained versions, newest first
+          headers:
+            ETag:
+              $ref: '#/components/headers/SiteETag'
+            X-Simple-Host-Latest-Skill-Version:
+              $ref: '#/components/headers/LatestSkillVersion'
+            X-Simple-Host-Minimum-Skill-Version:
+              $ref: '#/components/headers/MinimumSkillVersion'
+            X-Simple-Host-Update-URL:
+              $ref: '#/components/headers/SkillUpdateURL'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CollaborationVersion'
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/collaboration/sites/{owner}/{sitename}/versions/{version}/archive:
+    get:
+      summary: Download an exact retained deployed artifact
+      description: |
+        Owner/editor operation. Streams one immutable retained version as a ZIP
+        whose root is the deployed website contents. This is the deployed
+        artifact, not reconstructed framework source. Responses are private and
+        no-store and have an absolute five-minute streaming deadline. An archive
+        admitted before an owner revokes the editor may finish; every archive
+        request admitted after revoke is denied.
+      tags: [Collaboration]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+        - $ref: '#/components/parameters/version'
+      responses:
+        '200':
+          description: ZIP archive of exact retained content
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: private, no-store
+            Content-Disposition:
+              schema:
+                type: string
+                example: attachment; filename=owner-site-v4.zip
+            X-Simple-Host-Latest-Skill-Version:
+              $ref: '#/components/headers/LatestSkillVersion'
+            X-Simple-Host-Minimum-Skill-Version:
+              $ref: '#/components/headers/MinimumSkillVersion'
+            X-Simple-Host-Update-URL:
+              $ref: '#/components/headers/SkillUpdateURL'
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/collaboration/sites/{owner}/{sitename}/rollback:
+    post:
+      summary: Roll back an accessible canonical site
+      description: Owner/editor operation protected by the current site ETag.
+      tags: [Collaboration]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version:
+                  type: integer
+                  minimum: 1
+      responses:
+        '200':
+          description: Rollback applied
+          headers:
+            ETag:
+              $ref: '#/components/headers/SiteETag'
+            X-Simple-Host-Latest-Skill-Version:
+              $ref: '#/components/headers/LatestSkillVersion'
+            X-Simple-Host-Minimum-Skill-Version:
+              $ref: '#/components/headers/MinimumSkillVersion'
+            X-Simple-Host-Update-URL:
+              $ref: '#/components/headers/SkillUpdateURL'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CollaborationSite'
+        '400':
+          $ref: '#/components/responses/ManagementBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '428':
+          $ref: '#/components/responses/PreconditionRequired'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/collaboration/sites/{owner}/{sitename}/editors:
+    get:
+      summary: List current site editors
+      description: Owner-only. Returns usernames and grant timestamps, never API keys.
+      tags: [Collaboration]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+      responses:
+        '200':
+          description: Current editors
+          headers:
+            X-Simple-Host-Latest-Skill-Version:
+              $ref: '#/components/headers/LatestSkillVersion'
+            X-Simple-Host-Minimum-Skill-Version:
+              $ref: '#/components/headers/MinimumSkillVersion'
+            X-Simple-Host-Update-URL:
+              $ref: '#/components/headers/SkillUpdateURL'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SiteEditor'
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    post:
+      summary: Grant editor access
+      description: Owner-only, idempotent, existing registered usernames only, at most 50 editors per site.
+      tags: [Collaboration]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [usernames]
+              properties:
+                usernames:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  uniqueItems: true
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Complete current editor list
+          headers:
+            X-Simple-Host-Latest-Skill-Version:
+              $ref: '#/components/headers/LatestSkillVersion'
+            X-Simple-Host-Minimum-Skill-Version:
+              $ref: '#/components/headers/MinimumSkillVersion'
+            X-Simple-Host-Update-URL:
+              $ref: '#/components/headers/SkillUpdateURL'
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SiteEditor'
+        '400':
+          $ref: '#/components/responses/ManagementBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Adding the requested usernames would exceed the 50-editor cap
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Request body exceeds 16 KiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/collaboration/sites/{owner}/{sitename}/editors/{username}:
+    delete:
+      summary: Revoke one editor
+      description: Owner-only. Revocation blocks operations that have not already passed serialized admission, but does not cancel an already-admitted archive, undo deployed content, or erase files already downloaded.
+      tags: [Collaboration]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+        - $ref: '#/components/parameters/username'
+      responses:
+        '204':
+          description: Editor revoked
+          headers:
+            X-Simple-Host-Latest-Skill-Version:
+              $ref: '#/components/headers/LatestSkillVersion'
+            X-Simple-Host-Minimum-Skill-Version:
+              $ref: '#/components/headers/MinimumSkillVersion'
+            X-Simple-Host-Update-URL:
+              $ref: '#/components/headers/SkillUpdateURL'
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/collaboration/sites/{owner}/{sitename}/editor-candidates:
+    get:
+      summary: Search registered usernames for sharing
+      description: Owner-only. Returns at most 20 minimal username records; no keys, email guesses, or admin flags.
+      tags: [Collaboration]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+        - name: q
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 20
+            default: 20
+      responses:
+        '200':
+          description: Matching registered usernames
+          headers:
+            X-Simple-Host-Latest-Skill-Version:
+              $ref: '#/components/headers/LatestSkillVersion'
+            X-Simple-Host-Minimum-Skill-Version:
+              $ref: '#/components/headers/MinimumSkillVersion'
+            X-Simple-Host-Update-URL:
+              $ref: '#/components/headers/SkillUpdateURL'
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 20
+                items:
+                  $ref: '#/components/schemas/EditorCandidate'
+        '400':
+          $ref: '#/components/responses/ManagementBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/site/state:
+    get:
+      summary: Read the calling site's shared state
+      description: |
+        Nameless form of `/api/sites/{username}/{sitename}/state`, for use by
+        a deployed page with a relative URL. The server resolves which site is
+        calling from the page's own address (the `Referer` the browser sends
+        automatically), so the page never needs to know its own site name.
+        Works on the current address and will work on the per-owner
+        addresses sites are moving to. Same
+        response, status codes, and semantics as the named route: the raw JSON
+        document, `{}` for a site that has never saved.
+
+        **Authentication: none.** The Referer is forgeable and is attribution,
+        not access control. Treat the blob as public and shared across
+        visitors. Do not put secrets or PII in state.
+      tags: [State]
+      responses:
+        '200':
+          description: The raw state document
+          content:
+            application/json:
+              schema: {}
+        '403':
+          description: Referer is missing or does not name a site
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Site not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      summary: Save the calling site's shared state (last write wins)
+      description: |
+        Nameless form of `PUT /api/sites/{username}/{sitename}/state`. The
+        server resolves which site is calling from the page's own address
+        (the `Referer`); same body, response, status codes, and semantics as
+        the named route. Explicit last-write-wins: new stateful sites should
+        use `/api/site/state/versioned` and use this endpoint only when
+        unconditional saves are deliberately required. Body is the raw
+        document (any valid JSON, up to 1 MiB); response echoes it back.
+        Unauthenticated; the forgeable Referer only attributes the target site.
+      tags: [State]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              description: The full state document to store (raw, no wrapper).
+      responses:
+        '200':
+          description: Saved; the stored document echoed back
+          content:
+            application/json:
+              schema: {}
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: Referer check failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Site not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/site/state/versioned:
+    get:
+      summary: Read the calling site's state with its version
+      description: |
+        The default state endpoint for new stateful sites. Nameless form of
+        `/api/sites/{username}/{sitename}/state/versioned`, called with a
+        relative URL from a deployed page; the server resolves which site is
+        calling from the page's own address (the `Referer`), so the page never
+        computes its own name from `location.pathname`. Works on the current
+        address and will work on the per-owner addresses sites are moving
+        to. Returns
+        `{"version": N, "state": {...}}`; a never-saved site reads
+        `{"version": 0, "state": {}}`. Same public, unauthenticated state and
+        forgeable Referer attribution as the named route.
+      tags: [State]
+      responses:
+        '200':
+          description: Current version and state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionedState'
+        '403':
+          description: Referer check failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Site not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      summary: Save the calling site's state only if the version still matches
+      description: |
+        Nameless form of `PUT /api/sites/{username}/{sitename}/state/versioned`;
+        the server resolves the calling site from the page's own address (the
+        `Referer`). Same body, response, status codes, and semantics as the
+        named route. Send `{"version": N, "state": {...}}` where `N` is the
+        version you read. If nothing has changed since, the save applies and
+        you get the new version back. If someone else saved first, you get
+        **409** with the *current* version and state: reapply the user's
+        semantic mutation to that freshest state and retry; never retry a
+        stale whole snapshot. `version` is required; first save on a fresh
+        site sends `version: 0`. 1 MiB cap. Unauthenticated; the Referer is
+        attribution, not authorization.
+      tags: [State]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, state]
+              properties:
+                version:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  description: The version you read; the save applies only if it still matches.
+                  example: 7
+                state:
+                  description: The full state document to store.
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: integer
+                    format: int64
+                    example: 8
+        '400':
+          description: Missing/invalid version or state, or invalid JSON
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Referer check failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Site not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Version moved — someone else saved first. Body carries the current version and state; re-merge and retry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionedStateConflict'
+        '413':
+          description: Body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/sites/{username}/{sitename}/state:
+    get:
+      summary: Read per-site shared state (named route)
+      description: |
+        Named form, still supported for existing sites. New pages call the
+        nameless `/api/site/state` with a relative URL instead of computing
+        their own site name. Returns the site's shared JSON blob (the raw
+        document — no wrapper). A site that has never saved returns `{}`.
+
+        **Authentication: none.** The server only compares the parsed path in
+        `Referer` with `/sites/{username}/{sitename}/...`; this header is
+        forgeable and is attribution, not access control. Treat the blob as
+        public and shared across visitors. Hosted pages, control pages, and the
+        API also share an origin. Do not put secrets or PII in state.
+      tags: [State]
+      parameters:
+        - $ref: '#/components/parameters/username'
+        - $ref: '#/components/parameters/sitename'
+      responses:
+        '200':
+          description: The raw state document
+          content:
+            application/json:
+              schema: {}
+        '403':
+          description: Referer is missing or its parsed site path does not match
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Site not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      summary: Save per-site shared state (last write wins, named route)
+      description: |
+        Named form, still supported for existing sites; new pages call the
+        nameless `/api/site/state`. Legacy, explicit last-write-wins operation.
+        New stateful sites should use `/state/versioned`; use this endpoint
+        only when unconditional saves are deliberately required. It overwrites the site's shared JSON blob. Body is the
+        raw document (any valid JSON, up to 1 MiB); response echoes it back.
+        Concurrent or stale writers can silently overwrite newer state.
+
+        This endpoint is unauthenticated. The forgeable Referer-path check only
+        attributes the target site; it does not authorize the writer.
+      tags: [State]
+      parameters:
+        - $ref: '#/components/parameters/username'
+        - $ref: '#/components/parameters/sitename'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              description: The full state document to store (raw, no wrapper).
+      responses:
+        '200':
+          description: Saved; the stored document echoed back
+          content:
+            application/json:
+              schema: {}
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: Referer check failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Site not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/sites/{username}/{sitename}/state/versioned:
+    get:
+      summary: Read shared state with its version (named route)
+      description: |
+        Named form, still supported for existing sites. New pages call the
+        nameless `/api/site/state/versioned` with a relative URL instead of
+        computing their own site name from `location.pathname`. Returns
+        `{"version": N, "state": {...}}`. The version increases on
+        every save (through either state endpoint). A never-saved site reads
+        `{"version": 0, "state": {}}`. This is the same public,
+        unauthenticated state and forgeable Referer-path attribution as
+        `/state`.
+      tags: [State]
+      parameters:
+        - $ref: '#/components/parameters/username'
+        - $ref: '#/components/parameters/sitename'
+      responses:
+        '200':
+          description: Current version and state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionedState'
+        '403':
+          description: Referer check failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Site not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      summary: Save shared state only if the version still matches (named route)
+      description: |
+        Named form, still supported for existing sites; new pages call the
+        nameless `/api/site/state/versioned`. Compare-and-set save for
+        concurrent editors. Send
+        `{"version": N, "state": {...}}` where `N` is the version you read.
+        If nothing has changed since, the save applies and you get the new
+        version back. If someone else saved first, you get **409** with the
+        *current* version and state. Reapply the user's semantic mutation to
+        that freshest state and retry; never retry a stale whole snapshot.
+
+        `version` is required here (use plain `/state` for unconditional
+        saves). First save on a fresh site sends `version: 0`. Same Referer
+        attribution check and 1 MiB cap as `/state`; it is not authorization.
+      tags: [State]
+      parameters:
+        - $ref: '#/components/parameters/username'
+        - $ref: '#/components/parameters/sitename'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, state]
+              properties:
+                version:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  description: The version you read; the save applies only if it still matches.
+                  example: 7
+                state:
+                  description: The full state document to store.
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: integer
+                    format: int64
+                    example: 8
+        '400':
+          description: Missing/invalid version or state, or invalid JSON
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Referer check failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Site not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Version moved — someone else saved first. Body carries the current version and state; re-merge and retry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionedStateConflict'
+        '413':
+          description: Body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/search:
+    get:
+      summary: Search public sites
+      description: |
+        Searches the bounded plain-text index of active HTML pages. The live
+        query admits only sites whose current `public` flag is true and whose
+        indexed version is still the site's active version, then returns at
+        most one best-matching page per site. Ranking is lexical; recorded
+        clicks do not affect ranking.
+
+        `q` must appear exactly once. `limit`, `offset`, and `group` may appear
+        at most once, and unknown query parameters are rejected. The server
+        collapses Unicode whitespace in `q`; the normalized value is returned
+        as `query`. `result_count` is the number of results in this response,
+        not a total-hit count.
+
+        This endpoint is unauthenticated. A valid request reuses exactly one
+        valid `simple_host_search_session` cookie or creates a 32-random-byte
+        base64url cookie. The cookie is HttpOnly, SameSite=Lax, scoped to `/`,
+        and retained for 180 days; production also marks it Secure. Only its
+        SHA-256 digest is retained for rate limiting and telemetry. Query and
+        impression telemetry is best-effort.
+
+        The process-local safeguards are a coarse TCP-peer bucket (burst 200,
+        replenished at 20/second), a browser-session bucket (burst 60,
+        replenished at 1/second), and eight concurrent searches. Saturation
+        returns `429` with `Retry-After`. Every response is `Cache-Control:
+        no-store`; `HEAD` is rejected before cookie, rate, search, or telemetry
+        side effects.
+      tags: [Search]
+      security: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Web-style full-text query. After whitespace normalization it must contain 1–200 Unicode characters and no NUL.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+        - name: limit
+          in: query
+          required: false
+          description: Maximum sites returned after retaining one page per site.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 12
+        - name: offset
+          in: query
+          required: false
+          description: Zero-based offset in the ranked, site-deduplicated result set.
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 1000
+            default: 0
+        - name: group
+          in: query
+          required: false
+          description: Optional explicit grouping mode. Results are grouped by site even when omitted.
+          schema:
+            type: string
+            enum: [site]
+      responses:
+        '200':
+          description: Ranked public results; a new anonymous search cookie may also be issued
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+            Set-Cookie:
+              $ref: '#/components/headers/SearchSessionCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicSearchResponse'
+        '400':
+          description: Missing, duplicate, unknown, malformed, or out-of-range query parameter
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '405':
+          description: Method not allowed; this includes HEAD
+          headers:
+            Allow:
+              description: The allowed method.
+              schema:
+                type: string
+                example: GET
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        '429':
+          description: Peer, session, or concurrent-search limit reached; a new anonymous search cookie may also be issued after query validation
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+            Set-Cookie:
+              $ref: '#/components/headers/SearchSessionCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Search, session generation, or its required backend is unavailable; a new anonymous search cookie may also have been issued
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+            Set-Cookie:
+              $ref: '#/components/headers/SearchSessionCookie'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/search/click:
+    post:
+      summary: Record a search-result click
+      description: |
+        Records a best-effort click for an impression returned by
+        `GET /api/search`. The JSON object must contain exactly one
+        `impression_id` field whose value is an RFC 4122 version-4 UUID; the
+        request body is limited to 16 KiB.
+
+        This endpoint is unauthenticated but requires the existing anonymous
+        search cookie to match the session that received the impression. It
+        never creates or replaces that cookie. Validly shaped requests return
+        `204` without revealing whether the cookie or impression was missing,
+        mismatched, already recorded, dropped by the 16-write concurrency gate,
+        or rejected by the telemetry store.
+
+        Process-local peer limiting uses a burst of 500 replenished at
+        50/second; valid existing sessions use a burst of 60 replenished at
+        1/second. Those rate limits return `429` with `Retry-After`. Every
+        response is `Cache-Control: no-store`.
+      tags: [Search]
+      security: []
+      parameters:
+        - name: simple_host_search_session
+          in: cookie
+          required: false
+          description: HttpOnly anonymous session cookie previously issued by GET /api/search. Browsers send it automatically.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchClickRequest'
+      responses:
+        '204':
+          description: Accepted or deliberately ignored without disclosing telemetry state
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        '400':
+          description: Malformed JSON, extra or duplicate fields, or a non-v4 impression UUID
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: Request body exceeds 16 KiB
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Peer or valid-session rate limit reached
+          headers:
+            Retry-After:
+              $ref: '#/components/headers/RetryAfter'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Required search safeguards are unavailable
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /healthz:
+    get:
+      summary: Liveness probe
+      tags: [Health]
+      responses:
+        '200':
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /readyz:
+    get:
+      summary: Readiness probe
+      tags: [Health]
+      responses:
+        '200':
+          description: Service is ready (DB connected)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+        '503':
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: unready
+
+components:
+  headers:
+    LatestSkillVersion:
+      description: Latest skill bundle version published by this server.
+      schema:
+        type: string
+        example: 0.8.1
+    MinimumSkillVersion:
+      description: Oldest skill version accepted for API-key management calls.
+      schema:
+        type: string
+        example: 0.8.0
+    SkillUpdateURL:
+      description: Same-origin page describing the permissioned update flow.
+      schema:
+        type: string
+        example: /install.html
+    AgentSkillsNoStore:
+      description: The unversioned discovery representation must not be stored.
+      required: true
+      schema:
+        type: string
+        enum: [no-store]
+    AgentSkillsContentLength:
+      description: Exact byte length of the corresponding GET representation. HEAD returns this same value even though it has no body.
+      required: true
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    NoStore:
+      description: Prevents storage of search responses and telemetry outcomes.
+      schema:
+        type: string
+        example: no-store
+    RetryAfter:
+      description: Minimum whole seconds to wait before retrying.
+      required: true
+      schema:
+        type: string
+        pattern: '^[1-9][0-9]*$'
+    SearchSessionCookie:
+      description: Optional anonymous search session cookie; omitted when one valid cookie was already supplied or no session was created.
+      schema:
+        type: string
+        example: simple_host_search_session=<base64url>; Path=/; Max-Age=15552000; HttpOnly; Secure; SameSite=Lax
+    SiteETag:
+      description: Opaque validator containing the immutable site incarnation and active version.
+      schema:
+        type: string
+        example: '"site-4b256b3b-9d15-4ce5-bba7-b04ef26f49e5-v7"'
+
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  parameters:
+    SkillVersion:
+      name: X-Skill-Version
+      in: header
+      required: false
+      description: Required on API-key management requests made by an agent. Strict numeric major.minor.patch; the server rejects malformed or below-minimum values.
+      schema:
+        type: string
+        pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+      example: 0.8.1
+    SimpleHostClient:
+      name: X-Simple-Host-Client
+      in: header
+      required: false
+      description: Intentional non-skill client classification. Direct API integrations send `api`; `control-ui` is reserved for the first-party account page. This is compatibility metadata, not authentication, and never replaces X-API-Key.
+      schema:
+        type: string
+        enum: [api, control-ui]
+      example: api
+    sitename:
+      name: sitename
+      in: path
+      required: true
+      schema:
+        type: string
+      example: my-cool-site
+    username:
+      name: username
+      in: path
+      required: true
+      schema:
+        type: string
+      example: alice.smith
+    owner:
+      name: owner
+      in: path
+      required: true
+      description: Canonical resource owner's username, including when the caller is an editor.
+      schema:
+        type: string
+      example: alice.smith
+    version:
+      name: version
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      example: 4
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: ETag captured before the caller began editing the current site version.
+      schema:
+        type: string
+      example: '"site-4b256b3b-9d15-4ce5-bba7-b04ef26f49e5-v7"'
+
+  schemas:
+    AuthResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+          example: alice.smith
+        api_key:
+          type: string
+        is_admin:
+          type: boolean
+        created:
+          type: boolean
+          description: true if this is a new user
+
+    Site:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        active_version:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        analytics:
+          $ref: '#/components/schemas/SiteAnalytics'
+
+    CollaborationSite:
+      type: object
+      description: One canonical owned or shared site. It contains no owner or editor API keys.
+      required: [id, name, owner_username, access_role, active_version, public, public_path, url, etag, created_at, updated_at, analytics]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        owner_username:
+          type: string
+        access_role:
+          type: string
+          enum: [owner, editor]
+        active_version:
+          type: integer
+          minimum: 1
+        public:
+          type: boolean
+          description: Whether the canonical site participates in Showcase and public search.
+        public_path:
+          type: string
+          example: /sites/alice.smith/my-cool-site/
+        url:
+          type: string
+          example: https://simple-host.example.com/sites/alice.smith/my-cool-site/
+        etag:
+          type: string
+          example: '"site-4b256b3b-9d15-4ce5-bba7-b04ef26f49e5-v7"'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        analytics:
+          $ref: '#/components/schemas/SiteAnalytics'
+
+    CollaborationVersion:
+      type: object
+      required: [version_number, status, created_at]
+      properties:
+        version_number:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum: [uploading, active]
+        uploaded_by:
+          type: string
+          nullable: true
+          description: Registered uploader username; omitted when historical attribution is unavailable.
+        created_at:
+          type: string
+          format: date-time
+
+    SiteEditor:
+      type: object
+      required: [username, created_at]
+      properties:
+        username:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    EditorCandidate:
+      type: object
+      required: [username, already_editor]
+      properties:
+        username:
+          type: string
+        already_editor:
+          type: boolean
+
+    SitePrecondition:
+      type: object
+      required: [error, active_version, etag]
+      properties:
+        error:
+          type: string
+        active_version:
+          type: integer
+          minimum: 1
+        etag:
+          type: string
+          example: '"site-4b256b3b-9d15-4ce5-bba7-b04ef26f49e5-v8"'
+
+    SiteAnalytics:
+      type: object
+      description: Server-side daily aggregate analytics for this site.
+      properties:
+        today_pageviews:
+          type: integer
+          format: int64
+          description: Successful HTML pageviews counted today in UTC.
+        today_visits:
+          type: integer
+          format: int64
+          description: Site-scoped 30-minute visits counted today in UTC.
+        last_7_pageviews:
+          type: integer
+          format: int64
+          description: Successful HTML pageviews counted over the last 7 UTC days, including today.
+        last_7_visits:
+          type: integer
+          format: int64
+          description: Site-scoped visits counted over the last 7 UTC days, including today.
+
+    SiteWithNote:
+      allOf:
+        - $ref: '#/components/schemas/Site'
+        - type: object
+          properties:
+            note:
+              type: string
+              description: Human-readable info about the site URL
+              example: "Site is available at /sites/alice.smith/my-cool-site/."
+
+    Version:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        version_number:
+          type: integer
+        status:
+          type: string
+          enum: [uploading, active]
+        created_at:
+          type: string
+          format: date-time
+
+    VersionedState:
+      type: object
+      properties:
+        version:
+          type: integer
+          format: int64
+          description: Increases on every save through either state endpoint.
+          example: 7
+        state:
+          description: The current state document.
+
+    VersionedStateConflict:
+      type: object
+      description: Returned with 409 when the version moved. Re-merge into this state and retry with this version.
+      properties:
+        error:
+          type: string
+          example: version conflict
+        version:
+          type: integer
+          format: int64
+          example: 9
+        state:
+          description: The current state document (saves a re-read round trip).
+
+    PublicSearchResponse:
+      type: object
+      required: [query_id, query, result_count, results]
+      properties:
+        query_id:
+          type: string
+          format: uuid
+          description: Random identifier for this query response. It may be a non-persisted fallback if telemetry storage failed.
+        query:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Query after Unicode whitespace normalization.
+        result_count:
+          type: integer
+          minimum: 0
+          maximum: 50
+          description: Number of results in this response, not a total-hit count.
+        results:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/PublicSearchResult'
+
+    PublicSearchResult:
+      type: object
+      required: [impression_id, owner, site, page_path, url, title, snippet, position]
+      properties:
+        impression_id:
+          type: string
+          format: uuid
+          description: Random identifier to send to the click endpoint. It may be a non-persisted fallback if telemetry storage failed.
+        owner:
+          type: string
+        site:
+          type: string
+        page_path:
+          type: string
+          description: Relative path of the best-matching HTML page inside the active site version.
+        url:
+          type: string
+          description: Same-origin `/sites/{owner}/{site}/...` path for the matching page.
+          example: /sites/alice.smith/release-notes/archive/release.html
+        title:
+          type: string
+        snippet:
+          type: string
+          maxLength: 240
+          description: Bounded untrusted plain text with no service-generated markup.
+        position:
+          type: integer
+          minimum: 1
+          description: One-based position in the full paginated result order, including offset.
+
+    SearchClickRequest:
+      type: object
+      additionalProperties: false
+      required: [impression_id]
+      properties:
+        impression_id:
+          type: string
+          format: uuid
+          description: RFC 4122 version-4 impression UUID returned by GET /api/search.
+
+    AgentSkillsDiscoveryIndex:
+      type: object
+      additionalProperties: false
+      required: ['$schema', skills]
+      properties:
+        '$schema':
+          type: string
+          enum: ['https://schemas.agentskills.io/discovery/0.2.0/schema.json']
+          description: Fixed identifier for the draft Agent Skills discovery schema implemented by this document.
+        skills:
+          type: array
+          minItems: 3
+          maxItems: 3
+          uniqueItems: true
+          description: Exactly one entry each, in order, for `simple-host`, `simple-host-builder`, and `fix-paths-for-subpath-hosting`, paired with their correspondingly named fixed archive URLs.
+          items:
+            $ref: '#/components/schemas/AgentSkillDiscoveryEntry'
+
+    AgentSkillDiscoveryEntry:
+      type: object
+      additionalProperties: false
+      required: [name, description, type, url, digest]
+      properties:
+        name:
+          type: string
+          enum: [simple-host, simple-host-builder, fix-paths-for-subpath-hosting]
+        description:
+          type: string
+          minLength: 1
+          description: Description read from the corresponding embedded skill's frontmatter.
+        type:
+          type: string
+          enum: [archive]
+        url:
+          type: string
+          description: Path-absolute same-origin URL for the fixed archive corresponding to `name`.
+          enum:
+            - /.well-known/agent-skills/simple-host.zip
+            - /.well-known/agent-skills/simple-host-builder.zip
+            - /.well-known/agent-skills/fix-paths-for-subpath-hosting.zip
+        digest:
+          type: string
+          pattern: '^sha256:[0-9a-f]{64}$'
+          description: SHA-256 integrity digest of the exact bytes served by `url`. Because the digest and archive share an origin, this is an integrity check, not a signature.
+      allOf:
+        - oneOf:
+            - properties:
+                name:
+                  enum: [simple-host]
+                url:
+                  enum: [/.well-known/agent-skills/simple-host.zip]
+            - properties:
+                name:
+                  enum: [simple-host-builder]
+                url:
+                  enum: [/.well-known/agent-skills/simple-host-builder.zip]
+            - properties:
+                name:
+                  enum: [fix-paths-for-subpath-hosting]
+                url:
+                  enum: [/.well-known/agent-skills/fix-paths-for-subpath-hosting.zip]
+
+    SkillVersionManifest:
+      type: object
+      required: [manifest_version, bundle_name, version, minimum_supported_version, bundle_url, sha256, bundle_size, release_type, requires_reload, release_notes_url]
+      properties:
+        manifest_version:
+          type: integer
+          enum: [1]
+        bundle_name:
+          type: string
+          enum: [simple-host-skills]
+        version:
+          type: string
+          example: 0.8.2
+        minimum_supported_version:
+          type: string
+          example: 0.8.0
+        bundle_url:
+          type: string
+          enum: [/skills.zip]
+        immutable_bundle_url:
+          type: string
+          description: Content-addressed path for this exact bundle. Its digest segment always equals sha256, so the URL cannot come to mean different bytes. Prefer it over bundle_url; /skills.zip is mutable and can change under a redeploy between reading this manifest and downloading.
+          pattern: '^/skills/sha256/[a-f0-9]{64}/skills\.zip$'
+        sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        bundle_size:
+          type: integer
+          format: int64
+          minimum: 1
+        release_type:
+          type: string
+          enum: [patch, minor, major]
+        requires_reload:
+          type: boolean
+          enum: [true]
+        release_notes_url:
+          type: string
+          enum: [/changelog.html]
+
+    SkillVersionRequired:
+      type: object
+      required: [error, code, latest_version, minimum_supported_version, update_url]
+      properties:
+        error:
+          type: string
+          example: a supported Simple Host skill version is required
+        code:
+          type: string
+          enum: [skill_version_required]
+        latest_version:
+          type: string
+          example: 0.8.2
+        minimum_supported_version:
+          type: string
+          example: 0.8.0
+        update_url:
+          type: string
+          enum: [/install.html]
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+
+  responses:
+    AgentSkillsDiscoveryIndexGET:
+      description: Non-empty draft discovery JSON containing exactly three fixed skill archive entries.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/AgentSkillsNoStore'
+        Content-Length:
+          $ref: '#/components/headers/AgentSkillsContentLength'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AgentSkillsDiscoveryIndex'
+    AgentSkillsDiscoveryIndexHEAD:
+      description: 'Same representation headers as GET, including `Content-Type: application/json`, with no body.'
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/AgentSkillsNoStore'
+        Content-Length:
+          $ref: '#/components/headers/AgentSkillsContentLength'
+    AgentSkillArchiveGET:
+      description: Non-empty fixed skill ZIP archive.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/AgentSkillsNoStore'
+        Content-Length:
+          $ref: '#/components/headers/AgentSkillsContentLength'
+      content:
+        application/zip:
+          schema:
+            type: string
+            format: binary
+    AgentSkillArchiveHEAD:
+      description: 'Same representation headers as GET, including `Content-Type: application/zip`, with no body.'
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/AgentSkillsNoStore'
+        Content-Length:
+          $ref: '#/components/headers/AgentSkillsContentLength'
+    SkillVersionRequired:
+      description: A valid API key was supplied, but the management client omitted a supported skill version or explicit non-skill classification.
+      headers:
+        Cache-Control:
+          $ref: '#/components/headers/NoStore'
+        X-Simple-Host-Latest-Skill-Version:
+          $ref: '#/components/headers/LatestSkillVersion'
+        X-Simple-Host-Minimum-Skill-Version:
+          $ref: '#/components/headers/MinimumSkillVersion'
+        X-Simple-Host-Update-URL:
+          $ref: '#/components/headers/SkillUpdateURL'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SkillVersionRequired'
+    ManagementBadRequest:
+      description: Invalid management request, or a valid API-key client that omitted a supported skill version or explicit non-skill classification.
+      headers:
+        Cache-Control:
+          description: "no-store on skill-version bootstrap errors; otherwise handler-specific."
+          schema:
+            type: string
+        X-Simple-Host-Latest-Skill-Version:
+          $ref: '#/components/headers/LatestSkillVersion'
+        X-Simple-Host-Minimum-Skill-Version:
+          $ref: '#/components/headers/MinimumSkillVersion'
+        X-Simple-Host-Update-URL:
+          $ref: '#/components/headers/SkillUpdateURL'
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/Error'
+              - $ref: '#/components/schemas/SkillVersionRequired'
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Missing or invalid API key
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Authenticated caller does not have the owner-only permission
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Site, retained version, or membership was not found or is not accessible
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PreconditionFailed:
+      description: The site incarnation or active version changed after the caller began editing
+      headers:
+        ETag:
+          $ref: '#/components/headers/SiteETag'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SitePrecondition'
+    PreconditionRequired:
+      description: This operation requires the current site ETag in If-Match
+      headers:
+        ETag:
+          $ref: '#/components/headers/SiteETag'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SitePrecondition'
+    TooManyRequests:
+      description: Process-local rate limit exceeded; wait at least the advertised number of seconds before retrying
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

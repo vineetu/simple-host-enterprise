@@ -1,0 +1,46 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: simple-host
+  # No controller-specific annotations here on purpose. The base has to be
+  # true on any conformant cluster, and an annotation for a controller you are
+  # not running is not an error — it is silently ignored. The one that matters
+  # is the request body cap: uploads are archives up to 100 MiB, and a proxy
+  # left at its own default rejects them long before the API sees them, which
+  # looks like a bug in the application rather than a setting in the cluster.
+  #
+  # Each overlay names its controller and sets the equivalent. See
+  # deploy/overlays/byo/ingress-patch.yaml for the block to copy, and
+  # docs/install.md section 3 for the per-controller table.
+spec:
+  # Overlays set this to whatever controller the cluster runs. Left unset here
+  # so a cluster with a default IngressClass uses it rather than demanding one
+  # called "nginx" that may not exist.
+  tls:
+    - hosts:
+        - simple-host.example.com
+        - "*.simple-host.example.com"
+      secretName: simple-host-tls
+  rules:
+    # The base host is the control plane; every owner is one label beneath
+    # it. Both come from one wildcard certificate. Overlays replace the hosts.
+    - host: simple-host.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: simple-host
+                port:
+                  name: http
+    - host: "*.simple-host.example.com"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: simple-host
+                port:
+                  name: http

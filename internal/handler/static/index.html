@@ -1,0 +1,1843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simple Host</title>
+  <link rel="stylesheet" href="/ps-blue.css">
+  <link rel="stylesheet" href="/site-header.css">
+  <style>
+    /* Page-specific layout overrides only — tokens/components live in ps-blue.css */
+    .container {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 0 24px;
+      position: relative;
+      z-index: 1;
+      isolation: isolate;
+    }
+    .container > *:not(.bloom) { position: relative; z-index: 1; }
+    .container > .bloom { z-index: -1; }
+
+    header {
+      padding: 24px 0;
+      border-bottom: 1px solid var(--surface-line);
+      margin-bottom: 56px;
+    }
+
+    header .container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .logo {
+      font-family: var(--font-sans);
+      font-weight: 700;
+      font-size: 15px;
+      letter-spacing: -0.01em;
+      color: var(--ink);
+      text-decoration: none;
+    }
+
+    nav.top {
+      display: flex;
+      gap: 18px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    nav.top a {
+      color: var(--ink-muted);
+      text-decoration: none;
+    }
+    nav.top a:hover { color: var(--ps-blue-700); }
+
+    .hero {
+      position: relative;
+      padding-bottom: 24px;
+    }
+
+    .hero .bloom {
+      top: -180px;
+      left: -260px;
+    }
+
+    .lede {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 52px;
+      line-height: 1.0;
+      letter-spacing: -0.03em;
+      color: var(--ps-blue-900);
+      margin: 8px 0 48px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .lede .dot { color: var(--ps-blue-800); }
+
+    main { padding-bottom: 80px; position: relative; z-index: 1; }
+
+    section { margin-bottom: 48px; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      font-size: 12px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--ink-muted);
+      margin-bottom: 12px;
+    }
+
+    section h2 {
+      font-family: var(--font-sans);
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin: 0 0 12px;
+      color: var(--ink);
+    }
+
+    section p {
+      font-family: var(--font-sans);
+      font-size: 15px;
+      color: var(--ink-soft);
+      line-height: 1.6;
+      margin-bottom: 16px;
+    }
+
+    .faq .a + .a {
+      margin-top: 10px;
+    }
+
+    .faq .a-label {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ps-blue-800);
+      margin-right: 10px;
+    }
+
+    p.install-alt {
+      font-family: var(--font-sans);
+      font-size: 13px;
+      color: var(--ink-muted);
+      margin-top: -8px;
+      margin-bottom: 20px;
+    }
+
+    p.install-alt a {
+      color: var(--ps-blue-700);
+      text-decoration: none;
+      font-weight: 600;
+      border-bottom: 1px solid var(--ps-blue-200);
+    }
+
+    p.install-alt a:hover {
+      color: var(--ps-blue-800);
+      border-bottom-color: var(--ps-blue-700);
+    }
+
+    ul.faq li {
+      margin-bottom: 22px;
+    }
+
+    .faq .q {
+      display: block;
+      font-family: var(--font-sans);
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--ink);
+      margin-bottom: 4px;
+    }
+
+    .faq .a {
+      font-family: var(--font-sans);
+      font-size: 15px;
+      color: var(--ink-soft);
+      line-height: 1.6;
+      margin: 0;
+    }
+
+    blockquote.faq-warn .q {
+      display: block;
+      font-family: var(--font-sans);
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--ps-blue-900);
+      margin-bottom: 6px;
+    }
+
+    blockquote.faq-warn .a {
+      font-family: var(--font-sans);
+      font-size: 15px;
+      color: var(--ink);
+      line-height: 1.6;
+      margin: 0;
+      font-weight: 500;
+    }
+
+    footer {
+      border-top: 1px solid var(--surface-line);
+      padding: 24px 0;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-muted);
+    }
+
+    footer a {
+      color: var(--ps-blue-700);
+      text-decoration: none;
+    }
+
+    footer a:hover { color: var(--ps-blue-800); text-decoration: underline; }
+
+    @media (max-width: 600px) {
+      .lede { font-size: 38px; }
+    }
+
+    /* First-time onboarding */
+    .site-header {
+      margin-bottom: 0;
+      padding: 0;
+    }
+
+    #main-content { padding-bottom: 0; }
+
+    .home-container {
+      width: min(100%, 896px);
+      margin: 0 auto;
+      padding-right: 24px;
+      padding-left: 24px;
+    }
+
+    .home-hero {
+      position: relative;
+      margin: 0;
+      border-bottom: 1px solid var(--surface-line);
+      background: #f7faff;
+    }
+
+    .home-hero__content {
+      position: relative;
+      z-index: 1;
+      max-width: 790px;
+      padding-top: clamp(48px, 6vw, 72px);
+      padding-bottom: clamp(48px, 6vw, 72px);
+    }
+
+    .home-eyebrow {
+      margin: 0 0 22px;
+      color: var(--ps-blue-800);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+    }
+
+    .home-hero h1 {
+      max-width: 790px;
+      margin: 0;
+      color: var(--ps-blue-900);
+      font-family: var(--font-sans);
+      font-size: clamp(42px, 6vw, 56px);
+      font-weight: 600;
+      letter-spacing: -0.045em;
+      line-height: 0.98;
+      text-wrap: balance;
+    }
+
+    .home-hero__intro {
+      max-width: 610px;
+      margin: 28px 0 0;
+      color: var(--ink-soft);
+      font-family: var(--font-sans);
+      font-size: clamp(17px, 2vw, 20px);
+      line-height: 1.55;
+    }
+
+    .home-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 34px;
+      align-items: center;
+    }
+
+    .home-button,
+    button.home-button {
+      display: inline-flex;
+      min-height: 46px;
+      padding: 11px 18px;
+      border: 1px solid var(--ps-blue-800);
+      border-radius: 6px;
+      align-items: center;
+      justify-content: center;
+      background: var(--ps-blue-800);
+      color: #fff;
+      cursor: pointer;
+      font-family: var(--font-sans);
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.2;
+      text-decoration: none;
+      transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+    }
+
+    .home-button:hover,
+    button.home-button:hover {
+      border-color: var(--ps-blue-700);
+      background: var(--ps-blue-700);
+      transform: translateY(-1px);
+    }
+
+    .home-button--secondary {
+      border-color: var(--ps-blue-300);
+      background: rgba(255, 255, 255, 0.74);
+      color: var(--ps-blue-900);
+    }
+
+    .home-button--secondary:hover {
+      border-color: var(--ps-blue-600);
+      background: #fff;
+    }
+
+    .home-button--small,
+    button.home-button--small {
+      min-height: 38px;
+      padding: 8px 13px;
+      font-size: 13px;
+    }
+
+    .home-button:focus-visible,
+    .home-text-link:focus-visible,
+    .home-details summary:focus-visible,
+    .work-email:focus-visible,
+    .website-brief:focus-visible,
+    .agent-choice:focus-visible,
+    .agent-prompt-text:focus-visible {
+      outline: 3px solid var(--ps-blue-600);
+      outline-offset: 3px;
+    }
+
+    .journey {
+      margin: 0 auto;
+      padding-top: clamp(72px, 10vw, 112px);
+      padding-bottom: clamp(72px, 10vw, 112px);
+    }
+
+    .home-section-heading {
+      width: 100%;
+      max-width: 680px;
+      margin: 0 auto 52px;
+      text-align: center;
+    }
+
+    .home-section-heading h2,
+    .collaboration h2 {
+      margin: 0;
+      color: var(--ink);
+      font-family: var(--font-sans);
+      font-size: clamp(34px, 5vw, 42px);
+      font-weight: 600;
+      letter-spacing: -0.035em;
+      line-height: 1.05;
+      text-wrap: balance;
+    }
+
+    .home-section-heading > p,
+    .collaboration__copy > p {
+      margin: 0;
+      color: var(--ink-soft);
+      font-family: var(--font-sans);
+      font-size: 16px;
+      line-height: 1.65;
+    }
+
+    .journey__steps {
+      margin: 0;
+      padding: 0;
+      border-top: 1px solid var(--surface-line);
+      list-style: none;
+      counter-reset: onboarding-step;
+    }
+
+    .journey__steps > li {
+      display: grid;
+      grid-template-columns: 76px minmax(0, 1fr);
+      gap: 28px;
+      padding: 40px 0 44px;
+      border-bottom: 1px solid var(--surface-line);
+      counter-increment: onboarding-step;
+      text-align: left;
+    }
+
+    /* [hidden] alone cannot beat display:grid above; this makes the reveal work. */
+    .journey__steps > li[hidden] { display: none; }
+
+    .journey__steps > li::before {
+      content: '0' counter(onboarding-step);
+      color: var(--ps-blue-700);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+    }
+
+    .step-lead {
+      margin: -5px 0 20px;
+      color: var(--ink-soft);
+      font-size: 16px;
+      line-height: 1.6;
+    }
+
+    .step-next {
+      margin-top: 22px;
+      padding-top: 20px;
+      border-top: 1px solid var(--surface-line);
+    }
+
+    .step-next > p {
+      margin: 0 0 14px;
+      color: var(--ink-soft);
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    .step-next[hidden] { display: none; }
+
+    .step-aside {
+      margin: 18px 0 0;
+      color: var(--ink-muted);
+      font-size: 14px;
+    }
+
+    .step-tiny-details { margin-top: 16px; }
+    .step-tiny-details summary { font-size: 13px; color: var(--ink-muted); }
+
+    .agent-picker {
+      display: flex;
+      margin-bottom: 20px;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .agent-choice {
+      min-height: 44px;
+      padding: 0 20px;
+      border: 1px solid var(--ps-blue-300);
+      border-radius: var(--radius-md);
+      background: var(--surface);
+      color: var(--ink);
+      cursor: pointer;
+      font-family: var(--font-sans);
+      font-size: 15px;
+      font-weight: 650;
+      transition: border-color 120ms ease, background 120ms ease;
+    }
+
+    .agent-choice:hover { border-color: var(--ps-blue-600); }
+
+    .agent-choice[aria-pressed="true"] {
+      border-color: var(--ps-blue-700);
+      background: var(--ps-blue-100);
+      color: var(--ps-blue-900);
+    }
+
+    .agent-guidance {
+      margin-bottom: 8px;
+      padding: 16px 18px;
+      border-left: 3px solid var(--ps-blue-300);
+      border-radius: var(--radius-sm);
+      background: var(--surface-muted);
+      color: var(--ink-soft);
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    .agent-guidance[hidden] { display: none; }
+    .agent-guidance strong { color: var(--ink); }
+
+    .site-home-url {
+      margin: 0 0 6px;
+    }
+
+    .site-home-url a {
+      font-family: var(--font-mono);
+      font-size: 15px;
+      word-break: break-all;
+    }
+
+    .step-share {
+      margin-top: 22px;
+      padding-top: 20px;
+      border-top: 1px solid var(--surface-line);
+    }
+
+    .step-share > p {
+      margin: 0 0 12px;
+      color: var(--ink-soft);
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    .step-content h3 {
+      margin: -5px 0 10px;
+      color: var(--ink);
+      font-family: var(--font-sans);
+      font-size: clamp(23px, 3vw, 30px);
+      letter-spacing: -0.025em;
+      line-height: 1.2;
+    }
+
+    .step-content > p {
+      max-width: 680px;
+      margin: 0 0 18px;
+      color: var(--ink-soft);
+      font-family: var(--font-sans);
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    .home-text-link {
+      color: var(--ps-blue-700);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      font-weight: 700;
+      text-underline-offset: 4px;
+    }
+
+    .copy-status {
+      min-height: 21px;
+      margin: 10px 0 0;
+      color: var(--ps-blue-800);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      font-weight: 650;
+      line-height: 1.5;
+    }
+
+    .copy-status.is-error { color: #a12a2a; }
+
+    .home-details {
+      margin-top: 22px;
+      border-top: 1px solid var(--surface-line);
+      border-bottom: 1px solid var(--surface-line);
+    }
+
+    .home-details summary {
+      padding: 14px 2px;
+      color: var(--ps-blue-800);
+      cursor: pointer;
+      font-family: var(--font-sans);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .home-details__body {
+      padding: 0 0 18px;
+    }
+
+    .home-details__body > p {
+      margin: 0 0 14px;
+      color: var(--ink-soft);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .prompt-block {
+      max-height: 360px;
+      margin: 0;
+      padding: 18px;
+      overflow: auto;
+      border: 0;
+      border-radius: 7px;
+      background: #0a1530;
+    }
+
+    .prompt-block code {
+      color: #eaf2fc;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.65;
+      white-space: pre-wrap;
+    }
+
+    .install-note {
+      max-width: 680px;
+      margin: 22px 0 0;
+      color: var(--ink-soft);
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    .agent-prompt-builder {
+      max-width: 680px;
+      margin-top: 22px;
+    }
+
+    .agent-prompt-builder[hidden] { display: none; }
+
+    .builder-field + .builder-field { margin-top: 22px; }
+
+    .work-email-label {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--ink);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .work-email,
+    .website-brief,
+    .agent-prompt-text {
+      width: 100%;
+      min-width: 0;
+      padding: 11px 13px;
+      border: 1px solid #9aa9bd;
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+      font-family: var(--font-sans);
+      font-size: 16px;
+    }
+
+    .website-brief {
+      min-height: 124px;
+      resize: vertical;
+      line-height: 1.55;
+    }
+
+    .work-email[aria-invalid='true'] {
+      border-color: #b3261e;
+    }
+
+    .field-help,
+    .field-error {
+      margin: 8px 0 0;
+      font-family: var(--font-sans);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .field-help { color: var(--ink-muted); }
+    .field-error { min-height: 20px; color: #a12a2a; font-weight: 650; }
+
+    .agent-prompt-builder > .home-button { margin-top: 20px; }
+
+    .agent-prompt-result {
+      margin-top: 26px;
+      padding-top: 24px;
+      border-top: 1px solid var(--surface-line);
+    }
+
+    .agent-prompt-result[hidden] { display: none; }
+
+    .agent-prompt-result__intro {
+      margin: 0 0 14px;
+      color: var(--ink);
+      font-family: var(--font-sans);
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    .agent-prompt-text {
+      width: 100%;
+      min-height: 220px;
+      resize: vertical;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .possibilities {
+      margin: 0;
+      padding-top: clamp(72px, 10vw, 112px);
+      padding-bottom: clamp(72px, 10vw, 112px);
+      border-top: 1px solid var(--surface-line);
+      background: var(--surface);
+    }
+
+    .outcome-list {
+      margin-top: 48px;
+      border-top: 1px solid var(--surface-line);
+      text-align: left;
+    }
+
+    .outcome {
+      display: grid;
+      grid-template-columns: minmax(120px, 0.3fr) minmax(0, 1fr);
+      gap: 44px;
+      padding: 34px 0 38px;
+      border-bottom: 1px solid var(--surface-line);
+    }
+
+    .outcome__label {
+      margin: 2px 0 0;
+      color: var(--ps-blue-700);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+    }
+
+    .outcome h3 {
+      margin: 0 0 9px;
+      color: var(--ink);
+      font-family: var(--font-sans);
+      font-size: 23px;
+      letter-spacing: -0.02em;
+    }
+
+    .outcome p {
+      max-width: 650px;
+      margin: 0;
+      color: var(--ink-soft);
+      font-family: var(--font-sans);
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    .state-prompt {
+      margin-top: 20px;
+      padding: 18px 0 0;
+      border-top: 1px solid var(--surface-line);
+    }
+
+    .state-prompt__text {
+      margin: 0 0 12px;
+      color: var(--ink);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.65;
+    }
+
+    .state-warning {
+      margin-top: 14px !important;
+      color: #6f3a12 !important;
+      font-size: 13px !important;
+      font-weight: 650;
+    }
+
+    .collaboration {
+      margin: 0;
+      padding-top: clamp(68px, 9vw, 104px);
+      padding-bottom: clamp(68px, 9vw, 104px);
+      border-top: 1px solid var(--surface-line);
+      border-bottom: 1px solid var(--surface-line);
+      background: #f7faff;
+      color: var(--ink);
+    }
+
+    .collaboration__inner {
+      display: block;
+    }
+
+    .collaboration__copy {
+      max-width: 680px;
+      margin: 0 auto;
+      text-align: center;
+    }
+
+    .collaboration .home-eyebrow { color: var(--ps-blue-800); }
+    .collaboration h2 { color: var(--ink); }
+    .collaboration__copy > p:not(.home-eyebrow) { margin-top: 22px; color: var(--ink-soft); }
+
+    .collaboration__flow {
+      max-width: 680px;
+      margin: 42px auto 0;
+      padding: 0;
+      border-top: 1px solid var(--surface-line);
+      list-style: none;
+      text-align: left;
+    }
+
+    .collaboration__flow li {
+      display: grid;
+      grid-template-columns: 38px minmax(0, 1fr);
+      gap: 16px;
+      padding: 18px 0;
+      border-bottom: 1px solid var(--surface-line);
+      align-items: baseline;
+      color: var(--ink);
+      font-family: var(--font-sans);
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    .collaboration__flow span {
+      color: var(--ps-blue-800);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .home-faq {
+      margin: 0 auto;
+      padding-top: clamp(72px, 10vw, 104px);
+      padding-bottom: clamp(72px, 10vw, 104px);
+    }
+
+    .home-faq__list {
+      margin-top: 40px;
+      border-top: 1px solid var(--surface-line);
+    }
+
+    .home-faq__list details {
+      border-bottom: 1px solid var(--surface-line);
+    }
+
+    .home-faq__list summary {
+      padding: 20px 2px;
+      color: var(--ink);
+      cursor: pointer;
+      font-family: var(--font-sans);
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .home-faq__list p {
+      max-width: 680px;
+      margin: -4px 0 22px;
+      color: var(--ink-soft);
+      font-family: var(--font-sans);
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    .home-footer .home-container {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 12px 24px;
+    }
+
+    .visually-hidden {
+      position: absolute !important;
+      width: 1px !important;
+      height: 1px !important;
+      padding: 0 !important;
+      margin: -1px !important;
+      overflow: hidden !important;
+      clip: rect(0 0 0 0) !important;
+      white-space: nowrap !important;
+      border: 0 !important;
+    }
+
+    @media (max-width: 700px) {
+      .journey__steps > li { grid-template-columns: 44px minmax(0, 1fr); gap: 12px; }
+      .outcome { grid-template-columns: 1fr; gap: 10px; }
+    }
+
+    @media (max-width: 520px) {
+      .home-container { padding-right: 20px; padding-left: 20px; }
+      .home-hero h1 { font-size: clamp(36px, 11vw, 48px); }
+      .home-actions { align-items: stretch; }
+      .home-actions .home-button { width: 100%; }
+      .journey__steps > li { grid-template-columns: 1fr; }
+      .home-footer .home-container { display: block; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .home-button,
+      button.home-button {
+        transition: none;
+      }
+
+      .home-button:hover,
+      button.home-button:hover {
+        transform: none;
+      }
+    }
+
+    /* Agent launcher: pick your agent, one button opens it with the install
+       request already typed in. The copy button survives as recovery, moved
+       into the fallback line by script, so a no-JS reader still sees it. */
+    .launch { margin: 4px 0 0; }
+    .launch[hidden], .launch [hidden] { display: none !important; }
+    /* Built at control scale: undersized next to a 53px button it reads as a
+       toy, and the selected state has to survive a pale track. */
+    .launch__tabs { display: flex; width: fit-content; gap: 2px; padding: 4px; margin-bottom: 16px;
+                    background: var(--surface-muted); border: 1px solid var(--surface-line);
+                    border-radius: var(--radius-pill); flex-wrap: wrap; }
+    .launch__tab { font: inherit; font-size: 14px; font-weight: 600; padding: 10px 20px; cursor: pointer;
+                   border: 0; background: none; color: var(--ink-soft); border-radius: var(--radius-pill); }
+    .launch__tab:hover { color: var(--ps-blue-800); }
+    .launch__tab:focus-visible { outline: 2px solid var(--ps-blue-600); outline-offset: 2px; }
+    .launch__tab[aria-checked="true"] { background: var(--surface); color: var(--ps-blue-900);
+                                        box-shadow: var(--shadow-sm); }
+    /* These wrappers set display, which beats the hidden attribute. Script
+       empties them, so restate it or they leave their margin behind. */
+    .recommended__actions[hidden], .home-actions[hidden] { display: none !important; }
+    /* One primary action. It is an anchor so it can carry a custom URL scheme,
+       so it has to be told to look like the page's own primary button. */
+    a#launchButton { display: inline-flex; align-items: center; justify-content: center;
+      text-decoration: none; font-size: 16px; font-weight: 700; padding: 13px 26px;
+      border-radius: var(--radius-pill); background: var(--ps-blue-800); color: #fff;
+      border: 1px solid var(--ps-blue-800); }
+    a#launchButton:hover { background: var(--ps-blue-900); border-color: var(--ps-blue-900); }
+    /* Always one line, never absent: swapping its text rather than showing and
+       hiding a block keeps the button from jumping as tabs change. */
+    .launch__note { margin: 12px 0 0; font-size: 14px; color: var(--ink-soft); line-height: 1.5; }
+    .launch__note b { color: var(--ink); font-weight: 700; }
+    .launch__alt { margin-top: 6px; font-size: 13.5px; color: var(--ink-muted); }
+    .launch__alt a { color: var(--ps-blue-700); }
+    button.launch__copy { margin-top: 12px; font-size: 12.5px; font-weight: 600;
+      padding: 5px 13px; background: var(--surface); color: var(--ps-blue-700);
+      border: 1px solid var(--ps-blue-200); box-shadow: none; }
+    button.launch__copy:hover { background: var(--ps-blue-50); }
+  </style>
+</head>
+<body>
+  <a class="site-skip-link" href="#main-content">Skip to main content</a>
+  <header class="site-header">
+    <div class="site-header__inner">
+      <a class="site-header__wordmark" href="/" aria-current="page">Simple Host</a>
+      <nav class="site-header__nav" aria-label="Primary navigation">
+        <a href="/showcase">Showcase</a>
+        <a href="/capabilities.html">Capabilities</a>
+        <a href="/changelog.html">What's New</a>
+        <a href="/install.html">Install</a>
+        <a href="/docs.html">API</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main-content" tabindex="-1">
+    <section class="home-hero" aria-labelledby="home-title">
+      <div class="home-container home-hero__content">
+        <p class="home-eyebrow">Ship in minutes</p>
+        <h1 id="home-title">Build and share a website in about 20 minutes</h1>
+        <p class="home-hero__intro">
+          Describe what you want, let your coding agent build it, and get a link
+          you can share with teammates who can open, use, and edit it with you.
+        </p>
+        <div class="home-actions">
+          <a class="home-button" href="#get-started">Get started</a>
+          <a class="home-button home-button--secondary" href="/showcase">Browse examples</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="journey home-container" id="get-started" aria-labelledby="journey-title">
+      <div class="home-section-heading">
+        <div>
+          <p class="home-eyebrow">Your first site</p>
+          <h2 id="journey-title">From an idea to a shared link</h2>
+        </div>
+        <p>
+          Do one step at a time. Install once, describe what you want, paste the
+          prompt into your coding agent, and come back for the link.
+        </p>
+      </div>
+
+      <ol class="journey__steps" id="journeySteps">
+        <li class="journey__step" id="journeyStep1" data-step="1">
+          <div class="step-content">
+            <h3>Install Simple Host</h3>
+            <p>
+              Give this request to the ChatGPT desktop app on Mac or Windows, Claude
+              Code, Cursor, or another coding assistant. It will explain what it plans
+              to install and ask you to approve before changing anything.
+            </p>
+<div class="launch" id="launch" hidden>
+              <div class="launch__tabs" role="radiogroup" aria-label="Which agent do you use?">
+                <button type="button" class="launch__tab" data-agent="chatgpt" role="radio" aria-checked="false">ChatGPT app</button>
+                <button type="button" class="launch__tab" data-agent="claude" role="radio" aria-checked="false">Claude Code</button>
+                <button type="button" class="launch__tab" data-agent="cursor" role="radio" aria-checked="false">Cursor</button>
+              </div>
+              <a id="launchButton" href="#">Open your agent</a>
+              <p class="launch__note" id="launchNote"></p>
+              <p class="launch__alt" id="launchAlt"></p>
+            </div>
+                                    <div class="home-actions">
+              <button
+                class="home-button"
+                id="copyInstallPrompt"
+                type="button"
+                data-copy-target="installPrompt"
+                data-copy-name="Install prompt"
+                data-status-target="installCopyStatus"
+                data-copy-failure="Open the prompt below and copy it manually."
+                data-persist-copied
+                data-reveal="step1Next"
+              >Copy install prompt</button>
+            </div>
+            <p class="copy-status" id="installCopyStatus" role="status" aria-live="polite" aria-atomic="true"></p>
+
+            <div class="step-next" id="step1Next" hidden>
+              <p>Paste it into your coding agent and approve what it asks for. When it says the skills are installed, come back here.</p>
+              <button class="home-button" id="step1Done" type="button" data-advance-to="2">I've installed it</button>
+            </div>
+
+            <p class="step-aside">
+              <a class="home-text-link" href="/install.html">Every install option</a>
+            </p>
+
+            <details class="home-details" id="installCheckDetails">
+              <summary>Not sure if it's installed?</summary>
+              <div class="home-details__body">
+                <p>Paste this to your coding agent. It answers yes or no.</p>
+                <pre class="prompt-block"><code id="installCheckPrompt">Do I have the Simple Host skills installed? Look in the folders you load skills from for simple-host, simple-host-builder, and fix-paths-for-subpath-hosting. Answer yes or no in one line. If yes, tell me the version. Do not install or change anything.</code></pre>
+                <div class="home-actions">
+                  <button
+                    class="home-button home-button--small"
+                    type="button"
+                    data-copy-target="installCheckPrompt"
+                    data-copy-name="Check prompt"
+                    data-status-target="installCheckCopyStatus"
+                  >Copy check prompt</button>
+                </div>
+                <p class="copy-status" id="installCheckCopyStatus" role="status" aria-live="polite" aria-atomic="true"></p>
+              </div>
+            </details>
+
+            <details class="home-details step-tiny-details">
+              <summary>View the prompt</summary>
+              <div class="home-details__body">
+                <p>
+                  You do not need to read this. The prompt checks the released version
+                  and trust boundary before approval; existing installations use their
+                  verified updater.
+                </p>
+                <pre class="prompt-block"><code id="installPrompt">Install the three Simple Host skills from {{SIMPLE_HOST_ORIGIN}}
+
+Browser platform is unknown. Detect and verify the actual operating system and shell before continuing.
+
+First check whether you can actually read and write files on my computer. If you cannot — an ordinary ChatGPT chat window cannot — then stop, do not guess, and do not work around it. Tell me plainly that this has to run in the ChatGPT desktop app's coding agent, the part that can open a folder and edit files, and that I can ask in Slack #simple-host-support if I cannot find it.
+
+Work out my home folder using the shell you are actually in: $HOME on macOS or in PowerShell, %USERPROFILE% only in cmd. Install into exactly one folder:
+  Claude Code            &lt;home&gt;/.claude/skills
+  ChatGPT or Cursor      &lt;home&gt;/.agents/skills
+
+1. Read {{SIMPLE_HOST_ORIGIN}}/skills/version as JSON. Download the /skills.zip it names, then check the file's size and SHA-256 against that manifest.
+2. Copy the three folders (simple-host, simple-host-builder, fix-paths-for-subpath-hosting) straight into the skills folder, with no extra folder wrapped around them. Do not run anything out of the archive. Confirm all three SKILL.md files exist and none still says {{VERSION}}.
+3. From the exact skills root you selected, directly read &lt;selected-root&gt;/simple-host/references/account-recovery.md completely. Do not rely on the newly copied skill being discoverable yet. Follow that file before account creation, including its existing-config check, exact-destination preflight, and single-call save-and-verify transaction. Ask me for my work email only when that workflow requires it.
+4. Tell me my username, and that I may need a new chat or an app restart before the skills show up.
+
+Before changing anything, tell me conversationally in one or two sentences that Simple Host will install its tools in the selected skills root and save publishing access in the resolved config path, then wait for one yes covering both. Still show and honor every approval required by the host, tool, sandbox, or operating system. If anything fails, say what happened without exposing credentials and tell me to ask in Slack #simple-host-support.</code></pre>
+              </div>
+            </details>
+          </div>
+        </li>
+
+        <li class="journey__step" id="journeyStep2" data-step="2" hidden>
+          <div class="step-content">
+            <h3>Describe what you want</h3>
+            <p class="step-lead">
+              Write it like you would to a colleague. Simple Host turns that one
+              sentence into a detailed brief your coding agent can build from — you
+              never write the technical prompt yourself.
+            </p>
+
+            <noscript>
+              <p>
+                This step needs JavaScript to build your prompt. With it turned off,
+                install Simple Host using step 1, then ask your coding agent directly:
+                describe the website you want, tell it to use the simple-host skill to
+                publish, and give it your work email so it can set up your account.
+              </p>
+            </noscript>
+
+            <form class="agent-prompt-builder" id="agentPromptForm" novalidate>
+              <div class="builder-field">
+                <label class="work-email-label" for="websiteBrief">What do you want to make?</label>
+                <textarea
+                  class="website-brief"
+                  id="websiteBrief"
+                  rows="5"
+                  maxlength="2000"
+                  placeholder="For example: a sign-up sheet my team can all edit, or an interactive launch plan with owners and dates."
+                  aria-describedby="websiteBriefHelp websiteBriefError"
+                  required
+                ></textarea>
+                <p class="field-help" id="websiteBriefHelp">
+                  If your site needs to remember things between visitors, Simple Host
+                  adds that to the brief for you.
+                </p>
+                <p class="field-error" id="websiteBriefError" aria-live="polite"></p>
+              </div>
+
+              <div class="builder-field">
+                <label class="work-email-label" for="workEmail">Work email</label>
+                <input
+                  class="work-email"
+                  id="workEmail"
+                  type="email"
+                  inputmode="email"
+                  autocomplete="email"
+                  placeholder="firstname.lastname@example.com"
+                  aria-describedby="workEmailHelp workEmailError agentPromptGenerationStatus"
+                  required
+                >
+                <p class="field-help" id="workEmailHelp">
+                  Your email goes into the prompt so your agent can set up your account.
+                  It is remembered on this device for a day so you do not retype it, and
+                  is never sent to the AI, added to a URL, or included in analytics.
+                </p>
+                <p class="field-error" id="workEmailError" aria-live="polite"></p>
+              </div>
+
+              <button class="home-button" id="createAgentPrompt" type="submit">Create and copy my prompt</button>
+              <p class="copy-status" id="agentPromptGenerationStatus" role="status" aria-live="polite" aria-atomic="true"></p>
+
+              <div class="agent-prompt-result" id="agentPromptResult" hidden>
+                <p class="agent-prompt-result__intro">
+                  Copied. Paste it into your coding agent — it will build the site,
+                  set up your account, and give you the link.
+                </p>
+                <div class="home-actions">
+                  <button class="home-button" id="copyAgentPrompt" type="button">Copy again</button>
+                  <button class="home-button home-button--secondary" id="step2Done" type="button" data-advance-to="3">I've pasted it</button>
+                </div>
+                <p class="copy-status" id="agentPromptCopyStatus" role="status" aria-live="polite" aria-atomic="true"></p>
+                <details class="home-details step-tiny-details">
+                  <summary>View the prompt</summary>
+                  <div class="home-details__body">
+                    <label class="work-email-label" for="agentPromptText">Agent prompt</label>
+                    <textarea
+                      class="agent-prompt-text"
+                      id="agentPromptText"
+                      rows="10"
+                      readonly
+                      aria-describedby="agentPromptCopyStatus"
+                    ></textarea>
+                  </div>
+                </details>
+              </div>
+            </form>
+          </div>
+        </li>
+
+        <li class="journey__step" id="journeyStep3" data-step="3" hidden>
+          <div class="step-content">
+            <h3>Let it work</h3>
+            <p class="step-lead">
+              Your agent will ask a few questions, then build the site. Which one are
+              you using?
+            </p>
+
+            <div class="agent-picker" role="group" aria-label="Which coding agent are you using?">
+              <button class="agent-choice" type="button" data-agent="chatgpt" aria-pressed="false">ChatGPT</button>
+              <button class="agent-choice" type="button" data-agent="claude" aria-pressed="false">Claude Code</button>
+              <button class="agent-choice" type="button" data-agent="cursor" aria-pressed="false">Cursor</button>
+            </div>
+
+            <div class="agent-guidance" id="agentGuidance" role="status" aria-live="polite" hidden></div>
+
+            <div class="step-next" id="step3Next" hidden>
+              <p>That's everything on your side. Go do something else for a bit — it takes a while.</p>
+              <button class="home-button" id="step3Done" type="button" data-advance-to="4">Show me where it'll appear</button>
+            </div>
+          </div>
+        </li>
+
+        <li class="journey__step" id="journeyStep4" data-step="4" hidden>
+          <div class="step-content">
+            <h3>Find it and share it</h3>
+            <p class="step-lead">
+              When your agent finishes, it gives you a link. All your sites live here:
+            </p>
+
+            <p class="site-home-url"><a id="siteHomeUrl" class="home-text-link" href="/sites/your-name/" target="_blank" rel="noopener">/sites/your-name/</a></p>
+            <p class="field-help" id="siteHomeUrlHelp">This is where every site you publish will show up.</p>
+
+            <div class="step-share">
+              <p><strong>Share it to build together.</strong> Invite teammates as
+              editors and they work on the same site — one link, one version history,
+              and you can roll back any change. That is the point of publishing here
+              rather than sending a file around.</p>
+              <a class="home-text-link" href="/capabilities.html">See everything you can do</a>
+            </div>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <section class="possibilities" aria-labelledby="possibilities-title">
+      <div class="home-container">
+        <div class="home-section-heading">
+          <div>
+            <p class="home-eyebrow">What you can make</p>
+            <h2 id="possibilities-title">Publish work people can act on</h2>
+          </div>
+          <p>
+            Simple Host is useful for the work between a document and a full
+            product: quick to share, polished enough to use, and easy to update.
+          </p>
+        </div>
+
+        <div class="outcome-list">
+          <article class="outcome">
+            <p class="outcome__label">Plan</p>
+            <div>
+              <h3>Make plans easier to follow</h3>
+              <p>
+                Publish project plans, launch checklists, dashboards, and research
+                summaries as clear websites instead of another attachment.
+              </p>
+            </div>
+          </article>
+
+          <article class="outcome">
+            <p class="outcome__label">Prototype</p>
+            <div>
+              <h3>Turn an idea into something teammates can try</h3>
+              <p>
+                Share prototypes, workflow demos, and lightweight tools at a real
+                link, then improve them as the conversation moves forward.
+              </p>
+            </div>
+          </article>
+
+          <article class="outcome">
+            <p class="outcome__label">Coordinate</p>
+            <div>
+              <h3>Keep a shared timeline up to date</h3>
+              <p>
+                Make an interactive Gantt chart where teammates can update dates,
+                owners, dependencies, and progress from the published page.
+              </p>
+              <div class="state-prompt">
+                <p class="state-prompt__text" id="ganttPrompt">Use the simple-host-builder skill to turn my project plan into an interactive shared Gantt chart. Let teammates update task dates, owners, dependencies, and status. Save only that project state with Simple Host's versioned shared state. Never store passwords, secrets, API keys, or personal data.</p>
+                <button
+                  class="home-button home-button--small"
+                  type="button"
+                  data-copy-target="ganttPrompt"
+                  data-copy-name="Shared Gantt prompt"
+                  data-status-target="ganttCopyStatus"
+                >Copy shared Gantt prompt</button>
+                <p class="copy-status" id="ganttCopyStatus" role="status" aria-live="polite" aria-atomic="true"></p>
+                <p class="state-warning">
+                  Shared site state is public and unauthenticated. Never save
+                  passwords, secrets, API keys, or personal data in it.
+                </p>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="collaboration" aria-labelledby="collaboration-title">
+      <div class="home-container collaboration__inner">
+        <div class="collaboration__copy">
+          <p class="home-eyebrow">Made for shared work</p>
+          <h2 id="collaboration-title">One site, shared with editors</h2>
+          <p>
+            Invite trusted editors to the site you already published. Everyone
+            works on the same canonical site while the owner keeps control of
+            sharing, visibility, and deletion.
+          </p>
+        </div>
+        <ol class="collaboration__flow">
+          <li><span>01</span><strong>The owner shares editing access.</strong></li>
+          <li><span>02</span><strong>Editors update the same owner URL.</strong></li>
+          <li><span>03</span><strong>Every publish joins one version history.</strong></li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="home-faq home-container" aria-labelledby="faq-title">
+      <div class="home-section-heading">
+        <p class="home-eyebrow">Good to know</p>
+        <h2 id="faq-title">A few first-time questions</h2>
+        <p>Simple Host stays out of the way, but these details help before your first publish.</p>
+      </div>
+      <div class="home-faq__list">
+        <details>
+          <summary>Where do I get help?</summary>
+          <p>
+            Ask in <strong>#simple-host-support</strong> on Slack. If your
+            coding agent gets stuck installing or publishing, paste what it told you
+            into the channel — that is usually enough to sort it out.
+          </p>
+        </details>
+        <details>
+          <summary>Are my sites public by default?</summary>
+          <p>
+            No. A new site is <strong>unlisted</strong> — it does not appear on the
+            <a href="/showcase">Showcase</a> or in search until you choose to make
+            it public. Anyone on your company network who has the direct link can still view
+            it, so keep content internal either way.
+          </p>
+        </details>
+        <details>
+          <summary>What information can I put on a site?</summary>
+          <p>
+            Only information your company allows to be shared internally, plus
+            anything that is already public. Do not host confidential material,
+            personal data, or customer data. Every site requires sign-in, and a
+            restricted site is visible only to the people on its viewer list, but
+            treat anything you publish as visible to everyone in your company.
+          </p>
+        </details>
+        <details>
+          <summary>Can someone else change or overwrite my site?</summary>
+          <p>
+            No. Accounts come from your company sign-in, and only you, the members
+            of your team, or an editor you added can change a site. Every deploy is backed up
+            to S3 with the last five versions retained, so any change is one revert
+            away, and access logs are available to security on request.
+          </p>
+        </details>
+        <details>
+          <summary>Is the shared data on my site private?</summary>
+          <p>
+            Each site gets a JSON store — that is what makes shared demos and
+            trackers work. Writes are not authenticated today, so treat it as
+            collaborative rather than protected, and never store passwords, secrets,
+            or personal data in it. Every write is versioned with full history, so
+            anything is one revert away.
+          </p>
+        </details>
+        <details>
+          <summary>What is Simple Host good for?</summary>
+          <p>
+            Prototypes, demos, internal tools, dashboards, and trackers — and as a
+            canvas for AI-generated pages. It is static-only, so it is fast by
+            construction and nothing runs server-side; up to 100&nbsp;MB per site.
+            Support and takedowns are best-effort through
+            <strong>#simple-host-support</strong>, with no formal SLA.
+          </p>
+        </details>
+        <details>
+          <summary>Do I need to register first?</summary>
+          <p>
+            No. Your first publish request includes your work email, so the skill
+            registers you and saves your API key locally as part of that same step.
+          </p>
+        </details>
+        <details>
+          <summary>Can I publish more than one website?</summary>
+          <p>
+            Yes. Each site gets its own shareable URL, and your assistant can list,
+            update, inspect, or roll back the sites you own and the sites shared with you.
+          </p>
+        </details>
+        <details>
+          <summary>What if my existing site uses absolute paths?</summary>
+          <p>
+            Simple Host serves sites from a relative subpath. The deploy skill handles
+            the right base-path build for supported frameworks and can fix plain HTML
+            paths when needed.
+          </p>
+        </details>
+        <details>
+          <summary>What if the recommended installer is not compatible?</summary>
+          <p>
+            The install request falls back to the first-party ZIP, verifies its exact
+            byte size and SHA-256, checks the archive, and installs all three skills
+            into the one directory your assistant actually uses. The
+            <a href="/install.html">Install page</a> also has manual steps.
+          </p>
+        </details>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="home-footer">
+    <div class="home-container">
+      <span>Simple Host</span>
+      <span><a href="/showcase">Showcase</a> &middot; <a href="/docs.html">API reference</a></span>
+    </div>
+  </footer>
+
+  <!-- ============ Simple Host assistant (floating chat) ============ -->
+
+  <script>
+  (function () {
+    'use strict';
+
+    var installPrompt = document.getElementById('installPrompt');
+    var agentPromptForm = document.getElementById('agentPromptForm');
+    var websiteBrief = document.getElementById('websiteBrief');
+    var websiteBriefError = document.getElementById('websiteBriefError');
+    var workEmail = document.getElementById('workEmail');
+    var workEmailError = document.getElementById('workEmailError');
+    var createAgentPrompt = document.getElementById('createAgentPrompt');
+    var agentPromptGenerationStatus = document.getElementById('agentPromptGenerationStatus');
+    var agentPromptResult = document.getElementById('agentPromptResult');
+    var agentPromptText = document.getElementById('agentPromptText');
+    var copyAgentPrompt = document.getElementById('copyAgentPrompt');
+    var agentPromptCopyStatus = document.getElementById('agentPromptCopyStatus');
+    var agentPromptGeneration = 0;
+
+
+    // PLATFORM_CLASSIFIER_START
+    var INSTALL_PLATFORM_HINTS = {
+      windows: 'Browser hint: Windows. Verify the actual operating system and shell before continuing; if it is Windows, use PowerShell.',
+      macos: 'Browser hint: macOS. Verify the actual operating system and shell before continuing; if it is macOS, use its native shell.',
+      unknown: 'Browser platform is unknown. Detect and verify the actual operating system and shell before continuing.'
+    };
+
+    function classifyInstallPlatform(browserNavigator) {
+      var userAgentDataPlatform = browserNavigator && browserNavigator.userAgentData && browserNavigator.userAgentData.platform;
+      var platform = userAgentDataPlatform || (browserNavigator && browserNavigator.platform) || '';
+      if (/win/i.test(platform)) return INSTALL_PLATFORM_HINTS.windows;
+      if (/mac/i.test(platform)) return INSTALL_PLATFORM_HINTS.macos;
+      return INSTALL_PLATFORM_HINTS.unknown;
+    }
+    // PLATFORM_CLASSIFIER_END
+
+    installPrompt.textContent = installPrompt.textContent.replace(
+      /\{\{SIMPLE_HOST_ORIGIN\}\}/g,
+      window.location.origin
+    ).replace(INSTALL_PLATFORM_HINTS.unknown, classifyInstallPlatform(window.navigator));
+
+    function legacyCopy(text) {
+      return new Promise(function (resolve, reject) {
+        var field = document.createElement('textarea');
+        field.value = text;
+        field.setAttribute('readonly', '');
+        field.style.position = 'fixed';
+        field.style.opacity = '0';
+        document.body.appendChild(field);
+        field.select();
+
+        var copied = false;
+        try {
+          copied = document.execCommand('copy');
+        } catch (err) {
+          copied = false;
+        }
+        field.remove();
+
+        if (copied) resolve();
+        else reject(new Error('clipboard unavailable'));
+      });
+    }
+
+    function copyText(text) {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        return navigator.clipboard.writeText(text).catch(function () {
+          return legacyCopy(text);
+        });
+      }
+      return legacyCopy(text);
+    }
+
+    function setCopyStatus(status, message, isError) {
+      status.textContent = message;
+      status.classList.toggle('is-error', isError);
+    }
+
+    function showCopyButtonResult(button, message, delay) {
+      var label = button.querySelector('.copy-example__action') || button;
+      var original = label.textContent;
+      label.textContent = message;
+      setTimeout(function () { label.textContent = original; }, delay);
+    }
+
+    document.addEventListener('click', function (event) {
+      var button = event.target.closest('[data-copy-target]');
+      if (!button) return;
+
+      var target = document.getElementById(button.getAttribute('data-copy-target'));
+      var status = document.getElementById(button.getAttribute('data-status-target'));
+      var name = button.getAttribute('data-copy-name') || 'Text';
+      var failureHelp = button.getAttribute('data-copy-failure') || 'Select the visible text and copy it manually.';
+      if (!target || !status) return;
+
+      var persist = button.hasAttribute('data-persist-copied');
+      var revealId = button.getAttribute('data-reveal');
+      // Revealing the next affordance must not depend on the clipboard: if the
+      // copy fails, the user can still open "View the prompt" and copy by hand,
+      // so they must not be trapped. The reveal fires on engagement; only the
+      // button's confirmed state depends on success.
+      if (revealId) revealElement(document.getElementById(revealId));
+
+      copyText(target === installPrompt ? target.textContent : target.textContent.trim()).then(function () {
+        setCopyStatus(status, name + ' copied to your clipboard.', false);
+        if (persist) {
+          button.classList.add('is-copied');
+          button.textContent = 'Copied';
+        } else {
+          showCopyButtonResult(button, 'Copied', 1600);
+        }
+      }).catch(function () {
+        setCopyStatus(status, 'Could not copy ' + name.toLowerCase() + '. ' + failureHelp, true);
+        showCopyButtonResult(button, 'Copy failed', 2200);
+      });
+    });
+
+    // --- Progressive step reveal -------------------------------------------
+    // Steps 2-4 ship hidden and are revealed one at a time as the user asserts
+    // they finished the previous step. The page cannot verify any of it; the
+    // reveal exists to keep one decision on screen at a time, not to gate.
+    // Progress persists for a day so a returning visitor is not reset.
+
+    var STORE_KEY = 'sh-onboarding-v1';
+    var STORE_TTL_MS = 24 * 60 * 60 * 1000;
+
+    function revealElement(el) {
+      if (el) el.hidden = false;
+    }
+
+    function loadProgress() {
+      try {
+        var raw = window.localStorage.getItem(STORE_KEY);
+        if (!raw) return null;
+        var data = JSON.parse(raw);
+        if (!data || typeof data.savedAt !== 'number') return null;
+        // Bound the age at both ends: a future savedAt (clock skew, or a wrong
+        // clock at write time) would otherwise give a negative age and be
+        // accepted forever. Anything outside a sane window is discarded.
+        var age = Date.now() - data.savedAt;
+        if (age < 0 || age > STORE_TTL_MS) {
+          window.localStorage.removeItem(STORE_KEY);
+          return null;
+        }
+        return data;
+      } catch (err) {
+        return null;
+      }
+    }
+
+    function saveProgress(patch) {
+      var current = loadProgress() || {};
+      var next = { step: current.step || 1, brief: current.brief || '', email: current.email || '' };
+      for (var k in patch) if (patch.hasOwnProperty(k)) next[k] = patch[k];
+      next.savedAt = Date.now();
+      try {
+        window.localStorage.setItem(STORE_KEY, JSON.stringify(next));
+      } catch (err) {
+        /* storage unavailable or full — progress simply does not persist */
+      }
+    }
+
+    var reachedStep = 1;
+
+    function showStep(n) {
+      for (var i = 2; i <= 4; i++) {
+        var li = document.getElementById('journeyStep' + i);
+        if (li) li.hidden = i > n;
+      }
+      if (n > reachedStep) reachedStep = n;
+    }
+
+    function advanceTo(n, opts) {
+      showStep(n);
+      saveProgress({ step: reachedStep });
+      var target = document.getElementById('journeyStep' + n);
+      if (target && !(opts && opts.silent)) {
+        var heading = target.querySelector('h3');
+        if (heading) {
+          heading.setAttribute('tabindex', '-1');
+          heading.focus();
+        }
+        target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }
+    }
+
+    document.addEventListener('click', function (event) {
+      var advancer = event.target.closest('[data-advance-to]');
+      if (!advancer) return;
+      advanceTo(parseInt(advancer.getAttribute('data-advance-to'), 10));
+    });
+
+    function validateWorkEmail() {
+      var value = workEmail.value.trim();
+      var valid = value !== '' && workEmail.validity.valid;
+      workEmail.setAttribute('aria-invalid', valid ? 'false' : 'true');
+      workEmailError.textContent = valid ? '' : 'Enter a valid work email, such as firstname.lastname@example.com.';
+      return valid;
+    }
+
+    function validateWebsiteBrief() {
+      var valid = websiteBrief.value.trim() !== '';
+      websiteBrief.setAttribute('aria-invalid', valid ? 'false' : 'true');
+      websiteBriefError.textContent = valid ? '' : 'Describe the website you want to make.';
+      return valid;
+    }
+
+    function hideAgentPromptResult() {
+      agentPromptText.value = '';
+      agentPromptResult.hidden = true;
+      setCopyStatus(agentPromptCopyStatus, '', false);
+    }
+
+    function resetPromptBuilder() {
+      agentPromptGeneration += 1;
+      createAgentPrompt.disabled = false;
+      createAgentPrompt.textContent = 'Create and copy my prompt';
+      hideAgentPromptResult();
+      setCopyStatus(agentPromptGenerationStatus, '', false);
+    }
+
+    websiteBrief.addEventListener('input', function () {
+      resetPromptBuilder();
+      websiteBrief.setAttribute('aria-invalid', 'false');
+      websiteBriefError.textContent = '';
+      saveProgress({ brief: websiteBrief.value });
+    });
+
+    workEmail.addEventListener('input', function () {
+      resetPromptBuilder();
+      workEmail.setAttribute('aria-invalid', 'false');
+      workEmailError.textContent = '';
+      // Accepted trade-off: the email is persisted on this device for a day so
+      // the user does not retype it. The page copy says so. It is still never
+      // sent over the network, by any means (a test enforces that).
+      saveProgress({ email: workEmail.value });
+      updateSiteHomeUrl();
+    });
+
+    websiteBrief.addEventListener('blur', function () {
+      if (websiteBrief.value.trim() !== '') validateWebsiteBrief();
+    });
+
+    workEmail.addEventListener('blur', function () {
+      if (workEmail.value.trim() !== '') validateWorkEmail();
+    });
+
+    // Categorical, not quantitative: the repo gives no write-rate or editor-count
+    // threshold. If the described site remembers something shared between
+    // visitors, it needs versioned shared state. The skill makes the final call;
+    // this only ensures the instruction and its warning reach the agent.
+    var STATE_HINTS = /\b(sav(e|ed|ing)|store|stored|remember|persist|track(er|ing)?|sign[- ]?up|rsvp|submit|submission|register(?!\s+the\s+account)|log\b|logs|entr(y|ies)|list|todo|to-do|checklist|counter|vote|voting|poll|leaderboard|score|guestbook|comment|note|journal|inventory|booking|reservation|attendance|roster|collect|responses?)\b/i;
+
+    function describedSiteNeedsState(brief) {
+      return STATE_HINTS.test(brief);
+    }
+
+    function stateInstruction() {
+      return '\n\nThis site needs to remember things shared between visitors, so store that with Simple Host\'s versioned shared state (GET/PUT the relative nameless path /api/site/state/versioned — the server identifies the calling site from the page\'s own address, so never compute the site name from location.pathname — applying my edit to the current state on a 409 and retrying). ' +
+        'That state is public, unauthenticated, and world-readable and world-writable — anyone with the URL can read or overwrite it. The Referer check is attribution only and forgeable, not authorization, and a key generated in the browser does not make it private. ' +
+        'Never store passwords, API keys, tokens, confidential business data, personal data, private drafts, or per-user data in it, and keep the whole thing under 1 MiB. If what I asked for actually needs private or per-user data, tell me plainly that Simple Host cannot do that yet rather than faking it.';
+    }
+
+    function deploymentPrompt(buildRequest, email) {
+      return 'Before you build anything, check that all three Simple Host skills are installed and usable: simple-host, simple-host-builder, and fix-paths-for-subpath-hosting.\n\n' +
+        'If any of them is missing, installing them is your first task, not a reason to stop. Install all three from ' + window.location.origin + ' by following that site\'s install instructions, ask me to approve the install, and then carry on. ' +
+        'Do not build the website first and tell me about a publishing problem at the end.\n\n' +
+        'If you cannot install them, stop and tell me why in plain language. Do not offer me a workaround: not a downloadable copy of the website, not the website code pasted into the chat, not a different hosting service, and not any publishing or sites feature built into the app you are running in. None of those is a substitute. This website is only finished when it is published to Simple Host and I have the link.\n\n' +
+        'Next, before you build anything, make sure my Simple Host account exists. My work email is ' + email + '. ' +
+        'Use the installed simple-host account-recovery workflow to check the local config and, only if needed, register with that email and transactionally save and verify the returned API key. Never print the key. ' +
+        'Do this first because my username forms part of the published address, and a framework site has to be built for that address — discovering it afterwards means building it again.\n\n' +
+        'Once the skills and the account are both in place:\n\n' +
+        buildRequest.trim() +
+        (describedSiteNeedsState(buildRequest) ? stateInstruction() : '') + '\n\n' +
+        'Then use the simple-host skill to publish the finished website, and give me the final shareable link.';
+    }
+
+    function localBuildRequest(brief) {
+      return 'Use the simple-host-builder skill to plan the right implementation, then create or update this website with readable, non-minified source:\n\n' + brief;
+    }
+
+    agentPromptForm.addEventListener('submit', async function (event) {
+      event.preventDefault();
+      var briefIsValid = validateWebsiteBrief();
+      var emailIsValid = validateWorkEmail();
+      if (!briefIsValid || !emailIsValid) {
+        if (!briefIsValid) websiteBrief.focus();
+        else workEmail.focus();
+        return;
+      }
+
+      var generation = ++agentPromptGeneration;
+      var brief = websiteBrief.value.trim();
+      var email = workEmail.value.trim();
+      createAgentPrompt.disabled = true;
+      createAgentPrompt.textContent = 'Creating prompt…';
+      agentPromptResult.hidden = false;
+      agentPromptText.value = deploymentPrompt(localBuildRequest(brief), email);
+      setCopyStatus(agentPromptGenerationStatus, 'Creating your prompt…', false);
+      setCopyStatus(agentPromptCopyStatus, '', false);
+
+      // The prompt is composed locally; the package ships no model behind the page.
+      {
+        if (generation === agentPromptGeneration) {
+          createAgentPrompt.disabled = false;
+          createAgentPrompt.textContent = 'Create and copy my prompt';
+          // The prompt is long and reads as noise, so it is copied straight to
+          // the clipboard rather than shown. The disclosure holds it for anyone
+          // who wants to look.
+          copyText(agentPromptText.value).then(function () {
+            setCopyStatus(agentPromptGenerationStatus, 'Copied to your clipboard.', false);
+          }).catch(function () {
+            setCopyStatus(agentPromptGenerationStatus, 'Ready — open "View the prompt" below to copy it.', false);
+          });
+          var step2Done = document.getElementById('step2Done');
+          if (step2Done) step2Done.focus();
+        }
+      }
+    });
+
+    copyAgentPrompt.addEventListener('click', function () {
+      copyText(agentPromptText.value).then(function () {
+        setCopyStatus(agentPromptCopyStatus, 'Agent prompt copied. Paste it into your coding agent.', false);
+        showCopyButtonResult(copyAgentPrompt, 'Copied', 1600);
+      }).catch(function () {
+        setCopyStatus(agentPromptCopyStatus, 'Could not copy the prompt. Select the prompt above and copy it manually.', true);
+        showCopyButtonResult(copyAgentPrompt, 'Copy failed', 2200);
+        agentPromptText.focus();
+        agentPromptText.select();
+      });
+    });
+
+    // --- Step 3: which agent, and honest expectations ----------------------
+    var AGENT_GUIDANCE = {
+      chatgpt: '<strong>ChatGPT desktop app.</strong> Pick the coding mode that can open a folder and edit files, and use the most capable model your plan offers — GPT-5.6 Sol if you have it. It asks a few questions, then works. This one is thorough and takes the longest: expect a good 20-30 minutes.',
+      claude: '<strong>Claude Code.</strong> Use Opus 4.8 for the best result. It asks a few questions, then builds — usually about 10-15 minutes.',
+      cursor: '<strong>Cursor.</strong> It asks a few questions, then builds — usually about 10-15 minutes. Use its strongest available model for a first attempt.'
+    };
+    var agentPicker = document.querySelector('.agent-picker');
+    var agentGuidance = document.getElementById('agentGuidance');
+    var step3Next = document.getElementById('step3Next');
+    if (agentPicker && agentGuidance) {
+      agentPicker.addEventListener('click', function (event) {
+        var choice = event.target.closest('.agent-choice');
+        if (!choice) return;
+        var buttons = agentPicker.querySelectorAll('.agent-choice');
+        for (var i = 0; i < buttons.length; i++) {
+          buttons[i].setAttribute('aria-pressed', buttons[i] === choice ? 'true' : 'false');
+        }
+        agentGuidance.innerHTML = AGENT_GUIDANCE[choice.getAttribute('data-agent')] || '';
+        agentGuidance.hidden = false;
+        revealElement(step3Next);
+      });
+    }
+
+    // --- Step 4: where the sites live --------------------------------------
+    // Mirror the server's deriveUsernameFromEmail exactly: lowercase and trim
+    // the whole address, take the local part, then strip every character
+    // outside [a-z0-9.-] (so +tags and underscores go). Matching it means the
+    // previewed URL is the real one, not a guess that 404s.
+    var siteHomeUrl = document.getElementById('siteHomeUrl');
+    function deriveUsername(email) {
+      var normalized = (email || '').trim().toLowerCase();
+      var at = normalized.indexOf('@');
+      if (at <= 0) return '';
+      return normalized.slice(0, at).replace(/[^a-z0-9.-]+/g, '');
+    }
+    function updateSiteHomeUrl() {
+      if (!siteHomeUrl) return;
+      var user = deriveUsername(workEmail.value);
+      var path = '/sites/' + (user || 'your-name') + '/';
+      siteHomeUrl.textContent = window.location.origin + path;
+      siteHomeUrl.setAttribute('href', path);
+    }
+
+    // --- Restore progress on load ------------------------------------------
+    (function restoreProgress() {
+      var saved = loadProgress();
+      if (saved) {
+        if (saved.brief) websiteBrief.value = saved.brief;
+        if (saved.email) workEmail.value = saved.email;
+      }
+      updateSiteHomeUrl();
+      showStep(saved && saved.step && saved.step >= 1 ? saved.step : 1);
+    })();
+
+  })();
+  
+      // Agent launcher. The button carries the very prompt shown on this page,
+      // so there is one source of truth: read it after the origin has been
+      // substituted, encode it, and hand it to the agent's URL scheme. Nothing
+      // is sent — every one of these fills the composer and waits.
+      (function () {
+        var promptNode = document.getElementById('installPrompt');
+        var launch = document.getElementById('launch');
+        var button = document.getElementById('launchButton');
+        var hint = document.getElementById('launchHint');
+        var alt = document.getElementById('launchAlt');
+        var note = document.getElementById('launchNote');
+        if (!promptNode || !launch || !button || !note || !alt) { return; }
+
+        var AGENTS = {
+          chatgpt: {
+            label: 'Open the ChatGPT app',
+            note: '<b>Switch the app to Codex first</b>, using the dropdown at the top left. Chat and Work can answer questions but cannot create files.',
+            // threads/new lands in Codex; plain /new lands in chat, which cannot
+            // write files. No parameter can pick the mode, hence the hint above.
+            href: function (t) { return 'codex://threads/new?prompt=' + encodeURIComponent(t); },
+            windows: true
+          },
+          claude: {
+            label: 'Open Claude Code',
+            note: 'Opens a new terminal window with the request ready. Nothing runs until you press enter.',
+            href: function (t) { return 'claude-cli://open?q=' + encodeURIComponent(t); },
+            windows: true
+          },
+          cursor: {
+            label: 'Open Cursor',
+            note: 'Opens Cursor with the request in the chat box. Nothing runs until you press enter.',
+            windowsNote: 'On Windows, Cursor is best installed by hand.',
+            href: function (t) { return 'cursor://anysphere.cursor-deeplink/prompt?text=' + encodeURIComponent(t); },
+            // No vendor documentation for this scheme on Windows, so we do not
+            // offer a button we cannot stand behind; those readers get the
+            // step-by-step page instead.
+            windows: false
+          }
+        };
+
+        var navigatorRef = window.navigator || {};
+        var platform = (navigatorRef.userAgentData && navigatorRef.userAgentData.platform) ||
+          navigatorRef.platform || navigatorRef.userAgent || '';
+        var isWindows = /win/i.test(platform) && !/mac|darwin/i.test(platform);
+        var tabs = launch.querySelectorAll('[data-agent]');
+
+        function select(name) {
+          var agent = AGENTS[name] || AGENTS.claude;
+          var usable = !isWindows || agent.windows;
+          tabs.forEach(function (tab) {
+            var chosen = tab.getAttribute('data-agent') === name;
+            tab.setAttribute('aria-checked', String(chosen));
+            tab.setAttribute('tabindex', chosen ? '0' : '-1');
+          });
+          if (usable) {
+            button.textContent = agent.label;
+            button.setAttribute('href', agent.href(promptNode.textContent));
+            alt.innerHTML = 'Nothing opened? <a href="/dashboard">Sign in and set up manually</a>.';
+          } else {
+            button.textContent = 'Sign in and set up manually';
+            button.setAttribute('href', '/dashboard');
+            alt.innerHTML = '';
+          }
+          note.innerHTML = usable ? agent.note : agent.windowsNote;
+        }
+
+        // Copying is not a step on this page any more. The control moves in
+        // beside the prompt itself, for the reader who opens that disclosure
+        // and wants the text; moving rather than duplicating keeps its handler.
+        var copyButton = document.getElementById('copyInstallPrompt');
+        var copyHome = copyButton && copyButton.parentNode;
+        var promptHome = promptNode.parentNode && promptNode.parentNode.parentNode;
+        if (copyButton && promptHome) {
+          copyButton.classList.add('launch__copy');
+          promptHome.appendChild(copyButton);
+          // Its status line follows it, or an empty paragraph is left behind
+          // holding open a band of dead space under the button.
+          var copyStatus = document.getElementById('installCopyStatus');
+          if (copyStatus) { promptHome.appendChild(copyStatus); }
+        }
+
+        tabs.forEach(function (tab) {
+          tab.addEventListener('click', function () { select(tab.getAttribute('data-agent')); });
+        });
+        button.addEventListener('click', function () {
+          var next = document.getElementById('step1Next');
+          if (next) { next.hidden = false; }
+        });
+
+        launch.hidden = false;
+        if (copyHome && copyHome !== copyButton.parentNode) { copyHome.hidden = true; }
+        select(isWindows ? 'claude' : 'chatgpt');
+      })();
+</script>
+
+</body>
+</html>

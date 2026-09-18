@@ -1,0 +1,149 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simple-host
+  labels:
+    app: simple-host
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: simple-host
+  # Recreate: the site tree is a ReadWriteOnce volume, so two pods can never
+  # run at once. The rollout has a short gap; the migration init container
+  # makes it a safe one.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: simple-host
+    spec:
+      serviceAccountName: simple-host
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Same image, other mode. Takes an advisory lock, applies pending
+        # migrations in order, exits. The server then refuses to start unless
+        # the schema is exactly what it embeds.
+        - name: migrate
+          image: simple-host
+          args: ["migrate"]
+          envFrom:
+            - configMapRef:
+                name: simple-host-config
+            - secretRef:
+                name: simple-host-secrets
+          env:
+            # DB_USER/DB_PASSWORD above (from simple-host-secrets) are the
+            # owning role migrations run as (design 9.3). This container also
+            # needs the application role's target password, to set it on the
+            # role migration 0020 creates; the server never sees this value.
+            - name: DB_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: simple-host-secrets
+                  key: DB_APP_PASSWORD
+          volumeMounts:
+            - name: db-ca
+              mountPath: /etc/simple-host/db-ca
+              readOnly: true
+          securityContext: &containerSecurity
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 250m, memory: 128Mi }
+      containers:
+        - name: simple-host
+          image: simple-host
+          ports:
+            - name: application
+              containerPort: 8080
+            - name: redirect
+              containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: simple-host-config
+            - secretRef:
+                name: simple-host-secrets
+          env:
+            # Overrides the DB_USER/DB_PASSWORD envFrom provides above: the
+            # server connects as the least-privilege application role
+            # (design 9.3), never as the owning role migrations use. An
+            # explicit env entry wins over envFrom for the same name, which
+            # is the whole mechanism this override relies on.
+            - name: DB_USER
+              value: simplehost_app
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: simple-host-secrets
+                  key: DB_APP_PASSWORD
+          volumeMounts:
+            - name: site-data
+              mountPath: /mnt/data
+            - name: tmp
+              mountPath: /tmp
+            - name: db-ca
+              mountPath: /etc/simple-host/db-ca
+              readOnly: true
+          securityContext: *containerSecurity
+          startupProbe:
+            httpGet: { path: /healthz, port: application }
+            periodSeconds: 3
+            timeoutSeconds: 2
+            failureThreshold: 40
+          livenessProbe:
+            httpGet: { path: /healthz, port: application }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /readyz, port: application }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            # internal/tarball now checks each entry's declared size against
+            # the 500 MiB per-file/aggregate cap (design.md 2) before
+            # allocating or decompressing it (checkDeclaredSize), so a
+            # refused entry costs no allocation and an accepted one is
+            # allocated exactly once at its own declared size — the earlier
+            # 3Gi bump here was masking that bug (an oversized entry was
+            # fully read into memory before being refused), not sizing for
+            # legitimate traffic; see docs/security-review.md's
+            # "Reviewer findings / archive limits". One legitimate upload's
+            # worst case is now ~500MB (one accepted entry at the per-file
+            # cap) plus the ~100MB compressed request body readLimitedBody
+            # holds, and Go's GC commonly runs at ~2x live heap before
+            # collecting. 2Gi covers that with headroom for the second of
+            # the two concurrent upload slots abuse_limits.go allows; it
+            # does not cover two simultaneous worst-case uploads landing in
+            # the same GC window, which is a capacity-planning question for
+            # an installation's real traffic, not this limit's job.
+            limits: { cpu: "1", memory: 2Gi }
+      volumes:
+        - name: site-data
+          persistentVolumeClaim:
+            claimName: simple-host-site-data
+        - name: tmp
+          emptyDir: {}
+        # The database server's CA, for sslmode=verify-full. A component that
+        # runs Postgres in the cluster points this at the certificate it
+        # issued; a managed database's bundle is supplied by the overlay.
+        # Optional so an overlay that relies on the system bundle still starts.
+        - name: db-ca
+          secret:
+            secretName: simple-host-db-ca
+            optional: true

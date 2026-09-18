@@ -1,0 +1,76 @@
+# Drops expired audit_events and access_log partitions (design.md 8.1, 8.2,
+# 9.3). Runs `simple-host prune`, which also rolls audit_ensure_partitions
+# forward before it prunes, so this is the only scheduled job the rolling
+# partition scheme needs.
+#
+# Unlike every other CronJob and the server Deployment itself, this
+# container does NOT override DB_USER/DB_PASSWORD to the least-privilege
+# simplehost_app role: it inherits the owning role's credentials from
+# simple-host-secrets' plain DB_PASSWORD, the same credential the migrate
+# init container in deployment.yaml connects as. That is deliberate, not an
+# oversight — design 9.3 gives the application role no DROP privilege on
+# these tables at all, so retention can only ever run as the owning role,
+# and never from the server's own connection pool.
+#
+# No site-data mount: pruning touches only Postgres.
+#
+# The schedule (monthly, early on the 1st) is a starting point, like
+# backup-assets-cronjob.yaml's; an overlay with a different retention
+# cadence can patch it.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: simple-host-prune
+spec:
+  schedule: "30 3 1 * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          serviceAccountName: simple-host
+          automountServiceAccountToken: false
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: prune
+              image: simple-host
+              args: ["prune"]
+              envFrom:
+                - configMapRef:
+                    name: simple-host-config
+                - secretRef:
+                    name: simple-host-secrets
+              volumeMounts:
+                - name: db-ca
+                  mountPath: /etc/simple-host/db-ca
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests: { cpu: 50m, memory: 64Mi }
+                limits: { cpu: 250m, memory: 256Mi }
+          volumes:
+            # Optional so an overlay relying on the system CA bundle still
+            # starts; see deployment.yaml's own db-ca volume for the same
+            # comment.
+            - name: db-ca
+              secret:
+                secretName: simple-host-db-ca
+                optional: true
+            - name: tmp
+              emptyDir: {}

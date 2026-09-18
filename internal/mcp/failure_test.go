@@ -1,0 +1,100 @@
+package mcp
+
+import (
+	"net/http"
+	"strings"
+	"testing"
+)
+
+// A failure is the only thing a model reads before deciding what to do next,
+// so the wrong steering is worse than none: "call list_sites" on a team tool
+// sends it looking for a thing that has nothing to do with what failed.
+func TestExplainFailureSteersByCodeThenFamily(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		tool    string
+		status  int
+		body    string
+		want    string
+		notWant string
+	}{
+		{
+			name:   "code wins over status",
+			tool:   "delete_team",
+			status: http.StatusConflict,
+			body:   `{"error":"delete the team's sites first","code":"team_has_sites"}`,
+			want:   "still owns sites",
+			// The status alone would have called this a stale ETag.
+			notWant: "etag",
+		},
+		{
+			name:    "last member is not an etag problem",
+			tool:    "remove_team_member",
+			status:  http.StatusConflict,
+			body:    `{"error":"a team keeps at least one member","code":"last_member"}`,
+			want:    "delete_team",
+			notWant: "get_site",
+		},
+		{
+			name:    "a team 404 does not send the model to look for a site",
+			tool:    "list_team_members",
+			status:  http.StatusNotFound,
+			body:    `{"error":"team not found","code":"not_found"}`,
+			want:    "list_teams",
+			notWant: "list_sites",
+		},
+		{
+			name:    "the same code on a site tool is about the namespace",
+			tool:    "delete_site",
+			status:  http.StatusNotFound,
+			body:    `{"error":"namespace not found","code":"not_found"}`,
+			want:    "namespace",
+			notWant: "list_team_members",
+		},
+		{
+			name:   "a site 404 with no code keeps the site wording",
+			tool:   "get_site",
+			status: http.StatusNotFound,
+			body:   `{"error":"not found"}`,
+			want:   "list_sites",
+		},
+		{
+			name:   "400 is steered rather than handed over raw",
+			tool:   "create_team",
+			status: http.StatusBadRequest,
+			body:   `{"error":"team names use letters, numbers and hyphens only — no dots"}`,
+			want:   "no dots",
+		},
+		{
+			name:   "400 on any other tool still says not to repeat the call",
+			tool:   "deploy_site",
+			status: http.StatusBadRequest,
+			body:   `{"error":"index.html is required"}`,
+			want:   "correct the arguments",
+		},
+		{
+			name:   "a body that is not JSON falls through to the status",
+			tool:   "deploy_site",
+			status: http.StatusRequestEntityTooLarge,
+			body:   "request body too large",
+			want:   "size limit",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tool, known := byName(tc.tool)
+			if !known {
+				t.Fatalf("tool %q is not registered", tc.tool)
+			}
+			got := explainFailure(tc.status, tc.body, tool)
+			if !strings.Contains(strings.ToLower(got), strings.ToLower(tc.want)) {
+				t.Errorf("explanation does not mention %q:\n%s", tc.want, got)
+			}
+			if tc.notWant != "" && strings.Contains(strings.ToLower(got), strings.ToLower(tc.notWant)) {
+				t.Errorf("explanation should not mention %q:\n%s", tc.notWant, got)
+			}
+			if !strings.Contains(got, tc.body) {
+				t.Errorf("the upstream body must survive into the explanation:\n%s", got)
+			}
+		})
+	}
+}

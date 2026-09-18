@@ -1,0 +1,35 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Bring your own database and bucket: nothing but the application is
+# deployed, and config.env / secrets.env carry the coordinates of a managed
+# Postgres and an S3-compatible bucket. Copy the .example files, fill them in,
+# set the ingress hosts in ingress-patch.yaml, and point `images` at the
+# digest you scanned and pushed.
+namespace: simple-host
+
+resources:
+  - ../../base
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: simple-host-config
+    envs: [config.env]
+
+secretGenerator:
+  - name: simple-host-secrets
+    envs: [secrets.env]
+  # The managed database's CA bundle, for sslmode=verify-full. Download it
+  # from the provider and place it at db-ca.crt next to this file.
+  - name: simple-host-db-ca
+    files: [ca.crt=db-ca.crt]
+
+images:
+  - name: simple-host
+    newName: ghcr.io/example/simple-host
+    digest: sha256:REPLACE_WITH_THE_SCANNED_IMAGE_DIGEST
+
+patches:
+  - path: ingress-patch.yaml

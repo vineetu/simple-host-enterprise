@@ -1,0 +1,68 @@
+# Creates the backup bucket once MinIO answers. Idempotent, so re-applying the
+# overlay is harmless; the Job is replaced on each apply because its spec is
+# immutable and kustomize names it the same every time.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-create-bucket
+spec:
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mc
+          image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              until mc alias set local "$BACKUP_STORAGE_ENDPOINT" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; do
+                echo "waiting for minio"; sleep 3
+              done
+              mc mb --ignore-existing "local/$BACKUP_STORAGE_BUCKET"
+              echo "bucket $BACKUP_STORAGE_BUCKET ready"
+          env:
+            - name: MC_CONFIG_DIR
+              value: /tmp/mc
+            - name: BACKUP_STORAGE_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: simple-host-config
+                  key: BACKUP_STORAGE_ENDPOINT
+            - name: BACKUP_STORAGE_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: simple-host-config
+                  key: BACKUP_STORAGE_BUCKET
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: simple-host-secrets
+                  key: BACKUP_STORAGE_ACCESS_KEY_ID
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: simple-host-secrets
+                  key: BACKUP_STORAGE_SECRET_ACCESS_KEY
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+      volumes:
+        - name: tmp
+          emptyDir: {}

@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# One MinIO server on a PersistentVolumeClaim, for evaluation and air-gapped
+# installs. The application talks to it exactly as it would to any S3
+# endpoint; the bucket is created once by a Job. Root credentials are the
+# application's BACKUP_STORAGE_ACCESS_KEY_ID / BACKUP_STORAGE_SECRET_ACCESS_KEY, so a
+# single secrets.env configures both sides.
+resources:
+  - statefulset.yaml
+  - service.yaml
+  - bucket-job.yaml

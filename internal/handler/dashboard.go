@@ -1,0 +1,431 @@
+package handler
+
+import (
+	"database/sql"
+	"fmt"
+	"html"
+	"log"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/vsriram/simple-host/internal/auth"
+	db "github.com/vsriram/simple-host/internal/db"
+)
+
+// dashboardHeadHTML reuses the admin dashboard's own head and CSS block
+// (design.md 14, Phase 1: "match the existing admin/dashboard style"),
+// retitled. Sharing the constant, rather than a second copy of ~350 lines of
+// CSS, is what keeps the two pages from drifting apart in appearance.
+var dashboardHeadHTML = strings.Replace(adminHeadHTML, "Simple Host · Admin", "Simple Host · Dashboard", 1)
+
+// DashboardHandler serves GET /dashboard: a sign-in prompt when signed out,
+// and the signed-in person's API keys — mint, list, revoke — when signed in.
+// The sessions page is a separate route, GET /auth/sessions (auth.go),
+// linked from here.
+type DashboardHandler struct {
+	database    *sql.DB
+	signingKeys []auth.SigningKey
+	sessionIdle time.Duration
+}
+
+func NewDashboardHandler(database *sql.DB, signingKeys []auth.SigningKey, sessionIdle time.Duration) *DashboardHandler {
+	return &DashboardHandler{database: database, signingKeys: signingKeys, sessionIdle: sessionIdle}
+}
+
+func (h *DashboardHandler) Register(mux *http.ServeMux, authMiddleware func(http.Handler) http.Handler) {
+	// Not behind authMiddleware: a signed-out visitor must see the sign-in
+	// prompt, not a 401. The page reads the session itself via a best-effort
+	// probe (auth.GetUser after a lightweight optional-auth wrapper) so it
+	// can render either state without two routes.
+	mux.HandleFunc("GET /dashboard", h.dashboard)
+}
+
+func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
+	user := h.optionalUser(r)
+
+	var b strings.Builder
+	b.WriteString(dashboardHeadHTML)
+
+	if user == nil {
+		fmt.Fprintf(&b, `<header class="bar"><div class="mast">Simple Host<span class="dot">.</span> <span class="kicker">dashboard</span></div></header>
+<main>
+<section class="login-block">
+  <h2 class="section-title">Sign in</h2>
+  <p class="login-copy">Sign in with your work account to manage your API keys and sessions.</p>
+  <p><a class="btn-login" href="/auth/login?to=%s">Sign in</a></p>
+</section>
+</main></body></html>`, html.EscapeString("/dashboard"))
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(b.String()))
+		return
+	}
+
+	keys, err := db.ListAPIKeysForUser(r.Context(), h.database, user.ID)
+	if err != nil {
+		log.Printf("dashboard: list keys for %s: %v", user.Username, err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	notice := ""
+	if r.URL.Query().Get("notice") == "username_suffixed" {
+		notice = `<section class="roadmap-block"><span class="roadmap-tag">Note</span>
+  <span class="roadmap-text">Your usual username was already taken, so your account and site address use a suffixed version instead.</span>
+</section>`
+	}
+
+	fmt.Fprintf(&b, `<header class="bar">
+  <div class="mast" data-username="%s">Simple Host<span class="dot">.</span> <span class="kicker">dashboard</span></div>
+  <nav class="dash-nav"><a href="/dashboard">Keys</a> <span class="sep" aria-hidden="true"></span> <a href="/auth/sessions">Sessions</a></nav>
+  <form method="POST" action="/auth/logout" class="logout-form"><button type="submit" class="btn-logout">Sign out</button></form>
+</header>
+<main>%s
+<h2 class="section-title">Signed in as %s%s</h2>
+
+<section>
+  <h2 class="section-title">API keys</h2>
+  <p class="login-copy">A key authenticates your agent as you. Mint one per agent or machine so each can be revoked without touching the others.</p>
+  <form id="mint-form" class="login-form" onsubmit="return false">
+    <input type="text" id="key-name" placeholder="Name (e.g. laptop, CI)" maxlength="200" autocomplete="off">
+    <button type="button" id="mint-button" class="btn-login">Create key</button>
+  </form>
+  <div id="mint-result" hidden></div>
+  <div id="key-list" class="rank-list" role="region" aria-label="API keys">`,
+		html.EscapeString(user.Username),
+		notice,
+		html.EscapeString(user.Username),
+		adminBadge(user.IsAdmin),
+	)
+	for _, k := range keys {
+		status := "active"
+		if k.RevokedAt != nil {
+			status = "revoked"
+		}
+		fmt.Fprintf(&b, `<div class="rank-row" data-key-id="%s">
+  <span class="rank-name">%s <span class="rank-sub">%s · created %s</span></span>
+  <span class="rank-metric">%s</span>`,
+			html.EscapeString(k.ID),
+			html.EscapeString(k.Name),
+			html.EscapeString(k.Prefix),
+			localTimeHTML(k.CreatedAt, "datetime"),
+			html.EscapeString(status),
+		)
+		if status == "active" {
+			fmt.Fprintf(&b, `<button type="button" class="btn-reject revoke-key" data-key-id="%s">Revoke</button>`, html.EscapeString(k.ID))
+		}
+		b.WriteString(`</div>`)
+	}
+	if len(keys) == 0 {
+		b.WriteString(`<div class="rank-empty">No keys yet.</div>`)
+	}
+	b.WriteString(`</div>
+</section>
+
+<section>
+  <h2 class="section-title">Your sites</h2>
+  <p class="login-copy">Manage who can view a restricted site and the files it has uploaded. Deploying, rolling back, and editor access are unchanged — use the skill or MCP for those.</p>
+  <div id="site-list" class="rank-list" role="region" aria-label="Sites"></div>
+</section>
+</main>`)
+	b.WriteString(dashboardScript)
+	b.WriteString(`</body></html>`)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(b.String()))
+}
+
+func adminBadge(isAdmin bool) string {
+	if isAdmin {
+		return ` <span class="chip">admin</span>`
+	}
+	return ""
+}
+
+// optionalUser resolves the session cookie without requiring one — the
+// dashboard renders a sign-in prompt rather than a 401 when there is none.
+// It intentionally does not accept X-API-Key: minting a key requires a
+// session (design.md 6.3), so an agent presenting a key here should see the
+// sign-in prompt, not a keys page it cannot act on.
+func (h *DashboardHandler) optionalUser(r *http.Request) *db.User {
+	c, err := r.Cookie(auth.SessionCookieName)
+	if err != nil || c.Value == "" {
+		return nil
+	}
+	verified, err := auth.VerifySessionCookie(h.signingKeys, c.Value)
+	if err != nil {
+		return nil
+	}
+	withUser, err := db.GetValidSession(r.Context(), h.database, verified.SessionID, h.sessionIdle)
+	if err != nil || withUser.Session.UserID != verified.UserID {
+		return nil
+	}
+	user := withUser.User
+	return &user
+}
+
+// dashboardScript mints and revokes keys via fetch, same-origin, so the
+// browser sends the session cookie and the same Origin header
+// originCheckMiddleware requires. The plaintext key is shown exactly once,
+// in a block shaped for the account-recovery skill's "paste this back to
+// your agent" step.
+const dashboardScript = `<script>
+(function(){
+  var mintButton = document.getElementById('mint-button');
+  var nameInput = document.getElementById('key-name');
+  var resultBox = document.getElementById('mint-result');
+  var list = document.getElementById('key-list');
+  if (!mintButton) return;
+
+  mintButton.addEventListener('click', function(){
+    mintButton.disabled = true;
+    fetch('/api/keys', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: nameInput.value || ''})
+    }).then(function(r){ return r.json().then(function(body){ return {ok: r.ok, body: body}; }); })
+      .then(function(res){
+        mintButton.disabled = false;
+        if (!res.ok) {
+          resultBox.hidden = false;
+          resultBox.textContent = 'Could not create key: ' + (res.body.error || 'unknown error');
+          return;
+        }
+        var payload = JSON.stringify({api_key: res.body.api_key, username: document.querySelector('.mast').getAttribute('data-username') || ''});
+        resultBox.hidden = false;
+        resultBox.innerHTML = '<p><strong>Copy this now — it will not be shown again:</strong></p>' +
+          '<pre style="white-space:pre-wrap;word-break:break-all;background:var(--ps-blue-50);padding:12px;border-radius:4px">' +
+          res.body.api_key + '</pre>' +
+          '<p>Paste this block back to your agent:</p>' +
+          '<pre style="white-space:pre-wrap;word-break:break-all;background:var(--ps-blue-50);padding:12px;border-radius:4px">' +
+          payload + '</pre>';
+        location.reload();
+      }).catch(function(){
+        mintButton.disabled = false;
+        resultBox.hidden = false;
+        resultBox.textContent = 'Network error creating key.';
+      });
+  });
+
+  if (list) {
+    list.addEventListener('click', function(ev){
+      var button = ev.target.closest('.revoke-key');
+      if (!button) return;
+      var id = button.getAttribute('data-key-id');
+      if (!confirm('Revoke this key? Anything using it will stop working immediately.')) return;
+      button.disabled = true;
+      fetch('/api/keys/' + encodeURIComponent(id), {method: 'DELETE', credentials: 'same-origin'})
+        .then(function(){ location.reload(); })
+        .catch(function(){ button.disabled = false; });
+    });
+  }
+})();
+</script>` + dashboardSitesScript
+
+// dashboardSitesScript renders the signed-in person's accessible sites and,
+// for a site they own or belong to the owning team of (requireOwnerRole's
+// gate — an editor sees the site listed but not these controls), a viewer
+// list and an asset list, each backed by the existing collaboration API
+// (design.md 14, Phase 3: "reuse the share dialog pattern" — the pattern
+// reused here is fetch-driven panels against the same endpoints the share
+// dialog itself calls, not the dialog markup verbatim, since these live
+// inline per site row rather than in one global modal).
+//
+// Every fetch to a site-management endpoint carries
+// X-Simple-Host-Client: control-ui, which is what exempts a browser
+// (rather than the skill or MCP) from the skill-version guard
+// (notice_middleware.go's isClassifiedNonSkillClient) — without it every
+// one of these calls would 400 with "skill_version_required".
+const dashboardSitesScript = `<script>
+(function(){
+  var container = document.getElementById('site-list');
+  if (!container) return;
+  var CH = {'X-Simple-Host-Client': 'control-ui'};
+
+  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+  function fmtBytes(n) {
+    if (n < 1024) return n + ' B';
+    var units = ['KB','MB','GB'], u = -1;
+    do { n = n / 1024; u++; } while (n >= 1024 && u < units.length - 1);
+    return n.toFixed(1) + ' ' + units[u];
+  }
+
+  function loadSites() {
+    fetch('/api/collaboration/sites', {credentials: 'same-origin', headers: CH})
+      .then(function(r){ return r.json(); })
+      .then(renderSites)
+      .catch(function(){ container.innerHTML = '<div class="rank-empty">Could not load sites.</div>'; });
+  }
+
+  function renderSites(sites) {
+    if (!sites || !sites.length) { container.innerHTML = '<div class="rank-empty">No sites yet.</div>'; return; }
+    container.innerHTML = '';
+    sites.forEach(function(site){
+      var canManage = site.access_role === 'owner' || site.access_role === 'member';
+      var row = document.createElement('div');
+      row.className = 'rank-row site-row';
+      row.innerHTML = '<span class="rank-name">' + esc(site.owner_username) + '/' + esc(site.name) +
+        ' <span class="rank-sub">' + esc(site.access_role) + (site.public ? ' · public' : '') + '</span></span>' +
+        (canManage ? '<button type="button" class="btn-reject manage-toggle">Manage</button>' : '');
+      var panel = document.createElement('div');
+      panel.className = 'site-panel';
+      panel.hidden = true;
+      row.appendChild(panel);
+      container.appendChild(row);
+      if (!canManage) return;
+
+      var toggle = row.querySelector('.manage-toggle');
+      var loaded = false;
+      toggle.addEventListener('click', function(){
+        panel.hidden = !panel.hidden;
+        if (!panel.hidden && !loaded) { loaded = true; renderPanel(panel, site.owner_username, site.name); }
+      });
+    });
+  }
+
+  function renderPanel(panel, owner, name) {
+    panel.innerHTML =
+      '<div class="site-subsection"><h4>Viewers</h4>' +
+      '<p class="share-help">Empty means any signed-in person may view this site. Adding a first viewer restricts it to the list and moves it to its own address.</p>' +
+      '<div class="viewer-list" aria-live="polite"></div>' +
+      '<div class="add-row"><input type="text" class="add-viewer-input" placeholder="username, another-username" autocomplete="off">' +
+      '<button type="button" class="btn-login add-viewer-button">Add</button></div></div>' +
+      '<div class="site-subsection"><h4>Assets</h4><div class="asset-list" aria-live="polite"></div></div>' +
+      '<div class="site-subsection site-tabs"><div class="site-tab-buttons">' +
+      '<button type="button" class="btn-reject site-tab-button active" data-tab="activity">Activity</button>' +
+      '<button type="button" class="btn-reject site-tab-button" data-tab="visitors">Visitors</button>' +
+      '</div>' +
+      '<div class="site-tab-panel activity-tab"><div class="activity-list" aria-live="polite"></div></div>' +
+      '<div class="site-tab-panel visitor-tab" hidden><div class="visitor-list" aria-live="polite"></div></div>' +
+      '</div>';
+
+    var base = '/api/collaboration/sites/' + encodeURIComponent(owner) + '/' + encodeURIComponent(name);
+    var viewerList = panel.querySelector('.viewer-list');
+    var assetList = panel.querySelector('.asset-list');
+    var activityList = panel.querySelector('.activity-list');
+    var visitorList = panel.querySelector('.visitor-list');
+    var auditQuery = '/api/audit?owner=' + encodeURIComponent(owner) + '&site=' + encodeURIComponent(name);
+    var accessQuery = '/api/access?owner=' + encodeURIComponent(owner) + '&site=' + encodeURIComponent(name);
+
+    panel.querySelectorAll('.site-tab-button').forEach(function(button){
+      button.addEventListener('click', function(){
+        panel.querySelectorAll('.site-tab-button').forEach(function(b){ b.classList.remove('active'); });
+        button.classList.add('active');
+        var showActivity = button.getAttribute('data-tab') === 'activity';
+        panel.querySelector('.activity-tab').hidden = !showActivity;
+        panel.querySelector('.visitor-tab').hidden = showActivity;
+      });
+    });
+
+    function loadActivity() {
+      fetch(auditQuery, {credentials: 'same-origin', headers: CH})
+        .then(function(r){ return r.json(); })
+        .then(function(body){
+          var events = (body && body.events) || [];
+          activityList.innerHTML = '';
+          if (!events.length) { activityList.innerHTML = '<div class="rank-empty">No recorded actions yet.</div>'; return; }
+          events.forEach(function(e){
+            var row = document.createElement('div');
+            row.className = 'rank-row';
+            row.innerHTML = '<span class="rank-name">' + esc(e.action) +
+              ' <span class="rank-sub">' + esc(new Date(e.at).toLocaleString()) + '</span></span>';
+            activityList.appendChild(row);
+          });
+        })
+        .catch(function(){ activityList.innerHTML = '<div class="rank-empty">Could not load activity.</div>'; });
+    }
+
+    function loadVisitors() {
+      fetch(accessQuery, {credentials: 'same-origin', headers: CH})
+        .then(function(r){ return r.json(); })
+        .then(function(body){
+          var entries = (body && body.entries) || [];
+          visitorList.innerHTML = '';
+          if (!entries.length) { visitorList.innerHTML = '<div class="rank-empty">No recorded visits yet.</div>'; return; }
+          entries.forEach(function(e){
+            var row = document.createElement('div');
+            row.className = 'rank-row';
+            row.innerHTML = '<span class="rank-name">' + esc(e.method) + ' ' + esc(e.path) +
+              ' <span class="rank-sub">' + esc(e.status) + ' · ' + esc(e.client_kind) + ' · ' + esc(new Date(e.at).toLocaleString()) + '</span></span>';
+            visitorList.appendChild(row);
+          });
+        })
+        .catch(function(){ visitorList.innerHTML = '<div class="rank-empty">Could not load visitors.</div>'; });
+    }
+
+    function loadViewers() {
+      fetch(base + '/viewers', {credentials: 'same-origin', headers: CH})
+        .then(function(r){ return r.json(); })
+        .then(function(viewers){
+          viewerList.innerHTML = '';
+          if (!viewers || !viewers.length) { viewerList.innerHTML = '<div class="rank-empty">Open to any signed-in person.</div>'; return; }
+          viewers.forEach(function(v){
+            var row = document.createElement('div');
+            row.className = 'rank-row';
+            row.innerHTML = '<span class="rank-name">' + esc(v.username) + ' <span class="rank-sub">' + esc(v.kind) + '</span></span>' +
+              '<button type="button" class="btn-reject remove-viewer" data-username="' + esc(v.username) + '">Remove</button>';
+            viewerList.appendChild(row);
+          });
+        })
+        .catch(function(){ viewerList.innerHTML = '<div class="rank-empty">Could not load viewers.</div>'; });
+    }
+
+    function loadAssets() {
+      fetch(base + '/assets', {credentials: 'same-origin', headers: CH})
+        .then(function(r){ return r.json(); })
+        .then(function(assets){
+          assetList.innerHTML = '';
+          if (!assets || !assets.length) { assetList.innerHTML = '<div class="rank-empty">No assets uploaded.</div>'; return; }
+          assets.forEach(function(a){
+            var row = document.createElement('div');
+            row.className = 'rank-row';
+            row.innerHTML = '<span class="rank-name"><a href="' + esc(a.url) + '">' + esc(a.name) + '</a> <span class="rank-sub">' + esc(a.content_type) + ' · ' + fmtBytes(a.size) + '</span></span>' +
+              '<button type="button" class="btn-reject remove-asset" data-id="' + esc(a.id) + '">Delete</button>';
+            assetList.appendChild(row);
+          });
+        })
+        .catch(function(){ assetList.innerHTML = '<div class="rank-empty">Could not load assets.</div>'; });
+    }
+
+    panel.querySelector('.add-viewer-button').addEventListener('click', function(){
+      var input = panel.querySelector('.add-viewer-input');
+      var usernames = input.value.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+      if (!usernames.length) return;
+      fetch(base + '/viewers', {
+        method: 'POST', credentials: 'same-origin',
+        headers: Object.assign({'Content-Type': 'application/json'}, CH),
+        body: JSON.stringify({usernames: usernames}),
+      }).then(function(r){
+        if (!r.ok) return r.json().then(function(b){ alert('Could not add: ' + (b.error || 'unknown error')); });
+        input.value = '';
+        loadViewers();
+      }).catch(function(){ alert('Network error adding viewers.'); });
+    });
+
+    viewerList.addEventListener('click', function(ev){
+      var button = ev.target.closest('.remove-viewer');
+      if (!button) return;
+      fetch(base + '/viewers/' + encodeURIComponent(button.getAttribute('data-username')), {method: 'DELETE', credentials: 'same-origin', headers: CH})
+        .then(loadViewers)
+        .catch(function(){ alert('Network error removing viewer.'); });
+    });
+
+    assetList.addEventListener('click', function(ev){
+      var button = ev.target.closest('.remove-asset');
+      if (!button) return;
+      if (!confirm('Delete this asset? Any page still linking to it will break.')) return;
+      fetch(base + '/assets/' + encodeURIComponent(button.getAttribute('data-id')), {method: 'DELETE', credentials: 'same-origin', headers: CH})
+        .then(loadAssets)
+        .catch(function(){ alert('Network error deleting asset.'); });
+    });
+
+    loadViewers();
+    loadAssets();
+    loadActivity();
+    loadVisitors();
+  }
+
+  loadSites();
+})();
+</script>`

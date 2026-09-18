@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simple Host — API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <link rel="stylesheet" href="/site-header.css">
+  <style>
+    /* Blue light skin over Swagger UI. We don't load ps-blue.css here
+       (Swagger has its own chrome) — just retint the most prominent surfaces. */
+    @font-face {
+      font-family: 'Manrope';
+      font-style: normal;
+      font-weight: 400;
+      font-display: swap;
+      src: url('/fonts/manrope-400.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'Manrope';
+      font-style: normal;
+      font-weight: 600;
+      font-display: swap;
+      src: url('/fonts/manrope-600.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'JetBrains Mono';
+      font-style: normal;
+      font-weight: 500;
+      font-display: swap;
+      src: url('/fonts/jetbrains-mono-500.woff2') format('woff2');
+    }
+
+    :root {
+      --ps-blue-900: #002061;
+      --ps-blue-800: #003087;
+      --ps-blue-700: #004CB3;
+      --ps-blue-600: #006FCD;
+      --ps-blue-300: #85B7E9;
+      --ps-blue-200: #B8D4F0;
+      --ps-blue-100: #E6F0FA;
+      --ps-blue-50:  #F4F9FD;
+      --canvas: #FAFBFE;
+      --surface: #FFFFFF;
+      --surface-line: #DCE3ED;
+      --ink: #0A1530;
+      --ink-soft: #475569;
+    }
+
+    body {
+      margin: 0;
+      background: var(--canvas);
+      font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    /* Hide stock topbar; we'll add our own */
+    .swagger-ui .topbar { display: none; }
+
+    /* Type */
+    .swagger-ui,
+    .swagger-ui .info .title,
+    .swagger-ui .opblock-tag,
+    .swagger-ui .opblock .opblock-summary-path,
+    .swagger-ui .opblock .opblock-summary-description,
+    .swagger-ui .info p,
+    .swagger-ui .info li,
+    .swagger-ui .info a,
+    .swagger-ui .markdown,
+    .swagger-ui .markdown p,
+    .swagger-ui .response-col_status,
+    .swagger-ui .parameter__name,
+    .swagger-ui .parameter__type,
+    .swagger-ui .parameter__in,
+    .swagger-ui label,
+    .swagger-ui .tab li {
+      font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+      color: var(--ink);
+    }
+    .swagger-ui .info .title small { background: var(--ps-blue-100); color: var(--ps-blue-800); }
+    .swagger-ui .info .title { color: var(--ps-blue-900); font-weight: 700; }
+
+    /* Mono everywhere code/path lives */
+    .swagger-ui code,
+    .swagger-ui pre,
+    .swagger-ui .opblock .opblock-summary-path,
+    .swagger-ui .opblock .opblock-summary-method,
+    .swagger-ui .response-col_status,
+    .swagger-ui .parameter__name,
+    .swagger-ui .parameter__type {
+      font-family: 'JetBrains Mono', 'Menlo', 'Consolas', monospace !important;
+    }
+
+    /* Links */
+    .swagger-ui a,
+    .swagger-ui .info a,
+    .swagger-ui .info a:visited {
+      color: var(--ps-blue-700);
+    }
+    .swagger-ui a:hover { color: var(--ps-blue-800); }
+
+    /* Buttons — primary "Try it out", "Execute" */
+    .swagger-ui .btn.try-out__btn,
+    .swagger-ui .btn.execute,
+    .swagger-ui .btn.authorize {
+      background: var(--ps-blue-800);
+      color: #fff;
+      border-color: var(--ps-blue-800);
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      border-radius: 8px;
+      box-shadow: none;
+    }
+    .swagger-ui .btn.try-out__btn:hover,
+    .swagger-ui .btn.execute:hover,
+    .swagger-ui .btn.authorize:hover {
+      background: var(--ps-blue-900);
+      border-color: var(--ps-blue-900);
+    }
+    .swagger-ui .btn.cancel {
+      background: var(--surface);
+      color: var(--ps-blue-800);
+      border: 2px solid var(--ps-blue-800);
+      border-radius: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    /* Method tags — keep semantic colors but lean blue family where possible */
+    .swagger-ui .opblock.opblock-get { border-color: var(--ps-blue-700); background: var(--ps-blue-50); }
+    .swagger-ui .opblock.opblock-get .opblock-summary-method { background: var(--ps-blue-700); }
+    .swagger-ui .opblock.opblock-get .opblock-summary { border-color: var(--ps-blue-700); }
+
+    .swagger-ui .opblock.opblock-post { border-color: #10B981; background: #ECFDF5; }
+    .swagger-ui .opblock.opblock-post .opblock-summary-method { background: #10B981; }
+    .swagger-ui .opblock.opblock-post .opblock-summary { border-color: #10B981; }
+
+    .swagger-ui .opblock.opblock-put { border-color: var(--ps-blue-600); background: var(--ps-blue-50); }
+    .swagger-ui .opblock.opblock-put .opblock-summary-method { background: var(--ps-blue-600); }
+    .swagger-ui .opblock.opblock-put .opblock-summary { border-color: var(--ps-blue-600); }
+
+    .swagger-ui .opblock.opblock-delete { border-color: #EF4444; background: #FEF2F2; }
+    .swagger-ui .opblock.opblock-delete .opblock-summary-method { background: #EF4444; }
+    .swagger-ui .opblock.opblock-delete .opblock-summary { border-color: #EF4444; }
+
+    /* Section tags (group headers) */
+    .swagger-ui .opblock-tag {
+      color: var(--ps-blue-900);
+      border-bottom-color: var(--surface-line);
+      font-weight: 700;
+    }
+
+    /* Models / schemas */
+    .swagger-ui section.models {
+      border-color: var(--surface-line);
+      background: var(--surface);
+    }
+    .swagger-ui section.models h4,
+    .swagger-ui section.models .model-title {
+      color: var(--ps-blue-900);
+    }
+
+    /* Inputs */
+    .swagger-ui input[type=text],
+    .swagger-ui input[type=password],
+    .swagger-ui input[type=email],
+    .swagger-ui textarea,
+    .swagger-ui select {
+      border: 1px solid var(--surface-line);
+      border-radius: 8px;
+      background: var(--surface);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .swagger-ui input[type=text]:focus,
+    .swagger-ui textarea:focus,
+    .swagger-ui select:focus {
+      border-color: var(--ps-blue-800);
+      box-shadow: 0 0 0 3px rgba(0,48,135,0.15);
+      outline: none;
+    }
+
+    /* Status pills in responses */
+    .swagger-ui .responses-table .response-col_status {
+      color: var(--ps-blue-800);
+    }
+  </style>
+</head>
+<body>
+  <a class="site-skip-link" href="#main-content">Skip to main content</a>
+  <header class="site-header">
+    <div class="site-header__inner">
+      <a class="site-header__wordmark" href="/">Simple Host</a>
+      <nav class="site-header__nav" aria-label="Primary navigation">
+        <a href="/showcase">Showcase</a>
+        <a href="/capabilities.html">Capabilities</a>
+        <a href="/changelog.html">What's New</a>
+        <a href="/install.html">Install</a>
+        <a href="/docs.html" aria-current="page">API</a>
+      </nav>
+    </div>
+  </header>
+  <main id="main-content" tabindex="-1">
+    <div id="swagger-ui"></div>
+  </main>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    SwaggerUIBundle({
+      url: '/openapi.yaml',
+      dom_id: '#swagger-ui',
+      presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+      layout: 'BaseLayout',
+      deepLinking: true,
+    });
+  </script>
+</body>
+</html>

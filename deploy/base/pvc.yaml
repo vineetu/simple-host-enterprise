@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: simple-host-site-data
+spec:
+  # ReadWriteOnce: one replica writes the site tree. The storage class is the
+  # cluster default unless the overlay names an encrypting one, which the
+  # install guide requires for production.
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi

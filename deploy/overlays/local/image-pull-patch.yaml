@@ -1,0 +1,14 @@
+# The image is built into the local daemon, never pulled.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simple-host
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: migrate
+          imagePullPolicy: Never
+      containers:
+        - name: simple-host
+          imagePullPolicy: Never

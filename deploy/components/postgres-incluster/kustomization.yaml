@@ -1,0 +1,54 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# A single Postgres on a PersistentVolumeClaim, serving TLS from a
+# cert-manager CA so the application connects with sslmode=verify-full. It is
+# a reference install and an evaluation database, not a managed service: no
+# replicas, no automated backups beyond volume snapshots. CloudNativePG is the
+# production-grade in-cluster choice; a managed database is the usual one.
+#
+# Credentials come from the same simple-host-config and simple-host-secrets
+# the application reads (DB_USER, DB_NAME, DB_PASSWORD), so there is one
+# source of truth for them.
+resources:
+  - certificates.yaml
+  - statefulset.yaml
+  - service.yaml
+
+patches:
+  # Point the application's CA mount at the certificate this component issues.
+  - target:
+      kind: Deployment
+      name: simple-host
+    patch: |
+      - op: replace
+        path: /spec/template/spec/volumes/2
+        value:
+          name: db-ca
+          secret:
+            secretName: postgres-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+  # simple-host-prune also connects to Postgres directly (as the owning
+  # role, design 9.3) with sslmode=verify-full, so its own db-ca volume
+  # (deploy/base/cronjob-prune.yaml, index 0 of its pod template's volumes)
+  # needs the same fix, or its first query fails with "open
+  # /etc/simple-host/db-ca/ca.crt: no such file or directory" the moment it
+  # tries to actually connect (found running this CronJob for the first
+  # time against this component — deploy/base/backup-assets-cronjob.yaml
+  # needs no equivalent patch because it never mounts db-ca at all: it
+  # talks to disk and S3/MinIO only, no direct Postgres connection).
+  - target:
+      kind: CronJob
+      name: simple-host-prune
+    patch: |
+      - op: replace
+        path: /spec/jobTemplate/spec/template/spec/volumes/0
+        value:
+          name: db-ca
+          secret:
+            secretName: postgres-tls
+            items:
+              - key: ca.crt
+                path: ca.crt

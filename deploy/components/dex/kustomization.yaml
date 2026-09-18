@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# Dex: the automated-test OIDC provider for the local overlay only (design.md
+# 10.6). See configmap.yaml for why the issuer is the in-cluster Service DNS
+# name rather than the public nip.io hostname, and why that is fine.
+resources:
+  - deployment.yaml
+  - service.yaml
+  - configmap.yaml

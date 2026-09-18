@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: simple-host
+  labels:
+    # Every pod in the namespace must satisfy the restricted profile; the
+    # deployment's securityContext is written to it, and a future addition
+    # that is not gets refused rather than quietly weakening the namespace.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest

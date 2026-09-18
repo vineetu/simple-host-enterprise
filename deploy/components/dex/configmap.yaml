@@ -1,0 +1,60 @@
+# Dex is the automated-test OIDC provider for the local overlay (design.md
+# 10.6): a static test admin and a static test non-admin, no external
+# identity provider needed. Google is the manual rehearsal provider
+# (design.md 6.5, 10.7); this component is never used outside `make local`
+# and CI.
+#
+# The issuer is Dex's own in-cluster Service DNS name, deliberately not the
+# public nip.io hostname: every call OIDC_ISSUER drives (discovery, token
+# exchange, JWKS) is server-to-server from the simple-host pod, and a pod
+# cannot reach the host's loopback the way an external browser or curl can
+# (see docs/security-review.md, "Dex reachability"). The one
+# step that does need a human or a script acting as a browser — loading the
+# login form and posting credentials — reaches this same Service through a
+# `kubectl port-forward` plus `curl --resolve dex.simple-host.svc.cluster.local:5556:127.0.0.1`,
+# which scripts/smoke.sh sets up itself.
+#
+# clientSecret and the two static password hashes below are fixed, published
+# values that exist only for this local, disposable identity provider — never
+# treat them as real secrets, and never point OIDC_ISSUER at this component
+# outside the local overlay.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dex-config
+data:
+  config.yaml: |
+    issuer: http://dex.simple-host.svc.cluster.local:5556
+
+    storage:
+      type: memory
+
+    web:
+      http: 0.0.0.0:5556
+
+    telemetry:
+      http: 0.0.0.0:5558
+
+    oauth2:
+      skipApprovalScreen: true
+
+    staticClients:
+      - id: simple-host-local
+        name: Simple Host (local)
+        secret: local-dex-client-secret-96808aacbcb9ec41
+        redirectURIs:
+          - https://simple-host.127-0-0-1.nip.io/auth/callback
+
+    enablePasswordDB: true
+    staticPasswords:
+      # admin@example.com / adminpass — the test admin (matches ADMIN_EMAILS
+      # in deploy/overlays/local/config.env).
+      - email: "admin@example.com"
+        hash: "$2a$10$RcCcP10X4viG4v1669pY3eQ52YPhGHusgNjrB9tix2SX2AW4Bafwq"
+        username: "admin"
+        userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
+      # person@example.com / personpass — the test non-admin.
+      - email: "person@example.com"
+        hash: "$2a$10$T4LwgFfQed8V57V8mESrJ.RIyDQSj4o37rGx.8FzPIwGiGzxclaCG"
+        username: "person"
+        userID: "1e4d45f1-8a1a-4b0e-9f0a-3a6b6c0d9d21"

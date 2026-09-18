@@ -1,0 +1,8 @@
+# Generated local-cluster material is gitignored but sits in the tree; the
+# scanner runs without git so it must be told. Nothing else is allowlisted.
+[allowlist]
+paths = [
+  '''deploy/overlays/[^/]+/secrets\.env$''',
+  '''deploy/overlays/[^/]+/tls\.key$''',
+  '''deploy/overlays/[^/]+/tls\.crt$''',
+]

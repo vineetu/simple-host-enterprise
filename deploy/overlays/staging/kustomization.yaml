@@ -1,0 +1,38 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Staging is the byo shape with its own values: same manifests, a different
+# hostname, database, bucket and image digest. Copy the byo .example files
+# here as config.env / secrets.env / db-ca.crt and edit ingress-patch.yaml.
+namespace: simple-host-stage
+
+resources:
+  - ../../base
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: simple-host-config
+    envs: [config.env]
+
+secretGenerator:
+  - name: simple-host-secrets
+    envs: [secrets.env]
+  - name: simple-host-db-ca
+    files: [ca.crt=db-ca.crt]
+
+images:
+  - name: simple-host
+    newName: ghcr.io/example/simple-host
+    digest: sha256:REPLACE_WITH_THE_SCANNED_IMAGE_DIGEST
+
+patches:
+  - path: ingress-patch.yaml
+  - target:
+      kind: Namespace
+      name: simple-host
+    patch: |
+      - op: replace
+        path: /metadata/name
+        value: simple-host-stage

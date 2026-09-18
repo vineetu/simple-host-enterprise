@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Install — Simple Host</title>
+  <link rel="stylesheet" href="/ps-blue.css">
+  <link rel="stylesheet" href="/site-header.css">
+  <style>
+    .container {
+      width: min(100%, 800px);
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    .site-header { margin-bottom: 64px; }
+
+    main {
+      padding-bottom: 88px;
+    }
+
+    .hero {
+      max-width: 700px;
+      margin-bottom: 64px;
+    }
+
+    .eyebrow {
+      margin-bottom: 12px;
+      color: var(--ps-blue-800);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+    }
+
+    .lede {
+      margin: 0 0 18px;
+      color: var(--ps-blue-900);
+      font-family: var(--font-sans);
+      font-size: clamp(42px, 6vw, 56px);
+      font-weight: 600;
+      letter-spacing: -0.045em;
+      line-height: 0.98;
+      text-wrap: balance;
+    }
+
+    .lede .dot { color: var(--ps-blue-600); }
+
+    .subhead {
+      max-width: 650px;
+      margin: 0;
+      color: var(--ink-soft);
+      font-size: clamp(17px, 2vw, 20px);
+      line-height: 1.55;
+    }
+
+    section {
+      margin-bottom: 64px;
+    }
+
+    section h2,
+    .disclosure h2 {
+      margin: 0 0 12px;
+      color: var(--ink);
+      font-size: clamp(34px, 5vw, 42px);
+      font-weight: 600;
+      letter-spacing: -0.035em;
+      line-height: 1.05;
+    }
+
+    section h3,
+    .disclosure h3 {
+      margin: 28px 0 8px;
+      color: var(--ink);
+      font-size: clamp(23px, 3vw, 30px);
+      letter-spacing: -0.025em;
+      line-height: 1.2;
+    }
+
+    section p,
+    .disclosure p,
+    .disclosure li {
+      color: var(--ink-soft);
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    section p,
+    .disclosure p { margin: 0 0 16px; }
+
+    a {
+      color: var(--ps-blue-700);
+      text-underline-offset: 3px;
+    }
+
+    a:hover { color: var(--ps-blue-800); }
+
+    code {
+      font-family: var(--font-mono);
+    }
+
+    .recommended {
+      position: relative;
+      padding: 30px;
+      border: 1px solid var(--ps-blue-200);
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .recommended::before {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      width: 4px;
+      border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+      background: var(--ps-blue-700);
+      content: "";
+    }
+
+    .recommended__label {
+      display: inline-block;
+      margin-bottom: 12px;
+      color: var(--ps-blue-800);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+    }
+
+    .recommended__actions {
+      display: flex;
+      margin-top: 22px;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .copy-button {
+      min-height: 46px;
+      padding: 0 22px;
+      border: 1px solid var(--ps-blue-800);
+      border-radius: var(--radius-sm);
+      background: var(--ps-blue-800);
+      color: #fff;
+      cursor: pointer;
+      font-family: var(--font-sans);
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.2;
+      transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+    }
+
+    .copy-button:hover {
+      border-color: var(--ps-blue-700);
+      background: var(--ps-blue-700);
+      transform: translateY(-1px);
+    }
+
+    .copy-button.is-copied {
+      border-color: #087a55;
+      background: #087a55;
+    }
+
+    .copy-status,
+    .verify-result {
+      min-height: 24px;
+      margin: 10px 0 0;
+      color: #087a55;
+      font-family: var(--font-sans);
+      font-size: 13px;
+      font-weight: 650;
+      line-height: 1.5;
+    }
+
+    .copy-status.is-error,
+    .verify-result.is-error { color: #a4262c; }
+
+    .prompt-details {
+      margin-top: 18px;
+      border-top: 1px solid var(--surface-line);
+    }
+
+    .prompt-details summary,
+    .disclosure > summary {
+      padding: 18px 2px;
+      color: var(--ps-blue-800);
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .prompt-details[open] summary,
+    .disclosure[open] > summary {
+      border-bottom: 1px solid var(--surface-line);
+    }
+
+    .prompt-details__body {
+      padding-top: 20px;
+    }
+
+    pre {
+      max-width: 100%;
+      margin: 0;
+      padding: 20px;
+      overflow-x: auto;
+      border-left: 3px solid var(--ps-blue-300);
+      border-radius: var(--radius-md);
+      background: var(--ink);
+      color: #eaf3ff;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.65;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    pre code {
+      color: inherit;
+      font-size: inherit;
+    }
+
+    .next-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      margin-top: 24px;
+      border-top: 1px solid var(--surface-line);
+      border-bottom: 1px solid var(--surface-line);
+    }
+
+    .next-action {
+      padding: 22px 24px 22px 0;
+    }
+
+    .next-action + .next-action {
+      padding-right: 0;
+      padding-left: 24px;
+      border-left: 1px solid var(--surface-line);
+    }
+
+    .next-action strong {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--ink);
+      font-size: 16px;
+    }
+
+    .next-action p { margin: 0; }
+
+    .disclosure {
+      margin-bottom: 18px;
+      border-top: 1px solid var(--surface-line);
+      border-bottom: 1px solid var(--surface-line);
+    }
+
+    .disclosure + .disclosure {
+      border-top: 0;
+    }
+
+    .disclosure__body {
+      padding: 26px 2px 34px;
+    }
+
+    .scope-note {
+      padding-left: 14px;
+      border-left: 2px solid var(--ps-blue-300);
+    }
+
+    .command-group + .command-group {
+      margin-top: 28px;
+    }
+
+    .command-group h3:first-child { margin-top: 0; }
+
+    .command-label {
+      margin: 16px 0 7px;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .command {
+      padding: 14px 16px;
+      white-space: pre;
+      overflow-wrap: normal;
+    }
+
+    .manual-steps {
+      margin: 18px 0 0;
+      padding-left: 28px;
+    }
+
+    .manual-steps > li {
+      padding: 0 0 24px 10px;
+    }
+
+    .manual-steps > li:last-child { padding-bottom: 0; }
+
+    .manual-steps > li::marker {
+      color: var(--ps-blue-800);
+      font-family: var(--font-mono);
+      font-weight: 600;
+    }
+
+    .manual-steps strong {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--ink);
+      font-size: 16px;
+    }
+
+    .download-links {
+      display: flex;
+      margin: 12px 0 4px;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+
+    .file-check {
+      margin: 16px 0 10px;
+      padding: 18px;
+      border: 1px solid var(--surface-line);
+      border-radius: var(--radius-md);
+      background: var(--surface-muted);
+    }
+
+    .file-check label {
+      display: block;
+      margin-bottom: 9px;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .file-check input[type="file"] {
+      display: block;
+      width: 100%;
+      max-width: 100%;
+      color: var(--ink-soft);
+      font: 14px/1.5 var(--font-sans);
+    }
+
+    .privacy-note {
+      margin: 10px 0 0 !important;
+      color: var(--ink-muted) !important;
+      font-size: 13px !important;
+    }
+
+    .root-list {
+      margin: 12px 0 0;
+      padding-left: 20px;
+    }
+
+    .root-list li { margin-bottom: 5px; }
+
+    .trust-note {
+      padding-top: 16px;
+      border-top: 1px solid var(--surface-line);
+    }
+
+    .copy-button:focus-visible,
+    .prompt-details summary:focus-visible,
+    .disclosure > summary:focus-visible,
+    .file-check input:focus-visible,
+    main a:focus-visible,
+    footer a:focus-visible {
+      border-radius: 3px;
+      outline: 3px solid var(--ps-blue-600);
+      outline-offset: 4px;
+    }
+
+    footer {
+      padding: 24px 0;
+      border-top: 1px solid var(--surface-line);
+      color: var(--ink-muted);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    footer a { text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    @media (max-width: 640px) {
+      .site-header { margin-bottom: 48px; }
+      main { padding-bottom: 64px; }
+      .hero, section { margin-bottom: 52px; }
+      .lede { font-size: clamp(36px, 11vw, 48px); }
+      .recommended { padding: 24px 22px; }
+      .next-actions { grid-template-columns: 1fr; }
+      .next-action { padding: 20px 0; }
+      .next-action + .next-action {
+        padding: 20px 0;
+        border-top: 1px solid var(--surface-line);
+        border-left: 0;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .copy-button { transition: none; }
+      .copy-button:hover { transform: none; }
+    }
+
+    /* Agent launcher: pick your agent, one button opens it with the install
+       request already typed in. The copy button survives as recovery, moved
+       into the fallback line by script, so a no-JS reader still sees it. */
+    .launch { margin: 4px 0 0; }
+    .launch[hidden], .launch [hidden] { display: none !important; }
+    /* Built at control scale: undersized next to a 53px button it reads as a
+       toy, and the selected state has to survive a pale track. */
+    .launch__tabs { display: flex; width: fit-content; gap: 2px; padding: 4px; margin-bottom: 16px;
+                    background: var(--surface-muted); border: 1px solid var(--surface-line);
+                    border-radius: var(--radius-pill); flex-wrap: wrap; }
+    .launch__tab { font: inherit; font-size: 14px; font-weight: 600; padding: 10px 20px; cursor: pointer;
+                   border: 0; background: none; color: var(--ink-soft); border-radius: var(--radius-pill); }
+    .launch__tab:hover { color: var(--ps-blue-800); }
+    .launch__tab:focus-visible { outline: 2px solid var(--ps-blue-600); outline-offset: 2px; }
+    .launch__tab[aria-checked="true"] { background: var(--surface); color: var(--ps-blue-900);
+                                        box-shadow: var(--shadow-sm); }
+    /* These wrappers set display, which beats the hidden attribute. Script
+       empties them, so restate it or they leave their margin behind. */
+    .recommended__actions[hidden], .home-actions[hidden] { display: none !important; }
+    /* One primary action. It is an anchor so it can carry a custom URL scheme,
+       so it has to be told to look like the page's own primary button. */
+    a#launchButton { display: inline-flex; align-items: center; justify-content: center;
+      text-decoration: none; font-size: 16px; font-weight: 700; padding: 13px 26px;
+      border-radius: var(--radius-pill); background: var(--ps-blue-800); color: #fff;
+      border: 1px solid var(--ps-blue-800); }
+    a#launchButton:hover { background: var(--ps-blue-900); border-color: var(--ps-blue-900); }
+    /* Always one line, never absent: swapping its text rather than showing and
+       hiding a block keeps the button from jumping as tabs change. */
+    .launch__note { margin: 12px 0 0; font-size: 14px; color: var(--ink-soft); line-height: 1.5; }
+    .launch__note b { color: var(--ink); font-weight: 700; }
+    .launch__alt { margin-top: 6px; font-size: 13.5px; color: var(--ink-muted); }
+    .launch__alt a { color: var(--ps-blue-700); }
+    button.launch__copy { margin-top: 12px; font-size: 12.5px; font-weight: 600;
+      padding: 5px 13px; background: var(--surface); color: var(--ps-blue-700);
+      border: 1px solid var(--ps-blue-200); box-shadow: none; }
+    button.launch__copy:hover { background: var(--ps-blue-50); }
+  </style>
+</head>
+<body>
+  <a class="site-skip-link" href="#main-content">Skip to main content</a>
+  <header class="site-header">
+    <div class="site-header__inner">
+      <a class="site-header__wordmark" href="/">Simple Host</a>
+      <nav class="site-header__nav" aria-label="Primary navigation">
+        <a href="/showcase">Showcase</a>
+        <a href="/capabilities.html">Capabilities</a>
+        <a href="/changelog.html">What's New</a>
+        <a href="/install.html" aria-current="page">Install</a>
+        <a href="/docs.html">API</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main-content" tabindex="-1">
+    <div class="container">
+      <div class="hero">
+        <p class="eyebrow">Install</p>
+        <h1 class="lede">Install once. Publish with your agent<span class="dot">.</span></h1>
+        <p class="subhead">
+          Pick the agent you use and open it with one click. The request arrives
+          already typed in; your agent identifies the safe install path, explains
+          the trust boundary, and asks before changing anything.
+        </p>
+      </div>
+
+      <section aria-labelledby="recommended-title">
+        <div class="recommended">
+          <span class="recommended__label">Recommended</span>
+          <h2 id="recommended-title">Give this request to your agent</h2>
+          <p>
+            The agent checks for an existing installation first. A true first
+            install uses the current Simple Host release and one active skills
+            directory; an update always uses the installed permissioned updater.
+          </p>
+<div class="launch" id="launch" hidden>
+              <div class="launch__tabs" role="radiogroup" aria-label="Which agent do you use?">
+                <button type="button" class="launch__tab" data-agent="chatgpt" role="radio" aria-checked="false">ChatGPT app</button>
+                <button type="button" class="launch__tab" data-agent="claude" role="radio" aria-checked="false">Claude Code</button>
+                <button type="button" class="launch__tab" data-agent="cursor" role="radio" aria-checked="false">Cursor</button>
+              </div>
+              <a id="launchButton" href="#">Open your agent</a>
+              <p class="launch__note" id="launchNote"></p>
+              <p class="launch__alt" id="launchAlt"></p>
+            </div>
+                                  <div class="recommended__actions">
+            <button
+              class="copy-button"
+              id="copyInstallPrompt"
+              type="button"
+              aria-describedby="installCopyStatus"
+            >Copy install prompt</button>
+          </div>
+          <p
+            class="copy-status"
+            id="installCopyStatus"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          ></p>
+
+          <details class="prompt-details" id="installPromptDetails">
+            <summary>View full agent prompt</summary>
+            <div class="prompt-details__body">
+              <pre><code id="installPrompt" data-origin-template>Install the three Simple Host skills from {{SIMPLE_HOST_ORIGIN}}
+
+First check whether you can actually read and write files on my computer. If you cannot — an ordinary ChatGPT chat window cannot — then stop, do not guess, and do not work around it. Tell me plainly that this has to run in the ChatGPT desktop app's coding agent, the part that can open a folder and edit files, and that I can ask in Slack #simple-host-support if I cannot find it.
+
+Work out my home folder using the shell you are actually in: $HOME on macOS or in PowerShell, %USERPROFILE% only in cmd. Install into exactly one folder:
+  Claude Code            &lt;home&gt;/.claude/skills
+  ChatGPT or Cursor      &lt;home&gt;/.agents/skills
+
+1. Read {{SIMPLE_HOST_ORIGIN}}/skills/version as JSON. Download the /skills.zip it names, then check the file's size and SHA-256 against that manifest.
+2. Copy the three folders (simple-host, simple-host-builder, fix-paths-for-subpath-hosting) straight into the skills folder, with no extra folder wrapped around them. Do not run anything out of the archive. Confirm all three SKILL.md files exist and none still says {{VERSION}}.
+3. From the exact skills root you selected, directly read &lt;selected-root&gt;/simple-host/references/account-recovery.md completely. Do not rely on the newly copied skill being discoverable yet. Follow that file before account creation, including its existing-config check, exact-destination preflight, and single-call save-and-verify transaction. Ask me for my work email only when that workflow requires it.
+4. Tell me my username, and that I may need a new chat or an app restart before the skills show up.
+
+Before changing anything, tell me conversationally in one or two sentences that Simple Host will install its tools in the selected skills root and save publishing access in the resolved config path, then wait for one yes covering both. Still show and honor every approval required by the host, tool, sandbox, or operating system. If anything fails, say what happened without exposing credentials and tell me to ask in Slack #simple-host-support.</code></pre>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section aria-labelledby="next-title">
+        <p class="eyebrow">What to do next</p>
+        <h2 id="next-title">Go from a folder to a shared link</h2>
+        <div class="next-actions">
+          <div class="next-action">
+            <strong>Create or open a website</strong>
+            <p>Describe the page you need, or open an existing project with your agent.</p>
+          </div>
+          <div class="next-action">
+            <strong>Publish it</strong>
+            <p>Ask your agent to use <code>simple-host</code> and include your work email on the first deploy.</p>
+          </div>
+        </div>
+      </section>
+
+      <details class="disclosure" id="developers">
+        <summary>For developers</summary>
+        <div class="disclosure__body">
+          <h2>First install only</h2>
+          <p class="scope-note">
+            Requires Node 22.20 or newer. These commands pin
+            <code>skills@1.5.20</code> and use both npm and CLI noninteractive
+            flags, so there are no package, agent, destination, or confirmation
+            questionnaires. Running one executes third-party npm code. Existing
+            installations must use their permissioned updater instead.
+          </p>
+
+          <div class="command-group">
+            <h3>macOS or Linux</h3>
+            <p class="command-label">ChatGPT desktop app</p>
+            <pre class="command"><code data-origin-template>DISABLE_TELEMETRY=1 npx --yes skills@1.5.20 add {{SIMPLE_HOST_ORIGIN}} --global --agent codex --copy --skill simple-host --skill simple-host-builder --skill fix-paths-for-subpath-hosting --yes</code></pre>
+            <p class="command-label">Claude Code</p>
+            <pre class="command"><code data-origin-template>DISABLE_TELEMETRY=1 npx --yes skills@1.5.20 add {{SIMPLE_HOST_ORIGIN}} --global --agent claude-code --copy --skill simple-host --skill simple-host-builder --skill fix-paths-for-subpath-hosting --yes</code></pre>
+          </div>
+
+          <div class="command-group">
+            <h3>Windows PowerShell</h3>
+            <p class="command-label">ChatGPT desktop app</p>
+            <pre class="command"><code data-origin-template>$env:DISABLE_TELEMETRY="1"; npx.cmd --yes skills@1.5.20 add "{{SIMPLE_HOST_ORIGIN}}" --global --agent codex --copy --skill simple-host --skill simple-host-builder --skill fix-paths-for-subpath-hosting --yes</code></pre>
+            <p class="command-label">Claude Code</p>
+            <pre class="command"><code data-origin-template>$env:DISABLE_TELEMETRY="1"; npx.cmd --yes skills@1.5.20 add "{{SIMPLE_HOST_ORIGIN}}" --global --agent claude-code --copy --skill simple-host --skill simple-host-builder --skill fix-paths-for-subpath-hosting --yes</code></pre>
+          </div>
+
+          <p class="scope-note">
+            <strong>Required verification:</strong> after any command, confirm the
+            selected root contains <code>simple-host/SKILL.md</code>,
+            <code>simple-host-builder/SKILL.md</code>, and
+            <code>fix-paths-for-subpath-hosting/SKILL.md</code>. Confirm the concrete
+            server version appears in <code>simple-host/SKILL.md</code> where expected
+            and none of the three files contains <code>{{VERSION}}</code>. Treat any partial result as a failed install,
+            remove only skill roots newly created by that attempt, and use the
+            verified ZIP fallback.
+          </p>
+        </div>
+      </details>
+
+      <details class="disclosure" id="manual-install">
+        <summary>Manual first install</summary>
+        <div class="disclosure__body">
+          <h2>Install the verified ZIP yourself</h2>
+          <p class="scope-note">
+            This is a first-install escape hatch. If Simple Host already exists
+            in an active skills root, use its permissioned updater instead.
+          </p>
+
+          <ol class="manual-steps">
+            <li>
+              <strong>Download the ZIP and manifest.</strong>
+              Use both files from this Simple Host origin.
+              <span class="download-links">
+                <a href="/skills.zip" download>Download skills.zip</a>
+                <a href="/skills/version" download="skills-version.json">Download manifest</a>
+              </span>
+            </li>
+            <li>
+              <strong>Verify, then extract into one skills root.</strong>
+              Select the local <code>skills.zip</code> below. This page compares
+              its <code>file.size</code> and SHA-256 with the current
+              <a href="/skills/version"><code>/skills/version</code></a> manifest
+              using browser-side Web Crypto. After a match, extract the three
+              top-level folders into the single root your agent scans.
+
+              <div class="file-check">
+                <label for="skillsZipFile">Select the downloaded skills.zip</label>
+                <input
+                  id="skillsZipFile"
+                  type="file"
+                  accept=".zip,application/zip"
+                  aria-describedby="zipPrivacy zipVerifyResult"
+                >
+                <p class="privacy-note" id="zipPrivacy">
+                  The selected file stays in this browser tab. It is not uploaded,
+                  stored, or transmitted; only the manifest is fetched from this origin.
+                </p>
+                <p
+                  class="verify-result"
+                  id="zipVerifyResult"
+                  role="status"
+                  aria-live="polite"
+                  aria-atomic="true"
+                ></p>
+              </div>
+
+              <ul class="root-list">
+                <li>ChatGPT desktop app: <code>~/.agents/skills</code> on macOS/Linux or <code>$HOME\.agents\skills</code> on Windows.</li>
+                <li>Claude Code: <code>~/.claude/skills</code> on macOS/Linux or <code>$HOME\.claude\skills</code> on Windows.</li>
+                <li>Other agents: use the one root the agent reports scanning.</li>
+              </ul>
+              If the app already loads a legacy copy from
+              <code>$CODEX_HOME/skills</code> or <code>~/.codex/skills</code>, do
+              not add another root; update that existing copy or explicitly migrate it.
+            </li>
+            <li>
+              <strong>Restart and list the skills.</strong>
+              Restart the agent, then ask it to list its installed skills. Confirm
+              that <code>simple-host</code>, <code>simple-host-builder</code>, and
+              <code>fix-paths-for-subpath-hosting</code> all appear.
+            </li>
+          </ol>
+        </div>
+      </details>
+
+      <section class="trust-note" aria-labelledby="trust-title">
+        <p class="eyebrow">Integrity and trust</p>
+        <h2 id="trust-title">One active copy, one explicit approval</h2>
+        <p>
+          Existing installations always update through their installed,
+          permissioned updater and the verified first-party ZIP; they never use
+          the first-install <code>npx</code> route. The pinned developer route
+          executes a third-party npm CLI, while the ZIP route installs artifacts
+          produced by this running Simple Host server.
+        </p>
+        <p>
+          The SHA-256 published at <a href="/skills/version"><code>/skills/version</code></a>
+          proves that the ZIP matches the bytes served by this same origin. It is
+          an integrity check, not a code-signing signature or independent proof
+          of publisher identity.
+        </p>
+      </section>
+
+      <section class="trust-note" aria-labelledby="help-title">
+        <p class="eyebrow">Getting help</p>
+        <h2 id="help-title">Ask in Slack</h2>
+        <p>
+          If your agent gets stuck installing, or reports something you did not
+          expect, ask in <strong>#simple-host-support</strong>. Paste what
+          the agent told you into the channel — that is usually enough to sort it out.
+        </p>
+      </section>
+    </div>
+  </main>
+
+  <footer>
+    <div class="container">
+      Simple Host &middot; <a href="/showcase">Showcase</a> &middot;
+      <a href="/capabilities.html">Capabilities</a> &middot;
+      <a href="/docs.html">API reference</a>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      'use strict';
+
+      var originTemplates = document.querySelectorAll('[data-origin-template]');
+      var originPattern = /\{\{SIMPLE_HOST_ORIGIN\}\}/g;
+      var copyButton = document.getElementById('copyInstallPrompt');
+      var copyStatus = document.getElementById('installCopyStatus');
+      var installPrompt = document.getElementById('installPrompt');
+      var promptDetails = document.getElementById('installPromptDetails');
+      var zipInput = document.getElementById('skillsZipFile');
+      var zipResult = document.getElementById('zipVerifyResult');
+      var resetCopyTimer;
+      var zipVerificationGeneration = 0;
+
+      originTemplates.forEach(function (element) {
+        element.textContent = element.textContent.replace(originPattern, window.location.origin);
+      });
+
+      function legacyCopy(text) {
+        return new Promise(function (resolve, reject) {
+          var field = document.createElement('textarea');
+          field.value = text;
+          field.setAttribute('readonly', '');
+          field.style.position = 'fixed';
+          field.style.opacity = '0';
+          document.body.appendChild(field);
+          field.select();
+
+          var copied = false;
+          try {
+            copied = document.execCommand('copy');
+          } catch (error) {
+            copied = false;
+          }
+          field.remove();
+
+          if (copied) resolve();
+          else reject(new Error('Clipboard access is unavailable.'));
+        });
+      }
+
+      function copyText(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+          return navigator.clipboard.writeText(text);
+        }
+        return legacyCopy(text);
+      }
+
+      function resetCopyButtonAfter(delay) {
+        window.clearTimeout(resetCopyTimer);
+        resetCopyTimer = window.setTimeout(function () {
+          copyButton.textContent = 'Copy install prompt';
+          copyButton.classList.remove('is-copied');
+        }, delay);
+      }
+
+      copyButton.addEventListener('click', function () {
+        copyStatus.textContent = '';
+        copyStatus.classList.remove('is-error');
+
+        copyText(installPrompt.textContent).then(function () {
+          copyButton.textContent = 'Copied';
+          copyButton.classList.add('is-copied');
+          copyStatus.textContent = 'Install prompt copied to your clipboard.';
+          copyButton.focus();
+          resetCopyButtonAfter(1800);
+        }).catch(function () {
+          promptDetails.open = true;
+          copyButton.textContent = 'Copy failed';
+          copyButton.classList.remove('is-copied');
+          copyStatus.classList.add('is-error');
+          copyStatus.textContent = 'Could not copy the prompt. The full prompt is open below so you can select and copy it manually.';
+          copyButton.focus();
+          resetCopyButtonAfter(2600);
+        });
+      });
+
+      function setZipResult(message, isError) {
+        zipResult.textContent = message;
+        zipResult.classList.toggle('is-error', isError);
+      }
+
+      function bytesToHex(buffer) {
+        return Array.prototype.map.call(new Uint8Array(buffer), function (byte) {
+          return byte.toString(16).padStart(2, '0');
+        }).join('');
+      }
+
+      function validateManifest(manifest) {
+        if (!manifest || manifest.manifest_version !== 1 ||
+            manifest.bundle_name !== 'simple-host-skills' ||
+            manifest.bundle_url !== '/skills.zip' ||
+            typeof manifest.version !== 'string' || !manifest.version ||
+            !Number.isSafeInteger(manifest.bundle_size) || manifest.bundle_size <= 0 ||
+            typeof manifest.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(manifest.sha256)) {
+          throw new Error('The current /skills/version manifest is invalid. Do not extract the ZIP.');
+        }
+        return manifest;
+      }
+
+      function isCurrentZipSelection(generation, file) {
+        return generation === zipVerificationGeneration &&
+          zipInput.files && zipInput.files[0] === file;
+      }
+
+      zipInput.addEventListener('change', function () {
+        var generation = ++zipVerificationGeneration;
+        var file = zipInput.files && zipInput.files[0];
+        if (!file) {
+          setZipResult('', false);
+          return;
+        }
+
+        setZipResult('Checking the local file against the current manifest…', false);
+
+        fetch('/skills/version', {
+          cache: 'no-store',
+          credentials: 'same-origin',
+          headers: { 'Accept': 'application/json' }
+        }).then(function (response) {
+          if (!response.ok) {
+            throw new Error('Could not fetch /skills/version. Do not extract the ZIP.');
+          }
+          return response.json();
+        }).then(validateManifest).then(function (manifest) {
+          if (!isCurrentZipSelection(generation, file)) return;
+          if (file.size !== manifest.bundle_size) {
+            throw new Error('Verification failed: file size does not match /skills/version. Do not extract the ZIP.');
+          }
+          if (!window.crypto || !window.crypto.subtle) {
+            throw new Error('Web Crypto is unavailable in this browser. Do not extract the ZIP.');
+          }
+          return file.arrayBuffer().then(function (contents) {
+            if (!isCurrentZipSelection(generation, file)) return null;
+            return window.crypto.subtle.digest('SHA-256', contents);
+          }).then(function (digest) {
+            if (!isCurrentZipSelection(generation, file) || !digest) return;
+            var actualSha = bytesToHex(digest);
+            if (actualSha !== manifest.sha256.toLowerCase()) {
+              throw new Error('Verification failed: SHA-256 does not match /skills/version. Do not extract the ZIP.');
+            }
+            setZipResult(
+              'Verified version ' + manifest.version + ': file size and SHA-256 match. You can extract the three skill folders.',
+              false
+            );
+          });
+        }).catch(function (error) {
+          if (!isCurrentZipSelection(generation, file)) return;
+          setZipResult(error.message || 'Verification failed. Do not extract the ZIP.', true);
+        });
+      });
+    }());
+  
+      // Agent launcher. The button carries the very prompt shown on this page,
+      // so there is one source of truth: read it after the origin has been
+      // substituted, encode it, and hand it to the agent's URL scheme. Nothing
+      // is sent — every one of these fills the composer and waits.
+      (function () {
+        var promptNode = document.getElementById('installPrompt');
+        var launch = document.getElementById('launch');
+        var button = document.getElementById('launchButton');
+        var hint = document.getElementById('launchHint');
+        var alt = document.getElementById('launchAlt');
+        var note = document.getElementById('launchNote');
+        if (!promptNode || !launch || !button || !note || !alt) { return; }
+
+        var AGENTS = {
+          chatgpt: {
+            label: 'Open the ChatGPT app',
+            note: '<b>Switch the app to Codex first</b>, using the dropdown at the top left. Chat and Work can answer questions but cannot create files.',
+            // threads/new lands in Codex; plain /new lands in chat, which cannot
+            // write files. No parameter can pick the mode, hence the hint above.
+            href: function (t) { return 'codex://threads/new?prompt=' + encodeURIComponent(t); },
+            windows: true
+          },
+          claude: {
+            label: 'Open Claude Code',
+            note: 'Opens a new terminal window with the request ready. Nothing runs until you press enter.',
+            href: function (t) { return 'claude-cli://open?q=' + encodeURIComponent(t); },
+            windows: true
+          },
+          cursor: {
+            label: 'Open Cursor',
+            note: 'Opens Cursor with the request in the chat box. Nothing runs until you press enter.',
+            windowsNote: 'On Windows, Cursor is best installed by hand.',
+            href: function (t) { return 'cursor://anysphere.cursor-deeplink/prompt?text=' + encodeURIComponent(t); },
+            // No vendor documentation for this scheme on Windows, so we do not
+            // offer a button we cannot stand behind; those readers get the
+            // step-by-step page instead.
+            windows: false
+          }
+        };
+
+        var navigatorRef = window.navigator || {};
+        var platform = (navigatorRef.userAgentData && navigatorRef.userAgentData.platform) ||
+          navigatorRef.platform || navigatorRef.userAgent || '';
+        var isWindows = /win/i.test(platform) && !/mac|darwin/i.test(platform);
+        var tabs = launch.querySelectorAll('[data-agent]');
+
+        function select(name) {
+          var agent = AGENTS[name] || AGENTS.claude;
+          var usable = !isWindows || agent.windows;
+          tabs.forEach(function (tab) {
+            var chosen = tab.getAttribute('data-agent') === name;
+            tab.setAttribute('aria-checked', String(chosen));
+            tab.setAttribute('tabindex', chosen ? '0' : '-1');
+          });
+          if (usable) {
+            button.textContent = agent.label;
+            button.setAttribute('href', agent.href(promptNode.textContent));
+            alt.innerHTML = 'Nothing opened? <a href="/dashboard">Sign in and set up manually</a>.';
+          } else {
+            button.textContent = 'Sign in and set up manually';
+            button.setAttribute('href', '/dashboard');
+            alt.innerHTML = '';
+          }
+          note.innerHTML = usable ? agent.note : agent.windowsNote;
+        }
+
+        // Copying is not a step on this page any more. The control moves in
+        // beside the prompt itself, for the reader who opens that disclosure
+        // and wants the text; moving rather than duplicating keeps its handler.
+        var copyButton = document.getElementById('copyInstallPrompt');
+        var copyHome = copyButton && copyButton.parentNode;
+        var promptHome = promptNode.parentNode && promptNode.parentNode.parentNode;
+        if (copyButton && promptHome) {
+          copyButton.classList.add('launch__copy');
+          promptHome.appendChild(copyButton);
+          // Its status line follows it, or an empty paragraph is left behind
+          // holding open a band of dead space under the button.
+          var copyStatus = document.getElementById('installCopyStatus');
+          if (copyStatus) { promptHome.appendChild(copyStatus); }
+        }
+
+        tabs.forEach(function (tab) {
+          tab.addEventListener('click', function () { select(tab.getAttribute('data-agent')); });
+        });
+        button.addEventListener('click', function () {
+          var next = document.getElementById('step1Next');
+          if (next) { next.hidden = false; }
+        });
+
+        launch.hidden = false;
+        if (copyHome && copyHome !== copyButton.parentNode) { copyHome.hidden = true; }
+        select(isWindows ? 'claude' : 'chatgpt');
+      })();
+</script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dex
+  labels:
+    app: dex
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dex
+  template:
+    metadata:
+      labels:
+        app: dex
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: dex
+          image: ghcr.io/dexidp/dex:v2.41.1
+          args: ["dex", "serve", "/etc/dex/config.yaml"]
+          ports:
+            - name: http
+              containerPort: 5556
+            - name: telemetry
+              containerPort: 5558
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/dex
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet: { path: /healthz, port: telemetry }
+            periodSeconds: 3
+            timeoutSeconds: 2
+            failureThreshold: 20
+          livenessProbe:
+            httpGet: { path: /healthz, port: telemetry }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 250m, memory: 128Mi }
+      volumes:
+        - name: config
+          configMap:
+            name: dex-config
+        - name: tmp
+          emptyDir: {}

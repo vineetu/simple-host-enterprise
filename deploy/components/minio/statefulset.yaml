@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  labels:
+    app: minio
+spec:
+  serviceName: minio
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: minio
+          image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+          args: ["server", "/data", "--address", ":9000"]
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: simple-host-secrets
+                  key: BACKUP_STORAGE_ACCESS_KEY_ID
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: simple-host-secrets
+                  key: BACKUP_STORAGE_SECRET_ACCESS_KEY
+            # MinIO refuses a PutObject that carries
+            # x-amz-server-side-encryption (design 9.1's SSE header) with
+            # "KMS not configured" unless a KMS backend is set up, even for
+            # plain AES256. This single-key backend is MinIO's own built-in
+            # auto-encryption path, sufficient for a bucket the application
+            # itself is the only holder of the key material for; a
+            # production platform normally providing SSE natively has no
+            # equivalent step.
+            - name: MINIO_KMS_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: simple-host-secrets
+                  key: MINIO_KMS_SECRET_KEY
+          ports:
+            - name: s3
+              containerPort: 9000
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: s3
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi

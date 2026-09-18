@@ -1,0 +1,52 @@
+# A private CA for the database, issued once by cert-manager and used to sign
+# the server certificate. The application trusts only this CA, so a connection
+# to anything else named "postgres" fails the handshake.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: postgres-selfsigned
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: postgres-ca
+spec:
+  isCA: true
+  commonName: simple-host postgres CA
+  secretName: postgres-ca
+  duration: 87600h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: postgres-selfsigned
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: postgres-ca
+spec:
+  ca:
+    secretName: postgres-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: postgres-server
+spec:
+  secretName: postgres-tls
+  duration: 8760h
+  renewBefore: 720h
+  dnsNames:
+    - postgres
+    - postgres.simple-host
+    - postgres.simple-host.svc
+    - postgres.simple-host.svc.cluster.local
+  usages:
+    - server auth
+  issuerRef:
+    name: postgres-ca
+    kind: Issuer

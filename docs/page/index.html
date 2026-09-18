@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Simple Host for enterprises</title>
+<style>
+  :root {
+    --ps-blue-900: #002061;
+    --ps-blue-800: #003087;
+    --ps-blue-700: #004CB3;
+    --ps-blue-600: #006FCD;
+    --ps-blue-100: #E6F0FA;
+    --canvas: #FAFBFE;
+    --surface: #FFFFFF;
+    --surface-line: #DCE3ED;
+    --ink: #0A1530;
+    --ink-soft: #475569;
+    --ink-muted: #8B9AB0;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    color: var(--ink);
+    background: var(--canvas);
+    -webkit-font-smoothing: antialiased;
+  }
+  .container {
+    width: 100%;
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+  header.site-header {
+    border-bottom: 1px solid var(--surface-line);
+    padding: 20px 0;
+    margin-bottom: 56px;
+  }
+  header.site-header .container {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .wordmark {
+    font-weight: 700;
+    color: var(--ps-blue-900);
+    text-decoration: none;
+    font-size: 15px;
+    letter-spacing: -0.01em;
+  }
+  .site-header nav a {
+    color: var(--ink-soft);
+    text-decoration: none;
+    font-size: 14px;
+    margin-left: 24px;
+  }
+  .site-header nav a:hover { color: var(--ps-blue-700); }
+  main { padding-bottom: 80px; }
+  .page-intro {
+    max-width: 640px;
+    margin: 0 auto 64px;
+  }
+  .eyebrow {
+    margin: 0 0 18px;
+    color: var(--ps-blue-800);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+  h1 {
+    margin: 0 0 20px;
+    color: var(--ps-blue-900);
+    font-size: clamp(34px, 5.5vw, 46px);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.08;
+  }
+  .intro {
+    margin: 0;
+    color: var(--ink-soft);
+    font-size: clamp(16px, 2vw, 18px);
+    line-height: 1.6;
+  }
+  section.numbered {
+    padding: 36px 0;
+    border-top: 1px solid var(--surface-line);
+  }
+  section.numbered .num {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--ps-blue-600);
+    letter-spacing: 0.1em;
+    margin-bottom: 10px;
+  }
+  section.numbered h2 {
+    margin: 0 0 14px;
+    color: var(--ink);
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+  }
+  section.numbered p {
+    margin: 0 0 12px;
+    color: var(--ink-soft);
+    font-size: 15.5px;
+    line-height: 1.7;
+    max-width: 66ch;
+  }
+  section.numbered p:last-child { margin-bottom: 0; }
+  section.numbered ul {
+    margin: 0 0 12px;
+    padding-left: 1.2em;
+    color: var(--ink-soft);
+    font-size: 15.5px;
+    line-height: 1.7;
+  }
+  section.numbered li + li { margin-top: 6px; }
+  code, .mono {
+    font-family: var(--font-mono);
+    font-size: 0.92em;
+    background: var(--ps-blue-100);
+    color: var(--ps-blue-900);
+    padding: 0.1em 0.4em;
+    border-radius: 4px;
+  }
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--surface-line);
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin-top: 16px;
+  }
+  .callout p { margin: 0; }
+  .callout p + p { margin-top: 8px; }
+  .cta {
+    margin-top: 8px;
+    display: inline-block;
+    background: var(--ps-blue-800);
+    color: #fff;
+    text-decoration: none;
+    font-size: 14.5px;
+    font-weight: 600;
+    padding: 12px 22px;
+    border-radius: 8px;
+  }
+  .cta:hover { background: var(--ps-blue-900); }
+  .cta.secondary {
+    background: var(--surface);
+    color: var(--ps-blue-800);
+    border: 1px solid var(--surface-line);
+    margin-left: 10px;
+  }
+  .cta.secondary:hover { background: var(--ps-blue-100); }
+  main a { color: var(--ps-blue-700); text-decoration: underline; text-underline-offset: 2px; }
+  main a:hover { color: var(--ps-blue-800); }
+  footer {
+    border-top: 1px solid var(--surface-line);
+    padding: 28px 0;
+    color: var(--ink-muted);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  @media (max-width: 600px) {
+    .container { padding: 0 20px; }
+    header.site-header nav a { margin-left: 14px; font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <span class="wordmark">Simple Host</span>
+      <nav>
+        <a href="install.html">Install</a>
+        <a href="#try-it">Try it</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="container">
+      <div class="page-intro">
+        <p class="eyebrow">Enterprise</p>
+        <h1>A place for internal AI-built pages that would actually pass review</h1>
+        <p class="intro">Employees build web pages with AI coding agents faster than any pipeline can review them. Simple Host for enterprises is the smallest thing that lets that happen safely: one binary, your own identity provider, and an origin boundary between every employee's work.</p>
+      </div>
+
+      <section class="numbered" id="problem">
+        <span class="num">01 — The problem</span>
+        <h2>An agent can build a page in minutes. Getting it hosted safely takes weeks.</h2>
+        <p>A coding agent can turn an idea into a working internal tool — a dashboard, a tracker, a small app with its own data — in one sitting. What it can't do is get that page a URL without either a manual deploy request or a shortcut nobody signed off on. Every shortcut we found in the instance this package replaces looked the same: a plaintext key standing in for identity, a state endpoint nobody authenticated, sites sharing an origin they shouldn't have.</p>
+        <p>None of that is a flaw in any one line of code. It's what happens when a tool built for a hackathon quietly becomes the thing people actually rely on.</p>
+      </section>
+
+      <section class="numbered" id="what-it-is">
+        <span class="num">02 — What it is</span>
+        <h2>Static hosting plus a database, and nothing else</h2>
+        <p>A site on Simple Host is three things: static files, a per-site JSON state document the page's own JavaScript reads and writes, and assets — files a page stores at runtime and serves back, like an upload or a generated image. That's the whole product surface. There's no server-side code to run, no function runtime to secure, no build pipeline to own.</p>
+        <p>Every employee gets a namespace at their own hostname the moment they sign in. Publishing is an API call, and an agent can make it directly — through the REST API, through MCP, or through a packaged skill. The browser dashboard is a convenience for a person, not the only way in.</p>
+      </section>
+
+      <section class="numbered" id="identity">
+        <span class="num">03 — Identity via what you already have</span>
+        <h2>Sign in with your company's SSO. There is no other way in.</h2>
+        <p>Okta, Google, Azure AD — any OpenID Connect provider your company already runs. An account is created by signing in, not by a registration form, and there's no key that stands in for a person: an API key is something a signed-in person mints for their own agent, never the identity itself. Admin status follows a claim or an email list your platform team controls, refreshed on every sign-in — never a value baked into the binary.</p>
+        <p>Offboarding is one action: disable the person, and every session and key they hold stops working immediately, everywhere, without touching the sites they built.</p>
+      </section>
+
+      <section class="numbered" id="isolation">
+        <span class="num">04 — Every site on its own address</span>
+        <h2>Origin isolation is the architecture, not a migration target</h2>
+        <p>Every site serves at its owner's own subdomain, from day one — no shared control-plane origin, no legacy path, no flag to flip later. That single decision is what makes the rest of the security story simple to state:</p>
+        <ul>
+          <li>A page's script can only read and write its own owner's state and assets — never a colleague's.</li>
+          <li>A site can be restricted to a named list of viewers, served on its own hostname, refusing everyone else as if it didn't exist.</li>
+          <li>Nothing about viewing or calling a site's API depends on a header a terminal can forge. The identity comes from a real, revocable session tied to that host.</li>
+        </ul>
+      </section>
+
+      <section class="numbered" id="teams">
+        <span class="num">05 — Teams, with one role</span>
+        <h2>Anyone on the team can do anything the team can do</h2>
+        <p>A team is a namespace, the same as a person's. Deliberately, there's no permission matrix inside it — every member can publish, roll back, or manage the team's sites. The control that matters is knowing who did what, not gating who's allowed to try, which is why the audit trail below is a requirement and not an add-on.</p>
+      </section>
+
+      <section class="numbered" id="audit">
+        <span class="num">06 — Everything is logged, and you can see it</span>
+        <h2>An action audit and a visitor log, both queryable and exportable</h2>
+        <p>Every mutation — a publish, a rollback, a visibility change, a membership change, every admin action — writes an audit row inside the same transaction that makes the change, so there is no path to a change with no record. Separately, every visit to a site is logged with the visitor's real identity from your SSO provider, including the owner's own visits, which is what turns "who looked at this" from a guess into an answer.</p>
+        <p>Owners see the activity and visitors for their own sites in the dashboard; admins see everything and can export both as CSV or JSONL for the systems that already collect your logs. Retention is a monthly job under the database's own owning credential, never the application's own connection.</p>
+      </section>
+
+      <section class="numbered" id="operations">
+        <span class="num">07 — What runs where</span>
+        <h2>One binary, Postgres, a volume, a bucket — on any Kubernetes</h2>
+        <p>The whole application is a single Go binary. It needs a Postgres database, a persistent volume for site files, and an S3-compatible bucket for backups — nothing AWS-specific, nothing that only works on one cloud. Deploys are image-based Kubernetes rollouts with a migration step that runs first and blocks the rollout until the schema is current, never a binary copied into a running pod by hand.</p>
+        <p>Encryption at rest is a requirement your platform meets with your own cluster and cloud: an encrypting storage class, a managed database with point-in-time recovery, a bucket with default encryption. What the application itself adds on top is a server-side-encryption header on every backup object, and an optional client-side envelope so a compromised bucket alone still isn't enough.</p>
+      </section>
+
+      <section class="numbered" id="install">
+        <span class="num">08 — Installing it</span>
+        <h2>From an empty cluster to a signed-in dashboard, in order</h2>
+        <p>The install guide takes a platform team from nothing to a working instance: first on a local cluster with no cloud account at all, so the whole shape is provable before anything touches production; then on a real cluster with your own managed Postgres and bucket; then your OIDC provider's setup checklist; then backup, restore, and upgrade. Every command in it is one that exists in the repository today — nothing hypothetical, nothing to reverse-engineer from a Kubernetes manifest.</p>
+        <p><a href="install.html">See the checklist, a copy-paste agent prompt, and the by-hand commands.</a></p>
+        <div class="callout">
+          <p>A security review pack ships in the same repository: a threat model, a control mapped to every finding from the audit that produced this package, a pen-test checklist, and the limitations the software accepts rather than hides.</p>
+        </div>
+      </section>
+
+      <section class="numbered" id="extension">
+        <span class="num">09 — Extension points</span>
+        <h2>Documented seams, not a plugin system</h2>
+        <p>A company whose pages need to call an internal model has one documented seam to add a forwarder: a handler on the site's own host that receives the authenticated session, applies the site's write rule, and meters usage per person and per site — the same shape the package's own removed AI-gateway proxy used, kept as the reference. Identity-provider quirks that a configuration value can't express get a small claim-mapping function per provider. The storage layer sits behind one interface if a future release ever needs something other than a mounted volume.</p>
+      </section>
+
+      <section class="numbered" id="try-it">
+        <span class="num">Try it</span>
+        <h2>Bring it up on a cluster you already have</h2>
+        <p>The install guide runs first on a local cluster — Docker Desktop or minikube, no cloud account, done in one sitting. From there it's the same package on a real cluster with your own database and bucket.</p>
+        <a class="cta" href="install.html">See the checklist and install</a>
+        <div class="callout">
+          <p>The full install guide and the security review pack ship in the package repository. This page is published ahead of that repository having a public home — ask the platform team for the current link, or check back here once it does.</p>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer>
+    <div class="container">Simple Host for enterprises</div>
+  </footer>
+</body>
+</html>

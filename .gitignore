@@ -1,0 +1,18 @@
+# Build output
+/bin/
+/simple-host
+/server
+*.tar.gz
+
+# Local cluster material: generated per machine, never committed
+deploy/overlays/*/secrets.env
+deploy/overlays/*/config.env.local
+deploy/overlays/*/tls.crt
+deploy/overlays/*/tls.key
+deploy/overlays/*/db-ca.crt
+deploy/overlays/byo/config.env
+deploy/overlays/staging/config.env
+deploy/overlays/production/config.env
+
+# Editor / OS noise
+.DS_Store
