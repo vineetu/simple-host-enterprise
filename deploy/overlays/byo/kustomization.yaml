@@ -33,3 +33,22 @@ images:
 
 patches:
   - path: ingress-patch.yaml
+
+# A private registry needs a pull secret, and it belongs on the ServiceAccount
+# rather than the Deployment. Three workloads run this image — the server, the
+# backup-assets CronJob and the prune CronJob — and Kubernetes applies a
+# ServiceAccount's imagePullSecrets to every pod that uses it.
+#
+# Patching only the Deployment is the trap: the instance serves perfectly while
+# both CronJobs sit in ImagePullBackOff, so backups and retention never run and
+# nothing says so. Found on a real cluster; invisible locally, where the image
+# is loaded into the node and never pulled.
+#
+#   kubectl create secret docker-registry registry-pull -n simple-host \
+#     --docker-server=<registry> --docker-username=<user> --docker-password=<token>
+#
+# then add a patch setting:
+#   apiVersion: v1
+#   kind: ServiceAccount
+#   metadata: {name: simple-host}
+#   imagePullSecrets: [{name: registry-pull}]

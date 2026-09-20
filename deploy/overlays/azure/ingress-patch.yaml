@@ -1,0 +1,62 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: simple-host
+  annotations:
+    # A wildcard certificate needs the DNS-01 solver; name the ClusterIssuer
+    # the platform team configured for it.
+    # --- Request body cap: set the line for YOUR controller and delete the
+    # rest. Uploads are archives up to 100 MiB. A controller left at its own
+    # default refuses them before the application is reached, and the failure
+    # reads as an application bug. This is the one setting you must not skip.
+    #
+    # ingress-nginx:
+    nginx.ingress.kubernetes.io/proxy-body-size: 128m
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    #
+    # Traefik: body size is unlimited by default; set the timeouts on the
+    # entryPoint in Traefik's own static configuration instead.
+    #
+    # AWS Load Balancer Controller: an ALB does not cap the body. Set
+    #   alb.ingress.kubernetes.io/scheme: internal
+    #   alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=300
+    #
+    # GKE native ingress (gce): no body cap, but the default backend timeout is
+    # 30s. Raise it with a BackendConfig and reference it from the Service.
+    #
+    # Azure Application Gateway (AGIC):
+    #   appgw.ingress.kubernetes.io/request-timeout: "300"
+    # and raise the WAF body limit if a WAF policy is attached.
+spec:
+  # The controller this cluster runs. "nginx" for ingress-nginx, "traefik",
+  # "alb", "gce", "azure-application-gateway" — whatever your IngressClass is
+  # actually called.
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - shent.simple-hack.app
+        - "*.shent.simple-hack.app"
+      secretName: shent-tls
+  rules:
+    - host: shent.simple-hack.app
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: simple-host
+                port:
+                  name: http
+    - host: "*.shent.simple-hack.app"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: simple-host
+                port:
+                  name: http

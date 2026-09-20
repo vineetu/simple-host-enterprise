@@ -1,0 +1,6 @@
+apiVersion: v1
+data:
+  config.yaml: "issuer: http://dex.simple-host.svc.cluster.local:5556\n\nstorage:\n  type: memory\n\nweb:\n  http: 0.0.0.0:5556\n\ntelemetry:\n  http: 0.0.0.0:5558\n\noauth2:\n  skipApprovalScreen: true\n\nstaticClients:\n  - id: simple-host-local\n    name: Simple Host (local)\n    secret: 37cb691b343e568d87255be9fff902f3c71262c2a72df51b\n    redirectURIs:\n      - https://shent.simple-hack.app/auth/callback\n\nenablePasswordDB: true\nstaticPasswords:\n  # admin@example.com / adminpass \u2014 the test admin (matches ADMIN_EMAILS\n  # in deploy/overlays/local/config.env).\n  - email: \"admin@example.com\"\n    hash: \"$2a$10$RcCcP10X4viG4v1669pY3eQ52YPhGHusgNjrB9tix2SX2AW4Bafwq\"\n    username: \"admin\"\n    userID: \"08a8684b-db88-4b73-90a9-3cd1661f5466\"\n  # person@example.com / personpass \u2014 the test non-admin.\n  - email: \"person@example.com\"\n    hash: \"$2a$10$T4LwgFfQed8V57V8mESrJ.RIyDQSj4o37rGx.8FzPIwGiGzxclaCG\"\n    username: \"person\"\n    userID: \"1e4d45f1-8a1a-4b0e-9f0a-3a6b6c0d9d21\"\n"
+kind: ConfigMap
+metadata:
+  name: dex-config

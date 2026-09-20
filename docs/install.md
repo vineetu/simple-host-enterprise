@@ -509,6 +509,19 @@ A migration that drops or rewrites a column is one-way. Read the files added
 since the version you are on, in `internal/migrate/sql/`, before planning a
 rollback — they are numbered and each one says what it does.
 
+### If you use a private registry
+
+Put the pull secret on the **ServiceAccount**, not the Deployment. Three
+workloads run this image: the server, the `backup-assets` CronJob and the
+`prune` CronJob. Kubernetes applies a ServiceAccount's `imagePullSecrets` to
+every pod that uses it, so one patch covers all three.
+
+Patching only the Deployment leaves both CronJobs in `ImagePullBackOff`. The
+instance serves normally, so nothing looks wrong — but no backup is ever taken
+and no audit partition is ever dropped. This does not show up on a local
+cluster, where the image is loaded into the node and never pulled at all.
+
+
 ## 11. Troubleshooting
 
 - **`mkcert -install` prompts for a password and the run is not
