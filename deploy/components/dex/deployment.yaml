@@ -22,41 +22,88 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: dex
-          image: ghcr.io/dexidp/dex:v2.41.1
-          args: ["dex", "serve", "/etc/dex/config.yaml"]
-          ports:
-            - name: http
-              containerPort: 5556
-            - name: telemetry
-              containerPort: 5558
-          securityContext:
-            allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            capabilities:
-              drop: ["ALL"]
-          volumeMounts:
-            - name: config
-              mountPath: /etc/dex
-              readOnly: true
-            - name: tmp
-              mountPath: /tmp
-          readinessProbe:
-            httpGet: { path: /healthz, port: telemetry }
-            periodSeconds: 3
-            timeoutSeconds: 2
-            failureThreshold: 20
-          livenessProbe:
-            httpGet: { path: /healthz, port: telemetry }
-            periodSeconds: 10
-            timeoutSeconds: 3
-            failureThreshold: 3
-          resources:
-            requests: { cpu: 50m, memory: 64Mi }
-            limits: { cpu: 250m, memory: 128Mi }
-      volumes:
+      - name: dex
+        image: ghcr.io/dexidp/dex:v2.41.1
+        args:
+        - dex
+        - serve
+        - /etc/dex/config.yaml
+        ports:
+        - name: http
+          containerPort: 5556
+        - name: telemetry
+          containerPort: 5558
+        securityContext: &id001
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
         - name: config
-          configMap:
-            name: dex-config
+          mountPath: /etc/dex
+          readOnly: true
         - name: tmp
-          emptyDir: {}
+          mountPath: /tmp
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: telemetry
+          periodSeconds: 3
+          timeoutSeconds: 2
+          failureThreshold: 20
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: telemetry
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 128Mi
+      volumes:
+      - name: config-template
+        configMap:
+          name: dex-config
+      - name: tmp
+        emptyDir: {}
+      - name: config
+        emptyDir: {}
+      initContainers:
+      - name: render-config
+        image: ghcr.io/dexidp/dex:v2.41.1
+        command:
+        - /bin/sh
+        - -c
+        - '# PUBLIC_BASE_URL carries the scheme and may carry a trailing slash;
+
+          # the config wants the bare host.
+
+          host="${PUBLIC_BASE_URL#*://}"; host="${host%%/*}";
+
+          sed -e "s|__PUBLIC_HOST__|$host|g" -e "s|__OIDC_CLIENT_SECRET__|$OIDC_CLIENT_SECRET|g" /template/config.yaml > /etc/dex/config.yaml;
+
+          grep -q "__" /etc/dex/config.yaml && { echo "render-config: a placeholder was left unsubstituted"; exit 1; }; true'
+        env:
+        - name: PUBLIC_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: simple-host-config
+              key: PUBLIC_BASE_URL
+        - name: OIDC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: simple-host-secrets
+              key: OIDC_CLIENT_SECRET
+        volumeMounts:
+        - name: config-template
+          mountPath: /template
+          readOnly: true
+        - name: config
+          mountPath: /etc/dex
+        securityContext: *id001

@@ -34,4 +34,3 @@ images:
 patches:
   - path: ingress-patch.yaml
   - path: pull-secret-patch.yaml
-  - path: dex-host-patch.yaml

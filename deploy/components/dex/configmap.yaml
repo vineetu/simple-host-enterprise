@@ -23,6 +23,17 @@ kind: ConfigMap
 metadata:
   name: dex-config
 data:
+  # __PUBLIC_HOST__ and __OIDC_CLIENT_SECRET__ are substituted by the render
+  # init container before Dex reads this (see deployment.yaml). Dex does NOT
+  # expand $VARS in staticClients.secret — verified against v2.41.1, where the
+  # literal string authenticates and the expanded one does not — so the
+  # substitution has to happen before the file reaches it.
+  #
+  # Both values come from the same ConfigMap and Secret the application reads,
+  # so the client secret cannot drift from the one the app sends. It used to be
+  # a literal here that the overlay had to repeat in secrets.env, and a
+  # freshly generated OIDC_CLIENT_SECRET then failed at the callback with
+  # invalid_client — after sign-in appeared to work.
   config.yaml: |
     issuer: http://dex.simple-host.svc.cluster.local:5556
 
@@ -41,9 +52,9 @@ data:
     staticClients:
       - id: simple-host-local
         name: Simple Host (local)
-        secret: local-dex-client-secret-96808aacbcb9ec41
+        secret: __OIDC_CLIENT_SECRET__
         redirectURIs:
-          - https://simple-host.127-0-0-1.nip.io/auth/callback
+          - https://__PUBLIC_HOST__/auth/callback
 
     enablePasswordDB: true
     staticPasswords:

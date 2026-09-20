@@ -6,6 +6,38 @@ Same six pieces as `docs/cloud/aws.md` and `docs/cloud/gke.md`; nothing
 here is compiled into the application. Every value below is a Kubernetes
 manifest field or a value in `deploy/overlays/byo/config.env`/`secrets.env`.
 
+
+## 0. Two things this subscription may refuse before you start
+
+Check both before planning the install; each costs an afternoon to discover.
+
+**Azure Database for PostgreSQL may be blocked outright.** Free-trial and
+Azure program subscriptions (Azure Pass, Students, MSDN, Startups) are
+restricted from provisioning PostgreSQL Flexible Server in most regions. The
+SKU catalogue lists the region as available and the resource provider reports
+it as supported; only the create call refuses, with *"The location is
+restricted from performing this operation"* — a message that reads like a
+capacity problem and is not one. Registering the resource provider, the fix
+every search result suggests, does not help.
+
+Verified on a `FreeTrial_2014-09-01` subscription in September 2026: PostgreSQL
+refused in westus2, westus3, eastus2 and centralus, while MySQL Flexible Server
+created normally in westus2 on the same subscription. It is specific to the
+PostgreSQL offer, not to managed databases.
+
+The fix is a free support request — *Service and subscription limits (quotas)*
+→ *Azure Database for PostgreSQL flexible server* → region access, naming the
+region and vCores. Upgrading to pay-as-you-go usually clears it too. Until it
+is lifted, `deploy/components/postgres-incluster` runs Postgres in the cluster,
+which is how this package was first verified on AKS.
+See [Microsoft's capacity-errors page](https://learn.microsoft.com/en-us/azure/postgresql/troubleshoot/how-to-resolve-capacity-errors).
+
+**Older B-series VM sizes may not be allowed.** `Standard_B2s` was refused on
+the same subscription; only `_v2` sizes were permitted. `Standard_B2s_v2`
+works and is what a two-node evaluation cluster wants. The error lists every
+permitted size, which is several thousand words — pipe it somewhere before
+reading it.
+
 ## 1. Storage class with encryption
 
 ```yaml

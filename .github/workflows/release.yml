@@ -1,0 +1,83 @@
+# Publish the container image so an installation does not begin with "build
+# your own". Multi-arch because the clusters this lands on are a mix: AKS and
+# EKS default to amd64, Graviton and Ampere node pools are arm64, and an
+# installer should not have to know which they have.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (defaults to the commit SHA)"
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The tests are the gate. An image nobody ran the suite against is worse
+      # than no image, because it looks official.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=tag
+            type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
+            type=sha,format=long
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
+
+      # The digest is what the overlays pin. Printing it in the summary means
+      # an installer copies it from the run rather than hunting in a registry.
+      - name: Digest to pin
+        run: |
+          echo "### Image published" >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo 'Set this in your overlay'"'"'s `kustomization.yaml`:' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo '```yaml' >> $GITHUB_STEP_SUMMARY
+          echo 'images:' >> $GITHUB_STEP_SUMMARY
+          echo '  - name: simple-host' >> $GITHUB_STEP_SUMMARY
+          echo '    newName: ghcr.io/${{ github.repository }}' >> $GITHUB_STEP_SUMMARY
+          echo '    digest: ${{ steps.build.outputs.digest }}' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

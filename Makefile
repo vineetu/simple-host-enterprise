@@ -13,7 +13,12 @@
 # needs `minikube addons enable ingress` replaced by the manifest below and
 # `minikube tunnel` running so the LoadBalancer reaches loopback.
 
+# docker-desktop is the evaluation default. A real install is on whatever
+# context you are already pointed at, so that is what the install targets use
+# unless you say otherwise — pinning a cloud's context name here would be the
+# one line in this file that assumed a provider.
 CLUSTER_CONTEXT ?= docker-desktop
+INSTALL_CONTEXT ?= $(shell kubectl config current-context 2>/dev/null)
 NAMESPACE       := simple-host
 LOCAL_BASE      ?= simple-host.127-0-0-1.nip.io
 LOCAL_OVERLAY   := deploy/overlays/local
@@ -136,3 +141,73 @@ pentest:
 	  PENTEST_CA_BUNDLE="$$(mkcert -CAROOT)/rootCA.pem" \
 	  PENTEST_SESSION_IDLE="$(PENTEST_SESSION_IDLE)" \
 	  go test -tags pentest ./test/pentest/ -v -timeout 30m
+
+# ---------------------------------------------------------------------------
+# Installing onto a real cluster
+#
+# `make local` runs an evaluation cluster end to end. These do the same for a
+# cluster you already have, on any provider: nothing below names a cloud.
+# OVERLAY is whichever directory under deploy/overlays you have filled in.
+# ---------------------------------------------------------------------------
+
+OVERLAY   ?= deploy/overlays/byo
+KUSTOMIZE ?= kustomize
+# Pass --context only when there is one; an empty flag is a hard error.
+INSTALL_KUBECTL := kubectl $(if $(INSTALL_CONTEXT),--context $(INSTALL_CONTEXT))
+
+# prereqs installs what the manifests assume the cluster already has, and
+# skips whatever is present. Both are ordinary upstream projects that run on
+# any conformant cluster; `make local` installs them too, which is exactly why
+# they were easy to forget on a real one — the base manifests reference
+# cert-manager CRDs and fail to apply without them, with an error that names
+# the CRD rather than the cause.
+.PHONY: prereqs
+prereqs:
+	@if $(INSTALL_KUBECTL) get ingressclass nginx >/dev/null 2>&1; then \
+	  echo "==> ingress-nginx: already installed"; \
+	else \
+	  echo "==> installing ingress-nginx"; \
+	  $(INSTALL_KUBECTL) apply -f $(INGRESS_NGINX_URL); \
+	  $(INSTALL_KUBECTL) -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=300s; \
+	fi
+	@if $(INSTALL_KUBECTL) get crd certificates.cert-manager.io >/dev/null 2>&1; then \
+	  echo "==> cert-manager: already installed"; \
+	else \
+	  echo "==> installing cert-manager"; \
+	  $(INSTALL_KUBECTL) apply -f $(CERT_MANAGER_URL); \
+	  $(INSTALL_KUBECTL) -n cert-manager rollout status deploy/cert-manager-webhook --timeout=300s; \
+	  $(INSTALL_KUBECTL) -n cert-manager rollout status deploy/cert-manager-cainjector --timeout=300s; \
+	fi
+
+# preflight fails loudly, before anything is applied, on the mistakes that
+# otherwise surface as a healthy-looking instance doing something wrong.
+.PHONY: preflight
+preflight:
+	@fail=0; \
+	if [ ! -f "$(OVERLAY)/kustomization.yaml" ]; then \
+	  echo "FAIL  $(OVERLAY) has no kustomization.yaml — set OVERLAY=<dir>"; exit 1; fi; \
+	if grep -q "REPLACE_WITH" "$(OVERLAY)/kustomization.yaml" 2>/dev/null; then \
+	  echo "FAIL  $(OVERLAY)/kustomization.yaml still has a REPLACE_WITH placeholder."; \
+	  echo "      Published images and their digests are on the repository's releases page."; fail=1; fi; \
+	for f in config.env secrets.env; do \
+	  if [ -f "$(OVERLAY)/$$f.example" ] && [ ! -f "$(OVERLAY)/$$f" ]; then \
+	    echo "FAIL  $(OVERLAY)/$$f is missing — copy $$f.example and fill it in"; fail=1; fi; \
+	done; \
+	if $(KUSTOMIZE) build "$(OVERLAY)" 2>/dev/null | grep -q "imagePullSecrets"; then :; else \
+	  img=$$($(KUSTOMIZE) build "$(OVERLAY)" 2>/dev/null | grep -m1 "image: " | sed 's/.*image: //'); \
+	  case "$$img" in \
+	    ghcr.io/*|"" ) : ;; \
+	    *) echo "WARN  $$img looks like a private registry and no imagePullSecrets is set."; \
+	       echo "      Put it on the ServiceAccount, not the Deployment: three workloads pull"; \
+	       echo "      this image, and patching only the Deployment leaves both CronJobs in"; \
+	       echo "      ImagePullBackOff — backups and audit pruning silently never run.";; \
+	  esac; fi; \
+	[ $$fail -eq 0 ] || exit 1; \
+	echo "==> preflight ok"
+
+# install is the whole thing: prerequisites, the checks, then apply and wait.
+.PHONY: install
+install: prereqs preflight
+	$(KUSTOMIZE) build "$(OVERLAY)" | $(INSTALL_KUBECTL) apply -f -
+	$(INSTALL_KUBECTL) -n $(NAMESPACE) rollout status deploy/simple-host --timeout=300s
+	@echo "==> installed. Verify with: make smoke BASE=<your base host>"
