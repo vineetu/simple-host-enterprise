@@ -265,7 +265,7 @@ func (h *ShowcaseHandler) page(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(&b, `<div class="site" data-filter-text="%s"%s>
   <div class="site-id">
     <div class="site-name"><a href="%s" target="_blank" rel="noopener">%s</a></div>
-    <div class="site-owner">%s</div>
+    <div class="site-owner"><a href="%s" target="_blank" rel="noopener">%s</a></div>
   </div>
   <div class="site-version"><span class="chip">v%d</span></div>
   <div class="site-traffic"><b>%s</b> views / <b>%s</b> visits today <span>%s views 7d</span></div>
@@ -274,6 +274,7 @@ func (h *ShowcaseHandler) page(w http.ResponseWriter, r *http.Request) {
 				ranks,
 				html.EscapeString(publicPath),
 				html.EscapeString(e.site.Name),
+				html.EscapeString(hosts.OwnerPageURL(e.owner)),
 				html.EscapeString(e.owner),
 				e.site.ActiveVersion,
 				formatCount(e.views),
@@ -511,6 +512,12 @@ const showcaseHeadHTML = `<!doctype html>
     color:var(--ink-muted);letter-spacing:0.04em;margin-top:2px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   }
+  /* The owner's name links to their own page. It stays the muted caption it
+     has always been and only reads as a link on hover, so crediting the
+     author does not compete with the site name above it. */
+  .site-owner a{color:inherit;text-decoration:none}
+  .site-owner a:hover{color:var(--ps-blue-800);text-decoration:underline}
+  .site-owner a:focus-visible{outline:3px solid var(--ps-blue-300);outline-offset:2px;border-radius:2px}
   .site:hover{background:var(--ps-blue-100);box-shadow:var(--shadow-xs);border-radius:var(--radius-md)}
   .site-name{font-family:var(--font-sans);font-size:18px;font-weight:600;letter-spacing:-0.005em;
     min-width:0}

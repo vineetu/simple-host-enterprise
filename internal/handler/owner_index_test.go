@@ -217,3 +217,19 @@ func TestOwnerHostRootLogsRefusal(t *testing.T) {
 		t.Fatalf("a refused index visit must still be logged, got %+v", logged)
 	}
 }
+
+// A person's name is credited wherever their work is listed, and the credit
+// links to their own page — otherwise the index is reachable only by someone
+// who already knows the URL.
+func TestOwnerPageURLIsTheRootOfTheirHost(t *testing.T) {
+	hosts := testHostModel(t)
+	if got, want := hosts.OwnerPageURL("alice"), "https://alice.foo.example/"; got != want {
+		t.Fatalf("OwnerPageURL = %q, want %q", got, want)
+	}
+	// The index lives at the root of the same host a short site path hangs
+	// off, so the two must agree on the origin.
+	site := hosts.SiteURL("alice", "gantt", false)
+	if !strings.HasPrefix(site, hosts.OwnerPageURL("alice")) {
+		t.Fatalf("site url %q is not under the owner page %q", site, hosts.OwnerPageURL("alice"))
+	}
+}

@@ -90,7 +90,8 @@ func TestShowcaseWithoutQueryPreservesPublicGallery(t *testing.T) {
 		`name="q" maxlength="200" value=""`,
 		`<div class="sites" id="showcase-sites">`,
 		`<select id="showcase-sort" name="sort">`,
-		`<div class="site-owner">alice</div>`,
+		// The owner's name credits them and links to their own page.
+		`<div class="site-owner"><a href="https://alice.foo.example/" target="_blank" rel="noopener">alice</a></div>`,
 		`data-rank-views="0"`,
 		`data-filter-text="alice portfolio"`,
 		`href="https://alice.foo.example/portfolio/"`,

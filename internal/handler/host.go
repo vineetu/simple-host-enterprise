@@ -309,6 +309,13 @@ func (m HostModel) OwnerOrigin(label string) string {
 	return m.scheme + "://" + authority
 }
 
+// OwnerPageURL is the root of a person's own host: the index of everything
+// they have published (owner_index.go). It is what a name links to anywhere
+// that person is credited.
+func (m HostModel) OwnerPageURL(username string) string {
+	return m.OwnerOrigin(ownerLabel(username)) + "/"
+}
+
 // shortSiteURL builds "<scheme>://<label>.<base>[:port]/<site>/" from the
 // public base URL's scheme and port, so a base URL with a port keeps it.
 func (m HostModel) shortSiteURL(username, siteName string) string {
