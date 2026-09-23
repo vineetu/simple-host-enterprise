@@ -8,6 +8,7 @@ import (
 	neturl "net/url"
 	"strings"
 
+	"github.com/vsriram/simple-host/internal/audit"
 	"github.com/vsriram/simple-host/internal/auth"
 	db "github.com/vsriram/simple-host/internal/db"
 	"github.com/vsriram/simple-host/internal/safepath"
@@ -89,6 +90,15 @@ type hostGate struct {
 	// auth; factored into a field for the same reason as
 	// siteForServing/viewerAllowed/writerAllowed above.
 	touchHostSession func(sessionID string)
+	// ownerIndex backs the root of an owner host (owner_index.go), wired in
+	// NewHostGate from the database and factored into a field for the same
+	// reason as siteForServing above.
+	ownerIndex ownerIndexData
+	// recordAccess writes one access_log row, reading SiteFiles' writer at
+	// call time because it is attached after NewHostGate runs. A field for
+	// the same reason as the funcs above: a test asserts what was logged
+	// without a live Postgres behind the writer.
+	recordAccess func(audit.AccessEvent)
 }
 
 // NewHostGate returns middleware that decides, per hostname, which routes the
@@ -112,6 +122,12 @@ func NewHostGate(hosts HostModel, files *SiteFiles, database *sql.DB, signingKey
 		touchHostSession: func(sessionID string) {
 			if err := db.TouchSession(context.Background(), database, sessionID); err != nil {
 				log.Printf("host gate: touch session %s: %v", sessionID, err)
+			}
+		},
+		ownerIndex: newOwnerIndexData(database),
+		recordAccess: func(event audit.AccessEvent) {
+			if files != nil {
+				files.access.Enqueue(event)
 			}
 		},
 		siteAPI:        siteAPI,
@@ -231,6 +247,12 @@ func (g *hostGate) serveOwnerHost(w http.ResponseWriter, r *http.Request, label 
 	rest, ok := strings.CutPrefix(r.URL.Path, "/")
 	if !ok {
 		http.NotFound(w, r)
+		return
+	}
+	// The root of an owner host is that person's index of what they have
+	// published, not a 404 (owner_index.go).
+	if rest == "" {
+		g.serveOwnerIndex(w, r, label, requestHost)
 		return
 	}
 	sitename, afterSite, hasSlash := strings.Cut(rest, "/")
