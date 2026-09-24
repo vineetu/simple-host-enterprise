@@ -27,9 +27,13 @@ jobs:
           for o in deploy/overlays/*/; do
             name=$(basename "$o")
             [ -f "$o/kustomization.yaml" ] || continue
-            # Overlays legitimately require operator-supplied files.
-            [ -f "$o/config.env.example" ] && cp -n "$o/config.env.example" "$o/config.env" 2>/dev/null || true
-            [ -f "$o/secrets.env.example" ] && cp -n "$o/secrets.env.example" "$o/secrets.env" 2>/dev/null || true
+            # Overlays legitimately require operator-supplied files. One with
+            # no .example of its own (azure, staging, production) is the byo
+            # shape, so byo's stands in.
+            for f in config.env secrets.env; do
+              [ -f "$o/$f" ] && continue
+              if [ -f "$o/$f.example" ]; then cp "$o/$f.example" "$o/$f"; else cp "deploy/overlays/byo/$f.example" "$o/$f"; fi
+            done
             [ -f "$o/kustomization.yaml" ] && grep -q db-ca.crt "$o/kustomization.yaml" && echo placeholder > "$o/db-ca.crt"
             echo "== $name"
             ./kustomize build "$o" > /dev/null || { echo "FAILED to render $name"; exit 1; }
