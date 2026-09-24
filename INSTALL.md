@@ -36,8 +36,8 @@ Done means all of these hold:
    publicly trusted certificate (no `-k`, no custom CA).
 2. A person in `ADMIN_EMAILS` signs in at `https://<base>/auth/login`, and
    `/admin` loads for them.
-3. The checks in section 9 pass against the real install: probes, API key
-   auth, a publish, the owner host, and state read/write.
+3. `make smoke BASE=https://<base> KEY_FILE=...` (section 9) passes
+   against the real install, and the browser check after it works.
 4. The `simple-host-backup-assets` and `simple-host-prune` CronJobs can pull
    their image (section 9, last check).
 
@@ -72,7 +72,7 @@ Run these from the repository root. Each has a fix if it fails.
 | Cluster reachable | `kubectl --context "$CTX" cluster-info` | Fix credentials first (`aws eks update-kubeconfig`, `gcloud container clusters get-credentials`, `az aks get-credentials`, `oci ce cluster create-kubeconfig`). |
 | Permission to install | `kubectl --context "$CTX" auth can-i create namespace` and `kubectl --context "$CTX" auth can-i create clusterrole` | Namespace is required. ClusterRole is only needed if ingress-nginx or cert-manager must be installed; otherwise ask the platform team to install them. |
 | Cloud identity | `aws sts get-caller-identity`, `gcloud config list account`, `az account show`, or `oci iam region list` | Needed only if you are creating the database or bucket. Ask the human to sign the CLI in. |
-| Ingress controller | `kubectl --context "$CTX" get ingressclass` | None: `make prereqs INSTALL_CONTEXT="$CTX"` installs ingress-nginx. One that is not called `nginx`: see section 5 step 3, and do **not** run `make install` (its `prereqs` step would add ingress-nginx alongside it). |
+| Ingress controller | `kubectl --context "$CTX" get ingressclass` | None: `make install` adds ingress-nginx and makes it the default. Any other (ALB, GKE, Traefik, AGIC, …): `make install` uses it and installs nothing. Section 5 step 3 covers a cluster with several classes. |
 | cert-manager | `kubectl --context "$CTX" get crd certificates.cert-manager.io` | Missing: `make prereqs INSTALL_CONTEXT="$CTX"` installs it. |
 | DNS-01 issuer | `kubectl --context "$CTX" get clusterissuer` | None that can solve DNS-01 for `<base>`: a wildcard certificate cannot use HTTP-01. See HUMAN STEP C. |
 | Storage classes | `kubectl --context "$CTX" get storageclass` | Note the default, and whether an encrypting class exists. See section 5 step 5. |
@@ -232,11 +232,14 @@ edits to them.
    `<base>` (both the TLS hosts and the two rules, including the
    `*.` wildcard). Set `cert-manager.io/cluster-issuer` to the DNS-01
    ClusterIssuer's name.
-3. Same file: set `ingressClassName` to a class from
-   `kubectl get ingressclass`, and keep only the request-body-size and
-   timeout annotations for that controller (the file lists nginx, Traefik,
-   AWS ALB, GKE, and Azure AGIC). Uploads are up to 100 MiB; a controller
-   left at its default refuses them and it looks like an application bug.
+3. Same file: `ingressClassName` is left unset, which uses the cluster's
+   default IngressClass (or the ingress-nginx `make install` adds when there
+   is none). If the cluster has several classes and none is the default, or
+   you want a non-default one, uncomment it and set a name from
+   `kubectl get ingressclass`. Keep only the request-body-size and timeout
+   annotations for that controller (the file lists nginx, Traefik, AWS ALB,
+   GKE, and Azure AGIC). Uploads are up to 100 MiB; a controller left at its
+   default refuses them and it looks like an application bug.
 4. `db-ca.crt`: the database CA bundle from section 2.
 5. Storage: the site-data PVC uses the cluster's default StorageClass.
    For production, patch in an encrypting class the same way
@@ -265,15 +268,12 @@ kustomize build deploy/overlays/byo >/dev/null && echo renders
 ```
 
 ```sh
-make preflight OVERLAY=deploy/overlays/byo
+make preflight OVERLAY=deploy/overlays/byo INSTALL_CONTEXT="$CTX"
 ```
 
-```sh
-grep -n 'REPLACE_WITH\|example\.com\|example-idp' deploy/overlays/byo/config.env deploy/overlays/byo/ingress-patch.yaml deploy/overlays/byo/kustomization.yaml
-```
-
-The last one must print nothing except comment lines. `make preflight`
-only looks at `kustomization.yaml` for placeholders.
+It fails on any placeholder left in `kustomization.yaml`, `config.env`, or
+`ingress-patch.yaml` (`REPLACE_WITH…`, `example.com`, `example-idp`,
+naming the lines), and on an ingress class the cluster does not have.
 
 ## 6. HUMAN STEPS
 
@@ -335,7 +335,9 @@ Two records, both pointing at the ingress controller's external address:
 | `<base>` | `A` (or `CNAME` / alias) | `<ingress address>` |
 | `*.<base>` | `A` (or `CNAME` / alias) | `<ingress address>` |
 
-Find the address (ingress-nginx shown; use your controller's Service):
+Find the address (ingress-nginx shown; use your controller's Service). If
+the cluster had no ingress controller, run
+`make prereqs INSTALL_CONTEXT="$CTX"` first so there is one to point at:
 
 ```sh
 kubectl --context "$CTX" -n ingress-nginx get svc ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0]}{"\n"}'
@@ -356,18 +358,15 @@ the one zone.
 
 ## 7. Apply
 
-With the default ingress-nginx, or a cluster where `make prereqs` found
-both prerequisites already installed:
-
 ```sh
 make install OVERLAY=deploy/overlays/byo INSTALL_CONTEXT="$CTX"
 ```
 
-With any other ingress controller (so `prereqs` does not add ingress-nginx):
-
-```sh
-make preflight OVERLAY=deploy/overlays/byo && kustomize build deploy/overlays/byo | kubectl --context "$CTX" apply -f -
-```
+Its `prereqs` step installs cert-manager if it is missing, and ingress-nginx
+only when the cluster has no IngressClass at all; an existing controller is
+used as it is, never joined by a second one. `INGRESS=nginx` installs
+ingress-nginx regardless (then set `ingressClassName: nginx` in the
+overlay); `INGRESS=none` never touches the controller.
 
 Watch the migrate init container. It applies the schema and blocks the
 rollout until it is current:
@@ -423,45 +422,29 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://install-check.<base>/healthz
 
 ## 9. Smoke test against the real install
 
-`make smoke` (`scripts/smoke.sh`) targets the local evaluation overlay
-only: it signs in through the in-cluster Dex test accounts and queries the
-in-cluster Postgres pod, neither of which exists on a real install. Do not
-run it here. Run this block instead, as one shell session, with `BASE` set
-to the base hostname (no `https://`). It uses the admin's API key from
-HUMAN STEP D and never prints it.
-
 ```sh
-BASE=<base>
-K="$(cat "$HOME/.simple-host-install-key")"; H="X-Skill-Version: 0.9.0"
-code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
-echo "healthz $(code https://$BASE/healthz) (want 200)"
-echo "readyz  $(code https://$BASE/readyz) (want 200)"
-echo "no auth $(code https://$BASE/api/sites) (want 401)"
-echo "bad key $(code -H 'X-API-Key: not-a-key' -H "$H" https://$BASE/api/sites) (want 401)"
-echo "key     $(code -H "X-API-Key: $K" -H "$H" https://$BASE/api/sites) (want 200)"
-ME="$(curl -fsS -H "X-API-Key: $K" -H "$H" https://$BASE/api/me)"
-OWNER="$(printf '%s' "$ME" | python3 -c 'import json,sys;print(json.load(sys.stdin)["username"])')"
-echo "admin   $(printf '%s' "$ME" | python3 -c 'import json,sys;print(json.load(sys.stdin)["is_admin"])') (want True)"
-LABEL="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]' | tr . -)"
-W="$(mktemp -d)"; printf '<!doctype html><title>install check</title><h1>install check</h1>\n' > "$W/index.html"; tar -czf "$W/site.tar.gz" -C "$W" index.html
-echo "publish $(code -X POST -H "X-API-Key: $K" -H "$H" -H 'Content-Type: application/gzip' --data-binary @"$W/site.tar.gz" https://$BASE/api/collaboration/sites/$OWNER/install-check) (want 201)"
-echo "view    $(code https://$LABEL.$BASE/install-check/) (want 401: viewing needs a session)"
-echo "state   $(curl -s -X PUT -H "X-API-Key: $K" -H 'Content-Type: application/json' -d '{"version":0,"state":{"install":"ok"}}' https://$LABEL.$BASE/api/sites/install-check/state/versioned) (want version 1)"
-echo "read    $(curl -s -H "X-API-Key: $K" https://$LABEL.$BASE/api/sites/install-check/state/versioned) (want install ok)"
-echo "open https://$LABEL.$BASE/install-check/ in a browser"
-rm -rf "$W"
+make smoke BASE=https://<base> KEY_FILE="$HOME/.simple-host-install-key"
 ```
 
-Then ask the admin to open the printed URL in their browser. It should show
-"install check" after one redirect (the session hand-off,
-`docs/install.md` section 6). That proves the wildcard certificate, DNS, and
-hand-off together.
+This is `scripts/smoke-remote.sh`. It uses only public HTTPS and the admin's
+key from HUMAN STEP D (read from the file, never printed): probes and TLS,
+key auth, publish, update and roll back a throwaway `smoke-…` site, the
+owner host, state read/write, an asset upload, list and delete, restricting
+the site (its old address must answer 404), then deletes the site, on
+failure too. Every line reads `ok` or `FAIL`; the exit status is the number
+of failures. Without `BASE`, `make smoke` is the local overlay's test; do
+not run that here.
 
-Clean up, then have the admin revoke the `install-check` key on
-`/dashboard`:
+Then the browser check it prints at the end: the admin opens
+`https://<their label>.<base>/` and sees their own index after one redirect
+(the session hand-off, `docs/install.md` section 6). That proves the
+wildcard certificate, DNS, and hand-off together.
+
+Clean up: have the admin revoke the `install-check` key on `/dashboard`,
+then:
 
 ```sh
-curl -s -o /dev/null -w '%{http_code}\n' -X DELETE -H "X-API-Key: $(cat "$HOME/.simple-host-install-key")" -H "X-Skill-Version: 0.9.0" https://<base>/api/collaboration/sites/<owner>/install-check && rm -f "$HOME/.simple-host-install-key"
+rm -f "$HOME/.simple-host-install-key"
 ```
 
 Last check: the two CronJobs run the same image and fail silently if they

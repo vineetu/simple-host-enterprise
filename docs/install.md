@@ -228,7 +228,12 @@ supply.
    in place of `simple-host.example.com` and `*.simple-host.example.com`,
    and name the `ClusterIssuer` your platform team configured for DNS-01
    wildcard issuance in place of `letsencrypt-dns` (see `docs/cloud/` for a
-   worked example per cloud).
+   worked example per cloud). `ingressClassName` is left unset there so
+   the cluster's default IngressClass serves it; set it only to pick a
+   non-default class. `make install` adds ingress-nginx only when the
+   cluster has no IngressClass at all (`INGRESS=nginx` forces it,
+   `INGRESS=none` never touches the controller), so an existing ALB, GKE,
+   Traefik or AGIC controller is never joined by a second one.
 5. Edit `deploy/overlays/byo/kustomization.yaml`'s `images:` entry to point
    at the digest you pushed in step 1, replacing
    `sha256:REPLACE_WITH_THE_SCANNED_IMAGE_DIGEST`.
@@ -248,6 +253,10 @@ supply.
    in the redirect URI.
 9. `curl https://<base>/readyz` should return `{"status":"ok"}`; sign in at
    `https://<base>/auth/login` as one of your `ADMIN_EMAILS` addresses.
+10. Mint an API key on `/dashboard`, save it to a file, and run
+    `make smoke BASE=https://<base> KEY_FILE=<that file>`. It publishes,
+    restricts and deletes a throwaway site over public HTTPS only; the key
+    is never printed. Revoke the key afterwards.
 
 `deploy/overlays/staging` and `deploy/overlays/production` are templates on
 top of the same `byo` shape, for a company that wants a separate

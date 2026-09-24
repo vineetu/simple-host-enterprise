@@ -70,7 +70,7 @@ accounts (`admin@example.com` / `person@example.com`) to sign in with; see
   `local` is complete, `byo` / `staging` / `production` are templates for
   managed services.
 - `simple-host-plugin/` — the skill bundle agents install.
-- `scripts/smoke.sh` — the end-to-end check every rollout runs.
+- `scripts/smoke.sh` — the end-to-end check every rollout runs; `scripts/smoke-remote.sh` (`make smoke BASE=https://<base> KEY_FILE=<key file>`) is its public-HTTPS-only counterpart for a real install.
 - `test/pentest` — the scripted half of the pen-test list in
   `docs/security-review.md`, gated behind the `pentest` build tag and a
   live local overlay.

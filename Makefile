@@ -6,6 +6,7 @@
 #   make image         docker build -t simple-host:local
 #   make local         bring the whole thing up on Docker Desktop Kubernetes
 #   make smoke         run scripts/smoke.sh against the local overlay
+#                      (or, with BASE=https://<host> KEY_FILE=<path>, a real install)
 #   make local-down    delete it, data included
 #
 # Every kubectl call names the context explicitly. The default is Docker
@@ -119,9 +120,24 @@ local-down:
 # reach its login form, since Dex's issuer is the in-cluster DNS name (see
 # deploy/components/dex/configmap.yaml) and only the simple-host pod, not
 # this script, can resolve that name directly.
+#
+# With BASE set, smoke targets a real install instead, over public HTTPS
+# only (scripts/smoke-remote.sh): no kubectl, no database, no Dex. It needs
+# an API key an admin minted on /dashboard, read from KEY_FILE, else from
+# SIMPLE_HOST_API_KEY, else from a hidden prompt; it is never printed.
+#   make smoke BASE=https://sites.example.com KEY_FILE=~/.simple-host-install-key
+# OTHER_KEY_FILE (optional) is a second, non-admin person's key; with it the
+# run also proves a signed-in stranger gets 404 from a restricted site.
+BASE           ?=
+KEY_FILE       ?=
+OTHER_KEY_FILE ?=
 smoke:
-	CURL_CA_BUNDLE="$$(mkcert -CAROOT)/rootCA.pem" BASE=$(LOCAL_BASE) \
-	  CLUSTER_CONTEXT="$(CLUSTER_CONTEXT)" NAMESPACE="$(NAMESPACE)" ./scripts/smoke.sh
+	@if [ -n "$(BASE)" ]; then \
+	  BASE="$(BASE)" KEY_FILE="$(KEY_FILE)" OTHER_KEY_FILE="$(OTHER_KEY_FILE)" ./scripts/smoke-remote.sh; \
+	else \
+	  CURL_CA_BUNDLE="$$(mkcert -CAROOT)/rootCA.pem" BASE=$(LOCAL_BASE) \
+	    CLUSTER_CONTEXT="$(CLUSTER_CONTEXT)" NAMESPACE="$(NAMESPACE)" ./scripts/smoke.sh; \
+	fi
 
 # Phase 7's scripted pen-test list (design.md 12) against the local overlay.
 # Dex's issuer is the in-cluster Service DNS name (see
@@ -161,14 +177,40 @@ INSTALL_KUBECTL := kubectl $(if $(INSTALL_CONTEXT),--context $(INSTALL_CONTEXT))
 # they were easy to forget on a real one — the base manifests reference
 # cert-manager CRDs and fail to apply without them, with an error that names
 # the CRD rather than the cause.
+#
+# INGRESS decides the ingress controller:
+#   auto  (default) install ingress-nginx only when the cluster has no
+#         IngressClass at all. Any existing controller (ALB, GKE, Traefik,
+#         AGIC, an ingress-nginx under another name) is used as it is: a
+#         second controller would race the first for the same Ingress.
+#   nginx install ingress-nginx unless a class called nginx already exists,
+#         even alongside another controller.
+#   none  never touch the ingress controller.
+# A freshly installed ingress-nginx is marked the default IngressClass when it
+# is the only one, so an overlay that names no class still lands on it.
+INGRESS ?= auto
 .PHONY: prereqs
 prereqs:
-	@if $(INSTALL_KUBECTL) get ingressclass nginx >/dev/null 2>&1; then \
-	  echo "==> ingress-nginx: already installed"; \
-	else \
+	@case "$(INGRESS)" in auto|nginx|none) ;; \
+	  *) echo "FAIL  INGRESS must be auto, nginx or none (got $(INGRESS))"; exit 1;; esac; \
+	classes=$$($(INSTALL_KUBECTL) get ingressclass -o name) || { \
+	  echo "FAIL  cannot list IngressClasses on this context; fix access before installing anything"; exit 1; }; \
+	classes=$$(printf '%s\n' "$$classes" | sed 's|.*/||' | tr '\n' ' ' | sed 's/ *$$//'); \
+	install=0; \
+	case "$(INGRESS)" in \
+	  none)  echo "==> ingress: INGRESS=none, leaving the controller alone (classes: $${classes:-none})";; \
+	  nginx) if $(INSTALL_KUBECTL) get ingressclass nginx >/dev/null 2>&1; then \
+	           echo "==> ingress-nginx: already installed"; else install=1; fi;; \
+	  auto)  if [ -n "$$classes" ]; then \
+	           echo "==> ingress: using the cluster's existing IngressClass ($$classes); not installing ingress-nginx"; \
+	         else install=1; fi;; \
+	esac; \
+	if [ $$install -eq 1 ]; then \
 	  echo "==> installing ingress-nginx"; \
-	  $(INSTALL_KUBECTL) apply -f $(INGRESS_NGINX_URL); \
-	  $(INSTALL_KUBECTL) -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=300s; \
+	  $(INSTALL_KUBECTL) apply -f $(INGRESS_NGINX_URL) || exit 1; \
+	  $(INSTALL_KUBECTL) -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=300s || exit 1; \
+	  if [ -z "$$classes" ]; then \
+	    $(INSTALL_KUBECTL) annotate ingressclass nginx ingressclass.kubernetes.io/is-default-class=true --overwrite || exit 1; fi; \
 	fi
 	@if $(INSTALL_KUBECTL) get crd certificates.cert-manager.io >/dev/null 2>&1; then \
 	  echo "==> cert-manager: already installed"; \
@@ -189,6 +231,12 @@ preflight:
 	if grep -q "REPLACE_WITH" "$(OVERLAY)/kustomization.yaml" 2>/dev/null; then \
 	  echo "FAIL  $(OVERLAY)/kustomization.yaml still has a REPLACE_WITH placeholder."; \
 	  echo "      Published images and their digests are on the repository's releases page."; fail=1; fi; \
+	for f in config.env ingress-patch.yaml; do \
+	  [ -f "$(OVERLAY)/$$f" ] || continue; \
+	  hits=$$(grep -nE '^[^#]*(REPLACE_WITH|REPLACE_ME|example\.com|example-idp)' "$(OVERLAY)/$$f" | cut -d: -f1 | tr '\n' ' '); \
+	  if [ -n "$$hits" ]; then \
+	    echo "FAIL  $(OVERLAY)/$$f still has example placeholders on line(s) $$hits"; fail=1; fi; \
+	done; \
 	for f in config.env secrets.env; do \
 	  if [ -f "$(OVERLAY)/$$f.example" ] && [ ! -f "$(OVERLAY)/$$f" ]; then \
 	    echo "FAIL  $(OVERLAY)/$$f is missing — copy $$f.example and fill it in"; fail=1; fi; \
@@ -202,6 +250,25 @@ preflight:
 	       echo "      this image, and patching only the Deployment leaves both CronJobs in"; \
 	       echo "      ImagePullBackOff — backups and audit pruning silently never run.";; \
 	  esac; fi; \
+	class=$$($(KUSTOMIZE) build "$(OVERLAY)" 2>/dev/null | sed -n 's/^ *ingressClassName: *//p' | tr -d '"' | head -1); \
+	if avail=$$($(INSTALL_KUBECTL) get ingressclass -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.annotations.ingressclass\.kubernetes\.io/is-default-class}{" "}{end}' 2>/dev/null); then \
+	  names=$$(printf '%s' "$$avail" | sed 's/=[^ ]*//g; s/ *$$//'); \
+	  default=$$(printf '%s' "$$avail" | tr ' ' '\n' | sed -n 's/=true$$//p' | head -1); \
+	  if [ -z "$$names" ]; then \
+	    echo "NOTE  the cluster has no IngressClass yet; make install adds ingress-nginx (INGRESS=auto)"; \
+	  elif [ -n "$$class" ]; then \
+	    case " $$names " in *" $$class "*) echo "==> ingress class: $$class";; \
+	      *) echo "FAIL  the overlay's ingressClassName is $$class, but the cluster has: $$names"; \
+	         echo "      Set it in $(OVERLAY)/ingress-patch.yaml, or delete the line to use the default class."; fail=1;; esac; \
+	  elif [ -n "$$default" ]; then \
+	    echo "==> ingress class: the cluster default, $$default"; \
+	  else \
+	    echo "FAIL  the overlay names no ingressClassName and the cluster has no default IngressClass."; \
+	    echo "      Set ingressClassName in $(OVERLAY)/ingress-patch.yaml to one of: $$names"; fail=1; \
+	  fi; \
+	else \
+	  echo "WARN  cluster not reachable; the ingress class was not checked"; \
+	fi; \
 	[ $$fail -eq 0 ] || exit 1; \
 	echo "==> preflight ok"
 
@@ -210,4 +277,5 @@ preflight:
 install: prereqs preflight
 	$(KUSTOMIZE) build "$(OVERLAY)" | $(INSTALL_KUBECTL) apply -f -
 	$(INSTALL_KUBECTL) -n $(NAMESPACE) rollout status deploy/simple-host --timeout=300s
-	@echo "==> installed. Verify with: make smoke BASE=<your base host>"
+	@echo "==> installed. Once an admin has signed in and minted an API key on /dashboard, verify with:"
+	@echo "    make smoke BASE=https://<your base host> KEY_FILE=<file holding the key>"

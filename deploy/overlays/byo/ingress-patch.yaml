@@ -31,10 +31,14 @@ metadata:
     #   appgw.ingress.kubernetes.io/request-timeout: "300"
     # and raise the WAF body limit if a WAF policy is attached.
 spec:
-  # The controller this cluster runs. "nginx" for ingress-nginx, "traefik",
-  # "alb", "gce", "azure-application-gateway" — whatever your IngressClass is
-  # actually called.
-  ingressClassName: nginx
+  # Which ingress controller serves this. Left unset, the cluster's default
+  # IngressClass is used: whatever the cluster already runs, or the
+  # ingress-nginx that `make install` adds when there is no controller at all
+  # (it marks that one the default). Set it only to pick a class that is not
+  # the default, by the name `kubectl get ingressclass` shows — "nginx",
+  # "traefik", "alb", "gce", "azure-application-gateway". `make preflight`
+  # checks the name exists, or that a default does when this is unset.
+  # ingressClassName: nginx
   tls:
     - hosts:
         - simple-host.example.com
