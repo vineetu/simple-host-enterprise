@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+Asked to *install* Simple Host rather than develop it? Follow `INSTALL.md` instead of this file.
+
 Guidance for coding agents working in this repository.
 
 ## What this is

@@ -16,10 +16,24 @@ migrations, a container image, and Kubernetes manifests that run on any
 cluster with Postgres and an S3-compatible bucket. `docs/install.md` is the
 step-by-step guide this section summarizes.
 
+## Install with your AI agent
+
+`INSTALL.md` is a runbook written for a coding agent. Point the agent at a
+clone of this repository with access to your cluster, and it provisions the
+database and bucket, writes the configuration, stops for the few steps only
+a person can do (registering the OIDC app, the DNS records), applies the
+manifests, and checks the result. It asks only what it cannot find out, and
+never prints a secret.
+
+```text
+Read INSTALL.md in this repository and install Simple Host on our Kubernetes cluster; ask me only what you cannot find out yourself.
+```
+
 ## Run it locally
 
-Docker Desktop with Kubernetes enabled (or minikube), `kubectl`, `kustomize`,
-and `mkcert`. Then:
+To evaluate it on a laptop before a real install: Docker Desktop with
+Kubernetes enabled (or minikube), `kubectl`, `kustomize`, and `mkcert`.
+Then:
 
 ```sh
 make local     # ingress-nginx, cert-manager, Postgres, MinIO, Dex, the app; ~5 minutes cold
@@ -92,6 +106,7 @@ make vuln      # govulncheck
 
 ## More
 
+- `INSTALL.md` — the install runbook an AI agent follows on a real cluster.
 - `docs/install.md` — the full install guide, local cluster through a real
   one with your own Postgres, bucket, and OIDC provider.
 - `docs/configuration.md` — every environment variable, its default, and

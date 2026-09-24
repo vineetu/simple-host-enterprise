@@ -1,5 +1,7 @@
 # AGENTS.md
 
+Asked to *install* Simple Host rather than develop it? Follow `INSTALL.md` instead of this file.
+
 Guidance for coding agents working in this repository. `CLAUDE.md` holds the
 same rules in full; this file exists for agents that read this name.
 
