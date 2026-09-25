@@ -10,7 +10,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -27,8 +26,7 @@ const maxSiteStateSize = 1 << 20
 
 type SiteHandler struct {
 	database      *sql.DB
-	diskStorage   *storage.DiskStorage
-	backup        *storage.Backup
+	store         *storage.Store
 	publicBaseURL string
 	// hosts decides which address a site is reported under; see HostModel.
 	hosts     HostModel
@@ -111,11 +109,10 @@ type versionedStateConflictResponse struct {
 	State   json.RawMessage `json:"state"`
 }
 
-func NewSiteHandler(database *sql.DB, diskStorage *storage.DiskStorage, backup *storage.Backup, publicBaseURL string, hosts HostModel, limits ...*AbuseLimits) *SiteHandler {
+func NewSiteHandler(database *sql.DB, store *storage.Store, publicBaseURL string, hosts HostModel, limits ...*AbuseLimits) *SiteHandler {
 	return &SiteHandler{
 		database:      database,
-		diskStorage:   diskStorage,
-		backup:        backup,
+		store:         store,
 		publicBaseURL: strings.TrimRight(publicBaseURL, "/"),
 		hosts:         hosts,
 		limits:        chooseAbuseLimits(limits),
@@ -123,27 +120,16 @@ func NewSiteHandler(database *sql.DB, diskStorage *storage.DiskStorage, backup *
 	}
 }
 
-// backupSiteVersion fires the S3 backup goroutine for a freshly-uploaded
-// version. Fire-and-forget — backup failures log but never block the
-// upload response. Uses context.Background() so the upload can return
-// while the backup continues.
-func (h *SiteHandler) backupSiteVersion(username, siteName string, version int) {
-	if h.backup == nil {
-		return
+// discardVersion deletes an uploaded version whose transaction is known not
+// to have committed. Best effort, and deliberately not on the request's
+// context: a leftover object is unreferenced and harmless, and is replaced
+// if the same version number is allocated again.
+func (h *SiteHandler) discardVersion(siteID string, version int) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := h.store.DeleteVersionObject(ctx, siteID, version); err != nil {
+		log.Printf("discard uncommitted version %s v%d: %v", siteID, version, err)
 	}
-	release, acquired := h.limits.acquireBackup()
-	if !acquired {
-		log.Printf("skip backup %s/%s v%d: backup memory slot is busy", username, siteName, version)
-		return
-	}
-	go func() {
-		defer release()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		if err := h.backup.BackupVersion(ctx, h.diskStorage.BasePath(), username, siteName, version); err != nil {
-			log.Printf("backup %s/%s v%d: %v", username, siteName, version, err)
-		}
-	}()
 }
 
 // stateUsageMarkerKey is shared with SiteAPIHandler.markStateUsage
@@ -166,21 +152,6 @@ func (h *SiteHandler) siteURL(ctx context.Context, username, siteName, siteID st
 		log.Printf("site url: check restriction for %s/%s: %v", username, siteName, err)
 	}
 	return h.hosts.SiteURL(username, siteName, restricted)
-}
-
-// userPublicPath is the retired per-user listing path. Nothing serves it any
-// more (design.md 7.1: the base host no longer serves site content or a
-// per-owner listing at all), but the admin dashboard's "New users" and "Top
-// users" ranking cards (admin_rankings.go) still link to it as a cosmetic
-// convenience predating this phase — see the comment on HostModel.SiteLink
-// for the same tradeoff applied to sites. Kept as a plain string builder,
-// harmless on its own, so those two call sites need no further change.
-func userPublicPath(username string) string {
-	return "/sites/" + url.PathEscape(username) + "/"
-}
-
-func sitePublicPath(username, siteName string) string {
-	return userPublicPath(username) + url.PathEscape(siteName) + "/"
 }
 
 func (h *SiteHandler) Register(mux *http.ServeMux, authMiddleware, skillVersionMiddleware func(http.Handler) http.Handler) {
@@ -328,14 +299,14 @@ func validateStoredUsername(w http.ResponseWriter, username string) bool {
 //
 // ActorID is who is doing it: rate limits and versions.uploaded_by.
 // Owner* is whose namespace it lands in: the mutation lock, the advisory lock,
-// the storage and backup paths, the sites row, and the reported URL.
+// the sites row, and the reported URL.
 //
 // Getting this wrong is quiet rather than loud. The advisory lock hashes the
 // owner id with the site name (db.LockSiteCollaboration), so two people
 // deploying one team site under their own ids would take different locks and
-// race the disk write; and reconcileSiteCommit looks the site up by the id it
-// is handed, so the actor's id would report a committed site as missing and
-// compensate a write that actually landed.
+// race each other's version numbers; and reconcileSiteCommit looks the site
+// up by the id it is handed, so the actor's id would report a committed site
+// as missing.
 type mutationTarget struct {
 	ActorID       string
 	ActorUsername string
@@ -352,16 +323,6 @@ func selfTarget(user *db.User) mutationTarget {
 		OwnerID:       user.ID,
 		OwnerUsername: user.Username,
 	}
-}
-
-func (h *SiteHandler) requireMatchingCurrent(w http.ResponseWriter, username, siteName string, expected int) bool {
-	current, exists, err := h.diskStorage.CurrentVersion(username, siteName)
-	if err != nil || !exists || current != expected {
-		log.Printf("site storage mismatch %s/%s: db=v%d disk=v%d exists=%t err=%v", username, siteName, expected, current, exists, err)
-		writeJSON(w, http.StatusConflict, errorResponse{Error: "site storage is inconsistent; administrator repair is required"})
-		return false
-	}
-	return true
 }
 
 // setSiteVisibility toggles a site's public flag. Owner-scoped by the
@@ -501,33 +462,12 @@ func (h *SiteHandler) createSiteForTarget(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	_, currentExists, err := h.diskStorage.CurrentVersion(target.OwnerUsername, siteName)
-	if err != nil {
-		log.Printf("inspect current before create %s/%s: %v", target.OwnerUsername, siteName, err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	if currentExists {
-		writeJSON(w, http.StatusConflict, errorResponse{Error: "site data already exists; administrator repair is required"})
-		return
-	}
 
 	tx, err := h.database.BeginTx(r.Context(), nil)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	compensate := true
-	published := false
-	switched := false
-	defer func() {
-		if published && compensate {
-			if err := compensatePublishedCreate(h.diskStorage, target.OwnerUsername, siteName, 1, switched); err != nil {
-				quarantine := quarantineSiteCurrent(h.diskStorage, target.OwnerUsername, siteName, 1)
-				logSiteCompensationQuarantine("create", target.OwnerID, target.OwnerUsername, siteName, 0, 1, err, quarantine)
-			}
-		}
-	}()
 	defer tx.Rollback()
 	if err := db.LockSiteCollaboration(r.Context(), tx, target.OwnerID, siteName); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
@@ -554,12 +494,19 @@ func (h *SiteHandler) createSiteForTarget(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := h.diskStorage.WriteFiles(target.OwnerUsername, siteName, versionNumber, files); err != nil {
-		log.Printf("write files for %s/%s v%d: %v", target.OwnerUsername, siteName, versionNumber, err)
+	// The object goes up before the commit that makes it live, so a
+	// committed version always has its files; until then nothing refers to it.
+	if _, err := h.store.PutVersion(r.Context(), site.ID, versionNumber, files); err != nil {
+		log.Printf("upload files for %s/%s v%d: %v", target.OwnerUsername, siteName, versionNumber, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	published = true
+	keepObject := false
+	defer func() {
+		if !keepObject {
+			h.discardVersion(site.ID, versionNumber)
+		}
+	}()
 
 	if err := db.ActivateVersion(r.Context(), tx, version.ID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
@@ -571,12 +518,6 @@ func (h *SiteHandler) createSiteForTarget(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := h.diskStorage.SetCurrentVersion(target.OwnerUsername, siteName, versionNumber); err != nil {
-		log.Printf("set current version %s/%s v%d: %v", target.OwnerUsername, siteName, versionNumber, err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	switched = true
 	if err := db.EnqueueSiteSearch(r.Context(), tx, site.ID, db.SiteSearchReconcile); err != nil {
 		log.Printf("enqueue site search reconcile for %s/%s: %v", target.OwnerUsername, siteName, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
@@ -600,22 +541,14 @@ func (h *SiteHandler) createSiteForTarget(w http.ResponseWriter, r *http.Request
 			applied:    existingSiteCommitSnapshot(site.ID, versionNumber),
 			rolledBack: siteCommitSnapshot{},
 		})
-		action := actionForSiteCommit(result.outcome)
-		compensate = action.compensate
-		quarantine := siteCurrentQuarantine{}
-		if action.quarantine {
-			quarantine = quarantineSiteCurrent(h.diskStorage, target.OwnerUsername, siteName, versionNumber)
-		}
-		logSiteCommitReconciliation("create", target.OwnerID, target.OwnerUsername, siteName, site.ID, 0, versionNumber, commitErr, result, quarantine)
-		if !action.continueSuccess {
+		logSiteCommitOutcome("create", target.OwnerID, siteName, 0, versionNumber, commitErr, result)
+		keepObject = result.outcome != siteCommitRolledBack
+		if result.outcome != siteCommitApplied {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 			return
 		}
-	} else {
-		compensate = false
 	}
-
-	h.backupSiteVersion(target.OwnerUsername, siteName, versionNumber)
+	keepObject = true
 
 	site.ActiveVersion = versionNumber
 	url := h.siteURL(r.Context(), target.OwnerUsername, siteName, site.ID)
@@ -655,19 +588,6 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	compensate := true
-	published := false
-	switched := false
-	versionNumber := 0
-	previousVersion := 0
-	defer func() {
-		if published && compensate {
-			if err := compensatePublishedUpdate(h.diskStorage, target.OwnerUsername, siteName, previousVersion, versionNumber, switched); err != nil {
-				quarantine := quarantineSiteCurrent(h.diskStorage, target.OwnerUsername, siteName, versionNumber)
-				logSiteCompensationQuarantine("update", target.OwnerID, target.OwnerUsername, siteName, previousVersion, versionNumber, err, quarantine)
-			}
-		}
-	}()
 	defer tx.Rollback()
 	if err := db.LockSiteCollaboration(r.Context(), tx, target.OwnerID, siteName); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
@@ -683,16 +603,13 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	previousVersion = site.ActiveVersion
+	previousVersion := site.ActiveVersion
 	collaborators, err := db.CountSiteCollaborators(r.Context(), tx, site.ID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
 	if !requireSitePrecondition(w, r, site, collaborators > 0) {
-		return
-	}
-	if !h.requireMatchingCurrent(w, target.OwnerUsername, siteName, previousVersion) {
 		return
 	}
 
@@ -702,7 +619,7 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	versionNumber = maxVersion + 1
+	versionNumber := maxVersion + 1
 	versionPrefix := siteVersionPrefix(target.OwnerUsername, siteName, versionNumber)
 
 	version, err := db.CreateVersion(r.Context(), tx, site.ID, versionNumber, versionPrefix, &target.ActorID)
@@ -711,12 +628,17 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.diskStorage.WriteFiles(target.OwnerUsername, siteName, versionNumber, files); err != nil {
-		log.Printf("write files for %s/%s v%d: %v", target.OwnerUsername, siteName, versionNumber, err)
+	if _, err := h.store.PutVersion(r.Context(), site.ID, versionNumber, files); err != nil {
+		log.Printf("upload files for %s/%s v%d: %v", target.OwnerUsername, siteName, versionNumber, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	published = true
+	keepObject := false
+	defer func() {
+		if !keepObject {
+			h.discardVersion(site.ID, versionNumber)
+		}
+	}()
 
 	if err := db.ActivateVersion(r.Context(), tx, version.ID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
@@ -728,12 +650,6 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.diskStorage.SetCurrentVersion(target.OwnerUsername, siteName, versionNumber); err != nil {
-		log.Printf("set current version %s/%s v%d: %v", target.OwnerUsername, siteName, versionNumber, err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	switched = true
 	if err := db.EnqueueSiteSearch(r.Context(), tx, site.ID, db.SiteSearchReconcile); err != nil {
 		log.Printf("enqueue site search reconcile for %s/%s: %v", target.OwnerUsername, siteName, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
@@ -757,22 +673,14 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 			applied:    existingSiteCommitSnapshot(site.ID, versionNumber),
 			rolledBack: existingSiteCommitSnapshot(site.ID, previousVersion),
 		})
-		action := actionForSiteCommit(result.outcome)
-		compensate = action.compensate
-		quarantine := siteCurrentQuarantine{}
-		if action.quarantine {
-			quarantine = quarantineSiteCurrent(h.diskStorage, target.OwnerUsername, siteName, versionNumber)
-		}
-		logSiteCommitReconciliation("update", target.OwnerID, target.OwnerUsername, siteName, site.ID, previousVersion, versionNumber, commitErr, result, quarantine)
-		if !action.continueSuccess {
+		logSiteCommitOutcome("update", target.OwnerID, siteName, previousVersion, versionNumber, commitErr, result)
+		keepObject = result.outcome != siteCommitRolledBack
+		if result.outcome != siteCommitApplied {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 			return
 		}
-	} else {
-		compensate = false
 	}
-
-	h.backupSiteVersion(target.OwnerUsername, siteName, versionNumber)
+	keepObject = true
 
 	site.ActiveVersion = versionNumber
 	if err := h.cleanupOldVersions(r.Context(), target.OwnerID, target.OwnerUsername, siteName, site.ID); err != nil {
@@ -885,16 +793,7 @@ func (h *SiteHandler) deleteSiteForTarget(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	hiddenCurrent := ""
-	restoreCurrent := true
-	defer func() {
-		_ = tx.Rollback()
-		if hiddenCurrent != "" && restoreCurrent {
-			if err := h.diskStorage.RestoreCurrent(target.OwnerUsername, siteName, hiddenCurrent); err != nil {
-				log.Printf("restore current after failed delete %s/%s: %v", target.OwnerUsername, siteName, err)
-			}
-		}
-	}()
+	defer tx.Rollback()
 	if err := db.LockSiteCollaboration(r.Context(), tx, target.OwnerID, siteName); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -908,14 +807,20 @@ func (h *SiteHandler) deleteSiteForTarget(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	hiddenCurrent, err = h.diskStorage.HideCurrent(target.OwnerUsername, siteName)
-	if err != nil {
-		log.Printf("hide current before delete %s/%s: %v", target.OwnerUsername, siteName, err)
+	if err := db.EnqueueSiteSearch(r.Context(), tx, site.ID, db.SiteSearchDelete); err != nil {
+		log.Printf("enqueue site search delete for %s/%s: %v", target.OwnerUsername, siteName, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	if err := db.EnqueueSiteSearch(r.Context(), tx, site.ID, db.SiteSearchDelete); err != nil {
-		log.Printf("enqueue site search delete for %s/%s: %v", target.OwnerUsername, siteName, err)
+	// Serving stops the moment the row is gone; the objects follow after the
+	// grace period, so a replica mid-request on the old version finishes it.
+	sitePrefix, err := storage.SitePrefix(site.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	if err := db.RetireObjects(r.Context(), tx, sitePrefix, storage.RetireGrace); err != nil {
+		log.Printf("retire objects for %s/%s: %v", target.OwnerUsername, siteName, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
@@ -943,25 +848,11 @@ func (h *SiteHandler) deleteSiteForTarget(w http.ResponseWriter, r *http.Request
 			applied:    siteCommitSnapshot{},
 			rolledBack: existingSiteCommitSnapshot(site.ID, site.ActiveVersion),
 		})
-		action := actionForSiteCommit(result.outcome)
-		restoreCurrent = action.compensate
-		logSiteCommitReconciliation("delete", target.OwnerID, target.OwnerUsername, siteName, site.ID, site.ActiveVersion, 0, commitErr, result, siteCurrentQuarantine{
-			hiddenCurrent: hiddenCurrent,
-			provenAbsent:  true,
-		})
-		if !action.continueSuccess {
+		logSiteCommitOutcome("delete", target.OwnerID, siteName, site.ActiveVersion, 0, commitErr, result)
+		if result.outcome != siteCommitApplied {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 			return
 		}
-	} else {
-		restoreCurrent = false
-	}
-	if err := h.diskStorage.DeleteSite(target.OwnerUsername, siteName); err != nil {
-		// The DB row is gone and current remains hidden, so this is an
-		// inaccessible orphan for operator cleanup rather than a public site.
-		log.Printf("purge deleted site %s/%s from disk: %v", target.OwnerUsername, siteName, err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "site deleted; disk cleanup pending"})
-		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -1004,17 +895,6 @@ func (h *SiteHandler) rollbackSite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	compensate := true
-	switched := false
-	previousVersion := 0
-	defer func() {
-		if switched && compensate {
-			if err := restorePriorCurrent(h.diskStorage, target.OwnerUsername, siteName, previousVersion); err != nil {
-				quarantine := quarantineSiteCurrent(h.diskStorage, target.OwnerUsername, siteName, req.Version)
-				logSiteCompensationQuarantine("rollback", target.OwnerID, target.OwnerUsername, siteName, previousVersion, req.Version, err, quarantine)
-			}
-		}
-	}()
 	defer tx.Rollback()
 	if err := db.LockSiteCollaboration(r.Context(), tx, target.OwnerID, siteName); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
@@ -1031,21 +911,13 @@ func (h *SiteHandler) rollbackSite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	previousVersion = site.ActiveVersion
+	previousVersion := site.ActiveVersion
 	collaborators, err := db.CountSiteCollaborators(r.Context(), tx, site.ID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
 	if !requireSitePrecondition(w, r, site, collaborators > 0) {
-		return
-	}
-	if !h.requireMatchingCurrent(w, target.OwnerUsername, siteName, previousVersion) {
-		return
-	}
-
-	if !h.diskStorage.VersionExists(target.OwnerUsername, siteName, req.Version) {
-		writeJSON(w, http.StatusNotFound, errorResponse{Error: "version not found"})
 		return
 	}
 
@@ -1064,12 +936,6 @@ func (h *SiteHandler) rollbackSite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	if err := h.diskStorage.SetCurrentVersion(target.OwnerUsername, siteName, req.Version); err != nil {
-		log.Printf("rollback %s/%s to v%d (disk): %v", target.OwnerUsername, siteName, req.Version, err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	switched = true
 	if err := db.EnqueueSiteSearch(r.Context(), tx, site.ID, db.SiteSearchReconcile); err != nil {
 		log.Printf("enqueue site search reconcile for %s/%s: %v", target.OwnerUsername, siteName, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
@@ -1091,19 +957,11 @@ func (h *SiteHandler) rollbackSite(w http.ResponseWriter, r *http.Request) {
 			applied:    existingSiteCommitSnapshot(site.ID, req.Version),
 			rolledBack: existingSiteCommitSnapshot(site.ID, previousVersion),
 		})
-		action := actionForSiteCommit(result.outcome)
-		compensate = action.compensate
-		quarantine := siteCurrentQuarantine{}
-		if action.quarantine {
-			quarantine = quarantineSiteCurrent(h.diskStorage, target.OwnerUsername, siteName, req.Version)
-		}
-		logSiteCommitReconciliation("rollback", target.OwnerID, target.OwnerUsername, siteName, site.ID, previousVersion, req.Version, commitErr, result, quarantine)
-		if !action.continueSuccess {
+		logSiteCommitOutcome("rollback", target.OwnerID, siteName, previousVersion, req.Version, commitErr, result)
+		if result.outcome != siteCommitApplied {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 			return
 		}
-	} else {
-		compensate = false
 	}
 
 	site.ActiveVersion = req.Version
@@ -1278,7 +1136,11 @@ func (h *SiteHandler) cleanupOldVersions(ctx context.Context, ownerID, username,
 		if version.VersionNumber == site.ActiveVersion {
 			continue
 		}
-		if err := h.diskStorage.DeleteVersion(username, siteName, version.VersionNumber); err != nil {
+		key, err := storage.VersionKey(siteID, version.VersionNumber)
+		if err != nil {
+			return err
+		}
+		if err := db.RetireObjects(ctx, tx, key, storage.RetireGrace); err != nil {
 			return err
 		}
 		if err := db.DeleteVersion(ctx, tx, version.ID); err != nil {

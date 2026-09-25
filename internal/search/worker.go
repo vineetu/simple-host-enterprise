@@ -36,10 +36,16 @@ const (
 	maxWorkerLogFieldBytes    = 256
 )
 
-// VersionOpener opens one exact immutable site version. DiskStorage satisfies
-// this interface without exposing its mutable current link to the worker.
+// VersionOpener opens one exact immutable site version, by site id, never
+// whatever happens to be live by the time it is read.
 type VersionOpener interface {
-	OpenVersion(username, siteName string, version int) (*os.Root, error)
+	OpenVersion(ctx context.Context, siteID string, version int) (OpenedVersion, error)
+}
+
+// OpenedVersion is an open version; Close releases it.
+type OpenedVersion interface {
+	Root() *os.Root
+	Close() error
 }
 
 type searchRepository interface {
@@ -391,19 +397,19 @@ func (r workerRunner) reconcile(lifecycleCtx, claimedCtx context.Context, work s
 		return
 	}
 
-	root, err := r.versions.OpenVersion(snapshot.OwnerName, snapshot.SiteName, snapshot.ActiveVersion)
+	opened, err := r.versions.OpenVersion(claimedCtx, snapshot.SiteID, snapshot.ActiveVersion)
 	if err != nil {
 		r.retryFailure(lifecycleCtx, work, "open_version", err)
 		return
 	}
 	if err := claimedCtx.Err(); err != nil {
-		r.retryFailure(lifecycleCtx, work, "lease_budget", errors.Join(err, root.Close()))
+		r.retryFailure(lifecycleCtx, work, "lease_budget", errors.Join(err, opened.Close()))
 		return
 	}
 	// Production Extract derives its existing 30-second extraction deadline from
 	// the claimed-work context, so lease or lifecycle cancellation still wins.
-	result, extractErr := r.extract(claimedCtx, root, snapshot.OwnerName, snapshot.SiteName)
-	closeErr := root.Close()
+	result, extractErr := r.extract(claimedCtx, opened.Root(), snapshot.OwnerName, snapshot.SiteName)
+	closeErr := opened.Close()
 	if extractErr == nil {
 		extractErr = claimedCtx.Err()
 	}

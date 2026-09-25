@@ -328,9 +328,6 @@ func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Req
 		return
 	}
 	previousVersion := access.Site.ActiveVersion
-	if !h.requireMatchingCurrent(w, access.OwnerUsername, siteName, previousVersion) {
-		return
-	}
 	maxVersion, err := db.GetMaxVersionNumber(r.Context(), tx, access.Site.ID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
@@ -344,23 +341,17 @@ func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	compensate := true
-	published := false
-	switched := false
-	defer func() {
-		if published && compensate {
-			if err := compensatePublishedUpdate(h.diskStorage, access.OwnerUsername, siteName, previousVersion, versionNumber, switched); err != nil {
-				quarantine := quarantineSiteCurrent(h.diskStorage, access.OwnerUsername, siteName, versionNumber)
-				logSiteCompensationQuarantine("collaboration_update", access.OwnerID, access.OwnerUsername, siteName, previousVersion, versionNumber, err, quarantine)
-			}
-		}
-	}()
-	if err := h.diskStorage.WriteFiles(access.OwnerUsername, siteName, versionNumber, files); err != nil {
-		log.Printf("write collaboration files for %s/%s v%d actor=%s: %v", access.OwnerUsername, siteName, versionNumber, actor.ID, err)
+	if _, err := h.store.PutVersion(r.Context(), access.Site.ID, versionNumber, files); err != nil {
+		log.Printf("upload collaboration files for %s/%s v%d actor=%s: %v", access.OwnerUsername, siteName, versionNumber, actor.ID, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	published = true
+	keepObject := false
+	defer func() {
+		if !keepObject {
+			h.discardVersion(access.Site.ID, versionNumber)
+		}
+	}()
 	if err := db.ActivateVersion(r.Context(), tx, version.ID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -369,12 +360,6 @@ func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	if err := h.diskStorage.SetCurrentVersion(access.OwnerUsername, siteName, versionNumber); err != nil {
-		log.Printf("set collaboration current %s/%s v%d: %v", access.OwnerUsername, siteName, versionNumber, err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	switched = true
 	if err := db.EnqueueSiteSearch(r.Context(), tx, access.Site.ID, db.SiteSearchReconcile); err != nil {
 		log.Printf("enqueue collaboration search reconcile for %s/%s: %v", access.OwnerUsername, siteName, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
@@ -396,22 +381,14 @@ func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Req
 			applied:    existingSiteCommitSnapshot(access.Site.ID, versionNumber),
 			rolledBack: existingSiteCommitSnapshot(access.Site.ID, previousVersion),
 		})
-		action := actionForSiteCommit(result.outcome)
-		compensate = action.compensate
-		quarantine := siteCurrentQuarantine{}
-		if action.quarantine {
-			quarantine = quarantineSiteCurrent(h.diskStorage, access.OwnerUsername, siteName, versionNumber)
-		}
-		logSiteCommitReconciliation("collaboration_update", access.OwnerID, access.OwnerUsername, siteName, access.Site.ID, previousVersion, versionNumber, commitErr, result, quarantine)
-		if !action.continueSuccess {
+		logSiteCommitOutcome("collaboration_update", access.OwnerID, siteName, previousVersion, versionNumber, commitErr, result)
+		keepObject = result.outcome != siteCommitRolledBack
+		if result.outcome != siteCommitApplied {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 			return
 		}
-	} else {
-		compensate = false
 	}
-
-	h.backupSiteVersion(access.OwnerUsername, siteName, versionNumber)
+	keepObject = true
 	access.Site.ActiveVersion = versionNumber
 	access.Site.UpdatedAt = time.Now().UTC()
 	if err := h.cleanupOldVersions(r.Context(), access.OwnerID, access.OwnerUsername, siteName, access.Site.ID); err != nil {
@@ -473,39 +450,20 @@ func (h *SiteHandler) rollbackCollaborationSite(w http.ResponseWriter, r *http.R
 		return
 	}
 	previousVersion := access.Site.ActiveVersion
-	if !h.requireMatchingCurrent(w, access.OwnerUsername, siteName, previousVersion) {
-		return
-	}
 	versions, err := db.ListVersions(r.Context(), tx, access.Site.ID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	if !versionExists(versions, request.Version) || !h.diskStorage.VersionExists(access.OwnerUsername, siteName, request.Version) {
+	if !versionExists(versions, request.Version) {
 		writeJSON(w, http.StatusNotFound, errorResponse{Error: "version not found"})
 		return
 	}
 
-	compensate := true
-	switched := false
-	defer func() {
-		if switched && compensate {
-			if err := restorePriorCurrent(h.diskStorage, access.OwnerUsername, siteName, previousVersion); err != nil {
-				quarantine := quarantineSiteCurrent(h.diskStorage, access.OwnerUsername, siteName, request.Version)
-				logSiteCompensationQuarantine("collaboration_rollback", access.OwnerID, access.OwnerUsername, siteName, previousVersion, request.Version, err, quarantine)
-			}
-		}
-	}()
 	if err := db.UpdateSiteActiveVersion(r.Context(), tx, access.Site.ID, request.Version); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	if err := h.diskStorage.SetCurrentVersion(access.OwnerUsername, siteName, request.Version); err != nil {
-		log.Printf("collaboration rollback %s/%s to v%d: %v", access.OwnerUsername, siteName, request.Version, err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	switched = true
 	if err := db.EnqueueSiteSearch(r.Context(), tx, access.Site.ID, db.SiteSearchReconcile); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -526,19 +484,11 @@ func (h *SiteHandler) rollbackCollaborationSite(w http.ResponseWriter, r *http.R
 			applied:    existingSiteCommitSnapshot(access.Site.ID, request.Version),
 			rolledBack: existingSiteCommitSnapshot(access.Site.ID, previousVersion),
 		})
-		action := actionForSiteCommit(result.outcome)
-		compensate = action.compensate
-		quarantine := siteCurrentQuarantine{}
-		if action.quarantine {
-			quarantine = quarantineSiteCurrent(h.diskStorage, access.OwnerUsername, siteName, request.Version)
-		}
-		logSiteCommitReconciliation("collaboration_rollback", access.OwnerID, access.OwnerUsername, siteName, access.Site.ID, previousVersion, request.Version, commitErr, result, quarantine)
-		if !action.continueSuccess {
+		logSiteCommitOutcome("collaboration_rollback", access.OwnerID, siteName, previousVersion, request.Version, commitErr, result)
+		if result.outcome != siteCommitApplied {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 			return
 		}
-	} else {
-		compensate = false
 	}
 	access.Site.ActiveVersion = request.Version
 	access.Site.UpdatedAt = time.Now().UTC()
@@ -803,7 +753,7 @@ func (h *SiteHandler) downloadCollaborationVersion(w http.ResponseWriter, r *htt
 		return
 	}
 
-	lease, err := h.diskStorage.LeaseVersion(lockedAccess.OwnerUsername, siteName, versionNumber)
+	lease, err := h.store.OpenVersion(r.Context(), lockedAccess.Site.ID, versionNumber)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			writeJSON(w, http.StatusNotFound, errorResponse{Error: "version not found"})

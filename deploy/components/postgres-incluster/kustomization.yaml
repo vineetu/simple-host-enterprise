@@ -36,9 +36,7 @@ patches:
   # needs the same fix, or its first query fails with "open
   # /etc/simple-host/db-ca/ca.crt: no such file or directory" the moment it
   # tries to actually connect (found running this CronJob for the first
-  # time against this component — deploy/base/backup-assets-cronjob.yaml
-  # needs no equivalent patch because it never mounts db-ca at all: it
-  # talks to disk and S3/MinIO only, no direct Postgres connection).
+  # time against this component).
   - target:
       kind: CronJob
       name: simple-host-prune

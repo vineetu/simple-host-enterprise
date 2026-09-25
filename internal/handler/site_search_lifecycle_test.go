@@ -31,26 +31,24 @@ func TestSiteSearchEnqueueTransactionalPlacementAndFailureGuards(t *testing.T) {
 			// covers both and cannot be satisfied by only one of them.
 			function:       "createSiteForTarget",
 			operation:      "SiteSearchReconcile",
-			orderedCalls:   []string{"SetCurrentVersion", "EnqueueSiteSearch", "Commit"},
-			compensationFn: "compensatePublishedCreate",
+			orderedCalls:   []string{"PutVersion", "UpdateSiteActiveVersion", "EnqueueSiteSearch", "Commit"},
+			compensationFn: "discardVersion",
 		},
 		{
 			function:       "updateSite",
 			operation:      "SiteSearchReconcile",
-			orderedCalls:   []string{"SetCurrentVersion", "EnqueueSiteSearch", "Commit"},
-			compensationFn: "compensatePublishedUpdate",
+			orderedCalls:   []string{"PutVersion", "UpdateSiteActiveVersion", "EnqueueSiteSearch", "Commit"},
+			compensationFn: "discardVersion",
 		},
 		{
-			function:       "deleteSiteForTarget",
-			operation:      "SiteSearchDelete",
-			orderedCalls:   []string{"HideCurrent", "EnqueueSiteSearch", "DeleteSite", "Commit"},
-			compensationFn: "RestoreCurrent",
+			function:     "deleteSiteForTarget",
+			operation:    "SiteSearchDelete",
+			orderedCalls: []string{"EnqueueSiteSearch", "RetireObjects", "DeleteSite", "Commit"},
 		},
 		{
-			function:       "rollbackSite",
-			operation:      "SiteSearchReconcile",
-			orderedCalls:   []string{"SetCurrentVersion", "EnqueueSiteSearch", "Commit"},
-			compensationFn: "restorePriorCurrent",
+			function:     "rollbackSite",
+			operation:    "SiteSearchReconcile",
+			orderedCalls: []string{"UpdateSiteActiveVersion", "EnqueueSiteSearch", "Commit"},
 		},
 	}
 
@@ -65,6 +63,9 @@ func TestSiteSearchEnqueueTransactionalPlacementAndFailureGuards(t *testing.T) {
 				}
 				name := calledFunctionName(call)
 				for _, required := range append(append([]string(nil), test.orderedCalls...), test.compensationFn) {
+					if required == "" {
+						continue
+					}
 					if name == required {
 						if prior, exists := positions[required]; !exists || call.Pos() < prior {
 							positions[required] = call.Pos()
@@ -85,8 +86,10 @@ func TestSiteSearchEnqueueTransactionalPlacementAndFailureGuards(t *testing.T) {
 				}
 				prior = position
 			}
-			if compensation := positions[test.compensationFn]; compensation == token.NoPos || compensation >= positions["EnqueueSiteSearch"] {
-				t.Fatalf("%s does not install %s compensation before enqueue", test.function, test.compensationFn)
+			if test.compensationFn != "" {
+				if compensation := positions[test.compensationFn]; compensation == token.NoPos || compensation >= positions["EnqueueSiteSearch"] {
+					t.Fatalf("%s does not install %s compensation before enqueue", test.function, test.compensationFn)
+				}
 			}
 
 			enqueueGuard := findEnqueueGuard(t, function)

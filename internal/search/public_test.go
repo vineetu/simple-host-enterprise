@@ -19,7 +19,7 @@ func TestPublicServiceNormalizesDelegatesAndBuildsPlainResults(t *testing.T) {
 		Owner:         "alice",
 		Site:          "planning",
 		PagePath:      "roadmap/index.html",
-		URL:           "/sites/alice/planning/roadmap/",
+		URL:           "https://alice.foo.example/planning/roadmap/",
 		Title:         "Release roadmap",
 		SnippetSource: " \tRelease\u00a0calendar\u2003and dates. ",
 	}}}
@@ -52,7 +52,7 @@ func TestPublicServiceNormalizesDelegatesAndBuildsPlainResults(t *testing.T) {
 		result.Owner != "alice" ||
 		result.Site != "planning" ||
 		result.PagePath != "roadmap/index.html" ||
-		result.URL != "/sites/alice/planning/roadmap/" ||
+		result.URL != "https://alice.foo.example/planning/roadmap/" ||
 		result.Title != "Release roadmap" ||
 		result.Position != 5 {
 		t.Fatalf("result metadata = %+v", result)
@@ -189,7 +189,7 @@ func TestPostgreSQLPublicDocumentAdapterIsPlainAndLossless(t *testing.T) {
 		OwnerName:     "alice",
 		SiteName:      "planning",
 		PagePath:      "index.html",
-		URLPath:       "/sites/alice/planning/",
+		URLPath:       "https://alice.foo.example/planning/",
 		Title:         "Planning",
 		SnippetSource: "Selected fragment",
 	}}
@@ -199,7 +199,7 @@ func TestPostgreSQLPublicDocumentAdapterIsPlainAndLossless(t *testing.T) {
 		Owner:         "alice",
 		Site:          "planning",
 		PagePath:      "index.html",
-		URL:           "/sites/alice/planning/",
+		URL:           "https://alice.foo.example/planning/",
 		Title:         "Planning",
 		SnippetSource: "Selected fragment",
 	}}

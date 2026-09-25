@@ -86,9 +86,9 @@ whole backup story.
 
 ## 3. Bucket with default encryption
 
-Azure Blob Storage has no S3-compatible API, and this package's backup
+Azure Blob Storage has no S3-compatible API, and this package's storage
 client speaks the S3 API only. Azure is the one platform in `docs/cloud/`
-where backups need a piece you would not otherwise run. Decide this before
+where the bucket needs a piece you would not otherwise run. Decide this before
 you install, not after.
 
 **Do not reach for a MinIO gateway.** MinIO deprecated gateway mode in
@@ -99,13 +99,13 @@ describing a binary you can no longer get. Two answers that work:
   front of Blob Storage — a real object store of its own, on a
   PersistentVolumeClaim with an encrypting StorageClass. The package ships
   it as `deploy/components/minio`, so this is one line in your
-  kustomization. The trade is that backups then live on a disk in the same
+  kustomization. The trade is that sites then live on a disk in the same
   cluster rather than in a separate, independently durable service, which
-  is a weaker backup story than the other clouds get. If this is where you
+  is a weaker durability story than the other clouds get. If this is where you
   land, replicate that volume or sync the bucket onward.
 - **An S3-to-Blob proxy**, such as `s3proxy`, which does what MinIO's
   gateway used to: presents an S3 endpoint and stores objects in a Blob
-  container. This keeps backups in Blob Storage, which is what you probably
+  container. This keeps sites in Blob Storage, which is what you probably
   wanted, at the cost of another component to patch and keep running.
 
 If neither is acceptable, Azure is the wrong platform for this package

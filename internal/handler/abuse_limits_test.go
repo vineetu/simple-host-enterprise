@@ -144,7 +144,7 @@ func TestSiteAPIStateReadLimitRunsBeforeDatabaseRead(t *testing.T) {
 
 func TestManagementClientLimitRunsBeforeAuthentication(t *testing.T) {
 	limits := testAbuseLimits(func() time.Time { return time.Unix(100, 0) })
-	handler := NewSiteHandler(nil, nil, nil, "", HostModel{}, limits)
+	handler := NewSiteHandler(nil, nil, "", HostModel{}, limits)
 	client := "192.0.2.15"
 	for i := 0; i < managementClientPolicy.Burst; i++ {
 		if decision := limits.allow(managementClientPolicy, client); !decision.Allowed {
@@ -220,7 +220,7 @@ func TestDecodeSmallJSONRejectsTrailingAndOversizedBodies(t *testing.T) {
 
 func TestUploadConcurrencyRejectsWhileFullAndReleasesAfterHandlersReturn(t *testing.T) {
 	limits := testAbuseLimits(time.Now)
-	handler := NewSiteHandler(nil, nil, nil, "", HostModel{}, limits)
+	handler := NewSiteHandler(nil, nil, "", HostModel{}, limits)
 	started := make(chan struct{}, uploadConcurrency)
 	finish := make(chan struct{})
 	wrapped := handler.limitUploadConcurrency(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -258,23 +258,6 @@ func TestUploadConcurrencyRejectsWhileFullAndReleasesAfterHandlersReturn(t *test
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("upload after handler release status = %d, want 204", response.Code)
 	}
-}
-
-func TestBackupMemorySemaphoreHasOneReusableSlot(t *testing.T) {
-	limits := testAbuseLimits(time.Now)
-	release, acquired := limits.acquireBackup()
-	if !acquired {
-		t.Fatal("first backup memory slot was unavailable")
-	}
-	if _, acquired := limits.acquireBackup(); acquired {
-		t.Fatal("second backup acquired the single memory slot")
-	}
-	release()
-	replacement, acquired := limits.acquireBackup()
-	if !acquired {
-		t.Fatal("released backup memory slot was not reusable")
-	}
-	replacement()
 }
 
 func TestArchiveDownloadSemaphoreIsBoundedAndReusable(t *testing.T) {

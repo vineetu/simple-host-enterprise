@@ -28,7 +28,7 @@ import (
 // "who is calling and which site."
 type SiteAPIHandler struct {
 	database    *sql.DB
-	disk        *storage.DiskStorage
+	store       *storage.Store
 	assetLimits storage.AssetLimits
 	audit       audit.Recorder
 	hosts       HostModel
@@ -46,13 +46,13 @@ type SiteAPIHandler struct {
 // (main.go's current default; a real DBRecorder is Phase 4's wiring) —
 // every write here calls Record regardless, so the audit trail activates
 // the moment main.go swaps the recorder, with no change here.
-func NewSiteAPIHandler(database *sql.DB, disk *storage.DiskStorage, assetLimits storage.AssetLimits, recorder audit.Recorder, hosts HostModel, limits ...*AbuseLimits) *SiteAPIHandler {
+func NewSiteAPIHandler(database *sql.DB, store *storage.Store, assetLimits storage.AssetLimits, recorder audit.Recorder, hosts HostModel, limits ...*AbuseLimits) *SiteAPIHandler {
 	if recorder == nil {
 		recorder = audit.NoOp{}
 	}
 	return &SiteAPIHandler{
 		database:    database,
-		disk:        disk,
+		store:       store,
 		assetLimits: assetLimits,
 		audit:       recorder,
 		hosts:       hosts,
@@ -393,9 +393,9 @@ type listAssetsResponse struct {
 // map keyed by field name) to pick "the first one found" would make that
 // choice depend on Go's randomized map iteration order, a different answer
 // on every request. storage.CreateAsset is called first (it validates,
-// sniffs, and streams to disk under the site's own lock) and only once that
-// succeeds is db.CreateAsset called with the same id, matching
-// docs/security-review.md's documented call order.
+// sniffs, and uploads the object) and only once that succeeds is the row
+// inserted with the same id, by db.CreateAssetWithinQuota, which enforces
+// the per-site quota under a per-site lock in the same transaction.
 func (h *SiteAPIHandler) CreateAsset(w http.ResponseWriter, r *http.Request, call siteAPICall) {
 	if decision := h.limits.allow(stateClientPolicy, remoteClientKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
@@ -451,13 +451,15 @@ func (h *SiteAPIHandler) CreateAsset(w http.ResponseWriter, r *http.Request, cal
 	}
 	defer file.Close()
 
-	stored, err := h.disk.CreateAsset(call.Owner, call.SiteName, fileHeader.Header.Get("Content-Type"), file, fileHeader.Size, h.assetLimits)
+	if fileHeader.Size > h.assetLimits.MaxFileBytes {
+		writeJSON(w, http.StatusRequestEntityTooLarge, errorResponse{Error: "asset exceeds the per-file size limit"})
+		return
+	}
+	stored, err := h.store.CreateAsset(r.Context(), call.SiteID, fileHeader.Header.Get("Content-Type"), file, h.assetLimits)
 	if err != nil {
 		switch {
 		case errors.Is(err, storage.ErrAssetTooLarge):
 			writeJSON(w, http.StatusRequestEntityTooLarge, errorResponse{Error: "asset exceeds the per-file size limit"})
-		case errors.Is(err, storage.ErrAssetQuotaExceeded):
-			writeJSON(w, http.StatusRequestEntityTooLarge, errorResponse{Error: "site asset quota exceeded"})
 		case errors.Is(err, storage.ErrAssetTypeNotAllowed):
 			writeJSON(w, http.StatusUnsupportedMediaType, errorResponse{Error: "asset content type is not allowed"})
 		default:
@@ -476,23 +478,32 @@ func (h *SiteAPIHandler) CreateAsset(w http.ResponseWriter, r *http.Request, cal
 		name = stored.ID
 	}
 
-	// The disk write above is deliberately outside this transaction and
-	// keeps its existing compensation story unchanged: the file is already
-	// on disk and safe to leave orphaned on any failure below (row insert,
-	// audit row, or commit) — a reconciliation pass or a retried upload
-	// minting a new id can recover it, while deleting it here on a
-	// database hiccup would throw away bytes the client already believes
-	// were saved. What's new is that the site_assets row and its
-	// audit_events row now commit together (design 8.1): a `RecordTx`
-	// failure rolls the row insert back too, rather than leaving an asset
-	// listed with no audit trail.
+	// The object is uploaded before this transaction, under a fresh id
+	// nothing refers to yet. The row and its audit_events row commit
+	// together (design 8.1). If the transaction is known not to have
+	// committed, the object is deleted again; after an ambiguous commit it
+	// is left, since the row may exist.
+	keepObject := false
+	defer func() {
+		if !keepObject {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := h.store.DeleteAsset(ctx, call.SiteID, stored.ID); err != nil {
+				log.Printf("discard uncommitted asset %s/%s id=%s: %v", call.Owner, call.SiteName, stored.ID, err)
+			}
+		}
+	}()
 	tx, err := h.database.BeginTx(r.Context(), nil)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
 	defer tx.Rollback()
-	if _, err := db.CreateAsset(r.Context(), tx, stored.ID, call.SiteID, name, stored.ContentType, stored.Size, stored.SHA256[:], createdBy); err != nil {
+	if _, err := db.CreateAssetWithinQuota(r.Context(), tx, stored.ID, call.SiteID, name, stored.ContentType, stored.Size, stored.SHA256[:], createdBy, h.assetLimits.MaxSiteCount, h.assetLimits.MaxSiteBytes); err != nil {
+		if errors.Is(err, db.ErrAssetQuotaExceeded) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, errorResponse{Error: "site asset quota exceeded"})
+			return
+		}
 		log.Printf("record asset row for %s/%s id=%s: %v", call.Owner, call.SiteName, stored.ID, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -505,10 +516,12 @@ func (h *SiteAPIHandler) CreateAsset(w http.ResponseWriter, r *http.Request, cal
 		return
 	}
 	if err := tx.Commit(); err != nil {
+		keepObject = true
 		log.Printf("commit asset_create %s/%s id=%s: %v", call.Owner, call.SiteName, stored.ID, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
+	keepObject = true
 	writeJSON(w, http.StatusCreated, createAssetResponse{
 		ID:  stored.ID,
 		URL: h.siteURL(call) + "_assets/" + url.PathEscape(stored.ID) + "/" + url.PathEscape(name),
@@ -545,10 +558,10 @@ func (h *SiteAPIHandler) ListAssets(w http.ResponseWriter, r *http.Request, call
 	writeJSON(w, http.StatusOK, listAssetsResponse{Assets: out})
 }
 
-// DeleteAsset answers DELETE .../assets/{id}. The disk file is removed
-// first, then the row is soft-deleted — storage.DeleteAsset's doc comment
-// gives the reasoning: freeing disk space before the audit-trail row
-// disappears from listings is the safer order on a partial failure.
+// DeleteAsset answers DELETE .../assets/{id}. The object is removed first,
+// then the row is soft-deleted: a listed asset whose object is gone is a
+// broken link, while an object that outlives its row is storage nobody can
+// see or reclaim.
 func (h *SiteAPIHandler) DeleteAsset(w http.ResponseWriter, r *http.Request, call siteAPICall, id string) {
 	if decision := h.limits.allow(stateClientPolicy, remoteClientKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
@@ -566,19 +579,12 @@ func (h *SiteAPIHandler) DeleteAsset(w http.ResponseWriter, r *http.Request, cal
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	// The disk delete stays outside any transaction, deliberately, and
-	// keeps its existing compensation story unchanged: freeing disk space
-	// first is the safer order on a partial failure (storage.DeleteAsset's
-	// own doc comment) regardless of whether the database step afterward
-	// succeeds. What's new is that the soft-delete and its audit_events
-	// row now commit together (design 8.1) — a failed `RecordTx` rolls the
-	// soft-delete back too, so the row keeps listing an asset whose file
-	// is already gone rather than disappearing from listings with no
-	// audit trail; that stale-row state is recoverable (the same
-	// reconciliation pass a lost row anywhere else in this handler needs),
-	// while a phantom audit-less deletion is not.
-	if err := h.disk.DeleteAsset(call.Owner, call.SiteName, id); err != nil && !errors.Is(err, storage.ErrAssetNotFound) {
-		log.Printf("delete asset file %s/%s id=%s: %v", call.Owner, call.SiteName, id, err)
+	// The object delete stays outside the transaction, deliberately: the
+	// soft-delete and its audit_events row commit together (design 8.1), so
+	// a failed `RecordTx` leaves the row listing an asset whose object is
+	// already gone rather than a phantom audit-less deletion.
+	if err := h.store.DeleteAsset(r.Context(), call.SiteID, id); err != nil && !errors.Is(err, storage.ErrAssetNotFound) {
+		log.Printf("delete asset object %s/%s id=%s: %v", call.Owner, call.SiteName, id, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
@@ -619,12 +625,15 @@ func (h *SiteAPIHandler) ServeAsset(w http.ResponseWriter, r *http.Request, call
 		http.NotFound(w, r)
 		return
 	}
-	file, info, err := h.disk.OpenAsset(call.Owner, call.SiteName, id)
+	asset, err := h.store.OpenAsset(r.Context(), call.SiteID, row.ID, max(row.Size, h.assetLimits.MaxFileBytes))
 	if err != nil {
+		if !errors.Is(err, storage.ErrAssetNotFound) {
+			log.Printf("open asset %s/%s id=%s: %v", call.Owner, call.SiteName, row.ID, err)
+		}
 		http.NotFound(w, r)
 		return
 	}
-	defer file.Close()
+	defer asset.Close()
 
 	w.Header().Set("Content-Type", row.ContentType)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -632,7 +641,7 @@ func (h *SiteAPIHandler) ServeAsset(w http.ResponseWriter, r *http.Request, call
 	if !isInlineAssetType(row.ContentType) {
 		w.Header().Set("Content-Disposition", `attachment; filename="`+sanitizeAssetFilename(row.Name)+`"`)
 	}
-	http.ServeContent(w, r, row.Name, info.ModTime(), file.(io.ReadSeeker))
+	http.ServeContent(w, r, row.Name, row.CreatedAt, asset.File)
 }
 
 func isInlineAssetType(contentType string) bool {

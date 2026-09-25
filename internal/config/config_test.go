@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -103,8 +104,8 @@ func TestLoadCompleteConfiguration(t *testing.T) {
 	if cfg.Backup.Prefix != "backups/" {
 		t.Fatalf("Backup.Prefix = %q, want the layout default", cfg.Backup.Prefix)
 	}
-	if cfg.SiteDir != defaultSiteDir {
-		t.Fatalf("SiteDir = %q, want the layout default", cfg.SiteDir)
+	if cfg.CacheDir != defaultCacheDir || cfg.CacheMaxBytes != defaultCacheMaxBytes {
+		t.Fatalf("CacheDir, CacheMaxBytes = %q, %d, want the defaults", cfg.CacheDir, cfg.CacheMaxBytes)
 	}
 	if cfg.Audit.RetentionDays != defaultAuditRetentionDays {
 		t.Fatalf("Audit.RetentionDays = %d, want the default %d", cfg.Audit.RetentionDays, defaultAuditRetentionDays)
@@ -604,9 +605,13 @@ func TestParseEnvelopeKeys(t *testing.T) {
 		}
 	})
 
-	t.Run("more than two keys is refused", func(t *testing.T) {
-		if _, err := parseEnvelopeKeys("k1:" + key1 + ",k2:" + key2 + ",k3:" + key1); err == nil {
-			t.Fatal("parseEnvelopeKeys accepted three keys")
+	t.Run("more than eight keys is refused", func(t *testing.T) {
+		raw := "k1:" + key1
+		for i := 2; i <= 9; i++ {
+			raw += fmt.Sprintf(",k%d:%s", i, key2)
+		}
+		if _, err := parseEnvelopeKeys(raw); err == nil {
+			t.Fatal("parseEnvelopeKeys accepted nine keys")
 		}
 	})
 

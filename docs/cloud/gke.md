@@ -56,7 +56,7 @@ whole backup story.
 ## 3. Bucket with default encryption
 
 A Cloud Storage bucket, reached through its S3-compatible XML API (this
-package's backup client speaks the S3 API; it does not use the native
+package's storage client speaks the S3 API; it does not use the native
 Google Cloud Storage API):
 
 - Uniform bucket-level access enabled.
@@ -65,6 +65,8 @@ Google Cloud Storage API):
 - An HMAC key pair for the service account the workload uses, since the
   S3-compatible XML API authenticates with HMAC credentials, not a bearer
   token from workload identity directly.
+- Object versioning on, with lifecycle rules for noncurrent versions
+  (`docs/storage.md`).
 
 ```
 BACKUP_STORAGE_ENDPOINT=https://storage.googleapis.com

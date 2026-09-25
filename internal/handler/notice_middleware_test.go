@@ -179,7 +179,7 @@ func TestSkillVersionRouteScopeAndAuthenticationOrdering(t *testing.T) {
 
 	mux := http.NewServeMux()
 	NewUserHandler(nil).Register(mux, authMiddleware, skillMiddleware)
-	NewSiteHandler(nil, nil, nil, "", HostModel{}).Register(mux, authMiddleware, skillMiddleware)
+	NewSiteHandler(nil, nil, "", HostModel{}).Register(mux, authMiddleware, skillMiddleware)
 
 	t.Run("registration and reset intake are gone", func(t *testing.T) {
 		for _, path := range []string{"/api/auth", "/api/reset-requests"} {
@@ -478,7 +478,7 @@ func TestAdminAPIRouteAppliesGuardAfterAdminAuthentication(t *testing.T) {
 		t.Fatalf("SignSession: %v", err)
 	}
 	mux := http.NewServeMux()
-	NewAdminHandler(database, "", "https://example.com", HostModel{}, CookiePolicy{}, signingKeys, time.Hour, nil).Register(
+	NewAdminHandler(database, "https://example.com", HostModel{}, CookiePolicy{}, signingKeys, time.Hour, nil).Register(
 		mux,
 		auth.Middleware(database, signingKeys, time.Hour),
 		skillMiddleware,

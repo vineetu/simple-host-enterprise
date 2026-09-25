@@ -5,16 +5,19 @@ metadata:
   labels:
     app: simple-host
 spec:
-  replicas: 1
+  replicas: 2
   revisionHistoryLimit: 5
   selector:
     matchLabels:
       app: simple-host
-  # Recreate: the site tree is a ReadWriteOnce volume, so two pods can never
-  # run at once. The rollout has a short gap; the migration init container
-  # makes it a safe one.
+  # Pods are stateless: sites live in the bucket and the database decides
+  # which version is live (docs/storage.md), so a rollout starts the new pod
+  # before it stops an old one and never drops below the replica count.
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   template:
     metadata:
       labels:
@@ -22,6 +25,15 @@ spec:
     spec:
       serviceAccountName: simple-host
       automountServiceAccountToken: false
+      # Spread replicas across nodes when there are several; ScheduleAnyway
+      # so a single-node cluster still runs both.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: simple-host
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -90,8 +102,8 @@ spec:
                   name: simple-host-secrets
                   key: DB_APP_PASSWORD
           volumeMounts:
-            - name: site-data
-              mountPath: /mnt/data
+            - name: cache
+              mountPath: /var/cache/simple-host
             - name: tmp
               mountPath: /tmp
             - name: db-ca
@@ -134,11 +146,16 @@ spec:
             # an installation's real traffic, not this limit's job.
             limits: { cpu: "1", memory: 2Gi }
       volumes:
-        - name: site-data
-          persistentVolumeClaim:
-            claimName: simple-host-site-data
+        # Pod-local cache of site versions (CACHE_DIR), emptied on start.
+        # CACHE_MAX_BYTES bounds unpinned entries only; versions being served
+        # stay pinned, hence the headroom.
+        - name: cache
+          emptyDir:
+            sizeLimit: 3Gi
+        # Multipart asset uploads spill here.
         - name: tmp
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 1Gi
         # The database server's CA, for sslmode=verify-full. A component that
         # runs Postgres in the cluster points this at the certificate it
         # issued; a managed database's bundle is supplied by the overlay.

@@ -281,7 +281,7 @@ func writeRankCardHead(b *strings.Builder, title string, options []struct {
 }
 
 // renderUserRankingCard writes the "Top users" card with its metric tabs.
-func renderUserRankingCard(b *strings.Builder, rows []userRank, metric, sitesMetric rankMetric, days int) {
+func renderUserRankingCard(b *strings.Builder, hosts HostModel, rows []userRank, metric, sitesMetric rankMetric, days int) {
 	writeRankCardHead(b, "Top users", userMetrics, metric, days, func(m rankMetric) string {
 		return rankingURL(days, m, sitesMetric)
 	})
@@ -293,7 +293,7 @@ func renderUserRankingCard(b *strings.Builder, rows []userRank, metric, sitesMet
 		if i >= rankTop {
 			break
 		}
-		writeRankRow(b, i+1, userPublicPath(row.username), row.username, userMetricCell(row, metric))
+		writeRankRow(b, i+1, hosts.OwnerPageURL(row.username), row.username, userMetricCell(row, metric))
 	}
 	b.WriteString(`</div></div>`)
 }
@@ -333,7 +333,7 @@ type newUser struct {
 
 // renderNewUsersCard writes the "New users" card. It has no metric tabs: there
 // is only one order that answers "who just joined".
-func renderNewUsersCard(b *strings.Builder, rows []newUser, total int) {
+func renderNewUsersCard(b *strings.Builder, hosts HostModel, rows []newUser, total int) {
 	fmt.Fprintf(b, `<div class="overview-card"><h2 class="section-title">New users<span class="card-count">%d total</span></h2><div class="rank-list">`, total)
 	if len(rows) == 0 {
 		b.WriteString(`<div class="rank-empty">No users yet.</div>`)
@@ -349,7 +349,7 @@ func renderNewUsersCard(b *strings.Builder, rows []newUser, total int) {
 		if row.disabled {
 			sub += " · disabled"
 		}
-		writeRankRow(b, i+1, userPublicPath(row.username), row.username, rankCell{
+		writeRankRow(b, i+1, hosts.OwnerPageURL(row.username), row.username, rankCell{
 			valueHTML: localTimeHTML(row.joined, "date"),
 			sub:       sub,
 		})

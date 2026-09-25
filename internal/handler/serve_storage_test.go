@@ -1,35 +1,29 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/vsriram/simple-host/internal/storage"
 )
 
-func TestSiteFileHandlerServesAuthorizedRootedSite(t *testing.T) {
-	store, _ := newServeTestStorage(t)
-	if err := store.WriteFiles("alice", "demo", 1, map[string][]byte{
-		"index.html":        []byte("site home"),
-		"downloads/app.dmg": []byte("download"),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SetCurrentVersion("alice", "demo", 1); err != nil {
-		t.Fatal(err)
-	}
+const serveTestSiteID = "0a0a0a0a-0000-4000-8000-000000000001"
+
+func TestSiteFileHandlerServesTheLiveVersion(t *testing.T) {
+	store := newTestStore(t)
+	store.publish(t, "alice", "demo", serveTestSiteID, 1, map[string]string{
+		"index.html":        "site home",
+		"downloads/app.dmg": "download",
+	})
 
 	mux := newSiteFileTestMux(store)
 	for _, test := range []struct {
 		path string
 		body string
 	}{
-		{path: "/sites/alice/demo/", body: "site home"},
-		{path: "/sites/alice/demo/downloads/app.dmg", body: "download"},
+		{path: "/demo/", body: "site home"},
+		{path: "/demo/downloads/app.dmg", body: "download"},
 	} {
 		response := serveRequest(mux, test.path)
 		if response.Code != http.StatusOK {
@@ -41,98 +35,58 @@ func TestSiteFileHandlerServesAuthorizedRootedSite(t *testing.T) {
 	}
 }
 
-func TestSiteFileHandlerRejectsEncodedIdentityTraversal(t *testing.T) {
-	store, _ := newServeTestStorage(t)
-	if err := store.WriteFiles("alice", "demo", 1, map[string][]byte{"index.html": []byte("site home")}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SetCurrentVersion("alice", "demo", 1); err != nil {
-		t.Fatal(err)
-	}
+// The database decides what is live: a deploy on another replica is served
+// here as soon as the index says so, and a rollback likewise.
+func TestSiteFileHandlerFollowsTheIndex(t *testing.T) {
+	store := newTestStore(t)
+	store.publish(t, "alice", "demo", serveTestSiteID, 1, map[string]string{"index.html": "first"})
 	mux := newSiteFileTestMux(store)
-	for _, requestPath := range []string{
-		"/sites/alice/%2e%2e/",
-		"/sites/alice%2Fother/demo/",
-		"/sites/alice/demo%2Fother/",
-		"/sites/alice/demo%0A/",
-		"/sites/alice%09/demo/",
-	} {
-		response := serveRequest(mux, requestPath)
-		if response.Code != http.StatusNotFound {
-			t.Errorf("GET %s status = %d, want 404", requestPath, response.Code)
-		}
+	if body := serveRequest(mux, "/demo/").Body.String(); !strings.Contains(body, "first") {
+		t.Fatalf("v1 body = %q", body)
+	}
+	store.publish(t, "alice", "demo", serveTestSiteID, 2, map[string]string{"index.html": "second"})
+	if body := serveRequest(mux, "/demo/").Body.String(); !strings.Contains(body, "second") {
+		t.Fatalf("v2 body = %q", body)
+	}
+	store.index.set("alice", "demo", serveTestSiteID, 1)
+	if body := serveRequest(mux, "/demo/").Body.String(); !strings.Contains(body, "first") {
+		t.Fatalf("rolled-back body = %q", body)
+	}
+	store.index.remove("alice", "demo")
+	if response := serveRequest(mux, "/demo/"); response.Code != http.StatusNotFound {
+		t.Fatalf("deleted site status = %d, want 404", response.Code)
 	}
 }
 
-func TestSiteFileHandlerCannotReadOutsideVersionRoot(t *testing.T) {
-	store, base := newServeTestStorage(t)
-	outside := t.TempDir()
-	outsideFile := filepath.Join(outside, "secret.txt")
-	if err := os.WriteFile(outsideFile, []byte("outside-secret"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.WriteFiles("alice", "demo", 1, map[string][]byte{"index.html": []byte("site home")}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SetCurrentVersion("alice", "demo", 1); err != nil {
-		t.Fatal(err)
-	}
-	versionDir := filepath.Join(base, "alice", "demo", "v1")
-	relativeTarget, err := filepath.Rel(versionDir, outsideFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(relativeTarget, filepath.Join(versionDir, "escape.txt")); err != nil {
-		t.Fatal(err)
-	}
-	mux := newSiteFileTestMux(store)
-	for _, requestPath := range []string{
-		"/sites/alice/demo/escape.txt",
-		"/sites/alice/demo/%2e%2e/%2e%2e/secret.txt",
-	} {
-		response := serveRequest(mux, requestPath)
-		if strings.Contains(response.Body.String(), "outside-secret") {
-			t.Fatalf("GET %s exposed outside file", requestPath)
-		}
-		if response.Code == http.StatusOK {
-			t.Fatalf("GET %s unexpectedly succeeded", requestPath)
-		}
-	}
-}
-
-func TestSiteFileHandlerRejectsUnsafeCurrentTarget(t *testing.T) {
-	store, base := newServeTestStorage(t)
-	if err := store.WriteFiles("alice", "demo", 1, map[string][]byte{"index.html": []byte("demo")}); err != nil {
-		t.Fatal(err)
-	}
-	other := filepath.Join(base, "alice", "other", "v1")
-	if err := os.MkdirAll(other, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(other, "index.html"), []byte("sibling-secret"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink("../other/v1", filepath.Join(base, "alice", "demo", "current")); err != nil {
-		t.Fatal(err)
-	}
-	response := serveRequest(newSiteFileTestMux(store), "/sites/alice/demo/")
-	if response.Code != http.StatusNotFound {
+func TestSiteFileHandlerLiveVersionMissingFromBucketIs404(t *testing.T) {
+	store := newTestStore(t)
+	store.index.set("alice", "demo", serveTestSiteID, 3)
+	if response := serveRequest(newSiteFileTestMux(store), "/demo/"); response.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", response.Code)
 	}
-	if strings.Contains(response.Body.String(), "sibling-secret") {
-		t.Fatal("unsafe current target served sibling site")
+}
+
+func TestSiteFileHandlerRejectsEncodedIdentityTraversal(t *testing.T) {
+	store := newTestStore(t)
+	store.publish(t, "alice", "demo", serveTestSiteID, 1, map[string]string{"index.html": "site home"})
+	mux := newSiteFileTestMux(store)
+	for _, requestPath := range []string{
+		"/%2e%2e/",
+		"/demo%2Fother/",
+		"/demo%0A/",
+		"/demo/%2e%2e/%2e%2e/etc/passwd",
+	} {
+		response := serveRequest(mux, requestPath)
+		if response.Code == http.StatusOK {
+			t.Errorf("GET %s status = %d, want not found", requestPath, response.Code)
+		}
 	}
 }
 
 func TestSiteFileHandlerDoesNotListDirectories(t *testing.T) {
-	store, _ := newServeTestStorage(t)
-	if err := store.WriteFiles("alice", "demo", 1, map[string][]byte{"assets/app.js": []byte("app")}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SetCurrentVersion("alice", "demo", 1); err != nil {
-		t.Fatal(err)
-	}
-	response := serveRequest(newSiteFileTestMux(store), "/sites/alice/demo/assets/")
+	store := newTestStore(t)
+	store.publish(t, "alice", "demo", serveTestSiteID, 1, map[string]string{"assets/app.js": "app"})
+	response := serveRequest(newSiteFileTestMux(store), "/demo/assets/")
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", response.Code)
 	}
@@ -141,30 +95,21 @@ func TestSiteFileHandlerDoesNotListDirectories(t *testing.T) {
 	}
 }
 
-func newSiteFileTestMux(store *storage.DiskStorage) *http.ServeMux {
+// newSiteFileTestMux serves alice's sites the way the host gate does on her
+// own host: /{sitename}/..., with no host session to record.
+func newSiteFileTestMux(store *testStore) *http.ServeMux {
+	files := NewSiteFiles(store.Store, nil, CookiePolicy{}, nil, 0)
 	mux := http.NewServeMux()
-	mux.Handle("GET /sites/{user}/{sitename}/", siteFileHandler(store, nil, CookiePolicy{}, nil, 0))
+	mux.HandleFunc("GET /{sitename}/", func(w http.ResponseWriter, r *http.Request) {
+		siteName := r.PathValue("sitename")
+		files.serveSite(w, r, "alice", siteName, "/"+siteName, "", "")
+	})
 	return mux
 }
 
 func serveRequest(handler http.Handler, target string) *httptest.ResponseRecorder {
-	request := httptest.NewRequest(http.MethodGet, target, nil)
+	request := httptest.NewRequest(http.MethodGet, target, nil).WithContext(context.Background())
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	return response
-}
-
-func newServeTestStorage(t *testing.T) (*storage.DiskStorage, string) {
-	t.Helper()
-	base := t.TempDir()
-	store, err := storage.NewDiskStorage(base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := store.Close(); err != nil {
-			t.Errorf("Close: %v", err)
-		}
-	})
-	return store, base
 }

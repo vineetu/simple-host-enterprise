@@ -126,7 +126,7 @@ exercises `GET /api/admin/export` and `simple-host prune -dry-run` — see
 section 8.
 
 Tear down with `make local-down`, which deletes everything the overlay
-created, PVCs included — local data is disposable by design.
+created, the Postgres and MinIO volumes included — local data is disposable by design.
 
 ## 3. Local cluster: minikube (alternate)
 
@@ -215,7 +215,8 @@ supply.
 
    `config.env` needs your base URL, your OIDC provider's issuer and client
    ID, your admin email list and allowed domain(s), your database host and
-   name, and your bucket's endpoint, region, bucket name, and prefix.
+   name, and your bucket's endpoint, region, bucket name, and prefix (turn
+   on the bucket's versioning first: `docs/storage.md`).
    `secrets.env` needs the OIDC client secret, the session signing key, the
    database owner and application-role passwords, and (if your bucket does
    not use workload-identity credentials) an access key pair. Both files
@@ -454,36 +455,13 @@ nothing to wire until one exists.
 
 ## 9. Backup and restore
 
-Built and verified (Phase 5). Every uploaded version is already copied to
-your configured bucket with a server-side-encryption header
-(`BACKUP_SSE`, default `AES256`); set `BACKUP_ENVELOPE_KEY` for an
-additional client-side envelope that makes the objects unreadable to
-anyone who can read the bucket but not your Kubernetes Secrets.
-
-Restore a version into a (typically new) site, from inside a running pod:
-
-```sh
-kubectl -n simple-host exec deploy/simple-host -- \
-  simple-host restore -owner <owner> -site <site> -version <N> \
-  -target-owner <owner> -target-site <site>-restored \
-  -assets -set-current=true
-```
-
-`-assets` also restores that site's `assets/` directory from the bucket;
-omit `-target-owner`/`-target-site` to restore in place over the original
-site (only do this deliberately). `-set-current=false` restores the
-version's files without pointing the site's `current` symlink at them,
-useful for inspecting a restore before promoting it.
-
-Assets are synced to the bucket on a schedule by the `backup-assets`
-CronJob (`deploy/base/backup-assets-cronjob.yaml`); run it by hand with:
-
-```sh
-kubectl -n simple-host exec deploy/simple-host -- simple-host backup-assets -dry-run
-```
-
-to see which sites it would process without uploading anything, or without
-`-dry-run` to run it immediately.
+The bucket is the site store, not a copy of it: every version and asset is
+written there with a server-side-encryption header (`BACKUP_SSE`, default
+`AES256`); set `BACKUP_ENVELOPE_KEY` for an additional client-side envelope
+that makes the objects unreadable to anyone who can read the bucket but not
+your Kubernetes Secrets. Recovery comes from bucket versioning, which must be
+on. `docs/storage.md` covers the bucket setup, retention, the `restore`
+subcommand, and migrating an install that still keeps sites on a volume.
 
 **If your bucket is MinIO**, it refuses any `PutObject` carrying a
 server-side-encryption header at all — including the default `AES256` —
@@ -523,14 +501,14 @@ rollback — they are numbered and each one says what it does.
 
 ### If you use a private registry
 
-Put the pull secret on the **ServiceAccount**, not the Deployment. Three
-workloads run this image: the server, the `backup-assets` CronJob and the
-`prune` CronJob. Kubernetes applies a ServiceAccount's `imagePullSecrets` to
-every pod that uses it, so one patch covers all three.
+Put the pull secret on the **ServiceAccount**, not the Deployment. Two
+workloads run this image: the server and the `prune` CronJob. Kubernetes
+applies a ServiceAccount's `imagePullSecrets` to every pod that uses it, so
+one patch covers both.
 
-Patching only the Deployment leaves both CronJobs in `ImagePullBackOff`. The
-instance serves normally, so nothing looks wrong — but no backup is ever taken
-and no audit partition is ever dropped. This does not show up on a local
+Patching only the Deployment leaves the CronJob in `ImagePullBackOff`. The
+instance serves normally, so nothing looks wrong — but no audit partition is
+ever dropped. This does not show up on a local
 cluster, where the image is loaded into the node and never pulled at all.
 
 

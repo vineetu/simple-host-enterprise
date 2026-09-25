@@ -1,8 +1,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# Production is the byo shape with production values and the encrypting
-# storage class the install guide requires. Copy the byo .example files here
+# Production is the byo shape with production values. Copy the byo .example files here
 # as config.env / secrets.env / db-ca.crt and edit ingress-patch.yaml.
 namespace: simple-host
 
@@ -29,13 +28,3 @@ images:
 
 patches:
   - path: ingress-patch.yaml
-  - target:
-      kind: PersistentVolumeClaim
-      name: simple-host-site-data
-    patch: |
-      - op: add
-        path: /spec/storageClassName
-        value: REPLACE_WITH_AN_ENCRYPTING_STORAGE_CLASS
-      - op: replace
-        path: /spec/resources/requests/storage
-        value: 50Gi

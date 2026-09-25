@@ -152,11 +152,11 @@ func newTestHostModel(t *testing.T, publicBaseURL string) HostModel {
 }
 
 func TestVisitCookieUsesInjectedPolicy(t *testing.T) {
-	secureCookie := visitCookie(escapePathSegments("/sites/alice#ops/demo?100%")+"/", CookiePolicy{Secure: true})
-	if !secureCookie.Secure || !secureCookie.HttpOnly || secureCookie.MaxAge <= 0 || secureCookie.Path != "/sites/alice%23ops/demo%3F100%25/" {
+	secureCookie := visitCookie(escapePathSegments("/demo#ops?100%")+"/", CookiePolicy{Secure: true})
+	if !secureCookie.Secure || !secureCookie.HttpOnly || secureCookie.MaxAge <= 0 || secureCookie.Path != "/demo%23ops%3F100%25/" {
 		t.Fatalf("secure visit cookie = %+v", secureCookie)
 	}
-	localCookie := visitCookie("/sites/alice/demo/", CookiePolicy{})
+	localCookie := visitCookie("/demo/", CookiePolicy{})
 	if localCookie.Secure {
 		t.Fatalf("local visit cookie = %+v", localCookie)
 	}

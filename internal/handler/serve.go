@@ -64,20 +64,19 @@ func renderShareDialog(builder *strings.Builder) {
 	builder.WriteString(`<dialog id="shareDialog" class="share-dialog" aria-labelledby="shareDialogTitle" aria-describedby="shareDialogNote"><div class="share-dialog-shell"><header class="dialog-header"><div><div class="dialog-kicker">Site access</div><h2 id="shareDialogTitle">Share site</h2><p class="dialog-subtitle" id="shareDialogSubtitle"></p></div><button type="button" class="dialog-close" data-dialog-close aria-label="Close share dialog">&times;</button></header><div class="dialog-body"><section class="share-block" aria-labelledby="currentEditorsTitle"><h3 id="currentEditorsTitle">Current editors</h3><p class="share-help">Editors can download, deploy, and roll back this site's static files with their own API key.</p><div id="editorList" class="editor-list" aria-live="polite"></div></section><section class="share-block" aria-labelledby="addEditorsTitle"><h3 id="addEditorsTitle">Add editors</h3><p class="share-help">Choose from registered Simple Host users. You can add several people at once.</p><label class="search-label" for="editorSearch">Search usernames</label><input id="editorSearch" class="editor-search" type="search" maxlength="100" autocomplete="off" placeholder="Start typing a username"><div id="candidateList" class="candidate-list" aria-label="Registered users" aria-live="polite"></div><div id="selectedEditors" class="selected-editors" aria-label="Selected editors"></div><div class="share-footer"><p class="share-note" id="shareDialogNote">Revoking access blocks future changes and downloads. It does not undo content an editor already deployed or erase files they downloaded.</p><button type="button" id="addEditorsButton" class="btn btn-primary add-editors" disabled>Add selected</button></div></section></div></div></dialog>`)
 }
 
-// SiteFiles serves a site's current version under any URL prefix. The
-// same code answers the long path /sites/{user}/{sitename}/... on the base
-// host and the short path /{sitename}/... on the owner's own host; only the
-// prefix differs, and the visit cookie, prefix stripping, and download-path
-// trimming all follow it.
+// SiteFiles serves a site's current version under a URL prefix: /{sitename}
+// on the owner's own host, or the root of a restricted site's own host. The
+// visit cookie, prefix stripping, and download-path trimming all follow the
+// prefix.
 //
 // Build one per process and hand it to both RegisterServeRoutes and
 // NewHostGate: it owns the download recorder's worker pool, and two of them
 // would double the write concurrency against the database.
 type SiteFiles struct {
-	diskStorage *storage.DiskStorage
-	database    *sql.DB
-	cookies     CookiePolicy
-	downloads   *fileDownloadRecorder
+	store     *storage.Store
+	database  *sql.DB
+	cookies   CookiePolicy
+	downloads *fileDownloadRecorder
 	// signingKeys and sessionIdle let the owner-detection paths (the
 	// per-user listing page, self-traffic exclusion) verify the session
 	// cookie the same way internal/auth.Middleware does, without importing
@@ -96,9 +95,9 @@ type SiteFiles struct {
 }
 
 // NewSiteFiles builds the shared site file server.
-func NewSiteFiles(diskStorage *storage.DiskStorage, database *sql.DB, cookies CookiePolicy, signingKeys []auth.SigningKey, sessionIdle time.Duration) *SiteFiles {
+func NewSiteFiles(store *storage.Store, database *sql.DB, cookies CookiePolicy, signingKeys []auth.SigningKey, sessionIdle time.Duration) *SiteFiles {
 	return &SiteFiles{
-		diskStorage: diskStorage,
+		store:       store,
 		database:    database,
 		cookies:     cookies,
 		downloads:   newFileDownloadRecorder(database),
@@ -115,40 +114,27 @@ func (s *SiteFiles) WithAccessWriter(access *audit.AccessWriter) *SiteFiles {
 	return s
 }
 
-func siteFileHandler(diskStorage *storage.DiskStorage, database *sql.DB, cookies CookiePolicy, signingKeys []auth.SigningKey, sessionIdle time.Duration) http.Handler {
-	return siteFileHandlerFor(NewSiteFiles(diskStorage, database, cookies, signingKeys, sessionIdle))
-}
-
-// siteFileHandlerFor serves the long path through an existing SiteFiles. Not
-// mounted on any route in this repository — the base host serves only the
-// control plane (design.md 7.1) — but kept as a direct entry point for
-// package tests that exercise serveSite without a host session, hence the
-// empty userID/sessionID: this path predates design.md 8.1's host-session
-// requirement and has no session to report.
-func siteFileHandlerFor(server *SiteFiles) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user := r.PathValue("user")
-		siteName := r.PathValue("sitename")
-		server.serveSite(w, r, user, siteName, "/sites/"+user+"/"+siteName, "", "")
-	})
-}
-
 // serveSite serves the current version of user's site beneath prefix, which is
 // the decoded URL path the site is mounted at with no trailing slash, for
-// example "/sites/alice/my-site" or "/my-site". The request path must begin
+// example "/my-site". The request path must begin
 // with prefix followed by "/". userID and sessionID are the host session the
 // gate already authenticated the request against (design.md 8.1's
 // requireHostSession) — recorded on the access_log row this method writes
-// for every response, including the owner's and editors' own; empty when the
-// caller has none (siteFileHandlerFor's package-test entry point only, since
-// every mounted route requires a host session before reaching here).
+// for every response, including the owner's and editors' own. Every mounted
+// route requires a host session before reaching here.
 func (s *SiteFiles) serveSite(w http.ResponseWriter, r *http.Request, user, siteName, prefix, userID, sessionID string) {
 	if !safepath.IsSegment(user) || !safepath.IsSegment(siteName) {
 		http.NotFound(w, r)
 		return
 	}
-	root, err := s.diskStorage.OpenCurrent(user, siteName)
+	// The database says which version is live; the cache serves its files.
+	root, err := s.store.OpenCurrent(r.Context(), user, siteName)
 	if err != nil {
+		// A missing site is ordinary; anything else, including a live
+		// version whose object is missing from the bucket, is worth a line.
+		if err != fs.ErrNotExist {
+			log.Printf("open current %s/%s: %v", user, siteName, err)
+		}
 		http.NotFound(w, r)
 		return
 	}
@@ -328,7 +314,7 @@ func hasVisitCookie(r *http.Request) bool {
 
 // visitCookie marks a browser as having visited the site mounted at path,
 // which is the encoded prefix the site is served under, with its trailing
-// slash ("/sites/alice/my-site/" or "/my-site/").
+// slash ("/my-site/").
 func visitCookie(path string, cookies CookiePolicy) *http.Cookie {
 	return &http.Cookie{
 		Name:     siteVisitCookieName,
@@ -340,10 +326,6 @@ func visitCookie(path string, cookies CookiePolicy) *http.Cookie {
 		SameSite: http.SameSiteLaxMode,
 		Secure:   cookies.Secure,
 	}
-}
-
-func userListingFormAction(username, endpoint string) string {
-	return html.EscapeString(userPublicPath(username) + endpoint)
 }
 
 func analyticsDaysForRequest(r *http.Request, allowSelection bool) int {
@@ -431,40 +413,6 @@ func renderAnalyticsRangeSelectorWith(builder *strings.Builder, action string, d
 			html.EscapeString(name), html.EscapeString(extra[name]))
 	}
 	builder.WriteString(`<button type="submit">Apply</button></form>`)
-}
-
-func renderUserAnalyticsRangeSelector(builder *strings.Builder, username string, days int, detailed bool) {
-	if !detailed {
-		return
-	}
-	renderAnalyticsRangeSelector(builder, userPublicPath(username), days)
-}
-
-func loadUserListingAnalytics(r *http.Request, database *sql.DB, sites []dbstore.Site, days int) (map[string]dbstore.SiteAnalyticsSummary, map[string][]dbstore.SiteAnalyticsDay) {
-	analyticsBySiteID := make(map[string]dbstore.SiteAnalyticsSummary)
-	seriesBySiteID := make(map[string][]dbstore.SiteAnalyticsDay)
-	if database == nil {
-		return analyticsBySiteID, seriesBySiteID
-	}
-
-	siteIDs := make([]string, 0, len(sites))
-	for _, site := range sites {
-		siteIDs = append(siteIDs, site.ID)
-	}
-
-	analyticsBySiteID, err := dbstore.ListSiteAnalyticsSummariesForSites(r.Context(), database, days, siteIDs)
-	if err != nil {
-		log.Printf("load listing analytics: %v", err)
-		return make(map[string]dbstore.SiteAnalyticsSummary), seriesBySiteID
-	}
-
-	seriesBySiteID, err = dbstore.ListSiteAnalyticsDailySeriesForSites(r.Context(), database, days, siteIDs)
-	if err != nil {
-		log.Printf("load listing analytics series: %v", err)
-		return analyticsBySiteID, make(map[string][]dbstore.SiteAnalyticsDay)
-	}
-
-	return analyticsBySiteID, seriesBySiteID
 }
 
 func normalizeAnalyticsSeries(rows []dbstore.SiteAnalyticsDay, days int) []dbstore.SiteAnalyticsDay {

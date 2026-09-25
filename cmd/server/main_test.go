@@ -199,7 +199,7 @@ func TestApplicationResourcesStopsAndJoinsAllWorkersBeforeClosingDependencies(t 
 				},
 			},
 		},
-		disk:                   recordingCloser{name: "disk", events: &events},
+		store:                  recordingCloser{name: "store", events: &events},
 		database:               recordingCloser{name: "database", events: &events},
 		workersShutdownTimeout: time.Second,
 	}
@@ -207,7 +207,7 @@ func TestApplicationResourcesStopsAndJoinsAllWorkersBeforeClosingDependencies(t 
 	if err := resources.close(); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"indexer-stop", "pruner-stop", "indexer-wait", "pruner-wait", "disk-close", "database-close"}
+	want := []string{"indexer-stop", "pruner-stop", "indexer-wait", "pruner-wait", "store-close", "database-close"}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("lifecycle order = %v, want %v", events, want)
 	}
@@ -233,7 +233,7 @@ func TestApplicationResourcesRefusesToCloseDependenciesBeforeJoin(t *testing.T) 
 				},
 			},
 		},
-		disk:                   recordingCloser{name: "disk", events: &events},
+		store:                  recordingCloser{name: "store", events: &events},
 		database:               recordingCloser{name: "database", events: &events},
 		workersShutdownTimeout: 10 * time.Millisecond,
 	}

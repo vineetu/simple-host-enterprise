@@ -34,23 +34,6 @@ func TestDeriveUsernameRejectsUnsafeFilesystemSegments(t *testing.T) {
 	}
 }
 
-func TestSitePublicPathEscapesEachSegment(t *testing.T) {
-	got := sitePublicPath("two words", "report#one?100%")
-	want := "/sites/two%20words/report%23one%3F100%25/"
-	if got != want {
-		t.Fatalf("sitePublicPath = %q, want %q", got, want)
-	}
-}
-
-func TestUserPublicPathAndListingActionEscapeSegments(t *testing.T) {
-	if got, want := userPublicPath("two words#100%"), "/sites/two%20words%23100%25/"; got != want {
-		t.Fatalf("userPublicPath = %q, want %q", got, want)
-	}
-	if got, want := userListingFormAction("alice&ops", "sign-in"), "/sites/alice&amp;ops/sign-in"; got != want {
-		t.Fatalf("userListingFormAction = %q, want %q", got, want)
-	}
-}
-
 // redirectWithTrailingSlash (the short-path redirect the host gate calls
 // directly) is exercised by internal/handler/host_gate_test.go's
 // TestHostGateRouting; the long-path redirect this test once covered

@@ -1,27 +1,22 @@
 package storage
 
 import (
+	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"mime"
 	"net/http"
 	"os"
 	"strings"
-	"time"
+	"sync"
 
-	"github.com/vsriram/simple-host/internal/safepath"
+	db "github.com/vsriram/simple-host/internal/db"
 )
-
-// assetsDirName is the fixed subdirectory, sibling to every vN/, that holds
-// a site's uploaded assets (design.md 7.3): <SITE_DIR>/<owner>/<site>/assets/<id>.
-// It sits outside every version, so it survives deploys and rollbacks, and
-// Phase 5's backup/restore already expects exactly this layout
-// (internal/storage/backup.go's assetsObjectPrefix, restore.go's
-// RestoreAssets) — this file must not change it.
-const assetsDirName = "assets"
 
 // assetIDHeadPeek is how many leading bytes CreateAsset samples to sniff a
 // content type. It never affects site content, so 512 (net/http's own
@@ -34,9 +29,9 @@ var (
 	// stream did.
 	ErrAssetTooLarge = errors.New("asset exceeds the per-file size limit")
 	// ErrAssetQuotaExceeded is returned when accepting the upload would put
-	// the site's live asset count or total bytes over limits.MaxSiteCount or
-	// limits.MaxSiteBytes.
-	ErrAssetQuotaExceeded = errors.New("site asset quota exceeded")
+	// the site's live asset count or total bytes over its limits. The check
+	// is the database's (db.CreateAssetWithinQuota), so this is that error.
+	ErrAssetQuotaExceeded = db.ErrAssetQuotaExceeded
 	// ErrAssetTypeNotAllowed is returned when the sniffed content does not
 	// classify into the allowlist: design.md 7.3's image/*, video/*,
 	// audio/*, application/pdf, application/json, text/csv, text/plain,
@@ -49,8 +44,8 @@ var (
 	// still sniffs as text/html. An executable and everything else Go's
 	// sniffer names specifically (and does not appear above) is refused.
 	ErrAssetTypeNotAllowed = errors.New("asset content type is not allowed")
-	// ErrAssetNotFound is returned by OpenAsset and DeleteAsset when the id
-	// does not name a regular file under the site's assets directory.
+	// ErrAssetNotFound is returned by OpenAsset when the id is malformed or
+	// names no object.
 	ErrAssetNotFound = errors.New("asset not found")
 )
 
@@ -95,132 +90,6 @@ type StoredAsset struct {
 	Size        int64
 	SHA256      [sha256.Size]byte
 	Inline      bool
-}
-
-// AssetFileInfo is one entry from a raw directory walk of a site's assets,
-// independent of whatever the database's site_assets table believes. It
-// carries only what the filesystem itself knows: the id (the filename),
-// its size, and its modification time.
-type AssetFileInfo struct {
-	ID      string
-	Size    int64
-	ModTime time.Time
-}
-
-// CreateAsset validates, sniffs, and streams one upload to
-// <site>/assets/<newly-minted-id>, atomically: nothing under assetsDirName
-// is visible under a half-written name, and nothing is written at all if
-// any check fails. The site must already exist (a site is created by its
-// first WriteFiles call); CreateAsset does not create one.
-//
-// declaredSize is the caller's best guess at the upload's length (e.g. a
-// multipart part's Content-Length) and is used only for an early, cheap
-// quota rejection before any bytes are read; it is never trusted for the
-// actual size or the per-file cap, both of which are enforced against the
-// bytes actually read. Pass 0 if unknown.
-//
-// The quota check (MaxSiteCount, MaxSiteBytes) is computed by walking the
-// site's assets directory under the same site lock CreateAsset writes
-// under, not by asking a caller-supplied count. This makes it authoritative
-// against whatever is actually on disk regardless of what any database
-// row believes, at the cost of an O(files) directory read per upload —
-// acceptable at the counts design.md 7.3 allows per site (5,000).
-func (s *DiskStorage) CreateAsset(user, siteName, declaredContentType string, source io.Reader, declaredSize int64, limits AssetLimits) (StoredAsset, error) {
-	if err := validateIdentity(user, siteName); err != nil {
-		return StoredAsset{}, err
-	}
-	if err := limits.validate(); err != nil {
-		return StoredAsset{}, err
-	}
-	if source == nil {
-		return StoredAsset{}, fmt.Errorf("asset source is nil")
-	}
-
-	s.lifecycle.RLock()
-	defer s.lifecycle.RUnlock()
-	mutation := s.siteLock(user, siteName)
-	mutation.Lock()
-	defer mutation.Unlock()
-
-	siteRoot, err := s.openSite(user, siteName, false)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return StoredAsset{}, fmt.Errorf("site does not exist")
-		}
-		return StoredAsset{}, fmt.Errorf("open site: %w", err)
-	}
-	defer siteRoot.Close()
-
-	assetsRoot, err := openRealDir(siteRoot, assetsDirName, true)
-	if err != nil {
-		return StoredAsset{}, fmt.Errorf("open assets directory: %w", err)
-	}
-	defer assetsRoot.Close()
-
-	usage, err := assetUsageOnDisk(assetsRoot)
-	if err != nil {
-		return StoredAsset{}, err
-	}
-	if usage.count+1 > limits.MaxSiteCount {
-		return StoredAsset{}, ErrAssetQuotaExceeded
-	}
-	if declaredSize > 0 {
-		if declaredSize > limits.MaxFileBytes {
-			return StoredAsset{}, ErrAssetTooLarge
-		}
-		if usage.bytes+declaredSize > limits.MaxSiteBytes {
-			return StoredAsset{}, ErrAssetQuotaExceeded
-		}
-	}
-
-	tempName, err := uniqueName(".tmp-asset-")
-	if err != nil {
-		return StoredAsset{}, err
-	}
-	file, err := assetsRoot.OpenFile(tempName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if err != nil {
-		return StoredAsset{}, fmt.Errorf("create asset temp file: %w", err)
-	}
-	published := false
-	defer func() {
-		if !published {
-			_ = assetsRoot.Remove(tempName)
-		}
-	}()
-
-	written, storedType, sum, err := writeAssetContent(file, source, declaredContentType, limits.MaxFileBytes)
-	closeErr := file.Close()
-	if err != nil {
-		return StoredAsset{}, err
-	}
-	if closeErr != nil {
-		return StoredAsset{}, fmt.Errorf("close asset temp file: %w", closeErr)
-	}
-
-	// Authoritative post-write checks: declaredSize above was only ever an
-	// optimistic early exit, and the site-bytes check has to happen again
-	// here regardless of whether that branch ran, against what was actually
-	// written.
-	if usage.bytes+written > limits.MaxSiteBytes {
-		return StoredAsset{}, ErrAssetQuotaExceeded
-	}
-
-	id, err := allocateAssetID(assetsRoot)
-	if err != nil {
-		return StoredAsset{}, err
-	}
-	if err := assetsRoot.Rename(tempName, id); err != nil {
-		return StoredAsset{}, fmt.Errorf("publish asset %q: %w", id, err)
-	}
-	published = true
-
-	return StoredAsset{
-		ID:          id,
-		ContentType: storedType,
-		Size:        written,
-		SHA256:      sum,
-		Inline:      isInlineContentType(storedType),
-	}, nil
 }
 
 // writeAssetContent sniffs the first assetIDHeadPeek bytes of source,
@@ -340,28 +209,6 @@ func isInlineContentType(contentType string) bool {
 	return strings.HasPrefix(base, "image/") || strings.HasPrefix(base, "video/") || strings.HasPrefix(base, "audio/") || base == "application/pdf"
 }
 
-// allocateAssetID mints a fresh, collision-checked id: a random,
-// RFC 4122-shaped v4 UUID string. It is generated here (not left to the
-// database's own DEFAULT gen_random_uuid()) so the same string names the
-// on-disk file and the site_assets row the caller inserts afterward — the
-// canonical hyphenated form round-trips unchanged through Postgres's uuid
-// type, which a plain hex string would not (Postgres would return it
-// re-hyphenated on the next read, no longer matching the filename).
-func allocateAssetID(assetsRoot *os.Root) (string, error) {
-	for attempt := 0; attempt < 8; attempt++ {
-		candidate, err := newAssetID()
-		if err != nil {
-			return "", err
-		}
-		if _, statErr := assetsRoot.Lstat(candidate); errors.Is(statErr, os.ErrNotExist) {
-			return candidate, nil
-		} else if statErr != nil {
-			return "", fmt.Errorf("inspect asset id %q: %w", candidate, statErr)
-		}
-	}
-	return "", fmt.Errorf("could not allocate a unique asset id")
-}
-
 func newAssetID() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -372,203 +219,117 @@ func newAssetID() (string, error) {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
 }
 
-// OpenAsset opens one asset's raw bytes for reading. It does not hold any
-// lock for the lifetime of the returned ReadCloser — matching how the rest
-// of this package serves file content — so a concurrent DeleteAsset can
-// unlink the file while a read is in flight. On the POSIX filesystem this
-// package targets, that leaves the open file descriptor perfectly
-// readable until Close; the caller only ever sees the delete on its next,
-// separate call.
-func (s *DiskStorage) OpenAsset(user, siteName, id string) (io.ReadCloser, os.FileInfo, error) {
-	if err := validateIdentity(user, siteName); err != nil {
-		return nil, nil, err
+// CreateAsset validates, sniffs and uploads one asset under a newly minted
+// id, and returns what it stored. It enforces the per-file cap and the type
+// allowlist against the bytes actually read. The per-site quota is the
+// caller's to enforce, in the transaction that records the asset row
+// (db.CreateAssetWithinQuota), because only the database sees every replica's
+// uploads; on a quota refusal the caller deletes the object again.
+func (s *Store) CreateAsset(ctx context.Context, siteID, declaredContentType string, source io.Reader, limits AssetLimits) (StoredAsset, error) {
+	if err := limits.validate(); err != nil {
+		return StoredAsset{}, err
 	}
-	if err := safepath.ValidateSegment(id); err != nil {
-		return nil, nil, ErrAssetNotFound
+	if source == nil {
+		return StoredAsset{}, fmt.Errorf("asset source is nil")
 	}
-
-	s.lifecycle.RLock()
-	defer s.lifecycle.RUnlock()
-	lock := s.siteLock(user, siteName)
-	lock.RLock()
-	defer lock.RUnlock()
-
-	siteRoot, err := s.openSite(user, siteName, false)
+	if _, err := SitePrefix(siteID); err != nil {
+		return StoredAsset{}, err
+	}
+	var buffer bytes.Buffer
+	written, storedType, sum, err := writeAssetContent(&buffer, source, declaredContentType, limits.MaxFileBytes)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil, ErrAssetNotFound
-		}
-		return nil, nil, fmt.Errorf("open site: %w", err)
+		return StoredAsset{}, err
 	}
-	defer siteRoot.Close()
-
-	assetsRoot, err := openRealDir(siteRoot, assetsDirName, false)
+	id, err := newAssetID()
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil, ErrAssetNotFound
-		}
-		return nil, nil, fmt.Errorf("open assets directory: %w", err)
+		return StoredAsset{}, err
 	}
-	defer assetsRoot.Close()
-
-	if err := requireRealFile(assetsRoot, id); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil, ErrAssetNotFound
-		}
-		return nil, nil, fmt.Errorf("inspect asset %q: %w", id, err)
-	}
-	file, err := assetsRoot.Open(id)
+	key, err := assetKey(siteID, id)
 	if err != nil {
-		return nil, nil, fmt.Errorf("open asset %q: %w", id, err)
+		return StoredAsset{}, err
 	}
-	info, err := file.Stat()
-	if err != nil {
-		_ = file.Close()
-		return nil, nil, fmt.Errorf("stat asset %q: %w", id, err)
+	if err := s.objects.Put(ctx, key, buffer.Bytes(), storedType); err != nil {
+		return StoredAsset{}, err
 	}
-	return file, info, nil
+	return StoredAsset{
+		ID:          id,
+		ContentType: storedType,
+		Size:        written,
+		SHA256:      sum,
+		Inline:      isInlineContentType(storedType),
+	}, nil
 }
 
-// DeleteAsset removes one asset's on-disk bytes. It does not touch the
-// database's site_assets row — the caller is expected to pair this with
-// db.SoftDeleteAsset (or call it first: freeing disk space before the
-// audit-trail row disappears from listings is the safer order on a
-// partial failure, since a listed asset whose file is already gone is
-// simply a broken link, while a file that outlives its row leaks quota
-// forever).
-func (s *DiskStorage) DeleteAsset(user, siteName, id string) error {
-	if err := validateIdentity(user, siteName); err != nil {
-		return err
-	}
-	if err := safepath.ValidateSegment(id); err != nil {
-		return ErrAssetNotFound
-	}
-
-	s.lifecycle.RLock()
-	defer s.lifecycle.RUnlock()
-	lock := s.siteLock(user, siteName)
-	lock.Lock()
-	defer lock.Unlock()
-
-	siteRoot, err := s.openSite(user, siteName, false)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return ErrAssetNotFound
-		}
-		return fmt.Errorf("open site: %w", err)
-	}
-	defer siteRoot.Close()
-
-	assetsRoot, err := openRealDir(siteRoot, assetsDirName, false)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return ErrAssetNotFound
-		}
-		return fmt.Errorf("open assets directory: %w", err)
-	}
-	defer assetsRoot.Close()
-
-	if err := requireRealFile(assetsRoot, id); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return ErrAssetNotFound
-		}
-		return fmt.Errorf("inspect asset %q: %w", id, err)
-	}
-	if err := assetsRoot.Remove(id); err != nil {
-		return fmt.Errorf("delete asset %q: %w", id, err)
-	}
-	return nil
+// AssetLease is one asset's bytes, pinned in the local cache until Close.
+// File is seekable, so the caller can answer Range requests from it.
+type AssetLease struct {
+	File    *os.File
+	release func()
+	once    sync.Once
+	err     error
 }
 
-// ListAssets walks a site's assets directory directly, independent of
-// whatever the database's site_assets table believes. A site with no
-// assets directory yet (nothing uploaded) returns an empty list, not an
-// error.
-func (s *DiskStorage) ListAssets(user, siteName string) ([]AssetFileInfo, error) {
-	if err := validateIdentity(user, siteName); err != nil {
+func (l *AssetLease) Close() error {
+	l.once.Do(func() {
+		l.err = l.File.Close()
+		l.release()
+	})
+	return l.err
+}
+
+// OpenAsset returns one asset's bytes, fetching it into the cache on a miss.
+// maxBytes bounds the fetch (the configured per-file cap). The caller must
+// already have found the live asset row: a deleted asset's object may still
+// be cached here.
+func (s *Store) OpenAsset(ctx context.Context, siteID, id string, maxBytes int64) (*AssetLease, error) {
+	key, err := assetKey(siteID, id)
+	if err != nil {
 		return nil, err
 	}
-
-	s.lifecycle.RLock()
-	defer s.lifecycle.RUnlock()
-	lock := s.siteLock(user, siteName)
-	lock.RLock()
-	defer lock.RUnlock()
-
-	siteRoot, err := s.openSite(user, siteName, false)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
+	name := siteID + ".a." + id
+	entry, err := s.cache.acquire(ctx, name, func(ctx context.Context, temporary string) (int64, error) {
+		body, err := s.objects.Get(ctx, key, maxBytes)
+		if errors.Is(err, ErrObjectNotFound) {
+			return 0, ErrAssetNotFound
 		}
-		return nil, fmt.Errorf("open site: %w", err)
-	}
-	defer siteRoot.Close()
-
-	assetsRoot, err := openRealDir(siteRoot, assetsDirName, false)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("open assets directory: %w", err)
-	}
-	defer assetsRoot.Close()
-
-	return listAssetFiles(assetsRoot)
-}
-
-type assetUsage struct {
-	count int64
-	bytes int64
-}
-
-// assetUsageOnDisk sums assetUsage from a directory listing already open
-// under the site lock. Callers already holding assetsRoot use this
-// directly instead of ListAssets, which would re-derive and re-open it.
-func assetUsageOnDisk(assetsRoot *os.Root) (assetUsage, error) {
-	files, err := listAssetFiles(assetsRoot)
-	if err != nil {
-		return assetUsage{}, err
-	}
-	var usage assetUsage
-	for _, f := range files {
-		usage.count++
-		usage.bytes += f.Size
-	}
-	return usage, nil
-}
-
-// listAssetFiles lists the regular, non-hidden files directly inside
-// assetsRoot. Uploads-in-progress stage under a "." prefixed temp name
-// (writeAssetContent's tempName) and are skipped, the same way any other
-// leftover dotfile would be.
-func listAssetFiles(assetsRoot *os.Root) ([]AssetFileInfo, error) {
-	directory, err := assetsRoot.Open(".")
-	if err != nil {
-		return nil, fmt.Errorf("open assets directory: %w", err)
-	}
-	entries, readErr := directory.ReadDir(-1)
-	closeErr := directory.Close()
-	if readErr != nil {
-		return nil, fmt.Errorf("list assets directory: %w", readErr)
-	}
-	if closeErr != nil {
-		return nil, fmt.Errorf("close assets directory: %w", closeErr)
-	}
-
-	var files []AssetFileInfo
-	for _, entry := range entries {
-		name := entry.Name()
-		if strings.HasPrefix(name, ".") {
-			continue
-		}
-		info, err := entry.Info()
 		if err != nil {
-			return nil, fmt.Errorf("stat asset %q: %w", name, err)
+			return 0, err
 		}
-		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-			continue
+		file, err := s.cache.root.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			return 0, err
 		}
-		files = append(files, AssetFileInfo{ID: name, Size: info.Size(), ModTime: info.ModTime()})
+		_, writeErr := file.Write(body)
+		closeErr := file.Close()
+		if writeErr != nil {
+			return 0, writeErr
+		}
+		if closeErr != nil {
+			return 0, closeErr
+		}
+		return int64(len(body)) + cacheBlockOverhead, nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	return files, nil
+	file, err := s.cache.root.Open(name)
+	if err != nil {
+		s.cache.release(entry)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, ErrAssetNotFound
+		}
+		return nil, err
+	}
+	return &AssetLease{File: file, release: func() { s.cache.release(entry) }}, nil
+}
+
+// DeleteAsset removes one asset's object. A missing object is not an error.
+// A copy still in some replica's cache is unreachable once the row is
+// soft-deleted, because serving looks the row up first.
+func (s *Store) DeleteAsset(ctx context.Context, siteID, id string) error {
+	key, err := assetKey(siteID, id)
+	if err != nil {
+		return err
+	}
+	return s.objects.Delete(ctx, key)
 }

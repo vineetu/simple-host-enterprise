@@ -160,6 +160,18 @@ func (c *siteAPITestConn) QueryContext(_ context.Context, query string, args []d
 		}
 		return assetRows(rows), nil
 
+	case strings.Contains(normalized, "SELECT count(*), COALESCE(sum(size), 0) FROM site_assets"):
+		// Backs db.SumAssetUsage inside db.CreateAssetWithinQuota.
+		siteID := args[0].Value.(string)
+		var count, total int64
+		for _, row := range s.assets {
+			if row.siteID == siteID && !row.deleted {
+				count++
+				total += row.size
+			}
+		}
+		return &siteAPITestRows{columns: []string{"count", "sum"}, values: [][]driver.Value{{count, total}}}, nil
+
 	case strings.Contains(normalized, "FROM users") && strings.Contains(normalized, "WHERE username = $1"):
 		// Backs db.GetUserByUsername, which h.auditEvent (site_api.go) calls
 		// to resolve siteAPICall.Owner (a username) to the users.id
@@ -183,6 +195,9 @@ func (c *siteAPITestConn) ExecContext(_ context.Context, query string, args []dr
 	defer s.mu.Unlock()
 
 	switch {
+	case strings.Contains(normalized, "pg_advisory_xact_lock"):
+		return driver.RowsAffected(1), nil
+
 	case strings.Contains(normalized, "UPDATE site_assets SET deleted_at = now()"):
 		id, siteID := args[0].Value.(string), args[1].Value.(string)
 		row, ok := s.assets[id]
@@ -293,6 +308,8 @@ func twoFilePartUploadRequest(t *testing.T, filename1 string, content1 []byte, f
 	return request
 }
 
+const siteAPITestSiteID = "0a0a0a0a-0000-4000-8000-0000000000b1"
+
 func testAssetLimits() storage.AssetLimits {
 	return storage.AssetLimits{MaxFileBytes: 1 << 20, MaxSiteBytes: 10 << 20, MaxSiteCount: 100}
 }
@@ -302,12 +319,12 @@ func testAssetLimits() storage.AssetLimits {
 var testPNGBytes = append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, bytes.Repeat([]byte{0}, 32)...)
 
 func TestSiteAPICreateAssetAndServeHeaders(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "demo", "index")
 	state := &siteAPITestState{}
 	database := newSiteAPITestDB(t, state)
-	handler := NewSiteAPIHandler(database, store, testAssetLimits(), nil, testHostModel(t))
-	call := siteAPICall{Owner: "alice", SiteName: "demo", SiteID: "site-1"}
+	handler := NewSiteAPIHandler(database, store.Store, testAssetLimits(), nil, testHostModel(t))
+	call := siteAPICall{Owner: "alice", SiteName: "demo", SiteID: siteAPITestSiteID}
 
 	request := multipartUploadRequest(t, "logo.png", testPNGBytes)
 	response := httptest.NewRecorder()
@@ -381,10 +398,10 @@ func TestSiteAPICreateAssetAndServeHeaders(t *testing.T) {
 }
 
 func TestSiteAPICreateAssetRejectsDisallowedType(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "demo", "index")
-	handler := NewSiteAPIHandler(newSiteAPITestDB(t, &siteAPITestState{}), store, testAssetLimits(), nil, testHostModel(t))
-	call := siteAPICall{Owner: "alice", SiteName: "demo", SiteID: "site-1"}
+	handler := NewSiteAPIHandler(newSiteAPITestDB(t, &siteAPITestState{}), store.Store, testAssetLimits(), nil, testHostModel(t))
+	call := siteAPICall{Owner: "alice", SiteName: "demo", SiteID: siteAPITestSiteID}
 
 	request := multipartUploadRequest(t, "page.html", []byte("<html><body>hi</body></html>"))
 	response := httptest.NewRecorder()
@@ -395,10 +412,10 @@ func TestSiteAPICreateAssetRejectsDisallowedType(t *testing.T) {
 }
 
 func TestSiteAPICreateAssetRejectsMultipleFileParts(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "demo", "index")
-	handler := NewSiteAPIHandler(newSiteAPITestDB(t, &siteAPITestState{}), store, testAssetLimits(), nil, testHostModel(t))
-	call := siteAPICall{Owner: "alice", SiteName: "demo", SiteID: "site-1"}
+	handler := NewSiteAPIHandler(newSiteAPITestDB(t, &siteAPITestState{}), store.Store, testAssetLimits(), nil, testHostModel(t))
+	call := siteAPICall{Owner: "alice", SiteName: "demo", SiteID: siteAPITestSiteID}
 
 	request := twoFilePartUploadRequest(t, "logo.png", testPNGBytes, "sneaky.png", testPNGBytes)
 	response := httptest.NewRecorder()
@@ -409,12 +426,12 @@ func TestSiteAPICreateAssetRejectsMultipleFileParts(t *testing.T) {
 }
 
 func TestSiteAPIDeleteAssetRemovesFileAndRow(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "demo", "index")
 	state := &siteAPITestState{}
 	database := newSiteAPITestDB(t, state)
-	handler := NewSiteAPIHandler(database, store, testAssetLimits(), nil, testHostModel(t))
-	call := siteAPICall{Owner: "alice", SiteName: "demo", SiteID: "site-1"}
+	handler := NewSiteAPIHandler(database, store.Store, testAssetLimits(), nil, testHostModel(t))
+	call := siteAPICall{Owner: "alice", SiteName: "demo", SiteID: siteAPITestSiteID}
 
 	createResponse := httptest.NewRecorder()
 	handler.CreateAsset(createResponse, multipartUploadRequest(t, "logo.png", testPNGBytes), call)
@@ -453,13 +470,13 @@ func TestSiteAPIDeleteAssetRemovesFileAndRow(t *testing.T) {
 // now resolves Owner to its users.id first (site_api.go); this test fails
 // if that resolution is ever removed or bypassed again.
 func TestSiteAPIAuditEventResolvesOwnerUsernameToID(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "demo", "index")
 	state := &siteAPITestState{}
 	database := newSiteAPITestDB(t, state)
 	recorder := &siteAPITestRecorder{}
-	handler := NewSiteAPIHandler(database, store, testAssetLimits(), recorder, testHostModel(t))
-	call := siteAPICall{Owner: "alice", SiteName: "demo", SiteID: "site-1", ActorUserID: "user-1", ActorKind: "person"}
+	handler := NewSiteAPIHandler(database, store.Store, testAssetLimits(), recorder, testHostModel(t))
+	call := siteAPICall{Owner: "alice", SiteName: "demo", SiteID: siteAPITestSiteID, ActorUserID: "user-1", ActorKind: "person"}
 
 	response := httptest.NewRecorder()
 	handler.CreateAsset(response, multipartUploadRequest(t, "logo.png", testPNGBytes), call)
@@ -488,12 +505,12 @@ func TestSiteAPIAuditEventResolvesOwnerUsernameToID(t *testing.T) {
 // sql.ErrNoRows before PutState ever reaches h.auditEvent/RecordTx, so
 // the fake recorder here must see zero events.
 func TestSiteAPIPutStateFailureRecordsNoAudit(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	state := &siteAPITestState{} // siteExists defaults false
 	database := newSiteAPITestDB(t, state)
 	recorder := &siteAPITestRecorder{}
-	handler := NewSiteAPIHandler(database, store, testAssetLimits(), recorder, testHostModel(t))
-	call := siteAPICall{Owner: "alice", SiteName: "demo", SiteID: "site-1", ActorUserID: "user-1", ActorKind: "person"}
+	handler := NewSiteAPIHandler(database, store.Store, testAssetLimits(), recorder, testHostModel(t))
+	call := siteAPICall{Owner: "alice", SiteName: "demo", SiteID: siteAPITestSiteID, ActorUserID: "user-1", ActorKind: "person"}
 
 	request := httptest.NewRequest(http.MethodPut, "/api/sites/demo/state", strings.NewReader(`{"hello":"world"}`))
 	response := httptest.NewRecorder()
@@ -521,12 +538,12 @@ func TestSiteAPIPutStateFailureRecordsNoAudit(t *testing.T) {
 // is `*sql.Tx`'s and Postgres's own guarantee, already relied on
 // everywhere else this handler opens one.
 func TestSiteAPIPutStateReportsFailureWhenAuditRecordingFails(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	testState := &siteAPITestState{siteExists: true}
 	database := newSiteAPITestDB(t, testState)
 	recorder := &failingRecorder{}
-	handler := NewSiteAPIHandler(database, store, testAssetLimits(), recorder, testHostModel(t))
-	call := siteAPICall{Owner: "alice", SiteName: "demo", SiteID: "site-1", ActorUserID: "user-1", ActorKind: "person"}
+	handler := NewSiteAPIHandler(database, store.Store, testAssetLimits(), recorder, testHostModel(t))
+	call := siteAPICall{Owner: "alice", SiteName: "demo", SiteID: siteAPITestSiteID, ActorUserID: "user-1", ActorKind: "person"}
 
 	request := httptest.NewRequest(http.MethodPut, "/api/sites/demo/state", strings.NewReader(`{"hello":"world"}`))
 	response := httptest.NewRecorder()

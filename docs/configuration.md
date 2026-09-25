@@ -52,7 +52,8 @@ shell.
 | `SECURE_MODE` | No | `false` | Must parse as a bool. When `true`, requires `PUBLIC_BASE_URL` to be `https` and `HTTPS_REDIRECT_PORT` to differ from `PORT`. |
 | `PORT` | No | `8080` | none |
 | `HTTPS_REDIRECT_PORT` | No | `8081` | Must differ from `PORT` when `SECURE_MODE=true`. |
-| `SITE_DIR` | No | `/mnt/data/sites` | none |
+| `CACHE_DIR` | No | `/var/cache/simple-host` | none. Pod-local cache of site versions, emptied on start; the Deployment mounts an `emptyDir` here (docs/storage.md). |
+| `CACHE_MAX_BYTES` | No | `1073741824` (1 GiB) | Must parse as a positive integer. Bounds unpinned cache entries; versions being served are pinned and can exceed it, so size the volume at about 3x. |
 | `RESERVED_LABELS` | No | none (empty) | Comma-separated; extends the built-in reserved-label set (`www`, `api`, `admin`, `sites`, `mcp`, `docs`, `auth`, `login`, `mail`, `cdn`, `status`, `app`, and the rest — design 7.1, `internal/handler/names.go`) with installation-specific hostnames that must never belong to an account or a site. Checked at account and site creation, and (Phase 2) any label containing `--` anywhere is refused outright, independent of this list, since that shape is reserved for a restricted site's own hostname (`<owner>--<site>.<base>`, design 5.2a). |
 
 ## Identity (OIDC)
@@ -106,7 +107,7 @@ numbers rather than refusing to start.
 | Variable | Required | Default | Refusal it triggers when set wrong |
 |---|---|---|---|
 | `ASSET_MAX_FILE_BYTES` | No | `26214400` (25 MiB) | Must parse as a positive integer. |
-| `ASSET_MAX_SITE_BYTES` | No | `524288000` (500 MiB) | Must parse as a positive integer. Enforced by walking the site's `assets/` directory on disk at upload time, not by a stored counter, so it stays correct even if a row and its file ever drifted apart. |
+| `ASSET_MAX_SITE_BYTES` | No | `524288000` (500 MiB) | Must parse as a positive integer. Enforced against the site's live asset rows under a per-site lock, so concurrent uploads on any replica cannot both pass. |
 | `ASSET_MAX_SITE_COUNT` | No | `5000` | Must parse as a positive integer. |
 
 None of the shipped overlays (`local`, `byo`) set these; they are left at
@@ -133,7 +134,11 @@ owning role, never from the server's own connection pool.
 | `ACCESS_LOG_RETENTION_DAYS` | No | `90` | Must be a positive integer. |
 | `ACCESS_LOG_VISIBILITY` | No | `owner` | Must be `owner` or `admin`. `owner` (design 8.2's default) lets a site's owner and team members read `GET /api/access` for their own sites; `admin` refuses every non-admin caller of that route outright, regardless of ownership. Read by `handler.NewAuditHandler` (`cmd/server/main.go`) on every request; does not affect `GET /api/audit`, which is always scoped by caller identity rather than gated by this switch. |
 
-## Backup bucket (S3-compatible)
+## Site bucket (S3-compatible)
+
+The bucket is the site store: every site version and asset lives here, not on
+the pod. The variable names keep their `BACKUP_` prefix. Requirements, key
+layout and versioning: `docs/storage.md`.
 
 | Variable | Required | Default | Refusal it triggers when set wrong |
 |---|---|---|---|
@@ -144,9 +149,9 @@ owning role, never from the server's own connection pool.
 | `BACKUP_STORAGE_ACCESS_KEY_ID` | No | none | Must be set together with `BACKUP_STORAGE_SECRET_ACCESS_KEY` — exactly one of the pair is refused. Leave both unset to use the SDK's default credential chain (a platform's workload identity). |
 | `BACKUP_STORAGE_SECRET_ACCESS_KEY` | No | none | See `BACKUP_STORAGE_ACCESS_KEY_ID`. |
 | `BACKUP_STORAGE_INSECURE_ALLOWED` | No | `false` | Permits a plain-`http` `BACKUP_STORAGE_ENDPOINT`. For a local cluster where the bucket sits on the same node only; the local overlay's MinIO sets this. |
-| `BACKUP_SSE` | No | `AES256` | Must be `AES256` or `aws:kms`. `aws:kms` requires `BACKUP_SSE_KEY_ID`; `AES256` refuses it being set. Sent as `x-amz-server-side-encryption` on every backup `PutObject`. Self-hosted MinIO refuses any value here without its own `MINIO_KMS_SECRET_KEY` configured on the MinIO side — see `docs/install.md` section 9. |
+| `BACKUP_SSE` | No | `AES256` | Must be `AES256` or `aws:kms`. `aws:kms` requires `BACKUP_SSE_KEY_ID`; `AES256` refuses it being set. Sent as `x-amz-server-side-encryption` on every `PutObject`. Self-hosted MinIO refuses any value here without its own `MINIO_KMS_SECRET_KEY` configured on the MinIO side — see `docs/install.md` section 9. |
 | `BACKUP_SSE_KEY_ID` | Required with `BACKUP_SSE=aws:kms` | none | See `BACKUP_SSE`. |
-| `BACKUP_ENVELOPE_KEY` | No | none (envelope disabled) | Optional client-side envelope encryption, on top of the SSE header above (design 9.1). One or two comma-separated `<id>:<base64 32-byte key>` entries, same shape and rotation procedure as `SESSION_SIGNING_KEY`: the first wraps every new backup object, every configured key is tried to unwrap an existing one. Set in a Secret; a bucket that is later fully compromised cannot read these objects without also having this key. |
+| `BACKUP_ENVELOPE_KEY` | No | none (envelope disabled) | Optional client-side envelope encryption, on top of the SSE header above (design 9.1). One or two comma-separated `<id>:<base64 32-byte key>` entries, same shape as `SESSION_SIGNING_KEY`: the first wraps every new object, every configured key is tried to unwrap an existing one. Rotation: add the new key second, deploy, swap the order, deploy — and never remove the old key, since stored objects are long-lived and every one wrapped under it would become unreadable. Set in a Secret; a bucket that is later fully compromised cannot read these objects without also having this key. |
 
 ## Removed since the source instance
 

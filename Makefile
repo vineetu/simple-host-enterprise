@@ -246,9 +246,9 @@ preflight:
 	  case "$$img" in \
 	    ghcr.io/*|"" ) : ;; \
 	    *) echo "WARN  $$img looks like a private registry and no imagePullSecrets is set."; \
-	       echo "      Put it on the ServiceAccount, not the Deployment: three workloads pull"; \
-	       echo "      this image, and patching only the Deployment leaves both CronJobs in"; \
-	       echo "      ImagePullBackOff — backups and audit pruning silently never run.";; \
+	       echo "      Put it on the ServiceAccount, not the Deployment: two workloads pull"; \
+	       echo "      this image, and patching only the Deployment leaves the prune CronJob in"; \
+	       echo "      ImagePullBackOff — audit pruning silently never runs.";; \
 	  esac; fi; \
 	class=$$($(KUSTOMIZE) build "$(OVERLAY)" 2>/dev/null | sed -n 's/^ *ingressClassName: *//p' | tr -d '"' | head -1); \
 	if avail=$$($(INSTALL_KUBECTL) get ingressclass -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.annotations.ingressclass\.kubernetes\.io/is-default-class}{" "}{end}' 2>/dev/null); then \

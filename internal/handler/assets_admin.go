@@ -89,16 +89,11 @@ func (h *SiteHandler) deleteCollaborationAsset(w http.ResponseWriter, r *http.Re
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	// The disk delete stays outside any transaction, deliberately, and
-	// keeps its existing compensation story unchanged — the same shape and
-	// reasoning as site_api.go's own DeleteAsset (design 8.1): freeing disk
-	// space first is the safer order on a partial failure regardless of
-	// whether the database step afterward succeeds, and a stale row
-	// listing an asset whose file is already gone is recoverable, while a
-	// phantom audit-less deletion is not. What's new is that the
-	// soft-delete and its audit_events row now commit together.
-	if err := h.diskStorage.DeleteAsset(ownerUsername, siteName, id); err != nil && !errors.Is(err, storage.ErrAssetNotFound) {
-		log.Printf("delete asset file for %s/%s id=%s: %v", ownerUsername, siteName, id, err)
+	// The object delete stays outside the transaction, the same shape and
+	// reasoning as site_api.go's own DeleteAsset (design 8.1); the
+	// soft-delete and its audit_events row commit together.
+	if err := h.store.DeleteAsset(r.Context(), access.Site.ID, id); err != nil && !errors.Is(err, storage.ErrAssetNotFound) {
+		log.Printf("delete asset object for %s/%s id=%s: %v", ownerUsername, siteName, id, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}

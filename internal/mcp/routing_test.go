@@ -19,8 +19,8 @@ func appRoutes(t *testing.T) *http.ServeMux {
 	mux := http.NewServeMux()
 	passthrough := func(next http.Handler) http.Handler { return next }
 	handler.NewUserHandler(nil, nil).Register(mux, passthrough, passthrough)
-	handler.NewSiteHandler(nil, nil, nil, "", handler.HostModel{}, nil).Register(mux, passthrough, passthrough)
-	handler.NewTeamHandler(nil, nil, nil).Register(mux, passthrough, passthrough, handler.HostModel{}, "")
+	handler.NewSiteHandler(nil, nil, "", handler.HostModel{}, nil).Register(mux, passthrough, passthrough)
+	handler.NewTeamHandler(nil, nil).Register(mux, passthrough, passthrough, handler.HostModel{}, "")
 	return mux
 }
 

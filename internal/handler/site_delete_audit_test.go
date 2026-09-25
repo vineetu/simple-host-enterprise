@@ -16,7 +16,6 @@ import (
 	"github.com/vsriram/simple-host/internal/audit"
 	"github.com/vsriram/simple-host/internal/auth"
 	db "github.com/vsriram/simple-host/internal/db"
-	"github.com/vsriram/simple-host/internal/storage"
 )
 
 const (
@@ -38,6 +37,7 @@ type siteDeleteAuditState struct {
 	siteDeleted  bool
 	auditActions []string
 	auditSiteIDs []string
+	retired      []string
 }
 
 func (s *siteDeleteAuditState) query(query string, args []driver.NamedValue) (driver.Rows, error) {
@@ -80,6 +80,11 @@ func (s *siteDeleteAuditState) exec(query string, args []driver.NamedValue) (dri
 	switch {
 	case strings.Contains(normalized, "pg_advisory_xact_lock"):
 		// db.LockSiteCollaboration.
+		return driver.RowsAffected(1), nil
+	case strings.Contains(normalized, "INSERT INTO storage_retired"):
+		s.mu.Lock()
+		s.retired = append(s.retired, namedString(args, 0))
+		s.mu.Unlock()
 		return driver.RowsAffected(1), nil
 	case strings.Contains(normalized, "INSERT INTO site_search_queue"):
 		// db.EnqueueSiteSearch.
@@ -192,22 +197,11 @@ func TestDeleteSiteCommitsAuditAfterSiteRowIsGone(t *testing.T) {
 	database.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = database.Close() })
 
-	disk, err := storage.NewDiskStorage(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewDiskStorage: %v", err)
-	}
-	t.Cleanup(func() { _ = disk.Close() })
-	if err := disk.WriteFiles("owner", "demo", 1, map[string][]byte{
-		"index.html": []byte("<h1>bye</h1>"),
-	}); err != nil {
-		t.Fatalf("WriteFiles: %v", err)
-	}
-	if err := disk.SetCurrentVersion("owner", "demo", 1); err != nil {
-		t.Fatalf("SetCurrentVersion: %v", err)
-	}
+	store := newTestStore(t)
+	store.publish(t, "owner", "demo", siteDeleteTestSiteID, 1, map[string]string{"index.html": "<h1>bye</h1>"})
 
 	limits := testAbuseLimits(time.Now)
-	siteHandler := NewSiteHandler(database, disk, nil, "https://simple-host.example", newTestHostModel(t, "https://simple-host.example"), limits)
+	siteHandler := NewSiteHandler(database, store.Store, "https://simple-host.example", newTestHostModel(t, "https://simple-host.example"), limits)
 	siteHandler.WithAudit(audit.NewDBRecorder(database))
 	mux := http.NewServeMux()
 	identity := func(next http.Handler) http.Handler { return next }
@@ -226,7 +220,13 @@ func TestDeleteSiteCommitsAuditAfterSiteRowIsGone(t *testing.T) {
 	deleted := state.siteDeleted
 	actions := append([]string(nil), state.auditActions...)
 	siteIDs := append([]string(nil), state.auditSiteIDs...)
+	retired := append([]string(nil), state.retired...)
 	state.mu.Unlock()
+
+	// The site's objects are queued for the sweep in the same transaction.
+	if len(retired) != 1 || retired[0] != "sites/"+siteDeleteTestSiteID+"/" {
+		t.Fatalf("retired = %v, want the site's prefix", retired)
+	}
 
 	if !deleted {
 		t.Fatal("DELETE FROM sites was never executed")

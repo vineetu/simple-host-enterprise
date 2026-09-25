@@ -53,19 +53,20 @@ accounts (`admin@example.com` / `person@example.com`) to sign in with; see
 
 - `cmd/server` — the binary. `simple-host` serves; `simple-host migrate`
   applies the schema and is what the pod's init container runs;
-  `simple-host restore` rebuilds a site version (and its assets) from the
-  bucket; `simple-host backup-assets` is what its CronJob runs to sync
-  every site's assets directory to the bucket; `simple-host prune` drops
+  `simple-host restore` copies a stored version of any site, live or
+  deleted, into a site as its next version; `simple-host migrate-storage`
+  moves an older install's site volume into the bucket
+  (`docs/storage.md`); `simple-host prune` drops
   expired audit/access-log partitions on a monthly `CronJob`
   (`deploy/base/cronjob-prune.yaml`), under the database's owning
   credential rather than the application's own role.
 - `internal/` — one package per concern. `handler` is the HTTP surface,
-  `db` the queries, `storage` the site tree, backups and restores, `migrate`
+  `db` the queries, `storage` the bucket-backed site store and its cache, `migrate`
   the embedded schema, `oidc` sign-in, `audit` the action/access log sink
   (recorder, batching access writer, reader, and retention pruning),
   `reqlog` the request log, `mcp` the tool adapter.
-- `deploy/base` — the application's manifests, including the
-  `backup-assets` and `prune` CronJobs. `deploy/components` add an
+- `deploy/base` — the application's manifests, including the `prune`
+  CronJob. `deploy/components` add an
   in-cluster Postgres, MinIO, or Dex. `deploy/overlays` are environments:
   `local` is complete, `byo` / `staging` / `production` are templates for
   managed services.
@@ -92,7 +93,7 @@ connects to Postgres as `simplehost_app`, a least-privilege role migration
 admin key and no synthetic admin principal: admin status follows
 `ADMIN_EMAILS`/`OIDC_ADMIN_CLAIM` on a real signed-in person.
 
-Backups carry a server-side-encryption header (`BACKUP_SSE`, default
+Sites and assets live in the bucket (`docs/storage.md`). Every object carries a server-side-encryption header (`BACKUP_SSE`, default
 `AES256`) and, optionally, a client-side envelope (`BACKUP_ENVELOPE_KEY`)
 encrypted before the object ever reaches the bucket.
 

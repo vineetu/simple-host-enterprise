@@ -44,7 +44,7 @@ func TestExtractFieldsNormalizationAndSkippedSubtrees(t *testing.T) {
 		t.Fatalf("documents = %d, want 1", len(result.Documents))
 	}
 	document := result.Documents[0]
-	if document.PagePath != "index.html" || document.URLPath != "/sites/alice/demo/" {
+	if document.PagePath != "index.html" || document.URLPath != "/demo/" {
 		t.Fatalf("page identity = (%q, %q)", document.PagePath, document.URLPath)
 	}
 	if document.Title != "Demo Site" {
@@ -95,11 +95,11 @@ func TestExtractDeterministicRegularHTMLWalkAndURLMapping(t *testing.T) {
 	}
 	wantPaths := []string{"B.HTM", "a.HTML", "docs/INDEX.HTML", "docs/index.htm", "docs/page.htm"}
 	wantURLs := []string{
-		"/sites/alice%20smith/demo%231/B.HTM",
-		"/sites/alice%20smith/demo%231/a.HTML",
-		"/sites/alice%20smith/demo%231/docs/INDEX.HTML",
-		"/sites/alice%20smith/demo%231/docs/index.htm",
-		"/sites/alice%20smith/demo%231/docs/page.htm",
+		"/demo%231/B.HTM",
+		"/demo%231/a.HTML",
+		"/demo%231/docs/INDEX.HTML",
+		"/demo%231/docs/index.htm",
+		"/demo%231/docs/page.htm",
 	}
 	var gotPaths, gotURLs []string
 	for _, document := range result.Documents {
@@ -459,7 +459,7 @@ func TestNewExtractorUsesTheGivenSiteBase(t *testing.T) {
 	if !reflect.DeepEqual(viaNil.Documents, viaExtract.Documents) {
 		t.Fatalf("NewExtractor(nil) = %+v, want Extract's %+v", viaNil.Documents, viaExtract.Documents)
 	}
-	if got := viaNil.Documents[len(viaNil.Documents)-1].URLPath; got != "/sites/alice/demo/" {
-		t.Fatalf("nil base URLPath = %q, want /sites/alice/demo/", got)
+	if got := viaNil.Documents[len(viaNil.Documents)-1].URLPath; got != "/demo/" {
+		t.Fatalf("nil base URLPath = %q, want /demo/", got)
 	}
 }

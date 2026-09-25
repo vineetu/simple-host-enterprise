@@ -13,7 +13,6 @@ import (
 	"github.com/vsriram/simple-host/internal/auth"
 	db "github.com/vsriram/simple-host/internal/db"
 	"github.com/vsriram/simple-host/internal/safepath"
-	"github.com/vsriram/simple-host/internal/storage"
 )
 
 // TeamHandler owns the team namespace lifecycle: creating one, who is in it,
@@ -25,22 +24,18 @@ import (
 // membership: a person is in the team or they are not, and being in it grants
 // all of it. See docs/teams/design.md.
 type TeamHandler struct {
-	database    *sql.DB
-	diskStorage *storage.DiskStorage
-	limits      *AbuseLimits
+	database *sql.DB
+	limits   *AbuseLimits
 	// audit defaults to audit.NoOp{} (see WithAudit), the same chaining
-	// shape SiteHandler.WithAudit and AdminHandler.WithDiskStorage use so
-	// every existing NewTeamHandler(...) call site keeps compiling
-	// unchanged.
+	// shape SiteHandler.WithAudit uses.
 	audit audit.Recorder
 }
 
-func NewTeamHandler(database *sql.DB, diskStorage *storage.DiskStorage, limits ...*AbuseLimits) *TeamHandler {
+func NewTeamHandler(database *sql.DB, limits ...*AbuseLimits) *TeamHandler {
 	return &TeamHandler{
-		database:    database,
-		diskStorage: diskStorage,
-		limits:      chooseAbuseLimits(limits),
-		audit:       audit.NoOp{},
+		database: database,
+		limits:   chooseAbuseLimits(limits),
+		audit:    audit.NoOp{},
 	}
 }
 
@@ -481,20 +476,6 @@ func (h *TeamHandler) deleteTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The row is gone, so the name is free again — but the namespace's
-	// directory is not, and the host gate resolves a label by listing
-	// directories and fails closed when two of them claim one label. Left
-	// behind, this directory would permanently 404 the hostname of anybody
-	// who later registers a name that folds to the same label. DeleteSite
-	// removes <user>/<site> and never the containing <user>/, so nothing else
-	// in the system would ever clear it.
-	//
-	// After the commit, deliberately: a failure here is a stale empty
-	// directory, which the log names, and that is better than refusing a
-	// delete that the database has already accepted.
-	if err := h.diskStorage.RemoveEmptyUserDir(team.Username); err != nil {
-		log.Printf("team %q deleted but its empty directory remains, which will collide with a future account of the same label: %v", team.Username, err)
-	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

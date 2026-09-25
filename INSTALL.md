@@ -38,8 +38,8 @@ Done means all of these hold:
    `/admin` loads for them.
 3. `make smoke BASE=https://<base> KEY_FILE=...` (section 9) passes
    against the real install, and the browser check after it works.
-4. The `simple-host-backup-assets` and `simple-host-prune` CronJobs can pull
-   their image (section 9, last check).
+4. The `simple-host-prune` CronJob can pull its image (section 9, last
+   check).
 
 ## Step 0. Ask the human
 
@@ -114,7 +114,8 @@ kubectl --context "$CTX" run pgcheck --rm -i --restart=Never --image=postgres:16
 
 ## 3. Provision the bucket and pick the image
 
-**Bucket.** Any S3-compatible bucket over `https://`. Details per cloud in
+**Bucket.** Any S3-compatible bucket over `https://`, with versioning and a
+lifecycle rule turned on (`docs/storage.md`): it holds every site. Details per cloud in
 section 3 of each `docs/cloud/*.md`:
 
 - AWS: S3. Leave the key pair empty and use IRSA or EKS Pod Identity on the
@@ -176,7 +177,7 @@ lines (kustomize reads them as env files).
 | Variable | Value |
 |---|---|
 | `PUBLIC_BASE_URL` | `https://<base>`, origin only, no trailing path |
-| `SECURE_MODE`, `PORT`, `HTTPS_REDIRECT_PORT`, `SITE_DIR` | Leave as in the example |
+| `SECURE_MODE`, `PORT`, `HTTPS_REDIRECT_PORT` | Leave as in the example |
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID` | From HUMAN STEP A |
 | `OIDC_SCOPES` | Leave at `openid email profile` unless the provider notes say otherwise |
 | `ADMIN_EMAILS` | Step 0 answer, comma-separated |
@@ -247,11 +248,9 @@ edits to them.
    GKE, and Azure AGIC). Uploads are up to 100 MiB; a controller left at its
    default refuses them and it looks like an application bug.
 4. `db-ca.crt`: the database CA bundle from section 2.
-5. Storage: the site-data PVC uses the cluster's default StorageClass.
-   For production, patch in an encrypting class the same way
-   `deploy/overlays/production/kustomization.yaml` does (its
-   `PersistentVolumeClaim` patch), before the PVC is first created. The
-   class of an existing PVC cannot be changed.
+5. Storage: sites live in the bucket; pods keep only a disposable cache.
+   Turn on the bucket's versioning and lifecycle rule before the first
+   deploy (`docs/storage.md`, bucket requirements).
 6. Workload identity for the bucket (AWS IRSA / Pod Identity, or any cloud
    whose S3 endpoint accepts it): annotate the `simple-host` ServiceAccount
    with a patch in `kustomization.yaml`. The base ServiceAccount is
@@ -453,22 +452,9 @@ then:
 rm -f "$HOME/.simple-host-install-key"
 ```
 
-Last check: the two CronJobs run the same image and fail silently if they
-cannot pull it. Run each once by hand:
-
-```sh
-kubectl --context "$CTX" -n simple-host create job backup-check --from=cronjob/simple-host-backup-assets && kubectl --context "$CTX" -n simple-host wait --for=condition=complete job/backup-check --timeout=180s && kubectl --context "$CTX" -n simple-host logs job/backup-check --tail=20; kubectl --context "$CTX" -n simple-host delete job backup-check --ignore-not-found
-```
-
-A failure here with a bucket error means the bucket settings or
-credentials are wrong; the site itself will still serve. A pod stuck in
-`ContainerCreating` with a volume attach error means the job landed on a
-different node from the application and the site-data volume is
-ReadWriteOnce. The repository does not solve this for you (see the comment
-at the top of `deploy/base/backup-assets-cronjob.yaml`): pin the CronJob to
-the application's node, or use a ReadWriteMany class, and tell the human
-which you chose. For the prune job,
-use the dry-run preview in `docs/install.md` section 8.
+Last check: the prune CronJob runs the same image and fails silently if it
+cannot pull it. Run it once with the dry-run preview in `docs/install.md`
+section 8.
 
 When everything passes, tell the human: the URL, who is admin, and that
 people connect their agents through the plugin in `simple-host-plugin/`
@@ -487,7 +473,7 @@ against `https://<base>`.
 | Migrate init container fails with a permission error | The owning role cannot create tables or roles. Use the cloud's admin user or grant `CREATEROLE`. |
 | Migrate cannot connect | Network path from pods to the database (security group, authorised networks, private endpoint). Re-run the `pg_isready` check in section 2. |
 | Server refuses to start over a schema version | The image is older than the database's schema. Use a newer image; `docs/install.md` section 10. |
-| `/readyz` returns 503 | Database not reachable, or schema not current. Read the `migrate` and `simple-host` container logs. |
+| `/readyz` returns 503 | Database or bucket not reachable, or schema not current. Read the `migrate` and `simple-host` container logs. |
 | Sign-in: "the identity provider did not send an email address" | Provider does not put `email` in the ID token. Add the claim, or set `OIDC_EMAIL_CLAIM` (Entra: see HUMAN STEP A). |
 | Sign-in: "this account's email domain is not allowed" | `ALLOWED_EMAIL_DOMAINS` does not include the person's domain. |
 | Sign-in fails at the callback with a redirect-URI error | The registered redirect URI is not exactly `https://<base>/auth/callback`. |
@@ -495,8 +481,7 @@ against `https://<base>`.
 | Signed-in admin does not see `/admin` | Their address is not in `ADMIN_EMAILS` (compared lowercased), or the admin claim does not match. Takes effect at the next sign-in. |
 | Upload of a site fails with 413 | The ingress body-size limit. Section 5 step 3. |
 | Certificate never becomes ready | DNS-01 solver credential or zone. `kubectl describe` the `certificate`, `order`, and `challenge`. |
-| `backup-assets` job cannot attach its volume | Multi-node cluster with a ReadWriteOnce site-data volume. Section 9, last check. |
-| CronJobs in `ImagePullBackOff` | Pull secret on the Deployment instead of the ServiceAccount. `docs/install.md` section 10. |
+| CronJob in `ImagePullBackOff` | Pull secret on the Deployment instead of the ServiceAccount. `docs/install.md` section 10. |
 | `429` or "gave no redirect" after many sign-ins | `/auth/*` is rate limited per address. Wait two to three minutes. |
 
 Anything not listed: `docs/install.md` section 11, then the refusal column
@@ -508,8 +493,8 @@ of `docs/configuration.md`.
   (section 3), update `images:` in the overlay, apply, watch the rollout.
   Roll back only to a digest whose migrations are not older than the
   database's schema.
-- **Backups**: `docs/install.md` section 9. Site versions go to the bucket;
-  the per-site state lives only in Postgres, so the database's PITR window
+- **Backups**: `docs/storage.md`. Sites live in the bucket and are
+  recovered through its versioning; the per-site state lives only in Postgres, so the database's PITR window
   is its whole backup story. Confirm PITR retention with the human.
 - **Secret rotation**: `SESSION_SIGNING_KEY` and `BACKUP_ENVELOPE_KEY` rotate
   by adding a second key; see `docs/configuration.md`. Entra client secrets

@@ -28,7 +28,7 @@ func TestManagementWritesRequireOriginOnCookiePath(t *testing.T) {
 	}
 	identity := func(next http.Handler) http.Handler { return next }
 
-	handler := NewSiteHandler(nil, nil, nil, publicBaseURL, newTestHostModel(t, publicBaseURL))
+	handler := NewSiteHandler(nil, nil, publicBaseURL, newTestHostModel(t, publicBaseURL))
 	mux := http.NewServeMux()
 	handler.Register(mux, fakeAuth, identity)
 
@@ -114,7 +114,7 @@ func TestManagementRouteOriginCoverage(t *testing.T) {
 			w.WriteHeader(http.StatusTeapot)
 		})
 	}
-	handler := NewSiteHandler(nil, nil, nil, publicBaseURL, newTestHostModel(t, publicBaseURL))
+	handler := NewSiteHandler(nil, nil, publicBaseURL, newTestHostModel(t, publicBaseURL))
 	mux := http.NewServeMux()
 	handler.Register(mux, accept, identity)
 
@@ -170,7 +170,7 @@ func TestManagementRouteOriginCoverageOnOwnerHost(t *testing.T) {
 			w.WriteHeader(http.StatusTeapot)
 		})
 	}
-	handler := NewSiteHandler(nil, nil, nil, publicBaseURL, newTestHostModel(t, publicBaseURL))
+	handler := NewSiteHandler(nil, nil, publicBaseURL, newTestHostModel(t, publicBaseURL))
 	mux := http.NewServeMux()
 	handler.Register(mux, accept, identity)
 

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"log"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/vsriram/simple-host/internal/auth"
 	db "github.com/vsriram/simple-host/internal/db"
-	"github.com/vsriram/simple-host/internal/storage"
 )
 
 // newHostGateTestHandler builds a mux that stands in for the real one: the
@@ -24,7 +24,7 @@ import (
 // mux. It is wrapped in a gate whose siteForServing/viewerAllowed always
 // admit an unrestricted site to any signed-in caller, which is what every
 // test not specifically about restriction or refusal wants.
-func newHostGateTestHandler(t *testing.T, store *storage.DiskStorage) http.Handler {
+func newHostGateTestHandler(t *testing.T, store *testStore) http.Handler {
 	t.Helper()
 	gate := testHostGate(t, store, testHostModel(t))
 	return gate.wrap(newHostGateTestMux())
@@ -151,11 +151,11 @@ func fakeAuthMiddleware(next http.Handler) http.Handler {
 // unrestricted, writerAllowed matches viewerAllowed (state_write_mode
 // "anyone"), and every signed-in caller is an allowed viewer. siteAPI is a
 // *fakeSiteAPI so a test can inspect exactly what the gate decided to call.
-func testHostGate(t *testing.T, store *storage.DiskStorage, hosts HostModel) *hostGate {
+func testHostGate(t *testing.T, store *testStore, hosts HostModel) *hostGate {
 	t.Helper()
 	return &hostGate{
 		hosts:       hosts,
-		files:       NewSiteFiles(store, nil, CookiePolicy{}, testSigningKeys, 0),
+		files:       NewSiteFiles(store.Store, nil, CookiePolicy{}, testSigningKeys, 0),
 		signingKeys: testSigningKeys,
 		handoff:     NewHandoffHandler(nil, testSigningKeys, hosts, nil),
 		siteForServing: func(r *http.Request, ownerUsername, siteName string) (string, bool, error) {
@@ -191,17 +191,12 @@ func authenticatedGateRequest(t *testing.T, method, host, target string) *http.R
 	return request
 }
 
-func writeGateSite(t *testing.T, store *storage.DiskStorage, user, site, body string) {
+func writeGateSite(t *testing.T, store *testStore, user, site, body string) {
 	t.Helper()
-	if err := store.WriteFiles(user, site, 1, map[string][]byte{
-		"index.html":    []byte(body),
-		"assets/app.js": []byte("console.log(1)"),
-	}); err != nil {
-		t.Fatalf("WriteFiles(%s/%s): %v", user, site, err)
-	}
-	if err := store.SetCurrentVersion(user, site, 1); err != nil {
-		t.Fatalf("SetCurrentVersion(%s/%s): %v", user, site, err)
-	}
+	store.publish(t, user, site, testSiteID(user, site), 1, map[string]string{
+		"index.html":    body,
+		"assets/app.js": "console.log(1)",
+	})
 }
 
 func gateRequest(handler http.Handler, method, host, target string) *httptest.ResponseRecorder {
@@ -233,7 +228,7 @@ func gateAuthedRequest(t *testing.T, handler http.Handler, method, host, target 
 }
 
 func TestHostGateRouting(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "my-site", "alice-index")
 	writeGateSite(t, store, "bob", "x", "bob-index")
 	handler := newHostGateTestHandler(t, store)
@@ -332,7 +327,7 @@ func TestHostGateRouting(t *testing.T) {
 // A restricted site (viewerAllowed's siteForServing reports restricted=true)
 // no longer serves on its owner's short path: the address moved.
 func TestHostGateRestrictedSiteLeavesOwnerHost(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "private", "private-index")
 	gate := testHostGate(t, store, testHostModel(t))
 	gate.siteForServing = func(r *http.Request, owner, site string) (string, bool, error) {
@@ -349,7 +344,7 @@ func TestHostGateRestrictedSiteLeavesOwnerHost(t *testing.T) {
 // A site that fails viewerAllowed is 404, not 403: its existence must not be
 // confirmed to somebody it refuses (design.md 7.2).
 func TestHostGateViewerNotAllowedIs404(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "private", "private-index")
 	gate := testHostGate(t, store, testHostModel(t))
 	gate.viewerAllowed = func(r *http.Request, siteID, userID string) (bool, error) { return false, nil }
@@ -366,7 +361,7 @@ func TestHostGateViewerNotAllowedIs404(t *testing.T) {
 // the one match, the same disk-only, fail-closed-on-collision pattern
 // resolveOwner uses for the owner label itself.
 func TestHostGateServesRestrictedSiteHost(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "private", "private-index")
 	gate := testHostGate(t, store, testHostModel(t))
 	gate.siteForServing = func(r *http.Request, owner, site string) (string, bool, error) {
@@ -408,7 +403,7 @@ func TestHostGateServesRestrictedSiteHost(t *testing.T) {
 // even though both are ordinary owner hosts under the same base domain and
 // the underlying session row is shared on purpose.
 func TestHostGateSessionCookieBoundToItsOwnHost(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "my-site", "alice-index")
 	writeGateSite(t, store, "bob", "x", "bob-index")
 	handler := newHostGateTestHandler(t, store)
@@ -451,7 +446,7 @@ func TestHostGateSessionCookieBoundToItsOwnHost(t *testing.T) {
 // implementation (db.TouchSession) only ever logs a failure, and there is
 // nothing here for a caller to propagate even if it wanted to.
 func TestHostGateTouchesSessionOnSuccessfulHostedAuth(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "my-site", "alice-index")
 	gate := testHostGate(t, store, testHostModel(t))
 	var touched []string
@@ -472,7 +467,7 @@ func TestHostGateTouchesSessionOnSuccessfulHostedAuth(t *testing.T) {
 // though the request otherwise carries no credential problem; a navigation
 // (Sec-Fetch-Dest document) is let through to the ordinary checks.
 func TestHostGateRefusesSiblingOriginSubresourceLoads(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "my-site", "alice-index")
 	handler := newHostGateTestHandler(t, store)
 
@@ -508,7 +503,7 @@ func TestHostGateRefusesSiblingOriginSubresourceLoads(t *testing.T) {
 // nonce cookie on the owner host itself and redirects to <base>/auth/handoff
 // naming this exact URL, with n = sha256(nonce), base64url.
 func TestHostGateBeginHandoff(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "my-site", "alice-index")
 	handler := newHostGateTestHandler(t, store)
 
@@ -543,7 +538,7 @@ func TestHostGateBeginHandoff(t *testing.T) {
 }
 
 func TestHostGateRefusesCollidingLabels(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice.b", "my-site", "dotted")
 	writeGateSite(t, store, "alice-b", "my-site", "dashed")
 	writeGateSite(t, store, "alice-b", "only-dashed", "only-dashed-index")
@@ -582,15 +577,12 @@ func TestHostGateRefusesCollidingLabels(t *testing.T) {
 
 // A candidate whose current version cannot be read must fail the whole
 // resolution closed, not be skipped: otherwise the readable user on the same
-// label would be handed the name. The quarantine latch is the one way to make
-// CurrentVersion return an error other than "does not exist".
+// label would be handed the name.
 func TestHostGateUnreadableCandidateFailsClosed(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice.b", "my-site", "dotted")
 	writeGateSite(t, store, "alice-b", "my-site", "dashed")
-	if err := store.QuarantineCurrentServing("alice-b", "my-site"); err != nil {
-		t.Fatal(err)
-	}
+	store.index.fail("alice-b", "my-site")
 	handler := newHostGateTestHandler(t, store)
 
 	var logs bytes.Buffer
@@ -618,7 +610,7 @@ func TestHostGateUnreadableCandidateFailsClosed(t *testing.T) {
 
 // A dotted username resolves on its dashed label through the short path.
 func TestHostGateResolvesDottedUsername(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "Alice.Smith", "demo", "dotted-demo")
 	handler := newHostGateTestHandler(t, store)
 
@@ -626,9 +618,8 @@ func TestHostGateResolvesDottedUsername(t *testing.T) {
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "dotted-demo") {
 		t.Fatalf("status = %d body %q", response.Code, response.Body.String())
 	}
-	// A site with no current version is not served, even though the
-	// directory exists.
-	if err := store.WriteFiles("Alice.Smith", "draft", 1, map[string][]byte{"index.html": []byte("draft")}); err != nil {
+	// An uploaded version no site row makes live is not served.
+	if _, err := store.PutVersion(context.Background(), testSiteID("Alice.Smith", "draft"), 1, map[string][]byte{"index.html": []byte("draft")}); err != nil {
 		t.Fatal(err)
 	}
 	response = gateAuthedRequest(t, handler, http.MethodGet, "alice-smith.foo.example", "/draft/")
@@ -638,7 +629,7 @@ func TestHostGateResolvesDottedUsername(t *testing.T) {
 }
 
 func TestHostGateShortPathServesNoDirectoryListing(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "my-site", "alice-index")
 	handler := newHostGateTestHandler(t, store)
 
@@ -776,7 +767,7 @@ func apiKeyGateRequest(method, host, target string) *http.Request {
 // restricted site's own host (design.md 7.3's explicit ask: "restricted
 // sites get working state routes on their own host").
 func TestHostGateSiteAPIAuthMatrix(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "my-site", "alice-index")
 
 	for _, host := range []string{"alice.foo.example", "alice--my-site.foo.example"} {
@@ -839,7 +830,7 @@ func TestHostGateSiteAPIAuthMatrix(t *testing.T) {
 // who may view but not write gets 403 (existence already established), and
 // a caller who may not even view gets 404 either way.
 func TestHostGateSiteAPIWriterAllowedTable(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "my-site", "alice-index")
 
 	for _, test := range []struct {
@@ -879,7 +870,7 @@ func TestHostGateSiteAPIWriterAllowedTable(t *testing.T) {
 // own origin, not the base origin, on both an owner host and a restricted
 // site's own host (origin.go's expectedFor).
 func TestHostGateSiteAPIOriginCheckedOnNonSafeMethodsOnly(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "my-site", "alice-index")
 
 	for _, test := range []struct {
@@ -927,7 +918,7 @@ func TestHostGateSiteAPIOriginCheckedOnNonSafeMethodsOnly(t *testing.T) {
 // Method dispatch: GET/PUT on state and state/versioned, GET/POST on
 // assets, DELETE on assets/{id}; anything else on the same path is 405.
 func TestHostGateSiteAPIMethodDispatch(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "my-site", "alice-index")
 	gate := testHostGate(t, store, testHostModel(t))
 	fake := &fakeSiteAPI{}
@@ -975,7 +966,7 @@ func TestHostGateSiteAPIMethodDispatch(t *testing.T) {
 // disambiguate it, but is honoured on a restricted site's own host, which
 // serves exactly one site — and only when it names that exact site.
 func TestHostGateNamelessShapeOnlyOnRestrictedHost(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "my-site", "alice-index")
 
 	ownerGate := testHostGate(t, store, testHostModel(t))
@@ -1011,7 +1002,7 @@ func TestHostGateNamelessShapeOnlyOnRestrictedHost(t *testing.T) {
 // restricted site's own host, reuse hosted content's own session and
 // viewerAllowed checks and dispatch to ServeAsset.
 func TestHostGateAssetServeRoute(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "my-site", "alice-index")
 
 	t.Run("owner host", func(t *testing.T) {

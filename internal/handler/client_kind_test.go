@@ -7,7 +7,7 @@ import (
 )
 
 func request(userAgent string) *http.Request {
-	r := httptest.NewRequest(http.MethodGet, "/sites/alice/portfolio/", nil)
+	r := httptest.NewRequest(http.MethodGet, "/portfolio/", nil)
 	if userAgent != "" {
 		r.Header.Set("User-Agent", userAgent)
 	} else {

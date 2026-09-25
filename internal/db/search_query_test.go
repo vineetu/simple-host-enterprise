@@ -127,7 +127,7 @@ func TestSearchPublicSitesBindsAndScansPlainSnippetSource(t *testing.T) {
 				"alice",
 				"planning",
 				"roadmap/index.html",
-				"/sites/alice/planning/roadmap/",
+				"https://alice.foo.example/planning/roadmap/",
 				"Release roadmap",
 				"The complete release calendar.",
 			}},
@@ -145,7 +145,7 @@ func TestSearchPublicSitesBindsAndScansPlainSnippetSource(t *testing.T) {
 		OwnerName:     "alice",
 		SiteName:      "planning",
 		PagePath:      "roadmap/index.html",
-		URLPath:       "/sites/alice/planning/roadmap/",
+		URLPath:       "https://alice.foo.example/planning/roadmap/",
 		Title:         "Release roadmap",
 		SnippetSource: "The complete release calendar.",
 	}}

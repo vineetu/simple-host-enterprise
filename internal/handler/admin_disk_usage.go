@@ -1,137 +1,77 @@
 package handler
 
 import (
-	"io/fs"
-	"os"
-	"path/filepath"
+	"context"
+	"log"
 	"sync"
 	"time"
+
+	"github.com/vsriram/simple-host/internal/storage"
 )
 
-// siteDiskUsage is the on-disk footprint of one site.
+// siteDiskUsage is what one site holds in the bucket.
 //
-// Total counts every retained version, because that is what actually consumes
-// the volume — the server keeps several versions per site, and a site whose
-// live version is small can still be the biggest thing on the disk. Live is the
-// version the `current` link points at, which is the number the owner would
-// recognise as "my site".
+// Total counts every retained version and every asset, because that is what
+// the bucket actually stores — the server keeps several versions per site,
+// and a site whose live version is small can still be the biggest thing in
+// it. Live is the active version's own archive, the number the owner would
+// recognise as "my site". Sizes are as stored (compressed).
 type siteDiskUsage struct {
 	totalBytes uint64
 	liveBytes  uint64
 }
 
+// siteStorage is one measurement of the whole bucket, keyed by site id.
+type siteStorage struct {
+	bySite     map[string]storage.SiteUsage
+	totalBytes uint64
+}
+
+func (s siteStorage) site(siteID string, activeVersion int) siteDiskUsage {
+	usage := s.bySite[siteID]
+	return siteDiskUsage{
+		totalBytes: uint64(max(usage.TotalBytes, 0)),
+		liveBytes:  uint64(max(usage.VersionBytes[activeVersion], 0)),
+	}
+}
+
 // diskUsageCacheTTL bounds how stale the admin ranking can be. Measuring means
-// walking the whole site tree, so it is not something to do on every page load,
+// listing the whole bucket, so it is not something to do on every page load,
 // but it is also not data that changes minute to minute.
 const diskUsageCacheTTL = 5 * time.Minute
 
 var siteUsageCache struct {
 	sync.Mutex
 	measuredAt time.Time
-	root       string
-	usage      map[string]siteDiskUsage
+	usage      siteStorage
 }
 
-// measureSiteDiskUsage returns per-site disk usage keyed by "<user>/<site>",
-// recomputing at most once per diskUsageCacheTTL. Concurrent callers share one
-// measurement rather than stampeding the filesystem.
+// measureSiteStorage returns per-site bucket usage, recomputing at most once
+// per diskUsageCacheTTL. Concurrent callers share one measurement.
 //
-// A partially unreadable tree yields partial numbers rather than an error: this
-// feeds a ranking, and a missing site is better than a blank card.
-func measureSiteDiskUsage(siteDir string) map[string]siteDiskUsage {
+// A failed listing yields no numbers rather than an error: this feeds a
+// ranking, and a blank size is better than a broken dashboard.
+func measureSiteStorage(ctx context.Context, store *storage.Store) siteStorage {
+	if store == nil {
+		return siteStorage{}
+	}
 	siteUsageCache.Lock()
 	defer siteUsageCache.Unlock()
-
-	fresh := time.Since(siteUsageCache.measuredAt) < diskUsageCacheTTL
-	if fresh && siteUsageCache.root == siteDir && siteUsageCache.usage != nil {
+	if time.Since(siteUsageCache.measuredAt) < diskUsageCacheTTL && siteUsageCache.usage.bySite != nil {
 		return siteUsageCache.usage
 	}
-
-	usage := walkSiteDiskUsage(siteDir)
+	listCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	bySite, err := store.Usage(listCtx)
+	if err != nil {
+		log.Printf("admin storage usage: %v", err)
+		return siteStorage{}
+	}
+	measured := siteStorage{bySite: bySite}
+	for _, usage := range bySite {
+		measured.totalBytes += uint64(max(usage.TotalBytes, 0))
+	}
 	siteUsageCache.measuredAt = time.Now()
-	siteUsageCache.root = siteDir
-	siteUsageCache.usage = usage
-	return usage
-}
-
-func walkSiteDiskUsage(siteDir string) map[string]siteDiskUsage {
-	usage := make(map[string]siteDiskUsage)
-	if siteDir == "" {
-		return usage
-	}
-
-	users, err := os.ReadDir(siteDir)
-	if err != nil {
-		return usage
-	}
-
-	for _, userEntry := range users {
-		if !userEntry.IsDir() {
-			continue
-		}
-		userPath := filepath.Join(siteDir, userEntry.Name())
-		sites, err := os.ReadDir(userPath)
-		if err != nil {
-			continue
-		}
-
-		for _, siteEntry := range sites {
-			if !siteEntry.IsDir() {
-				continue
-			}
-			sitePath := filepath.Join(userPath, siteEntry.Name())
-			usage[userEntry.Name()+"/"+siteEntry.Name()] = measureOneSite(sitePath)
-		}
-	}
-	return usage
-}
-
-// measureOneSite sizes every version directory under a site and works out which
-// one is live by reading the `current` link.
-func measureOneSite(sitePath string) siteDiskUsage {
-	var out siteDiskUsage
-
-	entries, err := os.ReadDir(sitePath)
-	if err != nil {
-		return out
-	}
-
-	byVersionDir := make(map[string]uint64, len(entries))
-	for _, entry := range entries {
-		// os.ReadDir reports the link itself, not its target, so `current` is
-		// not a directory here and its bytes are never counted twice.
-		if !entry.IsDir() {
-			continue
-		}
-		size := directorySize(filepath.Join(sitePath, entry.Name()))
-		byVersionDir[entry.Name()] = size
-		out.totalBytes += size
-	}
-
-	if target, err := os.Readlink(filepath.Join(sitePath, "current")); err == nil {
-		out.liveBytes = byVersionDir[filepath.Base(target)]
-	}
-	return out
-}
-
-// directorySize sums regular files beneath root. Symlinks are counted as the
-// link, not the target, so nothing is double counted and nothing outside the
-// tree is followed.
-func directorySize(root string) uint64 {
-	var total uint64
-	_ = filepath.WalkDir(root, func(_ string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil // skip what we cannot read; keep the rest of the total
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil || !info.Mode().IsRegular() {
-			return nil
-		}
-		total += uint64(info.Size())
-		return nil
-	})
-	return total
+	siteUsageCache.usage = measured
+	return measured
 }

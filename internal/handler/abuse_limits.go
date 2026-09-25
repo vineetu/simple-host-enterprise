@@ -22,7 +22,6 @@ const (
 	searchQueryConcurrency     = 8
 	searchClickConcurrency     = 16
 	uploadConcurrency          = 2
-	backupConcurrency          = 1
 	archiveDownloadConcurrency = 2
 	concurrencyRetryAfter      = time.Second
 
@@ -89,7 +88,6 @@ type AbuseLimits struct {
 	searchQuerySlots     chan struct{}
 	searchClickSlots     chan struct{}
 	uploadSlots          chan struct{}
-	backupSlots          chan struct{}
 	archiveDownloadSlots chan struct{}
 }
 
@@ -117,10 +115,10 @@ func newAbuseLimits(
 		searchQuerySlots: make(chan struct{}, searchQueryConcurrency),
 		searchClickSlots: make(chan struct{}, searchClickConcurrency),
 		// Two worst-case uploads retain about 1.2 GiB of archive and
-		// extracted-file data, leaving headroom in the 4 GiB Pod for Go
-		// allocation overhead, the service, and one bounded backup.
+		// extracted-file data plus the packed archive being uploaded,
+		// leaving headroom in the Pod for Go allocation overhead and the
+		// service.
 		uploadSlots:          make(chan struct{}, uploadConcurrency),
-		backupSlots:          make(chan struct{}, backupConcurrency),
 		archiveDownloadSlots: make(chan struct{}, archiveDownloadConcurrency),
 	}
 }
@@ -162,15 +160,6 @@ func (l *AbuseLimits) acquireUpload() (func(), bool) {
 	select {
 	case l.uploadSlots <- struct{}{}:
 		return func() { <-l.uploadSlots }, true
-	default:
-		return nil, false
-	}
-}
-
-func (l *AbuseLimits) acquireBackup() (func(), bool) {
-	select {
-	case l.backupSlots <- struct{}{}:
-		return func() { <-l.backupSlots }, true
 	default:
 		return nil, false
 	}

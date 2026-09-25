@@ -88,12 +88,10 @@ db_query() {
 }
 
 # recent_pod_logs: the simple-host container's own logs since this run
-# started, used by a couple of checks below that have no database-visible
-# side effect of their own.
+# started, from every replica (a request may have hit any of them), used by a
+# couple of checks below that have no database-visible side effect of their own.
 recent_pod_logs() {
-  local pod
-  pod="$(kubectl --context "$CLUSTER_CONTEXT" -n "$NAMESPACE" get pods -l app=simple-host -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)"
-  [ -n "$pod" ] && kubectl --context "$CLUSTER_CONTEXT" -n "$NAMESPACE" logs "$pod" --since=5m 2>/dev/null
+  kubectl --context "$CLUSTER_CONTEXT" -n "$NAMESPACE" logs -l app=simple-host -c simple-host --since=5m 2>/dev/null
 }
 
 check() {

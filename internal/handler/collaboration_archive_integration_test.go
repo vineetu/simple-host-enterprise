@@ -12,8 +12,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,7 +21,6 @@ import (
 	"github.com/vsriram/simple-host/internal/auth"
 	db "github.com/vsriram/simple-host/internal/db"
 	"github.com/vsriram/simple-host/internal/reqlog"
-	"github.com/vsriram/simple-host/internal/storage"
 )
 
 const (
@@ -44,6 +41,8 @@ type collaborationArchiveDBState struct {
 	// (assets_admin.go's deleteCollaborationAsset).
 	assetExists  bool
 	assetDeleted bool
+	// retired records the keys queued in storage_retired.
+	retired []string
 }
 
 func (s *collaborationArchiveDBState) query(query string, args []driver.NamedValue) (driver.Rows, error) {
@@ -182,6 +181,11 @@ func (s *collaborationArchiveDBState) exec(query string, args []driver.NamedValu
 		s.mu.Unlock()
 		return driver.RowsAffected(1), nil
 	case strings.Contains(normalized, "INSERT INTO site_search_queue"):
+		return driver.RowsAffected(1), nil
+	case strings.Contains(normalized, "INSERT INTO storage_retired"):
+		s.mu.Lock()
+		s.retired = append(s.retired, namedString(args, 0))
+		s.mu.Unlock()
 		return driver.RowsAffected(1), nil
 	case strings.Contains(normalized, "DELETE FROM versions"):
 		versionID := namedString(args, 0)
@@ -350,29 +354,23 @@ func (r *collaborationArchiveRows) Next(destination []driver.Value) error {
 	return nil
 }
 
-func newCollaborationArchiveHarness(t *testing.T, state *collaborationArchiveDBState) (*SiteHandler, *http.ServeMux, *storage.DiskStorage, *AbuseLimits) {
+func newCollaborationArchiveHarness(t *testing.T, state *collaborationArchiveDBState) (*SiteHandler, *http.ServeMux, *testStore, *AbuseLimits) {
 	t.Helper()
 	database := sql.OpenDB(&collaborationArchiveConnector{state: state})
 	database.SetMaxOpenConns(8)
 	t.Cleanup(func() { _ = database.Close() })
 
-	disk, err := storage.NewDiskStorage(t.TempDir())
-	if err != nil {
-		t.Fatalf("NewDiskStorage: %v", err)
-	}
-	t.Cleanup(func() { _ = disk.Close() })
-	if err := disk.WriteFiles("owner", "demo", 1, map[string][]byte{
-		"index.html": []byte("<h1>collaboration</h1>"),
-	}); err != nil {
-		t.Fatalf("WriteFiles: %v", err)
-	}
+	store := newTestStore(t)
+	store.publish(t, "owner", "demo", archiveTestSiteID, 1, map[string]string{
+		"index.html": "<h1>collaboration</h1>",
+	})
 
 	limits := testAbuseLimits(time.Now)
-	siteHandler := NewSiteHandler(database, disk, nil, "https://simple-host.example", newTestHostModel(t, "https://simple-host.example"), limits)
+	siteHandler := NewSiteHandler(database, store.Store, "https://simple-host.example", newTestHostModel(t, "https://simple-host.example"), limits)
 	mux := http.NewServeMux()
 	identity := func(next http.Handler) http.Handler { return next }
 	siteHandler.Register(mux, auth.Middleware(database, nil, 0), identity)
-	return siteHandler, mux, disk, limits
+	return siteHandler, mux, store, limits
 }
 
 func collaborationArchiveRequest(method, target, apiKey string) *http.Request {
@@ -381,41 +379,32 @@ func collaborationArchiveRequest(method, target, apiKey string) *http.Request {
 	return request
 }
 
-func TestCleanupOldVersionsDeletesArchivedVersions(t *testing.T) {
+func TestCleanupOldVersionsRetiresObjects(t *testing.T) {
 	state := &collaborationArchiveDBState{activeVersion: 7, versions: []int{7, 6, 5, 4, 3, 2, 1}}
-	handler, _, disk, _ := newCollaborationArchiveHarness(t, state)
+	handler, _, store, _ := newCollaborationArchiveHarness(t, state)
 	for version := 2; version <= 7; version++ {
-		if err := disk.WriteFiles("owner", "demo", version, map[string][]byte{
-			"index.html": []byte(strconv.Itoa(version)),
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := disk.SetCurrentVersion("owner", "demo", 7); err != nil {
-		t.Fatal(err)
-	}
-	if err := disk.ArchiveVersion("owner", "demo", 2); err != nil {
-		t.Fatal(err)
+		store.publish(t, "owner", "demo", archiveTestSiteID, version, map[string]string{"index.html": strconv.Itoa(version)})
 	}
 
 	if err := handler.cleanupOldVersions(context.Background(), archiveTestOwnerID, "owner", "demo", archiveTestSiteID); err != nil {
 		t.Fatalf("cleanupOldVersions: %v", err)
 	}
-	for _, version := range []int{1, 2} {
-		if disk.VersionExists("owner", "demo", version) {
-			t.Fatalf("retention kept old v%d", version)
-		}
-	}
-	for _, version := range []int{3, 4, 5, 6, 7} {
-		if !disk.VersionExists("owner", "demo", version) {
-			t.Fatalf("retention removed kept v%d", version)
-		}
-	}
 	state.mu.Lock()
 	remaining := append([]int(nil), state.versions...)
+	retired := append([]string(nil), state.retired...)
 	state.mu.Unlock()
 	if got, want := fmt.Sprint(remaining), "[7 6 5 4 3]"; got != want {
 		t.Fatalf("database versions = %s, want %s", got, want)
+	}
+	// The objects are queued in the same transaction and deleted by the sweep
+	// after the grace period, never inline: another replica may still be
+	// serving what it resolved a moment ago.
+	want := "[sites/" + archiveTestSiteID + "/v2.tar.gz sites/" + archiveTestSiteID + "/v1.tar.gz]"
+	if got := fmt.Sprint(retired); got != want {
+		t.Fatalf("retired = %s, want %s", got, want)
+	}
+	if len(store.objects.Keys()) != 7 {
+		t.Fatalf("objects deleted inline: %v", store.objects.Keys())
 	}
 }
 
@@ -603,7 +592,7 @@ func TestCollaborationArchiveRechecksRevocationBeforeLeasingFiles(t *testing.T) 
 		editorAllowed:               true,
 		denyEditorAfterFirstResolve: true,
 	}
-	_, mux, disk, _ := newCollaborationArchiveHarness(t, state)
+	_, mux, _, _ := newCollaborationArchiveHarness(t, state)
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, collaborationArchiveRequest(
 		http.MethodGet,
@@ -616,22 +605,11 @@ func TestCollaborationArchiveRechecksRevocationBeforeLeasingFiles(t *testing.T) 
 	if got := state.editorResolves(); got != 1 {
 		t.Fatalf("successful editor resolves = %d, want 1 before the locked recheck denied access", got)
 	}
-
-	deleted := make(chan error, 1)
-	go func() { deleted <- disk.DeleteVersion("owner", "demo", 1) }()
-	select {
-	case err := <-deleted:
-		if err != nil {
-			t.Fatalf("DeleteVersion after denied archive: %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("denied archive left a storage lease behind")
-	}
 }
 
 func TestCollaborationArchiveWriteDeadlineReleasesLeaseAndSlot(t *testing.T) {
 	state := &collaborationArchiveDBState{editorAllowed: true}
-	handler, mux, disk, limits := newCollaborationArchiveHarness(t, state)
+	handler, mux, _, limits := newCollaborationArchiveHarness(t, state)
 	writer := newExpiringArchiveResponseWriter()
 	handlerDone := make(chan struct{})
 	go func() {
@@ -658,26 +636,10 @@ func TestCollaborationArchiveWriteDeadlineReleasesLeaseAndSlot(t *testing.T) {
 		t.Fatal("archive handler did not retain its streaming slot")
 	}
 
-	deleted := make(chan error, 1)
-	go func() { deleted <- disk.DeleteVersion("owner", "demo", 1) }()
-	select {
-	case err := <-deleted:
-		t.Fatalf("DeleteVersion completed while the archive writer was blocked: %v", err)
-	case <-time.After(50 * time.Millisecond):
-	}
-
 	select {
 	case <-handlerDone:
 	case <-time.After(time.Second):
 		t.Fatal("archive handler did not return after its writer deadline fired")
-	}
-	select {
-	case err := <-deleted:
-		if err != nil {
-			t.Fatalf("DeleteVersion after deadline: %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("archive lease was not released after the writer deadline")
 	}
 
 	remainingRelease()
@@ -703,7 +665,7 @@ func TestCollaborationArchiveWriteDeadlineReleasesLeaseAndSlot(t *testing.T) {
 	}
 }
 
-func TestRollbackPreflightsAcceptArchivedVersions(t *testing.T) {
+func TestRollbackRoutesSwitchTheLiveVersion(t *testing.T) {
 	tests := []struct {
 		name          string
 		editorAllowed bool
@@ -732,19 +694,8 @@ func TestRollbackPreflightsAcceptArchivedVersions(t *testing.T) {
 				activeVersion: 2,
 				versions:      []int{2, 1},
 			}
-			_, mux, disk, _ := newCollaborationArchiveHarness(t, state)
-			if err := disk.WriteFiles("owner", "demo", 2, map[string][]byte{"index.html": []byte("current-v2")}); err != nil {
-				t.Fatal(err)
-			}
-			if err := disk.SetCurrentVersion("owner", "demo", 2); err != nil {
-				t.Fatal(err)
-			}
-			if err := disk.ArchiveVersion("owner", "demo", 1); err != nil {
-				t.Fatal(err)
-			}
-			if disk.VersionDirExists("owner", "demo", 1) || !disk.VersionExists("owner", "demo", 1) {
-				t.Fatal("rollback target was not archive-only before request")
-			}
+			_, mux, store, _ := newCollaborationArchiveHarness(t, state)
+			store.publish(t, "owner", "demo", archiveTestSiteID, 2, map[string]string{"index.html": "current-v2"})
 
 			request := httptest.NewRequest(http.MethodPost, test.target, strings.NewReader(`{"version":1}`))
 			request.Header.Set("X-API-Key", test.apiKey)
@@ -757,14 +708,13 @@ func TestRollbackPreflightsAcceptArchivedVersions(t *testing.T) {
 			if response.Code != http.StatusOK {
 				t.Fatalf("rollback status = %d, want 200; body=%s", response.Code, response.Body.String())
 			}
-			if current, exists, err := disk.CurrentVersion("owner", "demo"); err != nil || !exists || current != 1 {
-				t.Fatalf("CurrentVersion = %d, %t, %v; want materialized v1", current, exists, err)
-			}
-			if !disk.VersionDirExists("owner", "demo", 1) {
-				t.Fatal("rollback did not leave archived target raw and live")
-			}
-			if _, err := os.Lstat(filepath.Join(disk.BasePath(), "owner", "demo", "v1.tar.gz")); !os.IsNotExist(err) {
-				t.Fatalf("rollback left archived form: %v", err)
+			// The database is the switch: nothing on any replica's disk
+			// has to change for the rollback to be what is served.
+			state.mu.Lock()
+			active := state.activeVersion
+			state.mu.Unlock()
+			if active != 1 {
+				t.Fatalf("active version = %d, want 1", active)
 			}
 		})
 	}

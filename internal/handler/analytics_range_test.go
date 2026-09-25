@@ -27,36 +27,11 @@ func TestAnalyticsDaysForRequestAllowlistAndPublicOverride(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			r := httptest.NewRequest("GET", "http://simple-host.test/sites/alice/"+test.query, nil)
+			r := httptest.NewRequest("GET", "http://alice.simple-host.test/"+test.query, nil)
 			if got := analyticsDaysForRequest(r, test.allowSelection); got != test.want {
 				t.Fatalf("analyticsDaysForRequest() = %d, want %d", got, test.want)
 			}
 		})
-	}
-}
-
-func TestUserAnalyticsRangeSelectorIsOwnerOnly(t *testing.T) {
-	var public strings.Builder
-	renderUserAnalyticsRangeSelector(&public, "alice", 180, false)
-	if public.Len() != 0 {
-		t.Fatalf("public listing rendered reporting-range controls: %s", public.String())
-	}
-
-	var owner strings.Builder
-	renderUserAnalyticsRangeSelector(&owner, "alice", 180, true)
-	html := owner.String()
-	for _, want := range []string{
-		`action="/sites/alice/"`,
-		`name="days"`,
-		`value="7"`,
-		`value="30"`,
-		`value="42"`,
-		`value="180" selected`,
-		`Analytics reporting range: 6 months`,
-	} {
-		if !strings.Contains(html, want) {
-			t.Errorf("owner selector missing %q: %s", want, html)
-		}
 	}
 }
 

@@ -24,7 +24,7 @@ func TestIsSelfTrafficSkipsTheDatabaseForAnonymousVisitors(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			r := httptest.NewRequest(http.MethodGet, "/sites/alice/portfolio/", nil)
+			r := httptest.NewRequest(http.MethodGet, "/portfolio/", nil)
 			if tc.cookie != nil {
 				r.AddCookie(tc.cookie)
 			}
@@ -38,7 +38,7 @@ func TestIsSelfTrafficSkipsTheDatabaseForAnonymousVisitors(t *testing.T) {
 // A nil database means analytics are not being recorded anyway; the check must
 // not claim the traffic is self-traffic and must not panic.
 func TestIsSelfTrafficWithoutDatabase(t *testing.T) {
-	r := httptest.NewRequest(http.MethodGet, "/sites/alice/portfolio/", nil)
+	r := httptest.NewRequest(http.MethodGet, "/portfolio/", nil)
 	r.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "some-value"})
 
 	if isSelfTraffic(r, nil, nil, 0, "alice", "portfolio") {

@@ -111,13 +111,12 @@ var errExtractionStopped = errors.New("extraction stopped at a configured limit"
 
 // SiteBase returns the address under which a site's pages are reachable,
 // ending in "/": a page's URLPath is that address plus the page's escaped
-// path. Nil means the relative long path on the base host, which is what the
-// index held before per-owner subdomains; after the subdomain cutover the
-// server passes a function that returns the absolute short address instead.
+// path. Nil means the path relative to the owner's own host ("/<site>/");
+// the server passes a function that returns the absolute address instead.
 type SiteBase func(owner, site string) string
 
 // Extract walks root deterministically and extracts bounded text from regular
-// .html and .htm files, addressing pages under the relative long path. Limit
+// .html and .htm files, addressing pages relative to the owner's host. Limit
 // exhaustion is returned as partial metadata, not as an error. Cancellation of
 // the caller's context is returned to the caller.
 func Extract(ctx context.Context, root *os.Root, owner, site string) (Result, error) {
@@ -600,7 +599,7 @@ func truncateUTF8(value string, maximum int64) string {
 
 func pageURL(siteBase SiteBase, owner, site, pagePath string) string {
 	if siteBase == nil {
-		siteBase = longSitePath
+		siteBase = ownerRelativeSitePath
 	}
 	base := siteBase(owner, site)
 	if path.Base(pagePath) == "index.html" {
@@ -613,10 +612,9 @@ func pageURL(siteBase SiteBase, owner, site, pagePath string) string {
 	return base + escapeArchivePath(pagePath)
 }
 
-// longSitePath is the pre-cutover site address: the relative long path on the
-// base host, one escaped segment per name.
-func longSitePath(owner, site string) string {
-	return "/sites/" + url.PathEscape(owner) + "/" + url.PathEscape(site) + "/"
+// ownerRelativeSitePath is a site's address relative to its owner's host.
+func ownerRelativeSitePath(_, site string) string {
+	return "/" + url.PathEscape(site) + "/"
 }
 
 func escapeArchivePath(archivePath string) string {

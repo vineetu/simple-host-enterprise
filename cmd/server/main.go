@@ -80,6 +80,9 @@ func run() (runErr error) {
 	if err != nil {
 		return fmt.Errorf("open postgres: %w", err)
 	}
+	database.SetMaxOpenConns(maxOpenDBConns)
+	database.SetMaxIdleConns(maxOpenDBConns / 2)
+	database.SetConnMaxIdleTime(5 * time.Minute)
 	// The schema gate: this binary serves only the schema it embeds. Behind
 	// means `simple-host migrate` did not run; ahead means a rollback landed
 	// on a contracted schema, and failing here beats failing on a query.
@@ -95,26 +98,11 @@ func run() (runErr error) {
 		runErr = errors.Join(runErr, resources.close())
 	}()
 
-	diskStorage, err := storage.NewDiskStorage(cfg.SiteDir)
+	siteStore, err := openStore(cfg, database)
 	if err != nil {
-		return fmt.Errorf("create disk storage: %w", err)
+		return err
 	}
-	resources.disk = diskStorage
-
-	backup, err := storage.NewBackup(context.Background(), storage.BackupConfig{
-		Endpoint:        cfg.Backup.Endpoint,
-		Region:          cfg.Backup.Region,
-		Bucket:          cfg.Backup.Bucket,
-		Prefix:          cfg.Backup.Prefix,
-		AccessKeyID:     cfg.Backup.AccessKeyID,
-		SecretAccessKey: cfg.Backup.SecretAccessKey,
-		SSE:             cfg.Backup.SSE,
-		SSEKMSKeyID:     cfg.Backup.SSEKMSKeyID,
-		EnvelopeKeys:    toStorageEnvelopeKeys(cfg.Backup.EnvelopeKeys),
-	})
-	if err != nil {
-		return fmt.Errorf("create backup client: %w", err)
-	}
+	resources.store = siteStore
 
 	mux := http.NewServeMux()
 	hosts, err := handler.NewHostModel(cfg.PublicBaseURL)
@@ -177,16 +165,16 @@ func run() (runErr error) {
 	}
 	log.Printf("simple-host skill version: %s", pluginVersion)
 
-	handler.RegisterHealthRoutes(mux, database)
+	handler.RegisterHealthRoutes(mux, database, siteStore.Ping)
 	publicSearchHandler.Register(mux, authMW)
 	handler.NewUserHandler(database, abuseLimits).Register(mux, authMW, skillVersionMW)
-	handler.NewSiteHandler(database, diskStorage, backup, cfg.PublicBaseURL, hosts, abuseLimits).WithAudit(auditRecorder).Register(mux, authMW, skillVersionMW)
-	handler.NewTeamHandler(database, diskStorage, abuseLimits).WithAudit(auditRecorder).Register(mux, authMW, skillVersionMW, hosts, cfg.PublicBaseURL)
+	handler.NewSiteHandler(database, siteStore, cfg.PublicBaseURL, hosts, abuseLimits).WithAudit(auditRecorder).Register(mux, authMW, skillVersionMW)
+	handler.NewTeamHandler(database, abuseLimits).WithAudit(auditRecorder).Register(mux, authMW, skillVersionMW, hosts, cfg.PublicBaseURL)
 	// Held rather than registered inline: the classification worker starts
 	// after the routes are wired, and the handler is given it once it exists.
 	// The route closures capture this pointer, so attaching later is enough.
 	auditReader := audit.NewReader(database)
-	adminHandler := handler.NewAdminHandler(database, cfg.SiteDir, cfg.PublicBaseURL, hosts, cookiePolicy, signingKeys, cfg.Session.Idle, auditRecorder, abuseLimits).WithDiskStorage(diskStorage).WithAuditReader(auditReader)
+	adminHandler := handler.NewAdminHandler(database, cfg.PublicBaseURL, hosts, cookiePolicy, signingKeys, cfg.Session.Idle, auditRecorder, abuseLimits).WithStore(siteStore).WithAuditReader(auditReader)
 	adminHandler.Register(mux, authMW, skillVersionMW)
 	handler.NewAuditHandler(database, auditReader, cfg.Audit.AccessLogVisibility, abuseLimits).Register(mux, authMW, skillVersionMW)
 	handler.NewShowcaseHandler(database, hosts, signingKeys, cfg.Session.Idle).Register(mux)
@@ -196,8 +184,8 @@ func run() (runErr error) {
 	handoffHandler := handler.NewHandoffHandler(database, signingKeys, hosts, auditRecorder, abuseLimits)
 	handoffHandler.Register(mux, authMW)
 	handler.RegisterUIRoutes(mux)
-	siteFiles := handler.NewSiteFiles(diskStorage, database, cookiePolicy, signingKeys, cfg.Session.Idle).WithAccessWriter(accessWriter)
-	siteAPIHandler := handler.NewSiteAPIHandler(database, diskStorage, storage.AssetLimits{
+	siteFiles := handler.NewSiteFiles(siteStore, database, cookiePolicy, signingKeys, cfg.Session.Idle).WithAccessWriter(accessWriter)
+	siteAPIHandler := handler.NewSiteAPIHandler(database, siteStore, storage.AssetLimits{
 		MaxFileBytes: cfg.Assets.MaxFileBytes,
 		MaxSiteBytes: cfg.Assets.MaxSiteBytes,
 		MaxSiteCount: cfg.Assets.MaxSiteCount,
@@ -253,7 +241,7 @@ func run() (runErr error) {
 	// Indexed pages carry whatever address SiteLink gives, so the index
 	// follows the cutover; existing documents are reindexed by hand after the
 	// flip (docs/subdomains/migration.md phase 4).
-	searchWorker, err := search.StartWorker(ctx, database, diskStorage, hosts.SiteLink)
+	searchWorker, err := search.StartWorker(ctx, database, searchVersions{siteStore}, hosts.SiteLink)
 	if err != nil {
 		return fmt.Errorf("start site search worker: %w", err)
 	}
@@ -263,6 +251,9 @@ func run() (runErr error) {
 		return fmt.Errorf("start site search telemetry pruner: %w", err)
 	}
 	resources.workers = append(resources.workers, telemetryPruner)
+	resources.workers = append(resources.workers, startLoop(ctx, func(ctx context.Context) {
+		siteStore.RunSweeper(ctx, database)
+	}))
 
 	// Site-type classification has no classifier in this package: the showcase
 	// shows no type chips, and the worker is not started. An installer with a
@@ -278,9 +269,85 @@ func run() (runErr error) {
 	return nil
 }
 
+// maxOpenDBConns caps each replica's pool, so replicas times this stays well
+// inside a typical Postgres max_connections.
+const maxOpenDBConns = 20
+
+// openStore builds the site store the server and the storage subcommands
+// share: the configured bucket, the database as the index of what is live,
+// and the pod-local cache.
+func openStore(cfg config.Config, database *sql.DB) (*storage.Store, error) {
+	objects, err := storage.NewS3Objects(context.Background(), s3Config(cfg))
+	if err != nil {
+		return nil, fmt.Errorf("create bucket client: %w", err)
+	}
+	store, err := storage.New(storage.Options{
+		Objects:       objects,
+		Index:         storage.NewDBIndex(database),
+		CacheDir:      cfg.CacheDir,
+		CacheMaxBytes: cfg.CacheMaxBytes,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create site store: %w", err)
+	}
+	return store, nil
+}
+
+func s3Config(cfg config.Config) storage.S3Config {
+	return storage.S3Config{
+		Endpoint:        cfg.Backup.Endpoint,
+		Region:          cfg.Backup.Region,
+		Bucket:          cfg.Backup.Bucket,
+		Prefix:          cfg.Backup.Prefix,
+		AccessKeyID:     cfg.Backup.AccessKeyID,
+		SecretAccessKey: cfg.Backup.SecretAccessKey,
+		SSE:             cfg.Backup.SSE,
+		SSEKMSKeyID:     cfg.Backup.SSEKMSKeyID,
+		EnvelopeKeys:    toStorageEnvelopeKeys(cfg.Backup.EnvelopeKeys),
+	}
+}
+
+// searchVersions adapts the store to the search worker's VersionOpener.
+type searchVersions struct{ store *storage.Store }
+
+func (s searchVersions) OpenVersion(ctx context.Context, siteID string, version int) (search.OpenedVersion, error) {
+	lease, err := s.store.OpenVersion(ctx, siteID, version)
+	if err != nil {
+		return nil, err
+	}
+	return lease, nil
+}
+
+// loop is a background goroutine with the worker lifecycle.
+type loop struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+func startLoop(parent context.Context, run func(context.Context)) *loop {
+	ctx, cancel := context.WithCancel(parent)
+	l := &loop{cancel: cancel, done: make(chan struct{})}
+	go func() {
+		defer close(l.done)
+		run(ctx)
+	}()
+	return l
+}
+
+func (l *loop) Stop() { l.cancel() }
+
+func (l *loop) Wait(ctx context.Context) error {
+	select {
+	case <-l.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // toStorageEnvelopeKeys copies config's envelope-key list into storage's own
 // type. Both packages define the same small struct rather than one importing
-// the other; see the comment on storage.BackupConfig.
+// the other; see the comment on storage.S3Config.
 func toStorageEnvelopeKeys(keys []config.EnvelopeKey) []storage.EnvelopeKey {
 	if len(keys) == 0 {
 		return nil
@@ -329,7 +396,7 @@ type workerLifecycle interface {
 
 type applicationResources struct {
 	workers                []workerLifecycle
-	disk                   io.Closer
+	store                  io.Closer
 	database               io.Closer
 	workersShutdownTimeout time.Duration
 	// sessionCache is the hosted-content negative cache's background refresh
@@ -385,8 +452,8 @@ func (r *applicationResources) close() error {
 	r.accessWriter.Close()
 
 	var closeErr error
-	if r.disk != nil {
-		closeErr = errors.Join(closeErr, r.disk.Close())
+	if r.store != nil {
+		closeErr = errors.Join(closeErr, r.store.Close())
 	}
 	if r.database != nil {
 		closeErr = errors.Join(closeErr, r.database.Close())

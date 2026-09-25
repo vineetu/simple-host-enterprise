@@ -12,11 +12,10 @@
 # these tables at all, so retention can only ever run as the owning role,
 # and never from the server's own connection pool.
 #
-# No site-data mount: pruning touches only Postgres.
+# Pruning touches only Postgres.
 #
-# The schedule (monthly, early on the 1st) is a starting point, like
-# backup-assets-cronjob.yaml's; an overlay with a different retention
-# cadence can patch it.
+# The schedule (monthly, early on the 1st) is a starting point; an overlay
+# with a different retention cadence can patch it.
 apiVersion: batch/v1
 kind: CronJob
 metadata:

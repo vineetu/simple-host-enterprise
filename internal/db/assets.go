@@ -138,3 +138,29 @@ func SumAssetUsage(ctx context.Context, q Querier, siteID string) (AssetUsage, e
 	err := q.QueryRowContext(ctx, query, siteID).Scan(&usage.Count, &usage.Bytes)
 	return usage, err
 }
+
+// ErrAssetQuotaExceeded is returned by CreateAssetWithinQuota when the new
+// asset would put the site over its count or byte limit.
+var ErrAssetQuotaExceeded = errors.New("site asset quota exceeded")
+
+const lockSiteAssetsQuery = `
+	SELECT pg_advisory_xact_lock(hashtextextended('site-assets' || chr(31) || $1::uuid::text, 0))
+`
+
+// CreateAssetWithinQuota inserts an asset row only if the site stays within
+// maxCount live assets and maxBytes live bytes. The check and the insert run
+// under a per-site transaction lock, so concurrent uploads — on any replica —
+// cannot both pass a check that only one of them fits.
+func CreateAssetWithinQuota(ctx context.Context, tx *sql.Tx, id, siteID, name, contentType string, size int64, sha256Sum []byte, createdBy *string, maxCount, maxBytes int64) (Asset, error) {
+	if _, err := tx.ExecContext(ctx, lockSiteAssetsQuery, siteID); err != nil {
+		return Asset{}, err
+	}
+	usage, err := SumAssetUsage(ctx, tx, siteID)
+	if err != nil {
+		return Asset{}, err
+	}
+	if usage.Count+1 > maxCount || usage.Bytes+size > maxBytes {
+		return Asset{}, ErrAssetQuotaExceeded
+	}
+	return CreateAsset(ctx, tx, id, siteID, name, contentType, size, sha256Sum, createdBy)
+}

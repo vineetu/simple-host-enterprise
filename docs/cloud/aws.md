@@ -13,7 +13,8 @@ software's.
 
 ## 1. Storage class with encryption
 
-An encrypting `gp3` `StorageClass` for the site-data PVC:
+An encrypting `gp3` `StorageClass`, for any volume you run in the cluster
+(the application itself keeps sites in the bucket and needs none):
 
 ```yaml
 apiVersion: storage.k8s.io/v1
@@ -30,8 +31,7 @@ parameters:
 allowVolumeExpansion: true
 ```
 
-Reference this StorageClass from `deploy/base/pvc.yaml` (or an overlay
-patch over it) before the PVC is first created — the storage class of an
+Reference it before a PVC is first created — the storage class of an
 existing PVC cannot be changed in place.
 
 ## 2. Managed Postgres with TLS and PITR
@@ -70,8 +70,9 @@ An S3 bucket:
   belt-and-braces on top of the bucket default, not a substitute for it.
 - A bucket policy denying non-TLS requests (`aws:SecureTransport: false`
   → `Deny`).
-- A lifecycle rule on the backup prefix (`BACKUP_STORAGE_PREFIX`, default
-  `backups/`) for your retention window.
+- Versioning on, with a lifecycle rule expiring noncurrent versions and
+  aborting incomplete multipart uploads. Required: the bucket holds every
+  site. Commands in `docs/storage.md`.
 
 ```
 BACKUP_STORAGE_ENDPOINT=https://s3.<region>.amazonaws.com

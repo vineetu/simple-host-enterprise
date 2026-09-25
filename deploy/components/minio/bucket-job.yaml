@@ -1,4 +1,5 @@
-# Creates the backup bucket once MinIO answers. Idempotent, so re-applying the
+# Creates the site bucket once MinIO answers, with versioning on as
+# docs/storage.md requires in production. Idempotent, so re-applying the
 # overlay is harmless; the Job is replaced on each apply because its spec is
 # immutable and kustomize names it the same every time.
 apiVersion: batch/v1
@@ -28,6 +29,7 @@ spec:
                 echo "waiting for minio"; sleep 3
               done
               mc mb --ignore-existing "local/$BACKUP_STORAGE_BUCKET"
+              mc version enable "local/$BACKUP_STORAGE_BUCKET"
               echo "bucket $BACKUP_STORAGE_BUCKET ready"
           env:
             - name: MC_CONFIG_DIR

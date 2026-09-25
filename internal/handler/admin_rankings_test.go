@@ -1,15 +1,16 @@
 package handler
 
 import (
+	"context"
 	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/vsriram/simple-host/internal/db"
+	"github.com/vsriram/simple-host/internal/storage"
 )
 
 func TestParseRankMetricFallsBackToViews(t *testing.T) {
@@ -139,7 +140,7 @@ func TestRenderUserRankingCardCapsAtTen(t *testing.T) {
 		rows[i] = userRank{username: string(rune('a'+i)) + "-user", views: int64(100 - i)}
 	}
 	var b strings.Builder
-	renderUserRankingCard(&b, rows, metricViews, metricViews, 7)
+	renderUserRankingCard(&b, HostModel{}, rows, metricViews, metricViews, 7)
 
 	if got := strings.Count(b.String(), `rank-row--ranked`); got != rankTop {
 		t.Errorf("rendered %d rows, want %d", got, rankTop)
@@ -150,7 +151,7 @@ func TestRenderUserRankingCardCapsAtTen(t *testing.T) {
 // packing several figures into that one right-aligned, non-shrinking cell.
 func TestRankRowHasOneValueAndContextBeneathTheName(t *testing.T) {
 	var b strings.Builder
-	renderUserRankingCard(&b, []userRank{
+	renderUserRankingCard(&b, HostModel{}, []userRank{
 		{username: "george.phipps", siteCount: 12, totalBytes: 472400000, liveBytes: 130900000},
 	}, metricSize, metricViews, 7)
 	out := b.String()
@@ -192,7 +193,7 @@ func TestRankRowNameIsTruncatableWithFullNameAvailable(t *testing.T) {
 // The reporting range is a property of the card, not of every row.
 func TestReportingRangeAppearsOncePerCard(t *testing.T) {
 	var b strings.Builder
-	renderUserRankingCard(&b, []userRank{
+	renderUserRankingCard(&b, HostModel{}, []userRank{
 		{username: "a", views: 5}, {username: "b", views: 4}, {username: "c", views: 3},
 	}, metricViews, metricViews, 7)
 
@@ -204,7 +205,7 @@ func TestReportingRangeAppearsOncePerCard(t *testing.T) {
 // Storage is not bounded by the reporting range, so showing one would be a lie.
 func TestUnrangedMetricsOmitTheReportingRange(t *testing.T) {
 	var b strings.Builder
-	renderUserRankingCard(&b, []userRank{{username: "a", totalBytes: 10}}, metricSize, metricViews, 7)
+	renderUserRankingCard(&b, HostModel{}, []userRank{{username: "a", totalBytes: 10}}, metricSize, metricViews, 7)
 
 	if strings.Contains(b.String(), `class="card-count"`) {
 		t.Error("storage ranking claims a reporting range it does not have")
@@ -226,7 +227,7 @@ func between(t *testing.T, s, open, close string) string {
 
 func TestRenderRankingCardsEscapeUntrustedNames(t *testing.T) {
 	var b strings.Builder
-	renderUserRankingCard(&b, []userRank{{username: `<script>x</script>`}}, metricViews, metricViews, 7)
+	renderUserRankingCard(&b, HostModel{}, []userRank{{username: `<script>x</script>`}}, metricViews, metricViews, 7)
 	renderSiteRankingCard(&b, HostModel{}, []siteRank{{name: `"><img onerror=x>`, owner: "o"}}, metricViews, metricViews, 7)
 
 	out := b.String()
@@ -240,7 +241,7 @@ func TestRenderRankingCardsEscapeUntrustedNames(t *testing.T) {
 
 func TestRenderRankingCardsHandleEmptyData(t *testing.T) {
 	var b strings.Builder
-	renderUserRankingCard(&b, nil, metricSize, metricViews, 7)
+	renderUserRankingCard(&b, HostModel{}, nil, metricSize, metricViews, 7)
 	renderSiteRankingCard(&b, HostModel{}, nil, metricShared, metricViews, 7)
 
 	out := b.String()
@@ -253,7 +254,7 @@ func TestRenderRankingCardsHandleEmptyData(t *testing.T) {
 // and every tab must link somewhere.
 func TestRankTabsMarkTheActiveMetric(t *testing.T) {
 	var b strings.Builder
-	renderUserRankingCard(&b, nil, metricSize, metricViews, 7)
+	renderUserRankingCard(&b, HostModel{}, nil, metricSize, metricViews, 7)
 	out := b.String()
 
 	if strings.Count(out, `class="rank-tab is-active"`) != 1 {
@@ -272,86 +273,45 @@ func TestRankTabsMarkTheActiveMetric(t *testing.T) {
 	}
 }
 
-func writeFile(t *testing.T, path string, size int) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+func TestMeasureSiteStorageCountsAllObjectsAndTracksLive(t *testing.T) {
+	siteUsageCache.Lock()
+	siteUsageCache.measuredAt = time.Time{}
+	siteUsageCache.Unlock()
+	store := newTestStore(t)
+	const siteID = "0a0a0a0a-0000-4000-8000-00000000000a"
+	for version, size := range map[int]int{1: 100, 2: 300} {
+		key, _ := storage.VersionKey(siteID, version)
+		if err := store.objects.Put(context.Background(), key, make([]byte, size), ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.objects.Put(context.Background(), "sites/"+siteID+"/assets/0a0a0a0a-0000-4000-8000-0000000000aa", make([]byte, 50), ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, make([]byte, size), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
 
-func TestMeasureSiteDiskUsageCountsAllVersionsAndTracksLive(t *testing.T) {
-	root := t.TempDir()
-	site := filepath.Join(root, "alice", "portfolio")
-
-	writeFile(t, filepath.Join(site, "v1", "index.html"), 100)
-	writeFile(t, filepath.Join(site, "v2", "index.html"), 300)
-	writeFile(t, filepath.Join(site, "v2", "assets", "app.css"), 50)
-	if err := os.Symlink("v2", filepath.Join(site, "current")); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
-	}
-
-	usage := walkSiteDiskUsage(root)["alice/portfolio"]
-
-	// 100 + 300 + 50 — every retained version, counted once. If the `current`
-	// symlink were followed, v2 would be counted twice and this would be 800.
+	measured := measureSiteStorage(context.Background(), store.Store)
+	usage := measured.site(siteID, 2)
+	// 100 + 300 + 50: every retained version and every asset, as stored.
 	if usage.totalBytes != 450 {
 		t.Errorf("totalBytes = %d, want 450", usage.totalBytes)
 	}
-	if usage.liveBytes != 350 {
-		t.Errorf("liveBytes = %d, want 350", usage.liveBytes)
+	if usage.liveBytes != 300 {
+		t.Errorf("liveBytes = %d, want 300", usage.liveBytes)
+	}
+	if measured.totalBytes != 450 {
+		t.Errorf("bucket total = %d, want 450", measured.totalBytes)
+	}
+	if got := measured.site(siteID, 9).liveBytes; got != 0 {
+		t.Errorf("liveBytes for a version with no object = %d, want 0", got)
 	}
 }
 
-func TestMeasureSiteDiskUsageWithoutCurrentLink(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "bob", "draft", "v1", "index.html"), 42)
-
-	usage := walkSiteDiskUsage(root)["bob/draft"]
-	if usage.totalBytes != 42 {
-		t.Errorf("totalBytes = %d, want 42", usage.totalBytes)
-	}
-	if usage.liveBytes != 0 {
-		t.Errorf("liveBytes = %d, want 0 when nothing is live", usage.liveBytes)
+func TestMeasureSiteStorageWithoutStoreShowsNothing(t *testing.T) {
+	if got := measureSiteStorage(context.Background(), nil); got.bySite != nil || storageStatsHTML(got) != "" {
+		t.Fatalf("nil store measured %+v", got)
 	}
 }
 
-func TestWalkSiteDiskUsageToleratesMissingAndEmptyRoots(t *testing.T) {
-	if got := walkSiteDiskUsage(""); len(got) != 0 {
-		t.Errorf("empty root returned %d entries", len(got))
-	}
-	if got := walkSiteDiskUsage(filepath.Join(t.TempDir(), "does-not-exist")); len(got) != 0 {
-		t.Errorf("missing root returned %d entries", len(got))
-	}
-}
-
-func TestMeasureSiteDiskUsageCachesPerRoot(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "carol", "site", "v1", "a.txt"), 10)
-
-	first := measureSiteDiskUsage(root)
-	if first["carol/site"].totalBytes != 10 {
-		t.Fatalf("first measurement = %d, want 10", first["carol/site"].totalBytes)
-	}
-
-	// Written after the measurement: the cache should still report the old
-	// number for this root.
-	writeFile(t, filepath.Join(root, "carol", "site", "v2", "b.txt"), 90)
-	if again := measureSiteDiskUsage(root); again["carol/site"].totalBytes != 10 {
-		t.Errorf("cached measurement = %d, want the stale 10", again["carol/site"].totalBytes)
-	}
-
-	// A different root must not read the previous root's cache.
-	other := t.TempDir()
-	writeFile(t, filepath.Join(other, "dave", "site", "v1", "c.txt"), 7)
-	if got := measureSiteDiskUsage(other)["dave/site"].totalBytes; got != 7 {
-		t.Errorf("new root measured %d, want 7", got)
-	}
-}
-
-// The "Updated" tab exists on the sites card only, and orders by recency.
 func TestSiteRanksSortByUpdated(t *testing.T) {
 	if got := parseRankMetric("updated", siteMetrics); got != metricUpdated {
 		t.Fatalf("parseRankMetric(updated, siteMetrics) = %q, want updated", got)
@@ -388,7 +348,7 @@ func TestSiteRanksSortByUpdated(t *testing.T) {
 func TestUpdatedRowRendersRealTimeMarkup(t *testing.T) {
 	var b strings.Builder
 	row := siteRank{name: "portfolio", owner: "ann", updatedAt: time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)}
-	writeRankRow(&b, 1, sitePublicPath(row.owner, row.name), row.name, siteMetricCell(row, metricUpdated))
+	writeRankRow(&b, 1, "https://ann.foo.example/portfolio/", row.name, siteMetricCell(row, metricUpdated))
 	out := b.String()
 	if !strings.Contains(out, `<time data-local-time="datetime" datetime="2026-08-01T12:00:00Z">`) {
 		t.Errorf("row lost its time element:\n%s", out)
@@ -404,7 +364,7 @@ func TestUpdatedRowRendersRealTimeMarkup(t *testing.T) {
 // Escaping still applies to every metric that is a plain value.
 func TestPlainRankValuesStayEscaped(t *testing.T) {
 	var b strings.Builder
-	writeRankRow(&b, 1, "/sites/ann/", "ann", rankCell{value: `<b>1</b>`, unit: "views", sub: "1 site"})
+	writeRankRow(&b, 1, "https://ann.foo.example/", "ann", rankCell{value: `<b>1</b>`, unit: "views", sub: "1 site"})
 	if !strings.Contains(b.String(), "&lt;b&gt;1&lt;/b&gt;") {
 		t.Errorf("plain value was not escaped:\n%s", b.String())
 	}
@@ -413,7 +373,7 @@ func TestPlainRankValuesStayEscaped(t *testing.T) {
 func TestNewUsersCardOrdersNewestFirst(t *testing.T) {
 	base := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	var b strings.Builder
-	renderNewUsersCard(&b, []newUser{
+	renderNewUsersCard(&b, HostModel{}, []newUser{
 		{username: "carol", joined: base.Add(72 * time.Hour), siteCount: 0, disabled: true},
 		{username: "bob", joined: base.Add(24 * time.Hour), siteCount: 3},
 	}, 41)
@@ -451,7 +411,7 @@ func TestAdminListScriptBehavior(t *testing.T) {
 func TestNewUsersCardMarksTeamsInsteadOfDisabled(t *testing.T) {
 	base := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	var b strings.Builder
-	renderNewUsersCard(&b, []newUser{
+	renderNewUsersCard(&b, HostModel{}, []newUser{
 		{username: "platform", joined: base.Add(48 * time.Hour), siteCount: 0, team: true},
 		{username: "dana", joined: base.Add(24 * time.Hour), siteCount: 0, disabled: true},
 	}, 2)
@@ -474,7 +434,7 @@ func TestUserBlockHeaderKeepsPersonControls(t *testing.T) {
 	joined := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 
 	var active strings.Builder
-	writeUserBlockHeader(&active, db.User{Username: "dana", CreatedAt: joined}, 0, "dana", 0, 0)
+	writeUserBlockHeader(&active, HostModel{}, db.User{Username: "dana", CreatedAt: joined}, 0, "dana", 0, 0)
 	if strings.Contains(active.String(), "disabled<") {
 		t.Errorf("active person is flagged as disabled:\n%s", active.String())
 	}
@@ -486,7 +446,7 @@ func TestUserBlockHeaderKeepsPersonControls(t *testing.T) {
 	// to render exactly as it did before teams existed.
 	disabledAt := joined.Add(time.Hour)
 	var disabled strings.Builder
-	writeUserBlockHeader(&disabled, db.User{Username: "dana", CreatedAt: joined, DisabledAt: &disabledAt}, 2, "dana demo", 0, 0)
+	writeUserBlockHeader(&disabled, HostModel{}, db.User{Username: "dana", CreatedAt: joined, DisabledAt: &disabledAt}, 2, "dana demo", 0, 0)
 	out := disabled.String()
 	if !strings.Contains(out, `chip chip-warn">disabled<`) {
 		t.Errorf("disabled person is not flagged:\n%s", out)
@@ -503,7 +463,7 @@ func TestUserBlockHeaderKeepsPersonControls(t *testing.T) {
 // nothing about keys: it has none to be pending and none to reset.
 func TestUserBlockHeaderMarksTeamAndDropsKeyControls(t *testing.T) {
 	var b strings.Builder
-	writeUserBlockHeader(&b, db.User{
+	writeUserBlockHeader(&b, testHostModel(t), db.User{
 		Username:    "platform",
 		Kind:        "team",
 		MemberCount: 3,
@@ -522,7 +482,7 @@ func TestUserBlockHeaderMarksTeamAndDropsKeyControls(t *testing.T) {
 	if strings.Contains(out, "/disable") || strings.Contains(out, "/enable") {
 		t.Errorf("team offers an offboarding control it has no sign-in to need:\n%s", out)
 	}
-	if !strings.Contains(out, `href="/sites/platform/"`) {
+	if !strings.Contains(out, `href="https://platform.foo.example/"`) {
 		t.Errorf("team lost the details link:\n%s", out)
 	}
 	if !strings.Contains(out, "1 site") {
@@ -533,7 +493,7 @@ func TestUserBlockHeaderMarksTeamAndDropsKeyControls(t *testing.T) {
 // One member is one member, not "1 members".
 func TestUserBlockHeaderSingularMemberCount(t *testing.T) {
 	var b strings.Builder
-	writeUserBlockHeader(&b, db.User{Username: "solo", Kind: "team", MemberCount: 1}, 0, "solo", 0, 0)
+	writeUserBlockHeader(&b, HostModel{}, db.User{Username: "solo", Kind: "team", MemberCount: 1}, 0, "solo", 0, 0)
 	if !strings.Contains(b.String(), "1 member<") {
 		t.Errorf("member count is not singular:\n%s", b.String())
 	}

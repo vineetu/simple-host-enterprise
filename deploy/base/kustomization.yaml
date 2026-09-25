@@ -10,11 +10,10 @@ namespace: simple-host
 resources:
   - namespace.yaml
   - serviceaccount.yaml
-  - pvc.yaml
   - deployment.yaml
   - service.yaml
   - ingress.yaml
-  - backup-assets-cronjob.yaml
+  - pdb.yaml
   - cronjob-prune.yaml
 
 images:

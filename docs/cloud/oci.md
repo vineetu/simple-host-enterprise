@@ -33,8 +33,9 @@ reclaimPolicy: Retain
 volumeBindingMode: WaitForFirstConsumer
 ```
 
-`reclaimPolicy: Retain` matters here as everywhere: the site tree is on this
-volume, and a deleted PVC should not take it.
+`reclaimPolicy: Retain` matters for any data volume you run in the cluster
+(the application itself keeps sites in the bucket): a deleted PVC should not
+take it.
 
 ## 2. Managed Postgres with TLS and PITR
 
@@ -62,7 +63,8 @@ backup story.
 
 Object Storage is encrypted at rest always, with an Oracle-managed key unless
 you assign one from Vault. It exposes an **S3 Compatibility API**, which is
-what the backup client speaks.
+what the storage client speaks. Turn on object versioning and a lifecycle
+policy for previous versions (`docs/storage.md`).
 
 Two things catch people:
 
@@ -88,8 +90,8 @@ set it rather than leaving the default.
 
 `BACKUP_SSE=AES256` asks for server-side encryption on the object. Oracle
 encrypts every object regardless; confirm the header is accepted rather than
-rejected the first time the backup CronJob runs, and read the object back with
-`simple-host restore` before you rely on it.
+rejected the first time a site is deployed, and that the site then serves,
+before you rely on it.
 
 For a customer-managed key, assign a Vault key to the bucket at creation.
 `BACKUP_SSE_KEY_ID` and `BACKUP_SSE=aws:kms` are an AWS-specific header pair

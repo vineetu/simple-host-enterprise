@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/vsriram/simple-host/internal/audit"
@@ -21,7 +20,6 @@ import (
 
 type AdminHandler struct {
 	database      *sql.DB
-	siteDir       string
 	publicBaseURL string
 	// hosts decides which address the dashboard links a site under.
 	hosts       HostModel
@@ -30,16 +28,13 @@ type AdminHandler struct {
 	signingKeys []auth.SigningKey
 	sessionIdle time.Duration
 	audit       audit.Recorder
-	// diskStorage must be the same instance the rest of the server uses. The
-	// per-site locks and the version-lease table live inside it, so a second
-	// instance over the same directory would compress versions out from under
-	// live deploys. Optional: nil disables the archive sweep endpoint.
-	diskStorage *storage.DiskStorage
+	// store sizes the storage ranking. Optional: nil shows no sizes.
+	store *storage.Store
 	// siteTypes enables the classification backfill endpoint. Optional.
 	siteTypes *sitetype.Worker
 	// auditReader backs GET /api/admin/export (design.md 8.3). Optional:
-	// nil leaves the endpoint returning 503, the same shape diskStorage and
-	// siteTypes use for their own optional endpoints.
+	// nil leaves the endpoint returning 503, the same shape siteTypes uses
+	// for its own optional endpoint.
 	auditReader *audit.Reader
 }
 
@@ -52,7 +47,7 @@ func (h *AdminHandler) WithAuditReader(reader *audit.Reader) *AdminHandler {
 
 func NewAdminHandler(
 	database *sql.DB,
-	siteDir, publicBaseURL string,
+	publicBaseURL string,
 	hosts HostModel,
 	cookies CookiePolicy,
 	signingKeys []auth.SigningKey,
@@ -65,7 +60,6 @@ func NewAdminHandler(
 	}
 	return &AdminHandler{
 		database:      database,
-		siteDir:       siteDir,
 		publicBaseURL: publicBaseURL,
 		hosts:         hosts,
 		cookies:       cookies,
@@ -96,34 +90,10 @@ func (h *AdminHandler) optionalUser(r *http.Request) *db.User {
 	return &user
 }
 
-// WithDiskStorage attaches the server's storage instance, enabling the archive
-// sweep. It must be the instance the site handlers use — see the field comment.
-func (h *AdminHandler) WithDiskStorage(diskStorage *storage.DiskStorage) *AdminHandler {
-	h.diskStorage = diskStorage
+// WithStore attaches the site store the storage ranking is measured from.
+func (h *AdminHandler) WithStore(store *storage.Store) *AdminHandler {
+	h.store = store
 	return h
-}
-
-type diskUsage struct {
-	totalBytes uint64
-	freeBytes  uint64
-	usedBytes  uint64
-	usedPct    int
-	ok         bool
-}
-
-func readDiskUsage(path string) diskUsage {
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(path, &stat); err != nil {
-		return diskUsage{}
-	}
-	total := stat.Blocks * uint64(stat.Bsize)
-	free := stat.Bavail * uint64(stat.Bsize)
-	used := total - free
-	pct := 0
-	if total > 0 {
-		pct = int((used * 100) / total)
-	}
-	return diskUsage{totalBytes: total, freeBytes: free, usedBytes: used, usedPct: pct, ok: true}
 }
 
 func formatBytes(b uint64) string {
@@ -185,7 +155,6 @@ func (h *AdminHandler) Register(mux *http.ServeMux, authMiddleware, skillVersion
 	}
 	mux.Handle("POST /api/admin/users/{username}/disable", dashboardCheck(adminAPI(http.HandlerFunc(h.disableUser))))
 	mux.Handle("POST /api/admin/users/{username}/enable", dashboardCheck(adminAPI(http.HandlerFunc(h.enableUser))))
-	mux.Handle("POST /api/admin/archive-versions", dashboardCheck(adminAPI(http.HandlerFunc(h.archiveVersions))))
 	mux.Handle("POST /api/admin/classify-sites", dashboardCheck(adminAPI(http.HandlerFunc(h.classifySites))))
 	mux.Handle("GET /api/admin/export", adminAPI(http.HandlerFunc(h.exportAuditOrAccess)))
 }
@@ -267,7 +236,7 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 		log.Printf("admin editor grants: %v", err)
 		editingByUserID = map[string]int{}
 	}
-	usageBySitePath := measureSiteDiskUsage(h.siteDir)
+	usageBySiteID := measureSiteStorage(r.Context(), h.store)
 
 	sitesByUser := make(map[string][]db.Site, len(users))
 	for _, s := range sites {
@@ -314,7 +283,7 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 				st.latest = s.UpdatedAt
 			}
 
-			usage := usageBySitePath[u.Username+"/"+s.Name]
+			usage := usageBySiteID.site(s.ID, s.ActiveVersion)
 			rank.views += analyticsBySiteID[s.ID].Last7Pageviews
 			rank.totalBytes += usage.totalBytes
 			rank.liveBytes += usage.liveBytes
@@ -384,8 +353,6 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 		return stateSites[i].UpdatedAt.After(stateSites[j].UpdatedAt)
 	})
 
-	disk := readDiskUsage(h.siteDir)
-
 	var b strings.Builder
 	b.WriteString(adminHeadHTML)
 	fmt.Fprintf(&b, `<header class="bar">
@@ -405,7 +372,7 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 		analyticsRangeCompact(analyticsDays),
 		formatCount(rangeBotViews),
 		analyticsRangeCompact(analyticsDays),
-		diskStatsHTML(disk),
+		storageStatsHTML(usageBySiteID),
 		adminActionNoticeHTML(r),
 	)
 	renderAnalyticsRangeSelectorWith(&b, "/admin", analyticsDays, map[string]string{
@@ -421,10 +388,10 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 	if len(users) > 0 {
 		b.WriteString(`<section class="overview">`)
 
-		renderUserRankingCard(&b, userRanks, usersMetric, sitesMetric, analyticsDays)
+		renderUserRankingCard(&b, hosts, userRanks, usersMetric, sitesMetric, analyticsDays)
 		renderSiteRankingCard(&b, hosts, siteRanks, sitesMetric, usersMetric, analyticsDays)
 
-		renderNewUsersCard(&b, newestUsers, len(users))
+		renderNewUsersCard(&b, hosts, newestUsers, len(users))
 
 		// State backend usage. Full width and outside the ranking grid: this is
 		// the one card that lists every matching site rather than a top ten, so
@@ -500,7 +467,7 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 		if !st.latest.IsZero() {
 			latestUnix = st.latest.Unix()
 		}
-		writeUserBlockHeader(&b, u, len(userSites), haystack, st.viewsRange, latestUnix)
+		writeUserBlockHeader(&b, hosts, u, len(userSites), haystack, st.viewsRange, latestUnix)
 
 		if len(userSites) == 0 {
 			b.WriteString(`<div class="empty-user">No sites yet.</div></section>`)
@@ -545,10 +512,10 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 // a namespace rather than somebody: it is labelled as one, carries how many
 // people are in it, and offers no offboarding control — there is no sign-in
 // to disable.
-func writeUserBlockHeader(b *strings.Builder, u db.User, siteCount int, haystack string, viewsRange, latestUnix int64) {
+func writeUserBlockHeader(b *strings.Builder, hosts HostModel, u db.User, siteCount int, haystack string, viewsRange, latestUnix int64) {
 	nameChips := ""
-	actions := fmt.Sprintf(`<a class="btn-view" href="/sites/%s/" target="_blank" rel="noopener">View details</a>`,
-		html.EscapeString(u.Username))
+	actions := fmt.Sprintf(`<a class="btn-view" href="%s" target="_blank" rel="noopener">View details</a>`,
+		html.EscapeString(hosts.OwnerPageURL(u.Username)))
 	if u.IsTeam() {
 		nameChips = fmt.Sprintf(` <span class="chip">team</span> <span class="chip chip-muted">%s</span>`,
 			html.EscapeString(pluralize(u.MemberCount, "1 member", fmt.Sprintf("%d members", u.MemberCount))))
@@ -734,12 +701,11 @@ func pluralize(n int, one, many string) string {
 	return many
 }
 
-func diskStatsHTML(d diskUsage) string {
-	if !d.ok {
+func storageStatsHTML(usage siteStorage) string {
+	if usage.bySite == nil {
 		return ""
 	}
-	return fmt.Sprintf(` <span class="sep" aria-hidden="true"></span> <b>%s</b> free of %s (%d%% used)`,
-		formatBytes(d.freeBytes), formatBytes(d.totalBytes), d.usedPct)
+	return fmt.Sprintf(` <span class="sep" aria-hidden="true"></span> <b>%s</b> stored`, formatBytes(usage.totalBytes))
 }
 
 // stateBackendHTML renders chips showing which state-backend variant(s) a site

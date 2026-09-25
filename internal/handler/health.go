@@ -673,18 +673,29 @@ const requiredSchemaProbe = `
 		team_triggers_ready
 `
 
-func RegisterHealthRoutes(mux *http.ServeMux, db *sql.DB) {
+// RegisterHealthRoutes mounts the probes. pingBucket is the site store's
+// bucket check: a replica that cannot reach the bucket cannot deploy or fill
+// its cache, so it takes itself out of rotation.
+func RegisterHealthRoutes(mux *http.ServeMux, db *sql.DB, pingBucket func(context.Context) error) {
 	mux.HandleFunc("GET /healthz", healthz)
-	mux.HandleFunc("GET /readyz", readyz(db))
+	mux.HandleFunc("GET /readyz", readyz(db, pingBucket))
 }
 
 func healthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, healthResponse{Status: "ok"})
 }
 
-func readyz(db *sql.DB) http.HandlerFunc {
+func readyz(db *sql.DB, pingBucket func(context.Context) error) http.HandlerFunc {
 	return readinessHandler(
-		db.PingContext,
+		func(ctx context.Context) error {
+			if err := db.PingContext(ctx); err != nil {
+				return err
+			}
+			if pingBucket == nil {
+				return nil
+			}
+			return pingBucket(ctx)
+		},
 		func(ctx context.Context) error {
 			var schemaReady bool
 			if err := db.QueryRowContext(ctx, requiredSchemaProbe).Scan(&schemaReady); err != nil {

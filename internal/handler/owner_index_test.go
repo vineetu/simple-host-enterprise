@@ -87,7 +87,7 @@ func TestOwnerIndexLinksRestrictedSiteToItsOwnHost(t *testing.T) {
 
 func ownerIndexGate(t *testing.T, ownerUserID string) http.Handler {
 	t.Helper()
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "gantt", "gantt-index")
 	gate := testHostGate(t, store, testHostModel(t))
 	gate.ownerIndex = func(_ context.Context, owner string) (string, []db.Site, map[string]bool, error) {
@@ -165,7 +165,7 @@ func TestOwnerHostRootDoesNotEnumerateUsersWithoutSession(t *testing.T) {
 // discloses one person's site list to a named caller is exactly what the
 // audit trail exists to record.
 func TestOwnerHostRootIsAccessLogged(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "gantt", "gantt-index")
 	gate := testHostGate(t, store, testHostModel(t))
 	gate.ownerIndex = func(_ context.Context, owner string) (string, []db.Site, map[string]bool, error) {
@@ -199,7 +199,7 @@ func TestOwnerHostRootIsAccessLogged(t *testing.T) {
 
 // A refusal is logged too, not just a successful render.
 func TestOwnerHostRootLogsRefusal(t *testing.T) {
-	store, _ := newServeTestStorage(t)
+	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "gantt", "gantt-index")
 	gate := testHostGate(t, store, testHostModel(t))
 	gate.ownerIndex = func(_ context.Context, owner string) (string, []db.Site, map[string]bool, error) {

@@ -8,35 +8,34 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/vsriram/simple-host/internal/audit"
 	"github.com/vsriram/simple-host/internal/config"
+	db "github.com/vsriram/simple-host/internal/db"
 	"github.com/vsriram/simple-host/internal/migrate"
 	"github.com/vsriram/simple-host/internal/safepath"
 	"github.com/vsriram/simple-host/internal/storage"
 )
 
 // runSubcommand dispatches the binary's non-server modes. The same image runs
-// as the init container (`migrate`), the server, and the backup/restore
-// CronJob and one-off recovery commands, so an operator only ever ships one
-// artifact.
+// as the init container (`migrate`), the server, the prune CronJob and the
+// one-off storage commands, so an operator only ever ships one artifact.
 func runSubcommand(name string, args []string) error {
 	switch name {
 	case "migrate":
 		return runMigrate(args)
 	case "restore":
 		return runRestore(args)
-	case "backup-assets":
-		return runBackupAssets(args)
+	case "migrate-storage":
+		return runMigrateStorage(args)
 	case "prune":
 		return runPrune(args)
 	case "version":
 		fmt.Println(versionString())
 		return nil
 	default:
-		return fmt.Errorf("unknown subcommand %q (expected: migrate, restore, backup-assets, prune, version)", name)
+		return fmt.Errorf("unknown subcommand %q (expected: migrate, restore, migrate-storage, prune, version)", name)
 	}
 }
 
@@ -112,130 +111,255 @@ func runMigrate(args []string) error {
 	return nil
 }
 
-// runRestore rebuilds one site version, and optionally its assets, from the
-// most recent matching backup object into a target site directory. The
-// target may name a different owner or site than the backup was taken from,
-// which is how a version is recovered into a fresh location for inspection
-// before it is trusted enough to become the real site's current version, and
-// how any environment gets a copy of another's content (design 10.5).
+// runRestore copies one stored version of any site — live, or deleted but
+// still in the bucket — into a target site as its next version, and by
+// default makes it live. The copy is server side, and it and the database
+// rows land under the target site's advisory lock, so a restore serializes
+// with deploys exactly as another deploy would. A deleted site's id is in
+// its site_delete audit event. An object already swept from the bucket has
+// to be brought back from the bucket's own versioning first
+// (docs/storage.md).
 func runRestore(args []string) error {
 	fs := flag.NewFlagSet("restore", flag.ContinueOnError)
-	owner := fs.String("owner", "", "owner label the backup was taken from")
-	site := fs.String("site", "", "site name the backup was taken from")
+	fromSiteID := fs.String("from-site-id", "", "id of the site the version was deployed to")
 	version := fs.Int("version", 0, "version number to restore")
-	targetOwner := fs.String("target-owner", "", "owner directory to restore into (default: -owner)")
-	targetSite := fs.String("target-site", "", "site directory to restore into (default: -site)")
-	assets := fs.Bool("assets", false, "also restore the site's assets directory")
-	setCurrent := fs.Bool("set-current", true, "point the target site's current version at the restored one")
+	owner := fs.String("owner", "", "username (or team name) that owns the target site")
+	site := fs.String("site", "", "target site name; created if it does not exist")
+	setCurrent := fs.Bool("set-current", true, "make the restored version the live one")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *owner == "" || *site == "" || *version <= 0 {
-		return errors.New("restore: -owner, -site and -version are required")
+	if _, err := storage.VersionKey(*fromSiteID, *version); err != nil {
+		return fmt.Errorf("restore: -from-site-id and -version: %w", err)
 	}
-	if *targetOwner == "" {
-		*targetOwner = *owner
+	if err := safepath.ValidateSegment(*owner); err != nil {
+		return fmt.Errorf("restore: -owner: %w", err)
 	}
-	if *targetSite == "" {
-		*targetSite = *site
-	}
-	if err := safepath.ValidateSegment(*targetOwner); err != nil {
-		return fmt.Errorf("restore: -target-owner: %w", err)
-	}
-	if err := safepath.ValidateSegment(*targetSite); err != nil {
-		return fmt.Errorf("restore: -target-site: %w", err)
+	if err := safepath.ValidateSegment(*site); err != nil {
+		return fmt.Errorf("restore: -site: %w", err)
 	}
 
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
-	backup, disk, err := openBackupAndDisk(cfg)
+	database, objects, err := openDatabaseAndObjects(cfg)
 	if err != nil {
 		return err
 	}
-	defer disk.Close()
-	if backup == nil {
-		return errors.New("restore: no bucket is configured (BACKUP_STORAGE_BUCKET is required)")
-	}
+	defer database.Close()
 
 	ctx := context.Background()
-	key, err := backup.RestoreVersion(ctx, disk, *owner, *site, *version, *targetOwner, *targetSite, *setCurrent)
+	tx, err := database.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("restore version: %w", err)
+		return err
 	}
-	log.Printf("restored %s/%s v%d from %s into %s/%s (current=%t)", *owner, *site, *version, key, *targetOwner, *targetSite, *setCurrent)
-
-	if *assets {
-		targetDir := filepath.Join(cfg.SiteDir, *targetOwner, *targetSite)
-		n, err := backup.RestoreAssets(ctx, *owner, *site, targetDir)
-		if err != nil {
-			return fmt.Errorf("restore assets: %w", err)
+	defer tx.Rollback()
+	user, err := db.GetUserByUsername(ctx, tx, *owner)
+	if err != nil {
+		return fmt.Errorf("restore: owner %q: %w", *owner, err)
+	}
+	if err := db.LockSiteCollaboration(ctx, tx, user.ID, *site); err != nil {
+		return err
+	}
+	target, err := db.GetSite(ctx, tx, user.ID, *site)
+	created := false
+	if errors.Is(err, sql.ErrNoRows) {
+		target, err = db.CreateSite(ctx, tx, user.ID, *site)
+		created = true
+	}
+	if err != nil {
+		return fmt.Errorf("restore: target site: %w", err)
+	}
+	maxVersion, err := db.GetMaxVersionNumber(ctx, tx, target.ID)
+	if err != nil {
+		return err
+	}
+	newVersion := maxVersion + 1
+	if err := storage.CopyVersion(ctx, objects, *fromSiteID, *version, target.ID, newVersion); err != nil {
+		if errors.Is(err, storage.ErrObjectNotFound) {
+			return fmt.Errorf("restore: %s v%d is not in the bucket; recover its noncurrent version with the bucket's versioning first: %w", *fromSiteID, *version, err)
 		}
-		log.Printf("restored %d asset(s) for %s/%s into %s/%s", n, *owner, *site, *targetOwner, *targetSite)
+		return fmt.Errorf("restore: copy: %w", err)
+	}
+	key, _ := storage.VersionKey(target.ID, newVersion)
+	row, err := db.CreateVersion(ctx, tx, target.ID, newVersion, key, nil)
+	if err != nil {
+		return err
+	}
+	if err := db.ActivateVersion(ctx, tx, row.ID); err != nil {
+		return err
+	}
+	if *setCurrent || created {
+		if err := db.UpdateSiteActiveVersion(ctx, tx, target.ID, newVersion); err != nil {
+			return err
+		}
+		if err := db.EnqueueSiteSearch(ctx, tx, target.ID, db.SiteSearchReconcile); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("restore: commit: %w", err)
+	}
+	log.Printf("restored %s v%d into %s/%s as v%d (site %s, live=%t)", *fromSiteID, *version, *owner, *site, newVersion, target.ID, *setCurrent || created)
+	return nil
+}
+
+// runMigrateStorage is the one-time move of an install that kept its sites
+// on a volume (SITE_DIR, <owner>/<site>/vN and assets/<id>) into the bucket.
+// It walks the database, not the volume: every retained version row and
+// every live asset row is uploaded from the volume under its site id and read
+// back to verify. Anything missing or failing is reported and makes the
+// command exit non-zero; re-running it re-uploads, so it is safe to repeat.
+func runMigrateStorage(args []string) error {
+	fs := flag.NewFlagSet("migrate-storage", flag.ContinueOnError)
+	from := fs.String("from", "", "the old site directory (the former SITE_DIR, e.g. /mnt/data/sites)")
+	dryRun := fs.Bool("dry-run", false, "only report what would be uploaded")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *from == "" {
+		return errors.New("migrate-storage: -from is required")
+	}
+	tree, err := os.OpenRoot(*from)
+	if err != nil {
+		return fmt.Errorf("migrate-storage: %w", err)
+	}
+	defer tree.Close()
+
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	database, objects, err := openDatabaseAndObjects(cfg)
+	if err != nil {
+		return err
+	}
+	defer database.Close()
+
+	ctx := context.Background()
+	users, err := db.ListAllUsers(ctx, database)
+	if err != nil {
+		return err
+	}
+	usernames := make(map[string]string, len(users))
+	for _, user := range users {
+		usernames[user.ID] = user.Username
+	}
+	sites, err := db.ListAllSites(ctx, database)
+	if err != nil {
+		return err
+	}
+
+	var versions, assets, failed int
+	fail := func(format string, args ...any) {
+		failed++
+		log.Printf("FAILED "+format, args...)
+	}
+	for _, site := range sites {
+		owner := usernames[site.UserID]
+		if !safepath.IsSegment(owner) || !safepath.IsSegment(site.Name) {
+			fail("site %s: unusable owner/site name %q/%q", site.ID, owner, site.Name)
+			continue
+		}
+		siteDir, err := tree.OpenRoot(owner + "/" + site.Name)
+		if err != nil {
+			fail("%s/%s: open site directory: %v", owner, site.Name, err)
+			continue
+		}
+		rows, err := db.ListVersions(ctx, database, site.ID)
+		if err != nil {
+			siteDir.Close()
+			return err
+		}
+		for _, row := range rows {
+			name := fmt.Sprintf("v%d", row.VersionNumber)
+			bytes, err := migrateVersion(ctx, objects, siteDir, site.ID, row.VersionNumber, *dryRun)
+			if err != nil {
+				fail("%s/%s %s: %v", owner, site.Name, name, err)
+				continue
+			}
+			versions++
+			log.Printf("%s/%s %s -> site %s (%d bytes)%s", owner, site.Name, name, site.ID, bytes, dryRunSuffix(*dryRun))
+		}
+		assetRows, err := db.ListAssets(ctx, database, site.ID)
+		if err != nil {
+			siteDir.Close()
+			return err
+		}
+		for _, asset := range assetRows {
+			body, err := siteDir.ReadFile("assets/" + asset.ID)
+			if err == nil && !*dryRun {
+				err = storage.UploadAsset(ctx, objects, site.ID, asset.ID, asset.ContentType, body, asset.SHA256)
+			}
+			if err != nil {
+				fail("%s/%s asset %s: %v", owner, site.Name, asset.ID, err)
+				continue
+			}
+			assets++
+		}
+		siteDir.Close()
+	}
+	log.Printf("migrate-storage: %d version(s), %d asset(s) %s, %d failed", versions, assets, map[bool]string{true: "found", false: "uploaded and verified"}[*dryRun], failed)
+	if failed > 0 {
+		return fmt.Errorf("migrate-storage: %d item(s) failed; fix and re-run", failed)
 	}
 	return nil
 }
 
-// runBackupAssets syncs every site's assets directory to the bucket. It is
-// what the backup-assets CronJob runs (deploy/base/backup-assets-cronjob.yaml)
-// and is safe to run by hand: every file is re-uploaded, so a run that
-// overlaps another, or that repeats one already done, changes nothing an
-// operator would notice besides bucket traffic.
-func runBackupAssets(args []string) error {
-	fs := flag.NewFlagSet("backup-assets", flag.ContinueOnError)
-	dryRun := fs.Bool("dry-run", false, "list sites with an assets directory without uploading")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	backup, err := storage.NewBackup(context.Background(), storage.BackupConfig{
-		Endpoint:        cfg.Backup.Endpoint,
-		Region:          cfg.Backup.Region,
-		Bucket:          cfg.Backup.Bucket,
-		Prefix:          cfg.Backup.Prefix,
-		AccessKeyID:     cfg.Backup.AccessKeyID,
-		SecretAccessKey: cfg.Backup.SecretAccessKey,
-		SSE:             cfg.Backup.SSE,
-		SSEKMSKeyID:     cfg.Backup.SSEKMSKeyID,
-		EnvelopeKeys:    toStorageEnvelopeKeys(cfg.Backup.EnvelopeKeys),
-	})
-	if err != nil {
-		return fmt.Errorf("create backup client: %w", err)
-	}
-	if backup == nil {
-		return errors.New("backup-assets: no bucket is configured (BACKUP_STORAGE_BUCKET is required)")
-	}
-
-	sites, err := sitesWithAssets(cfg.SiteDir)
-	if err != nil {
-		return fmt.Errorf("scan %s: %w", cfg.SiteDir, err)
-	}
-
-	ctx := context.Background()
-	var failed int
-	for _, site := range sites {
-		if *dryRun {
-			log.Printf("would back up %s/%s assets", site.owner, site.site)
-			continue
+// migrateVersion uploads one version from the old tree, whichever form it is
+// in there: an unpacked vN directory, or the vN.tar.gz an idle version was
+// compressed to.
+func migrateVersion(ctx context.Context, objects storage.Objects, siteDir *os.Root, siteID string, version int, dryRun bool) (int64, error) {
+	name := fmt.Sprintf("v%d", version)
+	if info, err := siteDir.Lstat(name); err == nil && info.IsDir() {
+		if dryRun {
+			return 0, nil
 		}
-		n, err := backup.BackupAssets(ctx, cfg.SiteDir, site.owner, site.site)
+		dir, err := siteDir.OpenRoot(name)
 		if err != nil {
-			log.Printf("backup-assets %s/%s: %v", site.owner, site.site, err)
-			failed++
-			continue
+			return 0, err
 		}
-		log.Printf("backed up %d asset(s) for %s/%s", n, site.owner, site.site)
+		defer dir.Close()
+		return storage.UploadVersionDir(ctx, objects, siteID, version, dir)
 	}
-	if failed > 0 {
-		return fmt.Errorf("backup-assets: %d of %d site(s) failed", failed, len(sites))
+	info, err := siteDir.Lstat(name + ".tar.gz")
+	if err != nil {
+		return 0, fmt.Errorf("neither %s/ nor %s.tar.gz is on the volume", name, name)
 	}
-	log.Printf("backup-assets: %d site(s) with assets processed", len(sites))
-	return nil
+	if !info.Mode().IsRegular() {
+		return 0, fmt.Errorf("%s.tar.gz is not a regular file", name)
+	}
+	if dryRun {
+		return 0, nil
+	}
+	archive, err := siteDir.ReadFile(name + ".tar.gz")
+	if err != nil {
+		return 0, err
+	}
+	return storage.UploadVersionArchive(ctx, objects, siteID, version, archive)
+}
+
+func dryRunSuffix(dryRun bool) string {
+	if dryRun {
+		return " (dry run)"
+	}
+	return ""
+}
+
+// openDatabaseAndObjects connects the storage subcommands to the database
+// and the bucket, with the same translation the server uses.
+func openDatabaseAndObjects(cfg config.Config) (*sql.DB, *storage.S3Objects, error) {
+	database, err := sql.Open("postgres", cfg.DBDSN)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open postgres: %w", err)
+	}
+	objects, err := storage.NewS3Objects(context.Background(), s3Config(cfg))
+	if err != nil {
+		database.Close()
+		return nil, nil, fmt.Errorf("create bucket client: %w", err)
+	}
+	return database, objects, nil
 }
 
 // runPrune drops (or, under -dry-run, lists) expired audit_events and
@@ -287,77 +411,6 @@ func runPrune(args []string) error {
 	}
 	log.Printf("prune: %d partition(s) dropped", len(result.Dropped))
 	return nil
-}
-
-type ownerSite struct {
-	owner string
-	site  string
-}
-
-// sitesWithAssets walks the site tree for every <owner>/<site>/assets
-// directory, without going through *storage.DiskStorage: DiskStorage's
-// os.Root confinement is for the request path, which mutates live sites
-// concurrently with this scan; a read-only directory walk under SITE_DIR
-// needs none of that, and Phase 3 (which will start populating these
-// directories) is expected to add its own accessor for the request path
-// without this scan needing to change.
-func sitesWithAssets(siteDir string) ([]ownerSite, error) {
-	ownerEntries, err := os.ReadDir(siteDir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var found []ownerSite
-	for _, ownerEntry := range ownerEntries {
-		if !ownerEntry.IsDir() || !safepath.IsSegment(ownerEntry.Name()) {
-			continue
-		}
-		ownerDir := filepath.Join(siteDir, ownerEntry.Name())
-		siteEntries, err := os.ReadDir(ownerDir)
-		if err != nil {
-			return nil, err
-		}
-		for _, siteEntry := range siteEntries {
-			if !siteEntry.IsDir() || !safepath.IsSegment(siteEntry.Name()) {
-				continue
-			}
-			assetsInfo, err := os.Stat(filepath.Join(ownerDir, siteEntry.Name(), "assets"))
-			if err != nil {
-				continue
-			}
-			if assetsInfo.IsDir() {
-				found = append(found, ownerSite{owner: ownerEntry.Name(), site: siteEntry.Name()})
-			}
-		}
-	}
-	return found, nil
-}
-
-// openBackupAndDisk constructs the backup client and disk storage restore
-// needs, sharing the same config-to-storage translation the server uses at
-// startup.
-func openBackupAndDisk(cfg config.Config) (*storage.Backup, *storage.DiskStorage, error) {
-	backup, err := storage.NewBackup(context.Background(), storage.BackupConfig{
-		Endpoint:        cfg.Backup.Endpoint,
-		Region:          cfg.Backup.Region,
-		Bucket:          cfg.Backup.Bucket,
-		Prefix:          cfg.Backup.Prefix,
-		AccessKeyID:     cfg.Backup.AccessKeyID,
-		SecretAccessKey: cfg.Backup.SecretAccessKey,
-		SSE:             cfg.Backup.SSE,
-		SSEKMSKeyID:     cfg.Backup.SSEKMSKeyID,
-		EnvelopeKeys:    toStorageEnvelopeKeys(cfg.Backup.EnvelopeKeys),
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("create backup client: %w", err)
-	}
-	disk, err := storage.NewDiskStorage(cfg.SiteDir)
-	if err != nil {
-		return nil, nil, fmt.Errorf("open disk storage: %w", err)
-	}
-	return backup, disk, nil
 }
 
 func waitForDatabase(ctx context.Context, db *sql.DB, wait time.Duration) error {

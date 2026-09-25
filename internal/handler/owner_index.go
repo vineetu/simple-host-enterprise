@@ -177,7 +177,7 @@ func (g *hostGate) recordOwnerIndexVisit(r *http.Request, label, userID, session
 // same reason: two users whose names normalise to one label must not have one
 // of them silently chosen for the other.
 func (g *hostGate) resolveOwnerLabel(label string) (string, bool) {
-	users, err := g.files.diskStorage.ListUsers()
+	users, err := g.files.store.ListUsers()
 	if err != nil {
 		log.Printf("host gate: list users for label %q: %v", label, err)
 		return "", false

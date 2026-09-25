@@ -128,7 +128,7 @@ section 2(d) above).
 | `to` open-redirect shapes | Attempt every disallowed shape (`//`, `/\`, a scheme, a host) against the post-hand-off redirect target | scripted: `test/pentest/open_redirect_test.go`; `sanitizeRedirectPath` also covered by `internal/handler/auth_test.go`'s `TestSanitizeRedirectPath` table | Pass |
 | Sibling-origin subresource loads of a restricted site | `<script src>`, `<link>`, `<img>`, `fetch` with `credentials: include` from another owner host, with and without `Sec-Fetch-*` headers | scripted: `test/pentest/sibling_origin_test.go` (the "with" cases); manual: a real browser's `<script src>`/`<img>` fetch against a restricted site is not exercised by a Go HTTP client and needs a hands-on check per design 10.6 | Pass (scripted half); manual: not run — see below for the exact browser steps |
 | Asset content-type confusion | Upload content whose sniffed type disagrees with its extension or claimed type; confirm it is never served as `text/html` | scripted: `test/pentest/asset_content_type_test.go` | Pass |
-| Path traversal in archives | Craft an archive entry with `../`, an absolute path, a backslash, or an empty path component | scripted: `test/pentest/path_traversal_test.go`; `internal/storage/restore_test.go`'s `TestRestoreAssetsRefusesUnsafeObjectKeys`/`TestBackupAssetsRefusesUnsafeRelativePaths` cover the restore/backup side (Phase 5) | Pass |
+| Path traversal in archives | Craft an archive entry with `../`, an absolute path, a backslash, or an empty path component | scripted: `test/pentest/path_traversal_test.go`; `internal/storage/keys_test.go`'s `TestKeysRejectNonCanonicalIDs` covers the bucket side: object keys are built only from validated ids (`docs/storage.md`) | Pass |
 | State write across sites | Attempt to write one site's state while authenticated to a sibling site | scripted: `test/pentest/state_write_across_sites_test.go` | Pass |
 | Origin bypass | Send a mutating request with a forged or missing `Origin` header | scripted: `test/pentest/origin_bypass_test.go` | Pass |
 | Session fixation across hosts | Attempt to reuse a session artifact minted for one host on another | scripted: `test/pentest/session_fixation_test.go` (`TestSessionFixationAcrossHosts`) — this is the test that found the gap the host-bound cookie control above closes | Pass — the host-bound session cookie control (section 2(d)) closes this live; confirmed against the local overlay |
@@ -155,9 +155,9 @@ Stated once, not repeated per finding:
 
 - **The running pod holds plaintext.** Whoever can exec into it, or read
   the platform's key policy for the volume and the database, reads content
-  regardless of anything this application does. The optional backup
+  regardless of anything this application does. The optional
   envelope key moves the *bucket* out of that set of readers — a leaked
-  backup object alone is not enough without the Kubernetes Secret that
+  stored object alone is not enough without the Kubernetes Secret that
   holds the envelope key — but it does not, and cannot, protect against
   someone who already controls the pod or the cluster's own secret store.
 - **Same-owner sites share an origin.** A page for one of an owner's sites
@@ -167,13 +167,9 @@ Stated once, not repeated per finding:
   (`via_site`) from what the browser can corroborate (`via_site_observed`)
   rather than pretending to prevent something a shared origin cannot
   prevent. See `docs/site-isolation.md` for the recorded path (sandboxed pages with an injected site-bound token) should this ever need closing.
-- **One replica.** The Deployment runs `replicas: 1` with a `Recreate`
-  strategy, because the site-data volume is `ReadWriteOnce`. A rollout has
-  a brief availability gap; there is no high-availability serving story in
-  this release.
 - **Platform-side encryption at rest is a requirement stated to the
   installer, not something the software enforces.** The application
-  applies the two controls it can (SSE headers on backup objects, the
+  applies the two controls it can (SSE headers on stored objects, the
   optional client-side envelope); whether the underlying volume, snapshot,
   and managed database are actually encrypted depends on the installer
   following `docs/install.md` and `docs/cloud/`.
@@ -242,7 +238,7 @@ Stated once, not repeated per finding:
   write-mode setting. Nothing for the audit sink to wire until one exists.
 - **`GET /api/admin/export` is mounted without the admin dashboard's
   Origin check** (`dashboardCheck` in `admin.go`), unlike every mutating
-  admin route (`disable`/`enable`/`archive-versions`/`classify-sites`),
+  admin route (`disable`/`enable`/`classify-sites`),
   which all wrap it. Deliberate, not an oversight: the export is a
   side-effect-free `GET`, and this package sends no
   `Access-Control-Allow-Origin` header anywhere (confirmed:

@@ -37,7 +37,7 @@ exists, what deviated from the plan, and what is deliberately unfinished.
 
 - `cmd/server/main.go` wires config, database, storage, handlers, the host
   gate, the request log, and the servers. `subcommands.go` is `migrate`,
-  `restore`, and `backup-assets`.
+  `restore`, `migrate-storage`, and `prune`.
 - `internal/config` reads the environment. Required values have no default;
   the database DSN and the bucket endpoint are additionally refused if their
   TLS is weaker than the design requires, unless the local-evaluation
@@ -50,10 +50,10 @@ exists, what deviated from the plan, and what is deliberately unfinished.
   connects as; `migrate` sets its password from `DB_APP_PASSWORD` every run.
 - `internal/handler/host_gate.go` decides per hostname what the router may
   answer; `serve.go` serves site files; `site.go` is the management API.
-- `internal/storage/disk.go` is the versioned site tree; `backup.go` copies
-  each version to the bucket with a server-side-encryption header and an
-  optional client-side envelope; `restore.go` reverses both for the
-  `restore` and `backup-assets` subcommands.
+- `internal/storage/store.go` is the site store: bucket objects, the live
+  version the database resolves, and the pod-local cache; `objects_s3.go`
+  is the S3 client (server-side-encryption header, optional client-side
+  envelope); `sweep.go` deletes retired objects. See `docs/storage.md`.
 - `deploy/` is kustomize: `base`, `components`, `overlays`. `make local`
   brings the `local` overlay up on Docker Desktop.
 

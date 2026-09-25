@@ -17,12 +17,13 @@ import (
 // misconfigured pod fails at startup with the list of what is missing rather
 // than quietly talking to somebody else's infrastructure.
 const (
-	defaultSiteDir      = "/mnt/data/sites"
-	defaultPort         = "8080"
-	defaultRedirectPort = "8081"
-	defaultDBPort       = "5432"
-	defaultDBSSLMode    = "verify-full"
-	defaultBackupPrefix = "backups/"
+	defaultCacheDir      = "/var/cache/simple-host"
+	defaultCacheMaxBytes = 1 << 30
+	defaultPort          = "8080"
+	defaultRedirectPort  = "8081"
+	defaultDBPort        = "5432"
+	defaultDBSSLMode     = "verify-full"
+	defaultBackupPrefix  = "backups/"
 	// defaultBackupRegion is a placeholder, not a location. Region is an AWS
 	// concept; most S3-compatible stores derive it from the endpoint and accept
 	// any value, so requiring one only made every installation outside AWS type
@@ -36,9 +37,11 @@ const (
 	// envelopeKeyLength is the fixed size of a BACKUP_ENVELOPE_KEY entry's
 	// key material: 32 random bytes, used directly as an AES-256 key.
 	envelopeKeyLength = 32
-	// maxEnvelopeKeys mirrors the two-key rotation shape SESSION_SIGNING_KEY
-	// uses (design 6.1): the first key wraps, every configured key unwraps.
-	maxEnvelopeKeys = 2
+	// maxEnvelopeKeys: the first key wraps, every configured key unwraps.
+	// Stored objects are immutable and live as long as the version or asset
+	// they hold, so a retired key must stay configured for good; the limit
+	// leaves room for several rotations.
+	maxEnvelopeKeys = 8
 
 	// signingKeyLength is the fixed size of a SESSION_SIGNING_KEY entry: 32
 	// random bytes, used directly as an HMAC-SHA256 key.
@@ -68,8 +71,11 @@ const (
 )
 
 type Config struct {
-	DBDSN         string
-	SiteDir       string
+	DBDSN string
+	// CacheDir is the pod-local directory the site store caches versions
+	// and assets in; CacheMaxBytes bounds it (internal/storage cache.go).
+	CacheDir      string
+	CacheMaxBytes int64
 	Port          string
 	RedirectPort  string
 	PublicBaseURL string
@@ -260,7 +266,7 @@ func Load() (Config, error) {
 
 	var need missing
 	cfg := Config{
-		SiteDir:        getEnvOrDefault("SITE_DIR", defaultSiteDir),
+		CacheDir:       getEnvOrDefault("CACHE_DIR", defaultCacheDir),
 		Port:           getEnvOrDefault("PORT", defaultPort),
 		RedirectPort:   getEnvOrDefault("HTTPS_REDIRECT_PORT", defaultRedirectPort),
 		PublicBaseURL:  need.require("PUBLIC_BASE_URL"),
@@ -329,6 +335,10 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	assetMaxSiteCount, err := int64Env("ASSET_MAX_SITE_COUNT", defaultAssetMaxSiteCount)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.CacheMaxBytes, err = int64Env("CACHE_MAX_BYTES", defaultCacheMaxBytes)
 	if err != nil {
 		return Config{}, err
 	}

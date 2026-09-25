@@ -69,7 +69,7 @@ func TestWorkerReconcilesExactSnapshotAndPublishesDocuments(t *testing.T) {
 	}
 	want := searchdb.SearchDocument{
 		PagePath:    "index.html",
-		URLPath:     "/sites/alice/demo/",
+		URLPath:     "/demo/",
 		Title:       "Demo",
 		Description: "A demo",
 		Headings:    "Welcome",
@@ -78,7 +78,7 @@ func TestWorkerReconcilesExactSnapshotAndPublishesDocuments(t *testing.T) {
 	if publishedDocuments[0] != want {
 		t.Fatalf("published document = %+v, want %+v", publishedDocuments[0], want)
 	}
-	if calls := opener.Calls(); !reflect.DeepEqual(calls, []versionOpenCall{{owner: "alice", site: "demo", version: 7}}) {
+	if calls := opener.Calls(); !reflect.DeepEqual(calls, []versionOpenCall{{siteID: "site-id", version: 7}}) {
 		t.Fatalf("OpenVersion calls = %#v", calls)
 	}
 	if repository.acknowledgeCalls() != 0 || repository.retryCalls() != 0 {
@@ -858,8 +858,7 @@ func waitForWorkerTest(t *testing.T, worker *Worker) {
 }
 
 type versionOpenCall struct {
-	owner   string
-	site    string
+	siteID  string
 	version int
 }
 
@@ -884,12 +883,21 @@ func newWorkerTestVersion(t *testing.T, files map[string]string) *workerTestVers
 	return &workerTestVersionOpener{path: base}
 }
 
-func (o *workerTestVersionOpener) OpenVersion(owner, site string, version int) (*os.Root, error) {
+func (o *workerTestVersionOpener) OpenVersion(_ context.Context, siteID string, version int) (OpenedVersion, error) {
 	o.mu.Lock()
-	o.calls = append(o.calls, versionOpenCall{owner: owner, site: site, version: version})
+	o.calls = append(o.calls, versionOpenCall{siteID: siteID, version: version})
 	o.mu.Unlock()
-	return os.OpenRoot(o.path)
+	root, err := os.OpenRoot(o.path)
+	if err != nil {
+		return nil, err
+	}
+	return openedRoot{root}, nil
 }
+
+type openedRoot struct{ root *os.Root }
+
+func (o openedRoot) Root() *os.Root { return o.root }
+func (o openedRoot) Close() error   { return o.root.Close() }
 
 func (o *workerTestVersionOpener) Calls() []versionOpenCall {
 	o.mu.Lock()
@@ -899,7 +907,7 @@ func (o *workerTestVersionOpener) Calls() []versionOpenCall {
 
 type unusedVersionOpener struct{}
 
-func (unusedVersionOpener) OpenVersion(string, string, int) (*os.Root, error) {
+func (unusedVersionOpener) OpenVersion(context.Context, string, int) (OpenedVersion, error) {
 	return nil, errors.New("unexpected OpenVersion call")
 }
 
@@ -907,7 +915,7 @@ type failingVersionOpener struct {
 	err error
 }
 
-func (o failingVersionOpener) OpenVersion(string, string, int) (*os.Root, error) {
+func (o failingVersionOpener) OpenVersion(context.Context, string, int) (OpenedVersion, error) {
 	return nil, o.err
 }
 

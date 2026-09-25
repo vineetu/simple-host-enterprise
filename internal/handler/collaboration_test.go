@@ -131,7 +131,7 @@ func TestArchiveCollectionRejectsNonRegularEntriesAndCancellation(t *testing.T) 
 }
 
 func TestArchiveRouteUsesStreamingSafeSkillVersionMiddleware(t *testing.T) {
-	handler := NewSiteHandler(nil, nil, nil, "", HostModel{})
+	handler := NewSiteHandler(nil, nil, "", HostModel{})
 	mux := http.NewServeMux()
 	identity := func(next http.Handler) http.Handler { return next }
 	notice := func(next http.Handler) http.Handler {

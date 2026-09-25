@@ -722,14 +722,13 @@ func viaSiteObserved(r *http.Request, claimedSite string, restricted bool, ownHo
 	return name == claimedSite
 }
 
-// resolveLabelHolder finds the single username whose label is label, using
-// only the user directories on disk. It is resolveOwner without the per-site
+// resolveLabelHolder finds the single username whose label is label, among
+// the owners of at least one site. It is resolveOwner without the per-site
 // filter, for the restricted-site host's owner part, which names no site
-// until resolveRestrictedSiteName runs; the reasons for reading the disk
-// rather than the database, and for failing closed on a collision, are the
-// ones documented on resolveOwner.
+// until resolveRestrictedSiteName runs; the reason for failing closed on a
+// collision is the one documented on resolveOwner.
 func (g *hostGate) resolveLabelHolder(label string) (string, bool) {
-	users, err := g.files.diskStorage.ListUsers()
+	users, err := g.files.store.ListUsers()
 	if err != nil {
 		log.Printf("host gate: list users for label %q: %v", label, err)
 		return "", false
@@ -752,12 +751,12 @@ func (g *hostGate) resolveLabelHolder(label string) (string, bool) {
 }
 
 // resolveRestrictedSiteName finds the single site under owner whose DNS
-// label (siteLabel) is siteLabelPart, using only the site directories on
-// disk — the same disk-only, fail-closed-on-collision pattern resolveOwner
-// uses for the owner label itself. It also requires a current version to
-// exist, so a site with no live content is not addressable here either.
+// label (siteLabel) is siteLabelPart — the same fail-closed-on-collision
+// pattern resolveOwner uses for the owner label itself. It also requires a
+// current version to exist, so a site with no live content is not
+// addressable here either.
 func (g *hostGate) resolveRestrictedSiteName(owner, siteLabelPart string) (string, bool) {
-	names, err := g.files.diskStorage.ListSites(owner)
+	names, err := g.files.store.ListSites(owner)
 	if err != nil {
 		log.Printf("host gate: list sites for %q: %v", owner, err)
 		return "", false
@@ -767,7 +766,7 @@ func (g *hostGate) resolveRestrictedSiteName(owner, siteLabelPart string) (strin
 		if siteLabel(name) != siteLabelPart {
 			continue
 		}
-		_, ok, err := g.files.diskStorage.CurrentVersion(owner, name)
+		_, ok, err := g.files.store.CurrentVersion(owner, name)
 		if err != nil {
 			log.Printf("host gate: owner %q site %q: current version unreadable, refusing to resolve: %v", owner, name, err)
 			return "", false
@@ -788,12 +787,9 @@ func (g *hostGate) resolveRestrictedSiteName(owner, siteLabelPart string) (strin
 }
 
 // resolveOwner finds the username whose label is label and who has a current
-// version of sitename, using only the site directory tree. The database is
-// deliberately not consulted for this: static serving survives a database
-// outage today and must keep doing so. Whether the site is restricted, and
-// whether the caller may view it, are separate checks made afterward against
-// the database (SiteForServing, viewerAllowed) — a new, accepted dependency
-// this phase's authenticated-viewing requirement introduces.
+// version of sitename, from the site store's index (the database). Whether
+// the site is restricted, and whether the caller may view it, are separate
+// checks made afterward (SiteForServing, viewerAllowed).
 //
 // Exactly one candidate is the owner. Two accounts sharing a label is a
 // collision the registration guard is supposed to prevent; serving either
@@ -804,13 +800,9 @@ func (g *hostGate) resolveRestrictedSiteName(owner, siteLabelPart string) (strin
 // a 404, and an unreadable candidate must not silently hand the name to the
 // other one: skipping it would serve the readable user's site under a label
 // the unreadable user may equally own.
-//
-// This is a readdir of the base path per short-path request. With ~108 user
-// directories that is cheap; a cache keyed on label is the place to look if
-// it ever shows up in profiles.
 func (g *hostGate) resolveOwner(label, sitename string) (string, bool) {
-	disk := g.files.diskStorage
-	users, err := disk.ListUsers()
+	store := g.files.store
+	users, err := store.ListUsers()
 	if err != nil {
 		log.Printf("host gate: list users for label %q: %v", label, err)
 		return "", false
@@ -820,9 +812,9 @@ func (g *hostGate) resolveOwner(label, sitename string) (string, bool) {
 		if !g.hosts.OwnsLabel(label, user) {
 			continue
 		}
-		// CurrentVersion reports a missing site or missing current link as
+		// CurrentVersion reports a missing site as
 		// (0, false, nil); any error is something other than "does not exist".
-		_, ok, err := disk.CurrentVersion(user, sitename)
+		_, ok, err := store.CurrentVersion(user, sitename)
 		if err != nil {
 			log.Printf("host gate: label %q user %q site %q: current version unreadable, refusing to resolve: %v", label, user, sitename, err)
 			return "", false

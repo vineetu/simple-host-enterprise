@@ -1,0 +1,10 @@
+# Keeps one pod serving through node drains and cluster upgrades.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: simple-host
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: simple-host

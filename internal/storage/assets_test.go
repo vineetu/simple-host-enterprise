@@ -2,97 +2,86 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"errors"
 	"io"
-	"os"
-	"path/filepath"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
-// generousLimits is large enough that none of it is the thing under test,
-// for cases exercising something other than a specific limit.
+// generousLimits is large enough that none of it is the thing under test.
 var generousLimits = AssetLimits{MaxFileBytes: 10 << 20, MaxSiteBytes: 100 << 20, MaxSiteCount: 100}
-
-func newSiteForAssets(t *testing.T, store *DiskStorage, user, site string) {
-	t.Helper()
-	if err := store.WriteFiles(user, site, 1, map[string][]byte{"index.html": []byte("home")}); err != nil {
-		t.Fatalf("WriteFiles: %v", err)
-	}
-}
 
 var pngMagic = []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0, 'I', 'H', 'D', 'R'}
 
-func TestCreateAssetWritesFileAndRoundTrips(t *testing.T) {
-	store, base := newTestDiskStorage(t)
-	newSiteForAssets(t, store, "alice", "demo")
+func newAssetStore(t *testing.T) (*Store, *recordingObjects, *MemoryObjects) {
+	t.Helper()
+	memory := NewMemoryObjects()
+	recording := newRecordingObjects(memory)
+	store, _ := newTestStore(t, recording, nil, 1<<30)
+	return store, recording, memory
+}
 
+func TestCreateAssetStoresObjectAndRoundTrips(t *testing.T) {
+	store, recording, memory := newAssetStore(t)
+	ctx := context.Background()
 	content := append(append([]byte(nil), pngMagic...), []byte("...more png bytes...")...)
-	stored, err := store.CreateAsset("alice", "demo", "image/png", bytes.NewReader(content), int64(len(content)), generousLimits)
+
+	stored, err := store.CreateAsset(ctx, testSiteA, "text/html", bytes.NewReader(content), generousLimits)
 	if err != nil {
 		t.Fatalf("CreateAsset: %v", err)
 	}
-	if stored.ContentType != "image/png" {
-		t.Fatalf("ContentType = %q, want image/png", stored.ContentType)
+	if stored.ContentType != "image/png" || !stored.Inline {
+		t.Fatalf("stored = %+v, want inline image/png", stored)
 	}
-	if !stored.Inline {
-		t.Fatal("image/png should be Inline")
+	if stored.Size != int64(len(content)) || stored.SHA256 != sha256.Sum256(content) {
+		t.Fatalf("size/hash mismatch: %+v", stored)
 	}
-	if stored.Size != int64(len(content)) {
-		t.Fatalf("Size = %d, want %d", stored.Size, len(content))
+	if !isUUID(stored.ID) {
+		t.Fatalf("asset id %q is not a canonical uuid", stored.ID)
 	}
-	wantSum := sha256.Sum256(content)
-	if stored.SHA256 != wantSum {
-		t.Fatalf("SHA256 = %x, want %x", stored.SHA256, wantSum)
+	key := "sites/" + testSiteA + "/assets/" + stored.ID
+	if keys := memory.Keys(); len(keys) != 1 || keys[0] != key {
+		t.Fatalf("bucket keys = %v, want [%s]", keys, key)
 	}
-	if stored.ID == "" {
-		t.Fatal("empty asset id")
-	}
-
-	// The file must exist directly on disk at <site>/assets/<id>, per
-	// design.md 7.3 and the layout Phase 5's backup/restore already expects.
-	onDisk, err := os.ReadFile(filepath.Join(base, "alice", "demo", "assets", stored.ID))
-	if err != nil {
-		t.Fatalf("read asset from disk: %v", err)
-	}
-	if !bytes.Equal(onDisk, content) {
-		t.Fatalf("on-disk content mismatch")
+	if recording.types[key] != "image/png" {
+		t.Fatalf("object content type = %q, want image/png", recording.types[key])
 	}
 
-	reader, info, err := store.OpenAsset("alice", "demo", stored.ID)
+	lease, err := store.OpenAsset(ctx, testSiteA, stored.ID, generousLimits.MaxFileBytes)
 	if err != nil {
 		t.Fatalf("OpenAsset: %v", err)
 	}
-	defer reader.Close()
-	got, err := io.ReadAll(reader)
-	if err != nil {
-		t.Fatalf("read asset: %v", err)
-	}
-	if !bytes.Equal(got, content) {
-		t.Fatalf("OpenAsset content mismatch")
-	}
-	if info.Size() != int64(len(content)) {
-		t.Fatalf("OpenAsset info.Size() = %d, want %d", info.Size(), len(content))
+	defer lease.Close()
+	got, err := io.ReadAll(lease.File)
+	if err != nil || !bytes.Equal(got, content) {
+		t.Fatalf("OpenAsset content mismatch (%v)", err)
 	}
 
-	// No staging leftovers.
-	entries, err := os.ReadDir(filepath.Join(base, "alice", "demo", "assets"))
+	// Range request through the seekable file.
+	request := httptest.NewRequest(http.MethodGet, "/asset", nil)
+	request.Header.Set("Range", "bytes=2-5")
+	recorder := httptest.NewRecorder()
+	http.ServeContent(recorder, request, "", time.Time{}, lease.File)
+	if recorder.Code != http.StatusPartialContent {
+		t.Fatalf("range status = %d, want 206", recorder.Code)
+	}
+	if !bytes.Equal(recorder.Body.Bytes(), content[2:6]) {
+		t.Fatalf("range body = %x, want %x", recorder.Body.Bytes(), content[2:6])
+	}
+
+	// A second open is served from the cache.
+	second, err := store.OpenAsset(ctx, testSiteA, stored.ID, generousLimits.MaxFileBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), ".") {
-			t.Fatalf("staging file was not cleaned up: %s", entry.Name())
-		}
-	}
-}
-
-func TestCreateAssetRequiresExistingSite(t *testing.T) {
-	store, _ := newTestDiskStorage(t)
-	_, err := store.CreateAsset("alice", "never-created", "text/plain", strings.NewReader("hi"), 2, generousLimits)
-	if err == nil {
-		t.Fatal("expected an error for a site that was never created")
+	second.Close()
+	if n := recording.getCount(key); n != 1 {
+		t.Fatalf("asset fetched %d times, want 1", n)
 	}
 }
 
@@ -106,315 +95,152 @@ func TestCreateAssetClassifiesContentByType(t *testing.T) {
 		wantAllowed bool
 	}{
 		{name: "png sniffed regardless of declared type", content: pngMagic, declared: "text/html", wantType: "image/png", wantInline: true, wantAllowed: true},
-		{name: "pdf", content: []byte("%PDF-1.4\nrest of pdf"), declared: "", wantType: "application/pdf", wantInline: true, wantAllowed: true},
-		{name: "plain text with no hint", content: []byte("hello world plain text"), declared: "", wantType: "text/plain", wantInline: false, wantAllowed: true},
-		{name: "plain text declared json", content: []byte(`{"a":1,"b":[1,2,3]}`), declared: "application/json", wantType: "application/json", wantInline: false, wantAllowed: true},
-		{name: "plain text declared csv", content: []byte("a,b,c\n1,2,3\n"), declared: "text/csv", wantType: "text/csv", wantInline: false, wantAllowed: true},
-		{name: "plain text declared json with charset param", content: []byte(`{"a":1}`), declared: "application/json; charset=utf-8", wantType: "application/json", wantInline: false, wantAllowed: true},
-		{name: "opaque binary with no signature", content: []byte{0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01, 0x02, 0x03, 0xFF, 0xFE}, declared: "application/octet-stream", wantType: "application/octet-stream", wantInline: false, wantAllowed: true},
-		{name: "html is refused even declared as plain text", content: []byte("<html><body>hi</body></html>"), declared: "text/plain", wantAllowed: false},
-		{name: "zip is allowed as an attachment", content: []byte{0x50, 0x4B, 0x03, 0x04, 0, 0, 0, 0}, declared: "", wantType: "application/zip", wantInline: false, wantAllowed: true},
-		{name: "gzip is allowed as an attachment", content: []byte{0x1F, 0x8B, 0x08, 0, 0, 0, 0, 0}, declared: "", wantType: "application/x-gzip", wantInline: false, wantAllowed: true},
+		{name: "pdf", content: []byte("%PDF-1.4\nrest of pdf"), wantType: "application/pdf", wantInline: true, wantAllowed: true},
+		{name: "plain text with no hint", content: []byte("hello world plain text"), wantType: "text/plain", wantAllowed: true},
+		{name: "plain text declared json", content: []byte(`{"a":1,"b":[1,2,3]}`), declared: "application/json", wantType: "application/json", wantAllowed: true},
+		{name: "plain text declared csv", content: []byte("a,b,c\n1,2,3\n"), declared: "text/csv", wantType: "text/csv", wantAllowed: true},
+		{name: "json with charset param", content: []byte(`{"a":1}`), declared: "application/json; charset=utf-8", wantType: "application/json", wantAllowed: true},
+		{name: "plain text declared html stays plain", content: []byte("just words"), declared: "text/html", wantType: "text/plain", wantAllowed: true},
+		{name: "opaque binary", content: []byte{0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01, 0x02, 0x03, 0xFF, 0xFE}, declared: "application/octet-stream", wantType: "application/octet-stream", wantAllowed: true},
+		{name: "executable sniffs as opaque binary", content: []byte("MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00\xFF\xFF\x00\x00"), wantType: "application/octet-stream", wantAllowed: true},
+		{name: "zip as attachment", content: []byte{0x50, 0x4B, 0x03, 0x04, 0, 0, 0, 0}, wantType: "application/zip", wantAllowed: true},
+		{name: "gzip as attachment", content: []byte{0x1F, 0x8B, 0x08, 0, 0, 0, 0, 0}, wantType: "application/x-gzip", wantAllowed: true},
+		{name: "html refused even declared plain text", content: []byte("<html><body>hi</body></html>"), declared: "text/plain", wantAllowed: false},
+		{name: "html refused declared image", content: []byte("<!DOCTYPE html><script>x</script>"), declared: "image/png", wantAllowed: false},
+		{name: "xml refused", content: []byte("<?xml version=\"1.0\"?><svg/>"), declared: "image/svg+xml", wantAllowed: false},
 	}
-
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			store, _ := newTestDiskStorage(t)
-			newSiteForAssets(t, store, "alice", "demo")
-			stored, err := store.CreateAsset("alice", "demo", tc.declared, bytes.NewReader(tc.content), int64(len(tc.content)), generousLimits)
+			store, _, memory := newAssetStore(t)
+			stored, err := store.CreateAsset(context.Background(), testSiteA, tc.declared, bytes.NewReader(tc.content), generousLimits)
 			if !tc.wantAllowed {
 				if !errors.Is(err, ErrAssetTypeNotAllowed) {
-					t.Fatalf("CreateAsset error = %v, want ErrAssetTypeNotAllowed", err)
+					t.Fatalf("error = %v, want ErrAssetTypeNotAllowed", err)
+				}
+				if keys := memory.Keys(); len(keys) != 0 {
+					t.Fatalf("refused upload wrote %v", keys)
 				}
 				return
 			}
 			if err != nil {
 				t.Fatalf("CreateAsset: %v", err)
 			}
-			if stored.ContentType != tc.wantType {
-				t.Fatalf("ContentType = %q, want %q", stored.ContentType, tc.wantType)
-			}
-			if stored.Inline != tc.wantInline {
-				t.Fatalf("Inline = %v, want %v", stored.Inline, tc.wantInline)
+			if stored.ContentType != tc.wantType || stored.Inline != tc.wantInline {
+				t.Fatalf("stored %q inline=%v, want %q inline=%v", stored.ContentType, stored.Inline, tc.wantType, tc.wantInline)
 			}
 		})
-	}
-}
-
-// TestCreateAssetExecutableMagicBytesAreIndistinguishableFromOpaqueBinary
-// documents, rather than tests a regression in, an existing limitation:
-// net/http.DetectContentType has no signature entry for a Windows PE or an
-// ELF executable, so both sniff identically to any other unrecognized
-// binary blob (application/octet-stream) — a limitation that predates and
-// is unrelated to allowing application/zip and application/gzip. There is
-// no sniffed value this package could refuse specifically for "this is an
-// executable" without also refusing every other opaque binary upload the
-// allowlist intends to accept.
-func TestCreateAssetExecutableMagicBytesAreIndistinguishableFromOpaqueBinary(t *testing.T) {
-	store, _ := newTestDiskStorage(t)
-	newSiteForAssets(t, store, "alice", "demo")
-	peHeader := []byte("MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00\xFF\xFF\x00\x00")
-	stored, err := store.CreateAsset("alice", "demo", "", bytes.NewReader(peHeader), int64(len(peHeader)), generousLimits)
-	if err != nil {
-		t.Fatalf("CreateAsset: %v", err)
-	}
-	if stored.ContentType != "application/octet-stream" {
-		t.Fatalf("ContentType = %q, want application/octet-stream", stored.ContentType)
-	}
-}
-
-func TestCreateAssetRefusalLeavesNoFileBehind(t *testing.T) {
-	store, base := newTestDiskStorage(t)
-	newSiteForAssets(t, store, "alice", "demo")
-	html := []byte("<html><body>refused</body></html>")
-	if _, err := store.CreateAsset("alice", "demo", "text/plain", bytes.NewReader(html), int64(len(html)), generousLimits); !errors.Is(err, ErrAssetTypeNotAllowed) {
-		t.Fatalf("expected ErrAssetTypeNotAllowed, got %v", err)
-	}
-	entries, err := os.ReadDir(filepath.Join(base, "alice", "demo", "assets"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("expected an empty assets directory after refusal, found %v", entries)
 	}
 }
 
 func TestCreateAssetEnforcesPerFileSizeCap(t *testing.T) {
-	store, base := newTestDiskStorage(t)
-	newSiteForAssets(t, store, "alice", "demo")
+	store, _, memory := newAssetStore(t)
+	ctx := context.Background()
 	limits := AssetLimits{MaxFileBytes: 10, MaxSiteBytes: 1 << 20, MaxSiteCount: 100}
 
-	content := []byte("this is way more than ten bytes of plain text")
-	_, err := store.CreateAsset("alice", "demo", "text/plain", bytes.NewReader(content), int64(len(content)), limits)
+	if _, err := store.CreateAsset(ctx, testSiteA, "text/plain", strings.NewReader("this is way more than ten bytes"), limits); !errors.Is(err, ErrAssetTooLarge) {
+		t.Fatalf("error = %v, want ErrAssetTooLarge", err)
+	}
+	// Past the sniffing window too.
+	big := AssetLimits{MaxFileBytes: 1000, MaxSiteBytes: 1 << 20, MaxSiteCount: 100}
+	if _, err := store.CreateAsset(ctx, testSiteA, "", bytes.NewReader(bytes.Repeat([]byte("a"), 1001)), big); !errors.Is(err, ErrAssetTooLarge) {
+		t.Fatalf("error = %v, want ErrAssetTooLarge", err)
+	}
+	if keys := memory.Keys(); len(keys) != 0 {
+		t.Fatalf("oversize upload wrote %v", keys)
+	}
+	stored, err := store.CreateAsset(ctx, testSiteA, "text/plain", strings.NewReader("0123456789"), limits)
+	if err != nil || stored.Size != 10 {
+		t.Fatalf("upload at exactly the cap: %+v, %v", stored, err)
+	}
+}
+
+func TestWriteAssetContentNeverWritesPastCap(t *testing.T) {
+	var destination bytes.Buffer
+	_, _, _, err := writeAssetContent(&destination, bytes.NewReader(bytes.Repeat([]byte("a"), 5000)), "", 1000)
 	if !errors.Is(err, ErrAssetTooLarge) {
-		t.Fatalf("expected ErrAssetTooLarge, got %v", err)
+		t.Fatalf("error = %v, want ErrAssetTooLarge", err)
 	}
-	entries, err := os.ReadDir(filepath.Join(base, "alice", "demo", "assets"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("expected an empty assets directory after size-cap refusal, found %v", entries)
-	}
-
-	// Within the cap, declared size unknown (0): must still succeed and be
-	// checked against the actual bytes streamed.
-	small := []byte("0123456789")
-	stored, err := store.CreateAsset("alice", "demo", "text/plain", bytes.NewReader(small), 0, limits)
-	if err != nil {
-		t.Fatalf("CreateAsset at exactly the cap: %v", err)
-	}
-	if stored.Size != int64(len(small)) {
-		t.Fatalf("Size = %d, want %d", stored.Size, len(small))
-	}
-}
-
-func TestCreateAssetEnforcesPerFileSizeCapWithoutDeclaredSize(t *testing.T) {
-	store, _ := newTestDiskStorage(t)
-	newSiteForAssets(t, store, "alice", "demo")
-	limits := AssetLimits{MaxFileBytes: 10, MaxSiteBytes: 1 << 20, MaxSiteCount: 100}
-
-	content := []byte("this is way more than ten bytes of plain text")
-	// declaredSize of 0 means "unknown": the cap must still be enforced
-	// against the real stream, not skipped because there was nothing to
-	// precheck.
-	if _, err := store.CreateAsset("alice", "demo", "text/plain", bytes.NewReader(content), 0, limits); !errors.Is(err, ErrAssetTooLarge) {
-		t.Fatalf("expected ErrAssetTooLarge, got %v", err)
-	}
-}
-
-func TestCreateAssetEnforcesSiteCountQuota(t *testing.T) {
-	store, _ := newTestDiskStorage(t)
-	newSiteForAssets(t, store, "alice", "demo")
-	limits := AssetLimits{MaxFileBytes: 1 << 20, MaxSiteBytes: 1 << 20, MaxSiteCount: 1}
-
-	if _, err := store.CreateAsset("alice", "demo", "text/plain", strings.NewReader("one"), 3, limits); err != nil {
-		t.Fatalf("first CreateAsset: %v", err)
-	}
-	if _, err := store.CreateAsset("alice", "demo", "text/plain", strings.NewReader("two"), 3, limits); !errors.Is(err, ErrAssetQuotaExceeded) {
-		t.Fatalf("second CreateAsset error = %v, want ErrAssetQuotaExceeded", err)
-	}
-}
-
-func TestCreateAssetEnforcesSiteByteQuota(t *testing.T) {
-	store, _ := newTestDiskStorage(t)
-	newSiteForAssets(t, store, "alice", "demo")
-	limits := AssetLimits{MaxFileBytes: 1 << 20, MaxSiteBytes: 15, MaxSiteCount: 100}
-
-	if _, err := store.CreateAsset("alice", "demo", "text/plain", strings.NewReader("0123456789"), 10, limits); err != nil {
-		t.Fatalf("first CreateAsset: %v", err)
-	}
-	// 10 + 10 = 20 > 15: the site-wide byte quota, not the per-file cap,
-	// must reject this second upload even though it is well under
-	// MaxFileBytes on its own.
-	if _, err := store.CreateAsset("alice", "demo", "text/plain", strings.NewReader("9876543210"), 10, limits); !errors.Is(err, ErrAssetQuotaExceeded) {
-		t.Fatalf("second CreateAsset error = %v, want ErrAssetQuotaExceeded", err)
-	}
-}
-
-func TestCreateAssetEnforcesSiteByteQuotaWithoutDeclaredSize(t *testing.T) {
-	store, _ := newTestDiskStorage(t)
-	newSiteForAssets(t, store, "alice", "demo")
-	limits := AssetLimits{MaxFileBytes: 1 << 20, MaxSiteBytes: 15, MaxSiteCount: 100}
-
-	if _, err := store.CreateAsset("alice", "demo", "text/plain", strings.NewReader("0123456789"), 10, limits); err != nil {
-		t.Fatalf("first CreateAsset: %v", err)
-	}
-	// declaredSize 0 skips the cheap pre-check; the post-write recount
-	// against actual bytes on disk must still catch this.
-	if _, err := store.CreateAsset("alice", "demo", "text/plain", strings.NewReader("9876543210"), 0, limits); !errors.Is(err, ErrAssetQuotaExceeded) {
-		t.Fatalf("second CreateAsset error = %v, want ErrAssetQuotaExceeded", err)
+	if destination.Len() > 1001 {
+		t.Fatalf("wrote %d bytes past a 1000-byte cap", destination.Len())
 	}
 }
 
 func TestOpenAssetNotFound(t *testing.T) {
-	store, _ := newTestDiskStorage(t)
-	newSiteForAssets(t, store, "alice", "demo")
-
-	traversal := []string{"missing-id", "../escape", "a/b", "", "."}
-	for _, id := range traversal {
-		id := id
-		t.Run(id, func(t *testing.T) {
-			_, _, err := store.OpenAsset("alice", "demo", id)
-			if !errors.Is(err, ErrAssetNotFound) {
-				t.Fatalf("OpenAsset(%q) error = %v, want ErrAssetNotFound", id, err)
-			}
-		})
-	}
-}
-
-func TestOpenAssetRefusesTraversalOutsideAssetsDir(t *testing.T) {
-	store, base := newTestDiskStorage(t)
-	newSiteForAssets(t, store, "alice", "demo")
-	// A secret file that exists on disk but outside the assets directory.
-	secret := filepath.Join(base, "alice", "demo", "v1", "index.html")
-	if _, err := os.Stat(secret); err != nil {
-		t.Fatalf("fixture missing: %v", err)
-	}
-	if _, _, err := store.OpenAsset("alice", "demo", "../v1/index.html"); !errors.Is(err, ErrAssetNotFound) {
-		t.Fatalf("traversal id error = %v, want ErrAssetNotFound", err)
-	}
-}
-
-func TestDeleteAssetRemovesFileAndIsIdempotentlyNotFound(t *testing.T) {
-	store, base := newTestDiskStorage(t)
-	newSiteForAssets(t, store, "alice", "demo")
-	stored, err := store.CreateAsset("alice", "demo", "text/plain", strings.NewReader("bye"), 3, generousLimits)
+	store, _, _ := newAssetStore(t)
+	ctx := context.Background()
+	stored, err := store.CreateAsset(ctx, testSiteA, "", strings.NewReader("hello"), generousLimits)
 	if err != nil {
-		t.Fatalf("CreateAsset: %v", err)
+		t.Fatal(err)
 	}
+	ids := []string{
+		testSiteC, // well formed, never uploaded
+		"missing-id", "../escape", "a/b", "", ".",
+		strings.ToUpper(stored.ID),
+		"../" + testSiteA + "/assets/" + stored.ID,
+	}
+	for _, id := range ids {
+		if lease, err := store.OpenAsset(ctx, testSiteA, id, generousLimits.MaxFileBytes); !errors.Is(err, ErrAssetNotFound) {
+			if lease != nil {
+				lease.Close()
+			}
+			t.Errorf("OpenAsset(%q) error = %v, want ErrAssetNotFound", id, err)
+		}
+	}
+	// Another site's id does not reach this site's asset.
+	if _, err := store.OpenAsset(ctx, testSiteB, stored.ID, generousLimits.MaxFileBytes); !errors.Is(err, ErrAssetNotFound) {
+		t.Errorf("cross-site OpenAsset error = %v, want ErrAssetNotFound", err)
+	}
+	if _, err := store.OpenAsset(ctx, testSiteA, stored.ID, 2); !errors.Is(err, ErrObjectTooLarge) {
+		t.Errorf("OpenAsset over maxBytes error = %v, want ErrObjectTooLarge", err)
+	}
+}
 
-	if err := store.DeleteAsset("alice", "demo", stored.ID); err != nil {
+func TestDeleteAssetRemovesObject(t *testing.T) {
+	store, _, memory := newAssetStore(t)
+	ctx := context.Background()
+	stored, err := store.CreateAsset(ctx, testSiteA, "text/plain", strings.NewReader("bye"), generousLimits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteAsset(ctx, testSiteA, stored.ID); err != nil {
 		t.Fatalf("DeleteAsset: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(base, "alice", "demo", "assets", stored.ID)); !os.IsNotExist(err) {
-		t.Fatalf("asset file still present after delete: %v", err)
+	if keys := memory.Keys(); len(keys) != 0 {
+		t.Fatalf("object survived delete: %v", keys)
 	}
-	if err := store.DeleteAsset("alice", "demo", stored.ID); !errors.Is(err, ErrAssetNotFound) {
-		t.Fatalf("second DeleteAsset error = %v, want ErrAssetNotFound", err)
+	if err := store.DeleteAsset(ctx, testSiteA, stored.ID); err != nil {
+		t.Fatalf("deleting a missing asset: %v", err)
 	}
-	if err := store.DeleteAsset("alice", "demo", "../escape"); !errors.Is(err, ErrAssetNotFound) {
-		t.Fatalf("traversal id error = %v, want ErrAssetNotFound", err)
+	if _, err := store.OpenAsset(ctx, testSiteA, stored.ID, generousLimits.MaxFileBytes); !errors.Is(err, ErrAssetNotFound) {
+		t.Fatalf("OpenAsset after delete = %v, want ErrAssetNotFound", err)
 	}
-}
-
-func TestListAssetsWalksDirectlyAndSkipsStaging(t *testing.T) {
-	store, base := newTestDiskStorage(t)
-	newSiteForAssets(t, store, "alice", "demo")
-
-	empty, err := store.ListAssets("alice", "demo")
-	if err != nil {
-		t.Fatalf("ListAssets on a site with no assets yet: %v", err)
-	}
-	if len(empty) != 0 {
-		t.Fatalf("expected no assets, got %v", empty)
-	}
-
-	first, err := store.CreateAsset("alice", "demo", "text/plain", strings.NewReader("one"), 3, generousLimits)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := store.CreateAsset("alice", "demo", "text/plain", strings.NewReader("twotwo"), 6, generousLimits)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// A stray leftover staging file must never be reported as an asset.
-	if err := os.WriteFile(filepath.Join(base, "alice", "demo", "assets", ".tmp-asset-leftover"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := store.ListAssets("alice", "demo")
-	if err != nil {
-		t.Fatalf("ListAssets: %v", err)
-	}
-	byID := map[string]AssetFileInfo{}
-	for _, f := range got {
-		byID[f.ID] = f
-	}
-	if len(byID) != 2 {
-		t.Fatalf("ListAssets returned %d entries, want 2: %v", len(byID), got)
-	}
-	if byID[first.ID].Size != 3 {
-		t.Fatalf("first asset size = %d, want 3", byID[first.ID].Size)
-	}
-	if byID[second.ID].Size != 6 {
-		t.Fatalf("second asset size = %d, want 6", byID[second.ID].Size)
+	if err := store.DeleteAsset(ctx, testSiteA, "../escape"); !errors.Is(err, ErrAssetNotFound) {
+		t.Fatalf("malformed id error = %v, want ErrAssetNotFound", err)
 	}
 }
 
-func TestListAssetsOnSiteWithNoAssetsDirectory(t *testing.T) {
-	store, _ := newTestDiskStorage(t)
-	newSiteForAssets(t, store, "alice", "demo")
-	got, err := store.ListAssets("alice", "demo")
-	if err != nil {
-		t.Fatalf("ListAssets: %v", err)
+func TestCreateAssetRejectsBadInput(t *testing.T) {
+	store, _, memory := newAssetStore(t)
+	ctx := context.Background()
+	for _, siteID := range []string{"", "..", "../x", "alice", strings.ToUpper(testSiteA)} {
+		if _, err := store.CreateAsset(ctx, siteID, "text/plain", strings.NewReader("x"), generousLimits); err == nil {
+			t.Errorf("CreateAsset accepted site id %q", siteID)
+		}
 	}
-	if len(got) != 0 {
-		t.Fatalf("expected no assets, got %v", got)
+	if _, err := store.CreateAsset(ctx, testSiteA, "text/plain", nil, generousLimits); err == nil {
+		t.Error("CreateAsset accepted a nil source")
 	}
-}
-
-func TestListAssetsOnMissingSite(t *testing.T) {
-	store, _ := newTestDiskStorage(t)
-	got, err := store.ListAssets("alice", "never-created")
-	if err != nil {
-		t.Fatalf("ListAssets on a missing site: %v", err)
-	}
-	if len(got) != 0 {
-		t.Fatalf("expected no assets, got %v", got)
-	}
-}
-
-func TestCreateAssetRejectsInvalidIdentity(t *testing.T) {
-	store, _ := newTestDiskStorage(t)
-	invalid := []string{"", ".", "..", "../escape", "a/b", `a\b`}
-	for _, segment := range invalid {
-		segment := segment
-		t.Run(segment, func(t *testing.T) {
-			if _, err := store.CreateAsset(segment, "demo", "text/plain", strings.NewReader("x"), 1, generousLimits); err == nil {
-				t.Errorf("CreateAsset accepted user %q", segment)
-			}
-			if _, err := store.CreateAsset("alice", segment, "text/plain", strings.NewReader("x"), 1, generousLimits); err == nil {
-				t.Errorf("CreateAsset accepted site %q", segment)
-			}
-		})
-	}
-}
-
-func TestAssetLimitsValidation(t *testing.T) {
-	store, _ := newTestDiskStorage(t)
-	newSiteForAssets(t, store, "alice", "demo")
-	bad := []AssetLimits{
+	for _, limits := range []AssetLimits{
 		{MaxFileBytes: 0, MaxSiteBytes: 10, MaxSiteCount: 10},
 		{MaxFileBytes: 10, MaxSiteBytes: 0, MaxSiteCount: 10},
 		{MaxFileBytes: 10, MaxSiteBytes: 10, MaxSiteCount: 0},
 		{MaxFileBytes: -1, MaxSiteBytes: 10, MaxSiteCount: 10},
-	}
-	for _, limits := range bad {
-		if _, err := store.CreateAsset("alice", "demo", "text/plain", strings.NewReader("x"), 1, limits); err == nil {
+	} {
+		if _, err := store.CreateAsset(ctx, testSiteA, "text/plain", strings.NewReader("x"), limits); err == nil {
 			t.Errorf("CreateAsset accepted invalid limits %+v", limits)
 		}
+	}
+	if keys := memory.Keys(); len(keys) != 0 {
+		t.Fatalf("refused uploads wrote %v", keys)
 	}
 }
