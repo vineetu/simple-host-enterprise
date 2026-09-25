@@ -127,7 +127,7 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 
 <section>
   <h2 class="section-title">Your sites</h2>
-  <p class="login-copy">Manage who can view a restricted site and the files it has uploaded. Deploying, rolling back, and editor access are unchanged — use the skill or MCP for those.</p>
+  <p class="login-copy">Choose who can open each site, name its viewers, and manage the files it has uploaded. A new site opens only for you (or your team). Deploying and rolling back are done with the skill or MCP.</p>
   <div id="site-list" class="rank-list" role="region" aria-label="Sites"></div>
 </section>
 </main>`)
@@ -228,8 +228,8 @@ const dashboardScript = `<script>
 
 // dashboardSitesScript renders the signed-in person's accessible sites and,
 // for a site they own or belong to the owning team of (requireOwnerRole's
-// gate — an editor sees the site listed but not these controls), a viewer
-// list and an asset list, each backed by the existing collaboration API
+// gate), an access-level control, a viewer list and an asset list, each
+// backed by the existing collaboration API
 // (design.md 14, Phase 3: "reuse the share dialog pattern" — the pattern
 // reused here is fetch-driven panels against the same endpoints the share
 // dialog itself calls, not the dialog markup verbatim, since these live
@@ -261,6 +261,18 @@ const dashboardSitesScript = `<script>
       .catch(function(){ container.innerHTML = '<div class="rank-empty">Could not load sites.</div>'; });
   }
 
+  var LEVELS = [
+    ['only_me', 'Only me (or my team)'],
+    ['specific', 'Specific people or teams'],
+    ['company', 'Anyone in the company with the link'],
+    ['listed', 'Listed in the showcase and search'],
+    ['network', 'Anyone on the network, no sign-in (needs admin approval)']
+  ];
+  function levelLabel(level) {
+    for (var i = 0; i < LEVELS.length; i++) { if (LEVELS[i][0] === level) return LEVELS[i][1]; }
+    return level || '';
+  }
+
   function renderSites(sites) {
     if (!sites || !sites.length) { container.innerHTML = '<div class="rank-empty">No sites yet.</div>'; return; }
     container.innerHTML = '';
@@ -269,7 +281,8 @@ const dashboardSitesScript = `<script>
       var row = document.createElement('div');
       row.className = 'rank-row site-row';
       row.innerHTML = '<span class="rank-name">' + esc(site.owner_username) + '/' + esc(site.name) +
-        ' <span class="rank-sub">' + esc(site.access_role) + (site.public ? ' · public' : '') + '</span></span>' +
+        ' <span class="rank-sub">' + esc(site.access_role) + ' · ' + esc(levelLabel(site.access)) +
+        (site.network_request ? ' · network access requested' : '') + '</span></span>' +
         (canManage ? '<button type="button" class="btn-reject manage-toggle">Manage</button>' : '');
       var panel = document.createElement('div');
       panel.className = 'site-panel';
@@ -282,15 +295,23 @@ const dashboardSitesScript = `<script>
       var loaded = false;
       toggle.addEventListener('click', function(){
         panel.hidden = !panel.hidden;
-        if (!panel.hidden && !loaded) { loaded = true; renderPanel(panel, site.owner_username, site.name); }
+        if (!panel.hidden && !loaded) { loaded = true; renderPanel(panel, site); }
       });
     });
   }
 
-  function renderPanel(panel, owner, name) {
+  function renderPanel(panel, site) {
+    var owner = site.owner_username, name = site.name;
+    var options = LEVELS.map(function(l){
+      return '<option value="' + l[0] + '"' + (l[0] === site.access ? ' selected' : '') + '>' + esc(l[1]) + '</option>';
+    }).join('');
     panel.innerHTML =
+      '<div class="site-subsection"><h4>Who can open it</h4>' +
+      '<div class="add-row"><select class="access-select">' + options + '</select>' +
+      '<button type="button" class="btn-login access-button">Save</button></div>' +
+      '<p class="share-help access-status">' + (site.network_request ? 'Network access requested; waiting for an admin. The site keeps its current level until then.' : '') + '</p></div>' +
       '<div class="site-subsection"><h4>Viewers</h4>' +
-      '<p class="share-help">Empty means any signed-in person may view this site. Adding a first viewer restricts it to the list and moves it to its own address.</p>' +
+      '<p class="share-help">Named viewers can open the site while it is set to specific people or teams, at its own address. Adding one sets that level.</p>' +
       '<div class="viewer-list" aria-live="polite"></div>' +
       '<div class="add-row"><input type="text" class="add-viewer-input" placeholder="username, another-username" autocomplete="off">' +
       '<button type="button" class="btn-login add-viewer-button">Add</button></div></div>' +
@@ -343,8 +364,23 @@ const dashboardSitesScript = `<script>
       fetch(accessQuery, {credentials: 'same-origin', headers: CH})
         .then(function(r){ return r.json(); })
         .then(function(body){
-          var entries = (body && body.entries) || [];
           visitorList.innerHTML = '';
+          if (body && body.days) {
+            // Counts only (ACCESS_LOG_VISIBILITY=counts): who viewed is for admins.
+            if (!body.days.length) { visitorList.innerHTML = '<div class="rank-empty">No recorded visits in the last 30 days.</div>'; return; }
+            var total = document.createElement('div');
+            total.className = 'rank-row';
+            total.innerHTML = '<span class="rank-name">' + esc(body.unique_viewers) + ' people viewed this site in the last 30 days</span>';
+            visitorList.appendChild(total);
+            body.days.forEach(function(d){
+              var row = document.createElement('div');
+              row.className = 'rank-row';
+              row.innerHTML = '<span class="rank-name">' + esc(d.day) + ' <span class="rank-sub">' + esc(d.views) + ' views · ' + esc(d.unique_viewers) + ' people</span></span>';
+              visitorList.appendChild(row);
+            });
+            return;
+          }
+          var entries = (body && body.entries) || [];
           if (!entries.length) { visitorList.innerHTML = '<div class="rank-empty">No recorded visits yet.</div>'; return; }
           entries.forEach(function(e){
             var row = document.createElement('div');
@@ -362,7 +398,7 @@ const dashboardSitesScript = `<script>
         .then(function(r){ return r.json(); })
         .then(function(viewers){
           viewerList.innerHTML = '';
-          if (!viewers || !viewers.length) { viewerList.innerHTML = '<div class="rank-empty">Open to any signed-in person.</div>'; return; }
+          if (!viewers || !viewers.length) { viewerList.innerHTML = '<div class="rank-empty">No named viewers.</div>'; return; }
           viewers.forEach(function(v){
             var row = document.createElement('div');
             row.className = 'rank-row';
@@ -390,6 +426,27 @@ const dashboardSitesScript = `<script>
         })
         .catch(function(){ assetList.innerHTML = '<div class="rank-empty">Could not load assets.</div>'; });
     }
+
+    panel.querySelector('.access-button').addEventListener('click', function(){
+      var level = panel.querySelector('.access-select').value;
+      var payload = {level: level};
+      if (level === 'network') {
+        var reason = prompt('Anyone who can reach this server will be able to open the site without signing in. An admin has to approve this. Why does it need to be open?');
+        if (!reason) return;
+        payload.reason = reason;
+      }
+      fetch(base + '/access', {
+        method: 'POST', credentials: 'same-origin',
+        headers: Object.assign({'Content-Type': 'application/json'}, CH),
+        body: JSON.stringify(payload),
+      }).then(function(r){
+        return r.json().then(function(b){
+          if (!r.ok) { alert('Could not change access: ' + (b.error || 'unknown error')); return; }
+          panel.querySelector('.access-status').textContent = b.note || '';
+          loadSites();
+        });
+      }).catch(function(){ alert('Network error changing access.'); });
+    });
 
     panel.querySelector('.add-viewer-button').addEventListener('click', function(){
       var input = panel.querySelector('.add-viewer-input');

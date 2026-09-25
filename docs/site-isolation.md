@@ -8,10 +8,13 @@ not a plan. Nothing here is scheduled.
 Isolation is per owner. Every owner has one hostname, and all of their
 sites live under it as paths: `alice.<base>/todo/`, `alice.<base>/notes/`.
 Owners are separate browser origins from each other, so one person's page
-can never read another person's cookies, storage, or pages. A restricted
-site (one with a viewer list) is the exception: it is served on its own
-hostname, `alice--notes.<base>`, so "private" means private from the
-owner's other sites as well.
+can never read another person's cookies, storage, or pages. A site shared
+with named viewers (access level `specific`) is the exception: it is served
+on its own hostname, `alice--notes.<base>`, so it is private from the
+owner's other sites as well. Every other level — `only_me`, `company`,
+`listed`, `network` — stays on the owner's hostname. A `network` site,
+once an admin approves it, is served there without a session: anonymous
+visitors can read its pages, assets and saved data, and write nothing.
 
 Two sites under the same owner share an origin. That is deliberate. The
 owner's hostname is the product: one address to remember, one thing to
@@ -23,10 +26,10 @@ findable by typing their name.
 Within one owner's sites there is no JavaScript boundary. A page in
 `/todo/` can read `/notes/`'s DOM and storage, and can call `/notes/`'s
 state API with whatever rights the visiting person has. The server checks
-the person, not the page. The only realistic exposure is an editor you
-have granted on a single site: script they deploy there can reach your
-other sites whenever you visit theirs. The security review records this
-as an accepted limitation.
+the person, not the page. That is acceptable because the only code on an
+owner's hostname is the owner's own (for a team hostname, the team's):
+nobody else can deploy there. An `only_me` site sits on that hostname for
+the same reason — only the owner's or team's code runs beside it.
 
 ## The two ways to close it, and why one fits this product
 

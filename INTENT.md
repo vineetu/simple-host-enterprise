@@ -3,13 +3,13 @@
 ## What this is, and why it exists
 
 Simple Host Enterprise is one Go service that gives every person in an organisation a place to
-put the things their AI agent builds for them — under their own name, unlisted by default, and
-live the moment it exists.
+put the things their AI agent builds for them — under their own name, visible only to them until
+they share it, and live the moment it exists.
 
 AI agents already produce artifacts constantly. Every one of them lands at a random UUID on a
 vendor's domain: unattributable, unfindable a week later, and hosted on someone else's internet
 whether or not that is what anyone wanted. That is the problem this solves. Here the artifact
-lives under its author's own subdomain, it is theirs, and it stays unlisted until they decide
+lives under its author's own subdomain, it is theirs, and it stays theirs alone until they decide
 otherwise.
 
 The result is closer to a portfolio than to a web host. The unit is the person, not the
@@ -32,10 +32,11 @@ artifact.
   No repo, no pipeline, no YAML, no per-artifact subdomain to provision.
 - A person accumulates hundreds of artifacts without that becoming a problem — one subdomain
   each, not one per artifact.
-- Nothing is listed or searchable until its author shares it. Unlisted is the default: any
-  signed-in colleague with the link can open the site and write its saved data. Adding named
-  viewers makes a site private: only they, the owner, the owner's team and editors can open it,
-  on its own host. The default is never a surprise.
+- Nothing is visible to anyone else until its author shares it. A new site is open only to its
+  owner (or, for a team site, the team). The author then picks who can open it: named people or
+  teams, anyone signed in at the company, the company showcase, or — with an admin's approval —
+  anyone on the network. Whoever can open a site can use its saved data. The default is never a
+  surprise.
 - When it is shared, the author gets the credit and a colleague can find it by searching for
   the person.
 - What gets published can actually *do* something — a prototype, a tracker — not just render.
@@ -48,7 +49,9 @@ artifact.
 - **Not a general web host.** No per-site custom domains. A person's subdomain is the identity;
   handing out domains would dissolve it.
 - **Not a public publishing platform.** Sharing is inside the organisation, against the
-  organisation's own identity provider. There are no anonymous visitors to authenticate.
+  organisation's own identity provider. The one exception is a site an admin has approved for
+  the network: anyone who can reach the server can read it, and nobody can change it without
+  signing in.
 - **Not a document tool.** Notion and Confluence write documents better. What earns a place
   here is something that runs.
 - **Not a CI target.** The publisher is an agent through MCP, not a build pipeline.
@@ -75,9 +78,10 @@ artifact.
 - **2026-09-23 — The unit is the person, not the artifact.** Each user owns one subdomain; all
   their work lives beneath it. Rejected: a subdomain per artifact, which does not survive
   someone making hundreds.
-- **2026-09-23 — Unlisted by default** (`sites.public = false`, migration 0006). A new site is
-  absent from search and the showcase, but any signed-in colleague with the link can open it
-  and write its saved data; named viewers make it private. Most artifacts are made for their
+- **2026-09-23 — Unlisted by default** (`sites.public = false`, migration 0006). *Superseded
+  by the 2026-09-25 access levels decision below; kept for history.* A new site was
+  absent from search and the showcase, but any signed-in colleague with the link could open it
+  and write its saved data; named viewers made it private. Most artifacts are made for their
   author. Listing is a deliberate act. (Wording corrected 2026-09-25: this line said "private",
   which the access model never was.)
 - **2026-09-23 — Attribution is the discovery mechanism.** Search, AI site classification and
@@ -93,3 +97,19 @@ artifact.
   carried over because it exists.
 - **2026-09-23 — Identity is the customer's OIDC provider**, with admin following
   `ADMIN_EMAILS` / `OIDC_ADMIN_CLAIM` on a real signed-in person. No admin key exists.
+- **2026-09-25 — Five access levels per site, only-me by default** (`sites.access`, migration
+  0033). `only_me` (owner or team), `specific` (named people or teams, on the site's own host),
+  `company` (anyone signed in with the link), `listed` (company, plus showcase and search),
+  `network` (anyone who can reach the server, no sign-in). Existing sites moved to the level
+  that matched what they had, so no shared link broke.
+  - Only-me default: most artifacts are made for their author, so they start private to them.
+  - `company` exists because a link shared inside the company is still the common case.
+  - `network` is a request an admin approves or declines on /admin; the site keeps its level
+    until then, and the owner can drop it at any time. Network access leaves the company's
+    identity boundary, so an admin decides. Anonymous visitors can read, never write.
+  - Per-site editors are removed; shared editing is publishing under a team. Editors
+    duplicated teams and made one owner's origin hold other people's code.
+  - The last 20 versions of each site's saved data are kept and the owner or team can restore
+    one. Saved data is writable by everyone who can open the site, so it needs an undo.
+  - Owners see view counts and distinct viewers, not who (`ACCESS_LOG_VISIBILITY=counts`).
+    Who viewed what is sensitive, so only admins see names.

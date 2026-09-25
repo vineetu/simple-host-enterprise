@@ -139,7 +139,7 @@ owning role, never from the server's own connection pool.
 |---|---|---|---|
 | `AUDIT_RETENTION_DAYS` | No | `400` | Must be a positive integer. |
 | `ACCESS_LOG_RETENTION_DAYS` | No | `90` | Must be a positive integer. |
-| `ACCESS_LOG_VISIBILITY` | No | `owner` | Must be `owner` or `admin`. `owner` (the default) lets a site's owner and team members read `GET /api/access` for their own sites; `admin` refuses every non-admin caller of that route outright, regardless of ownership. Read by `handler.NewAuditHandler` (`cmd/server/main.go`) on every request; does not affect `GET /api/audit`, which is always scoped by caller identity rather than gated by this switch. |
+| `ACCESS_LOG_VISIBILITY` | No | `counts` | Must be `counts`, `owner` or `admin`. `counts` (the default) answers a site's owner and team members on `GET /api/access` with views per day and the number of distinct viewers, never who; `owner` gives them each visit with the viewer's user id (IP and user agent stay admin-only); `admin` refuses every non-admin caller of that route outright. Admins always see full rows. Read by `handler.NewAuditHandler` (`cmd/server/main.go`); does not affect `GET /api/audit`, which is always scoped by caller identity rather than gated by this switch. |
 
 ## Site bucket (S3-compatible)
 
