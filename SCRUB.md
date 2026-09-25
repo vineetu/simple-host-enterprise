@@ -18,7 +18,7 @@ instance.
 | Profile and context names | cloud CLI profiles, kubeconfig contexts | removed; the Makefile names `docker-desktop` |
 | Gateway URLs | the internal AI gateway and its portal | removed with the proxies |
 | Bucket names | the original backup bucket | `simple-host-backups` |
-| Support channel | the internal chat channel pages pointed at | `#simple-host-support` |
+| Support channel | the internal chat channel pages pointed at | removed; pages and skills say "your platform team" |
 | Email domain | the corporate domain in placeholders, tests and one migration backfill | `@example.com`; the backfill was dropped |
 | Brand names | product and design-system names in comments and pages | plain words |
 | People | real usernames in docs, tests and scripts | `alice`, `bob`, `acme-team` |

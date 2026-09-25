@@ -61,12 +61,22 @@ var fixtures = []fixture{
 		{"site": "demo", "listed": true, "owner": "alice"},
 	}},
 	{"list_site_editors", []map[string]any{{"owner": "alice", "site": "demo"}}},
-	{"find_users", []map[string]any{{"owner": "alice", "site": "demo", "query": "bob"}}},
+	{"find_users", []map[string]any{
+		{"owner": "alice", "site": "demo", "query": "bob"},
+		{"owner": "alice", "site": "demo", "query": "bob", "for": "viewer"},
+	}},
 	{"grant_site_editor", []map[string]any{{"owner": "alice", "site": "demo", "usernames": []any{"bob"}}}},
 	{"revoke_site_editor", []map[string]any{{"owner": "alice", "site": "demo", "username": "bob"}}},
+	{"list_site_viewers", []map[string]any{{"owner": "alice", "site": "demo"}}},
+	{"grant_site_viewer", []map[string]any{{"owner": "alice", "site": "demo", "usernames": []any{"bob"}}}},
+	{"revoke_site_viewer", []map[string]any{{"owner": "alice", "site": "demo", "username": "bob"}}},
+	{"list_site_files", []map[string]any{{"owner": "alice", "site": "demo", "version": float64(2)}}},
+	{"read_site_file", []map[string]any{{"owner": "alice", "site": "demo", "version": float64(2), "path": "index.html"}}},
+	{"get_state", []map[string]any{{"owner": "alice", "site": "demo"}}},
+	{"update_state", []map[string]any{{"owner": "alice", "site": "demo", "version": float64(0), "state": map[string]any{"n": 1}}}},
 	{"delete_site", []map[string]any{
-		{"site": "demo"},
-		{"site": "demo", "owner": "alice"},
+		{"site": "demo", "confirm_name": "demo"},
+		{"site": "demo", "owner": "alice", "confirm_name": "demo"},
 	}},
 	{"create_team", []map[string]any{{"name": "acme-team"}}},
 	{"list_teams", []map[string]any{{}}},
@@ -96,6 +106,14 @@ func TestEveryToolResolvesToARealRoute(t *testing.T) {
 				continue
 			}
 			for _, route := range routesOf(up) {
+				if route.SiteHost != "" {
+					// The site API is not on the router: the host gate answers
+					// it on the owner's host. The end-to-end test drives it.
+					if !strings.HasPrefix(route.Path, "/api/sites/") || !strings.HasSuffix(route.Path, "/state/versioned") {
+						t.Errorf("%s resolves to %s on an owner host, which is not the site API's state route", tc.tool, route.Path)
+					}
+					continue
+				}
 				req := httptest.NewRequest(route.Method, route.Path, nil)
 				if _, pattern := mux.Handler(req); pattern == "" {
 					t.Errorf("%s resolves to %s %s, which matches no registered route — "+

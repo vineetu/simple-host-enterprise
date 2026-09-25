@@ -510,7 +510,7 @@
             <div class="prompt-details__body">
               <pre><code id="installPrompt" data-origin-template>Install the three Simple Host skills from {{SIMPLE_HOST_ORIGIN}}
 
-First check whether you can actually read and write files on my computer. If you cannot — an ordinary ChatGPT chat window cannot — then stop, do not guess, and do not work around it. Tell me plainly that this has to run in the ChatGPT desktop app's coding agent, the part that can open a folder and edit files, and that I can ask in Slack #simple-host-support if I cannot find it.
+First check whether you can actually read and write files on my computer. If you cannot — an ordinary ChatGPT chat window cannot — then stop, do not guess, and do not work around it. Tell me plainly that this has to run in the ChatGPT desktop app's coding agent, the part that can open a folder and edit files, and that I can ask my platform team if I cannot find it.
 
 Work out my home folder using the shell you are actually in: $HOME on macOS or in PowerShell, %USERPROFILE% only in cmd. Install into exactly one folder:
   Claude Code            &lt;home&gt;/.claude/skills
@@ -518,10 +518,10 @@ Work out my home folder using the shell you are actually in: $HOME on macOS or i
 
 1. Read {{SIMPLE_HOST_ORIGIN}}/skills/version as JSON. Download the /skills.zip it names, then check the file's size and SHA-256 against that manifest.
 2. Copy the three folders (simple-host, simple-host-builder, fix-paths-for-subpath-hosting) straight into the skills folder, with no extra folder wrapped around them. Do not run anything out of the archive. Confirm all three SKILL.md files exist and none still says {{VERSION}}.
-3. From the exact skills root you selected, directly read &lt;selected-root&gt;/simple-host/references/account-recovery.md completely. Do not rely on the newly copied skill being discoverable yet. Follow that file before account creation, including its existing-config check, exact-destination preflight, and single-call save-and-verify transaction. Ask me for my work email only when that workflow requires it.
+3. From the exact skills root you selected, directly read &lt;selected-root&gt;/simple-host/references/account-recovery.md completely. Do not rely on the newly copied skill being discoverable yet. Follow that file to get me signed in and holding an API key, including its existing-config check, exact-destination preflight, and save-and-verify steps.
 4. Tell me my username, and that I may need a new chat or an app restart before the skills show up.
 
-Before changing anything, tell me conversationally in one or two sentences that Simple Host will install its tools in the selected skills root and save publishing access in the resolved config path, then wait for one yes covering both. Still show and honor every approval required by the host, tool, sandbox, or operating system. If anything fails, say what happened without exposing credentials and tell me to ask in Slack #simple-host-support.</code></pre>
+Before changing anything, tell me conversationally in one or two sentences that Simple Host will install its tools in the selected skills root and save publishing access in the resolved config path, then wait for one yes covering both. Still show and honor every approval required by the host, tool, sandbox, or operating system. If anything fails, say what happened without exposing credentials and tell me to ask my platform team.</code></pre>
             </div>
           </details>
         </div>
@@ -537,7 +537,7 @@ Before changing anything, tell me conversationally in one or two sentences that 
           </div>
           <div class="next-action">
             <strong>Publish it</strong>
-            <p>Ask your agent to use <code>simple-host</code> and include your work email on the first deploy.</p>
+            <p>Ask your agent to use <code>simple-host</code> and sign in when it sends you a link.</p>
           </div>
         </div>
       </section>
@@ -669,11 +669,11 @@ Before changing anything, tell me conversationally in one or two sentences that 
 
       <section class="trust-note" aria-labelledby="help-title">
         <p class="eyebrow">Getting help</p>
-        <h2 id="help-title">Ask in Slack</h2>
+        <h2 id="help-title">Ask your platform team</h2>
         <p>
           If your agent gets stuck installing, or reports something you did not
-          expect, ask in <strong>#simple-host-support</strong>. Paste what
-          the agent told you into the channel — that is usually enough to sort it out.
+          expect, ask the platform team that runs Simple Host. Paste what the
+          agent told you — that is usually enough to sort it out.
         </p>
       </section>
     </div>

@@ -1,21 +1,17 @@
-# Framework builds for subpath hosting
+# Framework builds
 
 Read this file completely before building a project for Simple Host. Detect the
 framework from `package.json`, scripts, dependencies, and root config files.
 
-Build with `/sites/<owner_username>/<sitename>/`, where `owner_username` is the
-canonical resource owner—a person or a team, and not necessarily the
-authenticated actor. Use both the leading and trailing slash unless a framework
-rule below says otherwise.
+A site is served at `<owner-label>.<base>/<sitename>/`, and at its own host
+(`<owner-label>--<sitename-label>.<base>/`, no `/<sitename>/` segment) once it
+is restricted to named viewers. **Build with relative asset paths (`./`)**: a
+page that loads `./assets/app.js` works at both, and never needs rebuilding when
+the site is restricted or unrestricted. An absolute path (`/assets/app.js`, or
+`/<sitename>/assets/app.js`) breaks on one of the two.
 
-**Compose to build, quote to report.** You assemble this base path yourself, from
-the namespace you resolved, and every base path in this file is that composed
-long path. A site is also served at `<owner-label>.<base>/<sitename>/`; a build
-made for the long path works at *both* addresses and never needs rebuilding,
-while a build made for the short one 404s on the base host. So always compile
-long. Never build against the `url` or `public_path` the API returns — those are
-values to show a human, and their spelling depends on which host the request
-arrived on. Compose to build, quote to report.
+Use hash-based client routing (`#/page`) for a single-page app: a relative base
+cannot serve history-mode deep links.
 
 Do not patch a compiled bundle with string replacement. Configure the framework
 and rebuild.
@@ -25,184 +21,91 @@ and rebuild.
 Detect `vite` or `vite.config.{js,ts,mjs,cjs}`.
 
 ```bash
-npx vite build --base=/sites/<owner_username>/<sitename>/
+npx vite build --base=./
 ```
 
-Equivalent config:
+Equivalent config: `export default { base: './' }`. Default output: `dist/`.
+With Vue Router use `createWebHashHistory()`; with React Router use
+`HashRouter`.
 
-```js
-export default { base: '/sites/<owner_username>/<sitename>/' }
+## Slidev
+
+Detect `@slidev/cli`, or `slides.md` plus a Slidev package script. Set
+`routerMode: hash` in the first slide's frontmatter, then:
+
+```bash
+npx slidev build --base ./
 ```
 
 Default output: `dist/`.
 
-## Slidev
-
-Detect `@slidev/cli`, or `slides.md` plus a Slidev package script.
-
-```bash
-npx slidev build --base /sites/<owner_username>/<sitename>/
-```
-
-Default output: `dist/`. The base starts and ends with `/`.
-
-## Next.js
-
-Detect `next` or `next.config.{js,mjs,ts}`. Simple Host requires a static export.
-
-```js
-module.exports = {
-  basePath: '/sites/<owner_username>/<sitename>', // no trailing slash
-  output: 'export',
-  images: { unoptimized: true },
-  trailingSlash: true,
-}
-```
-
-```bash
-npx next build
-```
-
-Upload `out/`. API routes, server actions requiring a server, middleware, and SSR
-are not deployable here.
-
 ## Create React App
 
-Detect `react-scripts`. Set:
+Detect `react-scripts`. Set `"homepage": "."` in `package.json`, then
+`npm run build`. Upload `build/`. Use `HashRouter` for routing.
 
-```json
-{"homepage":"/sites/<owner_username>/<sitename>"}
-```
+## Vue CLI
 
-```bash
-npm run build
-```
-
-Upload `build/`. For React Router, also configure `basename` with the same path
-without a trailing slash.
-
-## SvelteKit
-
-Detect `@sveltejs/kit` or `svelte.config.{js,ts}`. Use the static adapter:
-
-```js
-import adapter from '@sveltejs/adapter-static';
-export default {
-  kit: {
-    adapter: adapter({ fallback: 'index.html' }),
-    paths: { base: '/sites/<owner_username>/<sitename>' }
-  }
-};
-```
-
-```bash
-npm run build
-```
-
-Upload `build/`. `paths.base` has no trailing slash. In application code, use
-`base` from `$app/paths` for internal links and assets.
-
-## Astro
-
-Detect `astro` or `astro.config.{mjs,ts,js}`.
-
-```js
-import { defineConfig } from 'astro/config';
-export default defineConfig({
-  base: '/sites/<owner_username>/<sitename>',
-  output: 'static',
-});
-```
-
-```bash
-npx astro build
-```
-
-Upload `dist/`. Use `import.meta.env.BASE_URL` instead of hardcoding `/`.
-
-## Nuxt 3 or 4
-
-Detect `nuxt` or `nuxt.config.{ts,js,mjs}`.
-
-```ts
-export default defineNuxtConfig({
-  app: { baseURL: '/sites/<owner_username>/<sitename>/' }
-})
-```
-
-```bash
-npx nuxt generate
-```
-
-Upload `.output/public/`. Do not upload the Node server bundle produced by
-`nuxt build`.
+Detect `@vue/cli-service` or `vue.config.js` without Vite. Set
+`module.exports = { publicPath: './' }`, then `npm run build`. Upload `dist/`.
+Use hash history for Vue Router.
 
 ## Angular
 
 Detect `@angular/core` or `angular.json`.
 
 ```bash
-ng build --base-href=/sites/<owner_username>/<sitename>/ --configuration=production
+ng build --base-href ./ --configuration=production
 ```
 
-Upload the output directory that contains `index.html`: commonly
-`dist/<project-name>/`, or `dist/<project-name>/browser/` with newer application
-builders.
+Use `withHashLocation()` (or `useHash: true`) for the router. Upload the
+directory that contains `index.html`: commonly `dist/<project-name>/`, or
+`dist/<project-name>/browser/`.
 
-## Gatsby
+## SvelteKit
 
-Detect `gatsby` or `gatsby-config.{js,ts}`.
+Detect `@sveltejs/kit` or `svelte.config.{js,ts}`. Use the static adapter, leave
+`paths.base` unset, and keep `paths.relative` at its default (`true`):
 
 ```js
-module.exports = {
-  pathPrefix: '/sites/<owner_username>/<sitename>',
-}
+import adapter from '@sveltejs/adapter-static';
+export default { kit: { adapter: adapter({ fallback: 'index.html' }), router: { type: 'hash' } } };
 ```
 
-```bash
-npx gatsby build --prefix-paths
-```
+`npm run build`, then upload `build/`.
 
-Upload `public/`. The `--prefix-paths` flag is required.
+## Frameworks that need an absolute base
 
-## Vue CLI
+Next.js, Astro, Nuxt, and Gatsby cannot build reliably with relative paths.
+Build them with the site's path on its owner's host, `/<sitename>` (the setting
+below), and tell the user: if the site is later restricted to named viewers it
+moves to its own host, and must be rebuilt with no base path and deployed again.
 
-Detect `@vue/cli-service` or `vue.config.js` without Vite.
+| Framework | Detect | Setting | Build | Upload |
+|---|---|---|---|---|
+| Next.js | `next` | `basePath: '/<sitename>'`, `output: 'export'`, `images: { unoptimized: true }`, `trailingSlash: true` | `npx next build` | `out/` |
+| Astro | `astro` | `base: '/<sitename>'`, `output: 'static'` | `npx astro build` | `dist/` |
+| Nuxt 3/4 | `nuxt` | `app: { baseURL: '/<sitename>/' }` | `npx nuxt generate` | `.output/public/` |
+| Gatsby | `gatsby` | `pathPrefix: '/<sitename>'` | `npx gatsby build --prefix-paths` | `public/` |
 
-```js
-module.exports = {
-  publicPath: '/sites/<owner_username>/<sitename>/'
-}
-```
-
-```bash
-npm run build
-```
-
-Upload `dist/`.
+API routes, server actions, middleware, and SSR are not deployable here.
 
 ## Plain static HTML
 
 Treat a project as plain HTML only when it has no build system that owns asset
-paths. Invoke the `fix-paths-for-subpath-hosting` skill on the site directory.
-That skill rewrites genuinely raw HTML/CSS/JavaScript paths mechanically. Then
-run packaging and validation.
-
-Do not invoke the path-rewriter on framework source or compiled chunks.
+paths. Invoke the `fix-paths-for-subpath-hosting` skill on the site directory,
+then run packaging and validation. Do not invoke it on framework source or
+compiled chunks.
 
 ## Unrecognized framework
 
-For Eleventy, Hugo, Jekyll, Remix static export, Qwik, SolidStart, VitePress,
-Docusaurus, or another unlisted tool:
+For Eleventy, Hugo, Jekyll, VitePress, Docusaurus, or another unlisted tool:
 
-1. Inspect the project and identify its exact framework/version.
-2. Consult that framework's official documentation for its base path, subpath,
-   path prefix, public path, or subdirectory deployment setting.
-3. Configure `/sites/<owner_username>/<sitename>/`, applying that framework's
-   trailing-slash rules, and rebuild.
+1. Identify the exact framework and version.
+2. Check its official documentation for relative asset paths (often a
+   `base`, `publicPath`, or `relativeURLs` setting). Use `./` where supported.
+3. If it only supports an absolute base, treat it like the table above.
 4. Upload only a fully static output directory.
-5. Fall back to `fix-paths-for-subpath-hosting` only if the output is genuinely
-   plain HTML/CSS/JavaScript with no chunk loader or build-owned URL runtime.
 
-If the framework cannot emit a static build for a subpath, explain the blocker;
-do not disguise a server application as a deployable static site.
+If the framework cannot emit a static build, explain the blocker; do not
+disguise a server application as a deployable static site.

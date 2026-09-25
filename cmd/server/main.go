@@ -195,7 +195,7 @@ func run() (runErr error) {
 	handler.NewDashboardHandler(database, signingKeys, cfg.Session.Idle).Register(mux, authMW)
 	handoffHandler := handler.NewHandoffHandler(database, signingKeys, hosts, auditRecorder, abuseLimits)
 	handoffHandler.Register(mux, authMW)
-	handler.RegisterUIRoutes(mux)
+	handler.RegisterUIRoutes(mux, cfg.PublicBaseURL)
 	siteFiles := handler.NewSiteFiles(diskStorage, database, cookiePolicy, signingKeys, cfg.Session.Idle).WithAccessWriter(accessWriter)
 	siteAPIHandler := handler.NewSiteAPIHandler(database, diskStorage, storage.AssetLimits{
 		MaxFileBytes: cfg.Assets.MaxFileBytes,
@@ -235,7 +235,11 @@ func run() (runErr error) {
 	// id and every request, including one the gate refuses, is on record.
 	requestLog := reqlog.Middleware(slog.New(slog.NewJSONHandler(os.Stdout, nil)), reqlog.ProbePaths)
 	hostGate := handler.NewHostGate(hosts, siteFiles, database, signingKeys, negativeSessionCache, handoffHandler, siteAPIHandler, authMW, cfg.PublicBaseURL)
-	applicationServer := newApplicationServer(":"+cfg.Port, requestLog(handler.SecurityHeaders(hostGate(mux), cfg.SecureMode, hosts)))
+	gated := hostGate(mux)
+	// The state tools reach the site API the way a page does: on the owner's
+	// own host, through the host gate and its access checks.
+	mcpServer.WithSiteAPI(gated, hosts.SiteHost)
+	applicationServer := newApplicationServer(":"+cfg.Port, requestLog(handler.SecurityHeaders(gated, cfg.SecureMode, hosts)))
 	servers := []managedServer{manageHTTPServer("application", applicationServer)}
 	if cfg.SecureMode {
 		redirectHandler, err := newHTTPSRedirectHandler(cfg.PublicBaseURL, hosts)

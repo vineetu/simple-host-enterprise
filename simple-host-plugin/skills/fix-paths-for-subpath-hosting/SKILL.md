@@ -1,15 +1,15 @@
 ---
 name: fix-paths-for-subpath-hosting
-description: Make a static site work under a URL subpath. First detects the framework — for any framework with a base-path build flag (Vite, Next.js, CRA, SvelteKit, Astro, Nuxt, Angular, Gatsby, Vue CLI), routes back to the simple-host skill's framework-specific build instructions. Mechanically rewrites root-relative paths to relative paths only for genuinely raw HTML projects with no build system. Use when deploying a static site under a subpath, or when the deploy skill references this as a pre-deploy step.
+description: Make a static site's asset paths relative so it works wherever Simple Host serves it. First detects the framework — for any framework with a base-path build setting (Vite, Next.js, CRA, SvelteKit, Astro, Nuxt, Angular, Gatsby, Vue CLI), routes back to the simple-host skill's framework-specific build instructions. Mechanically rewrites root-relative paths to relative paths only for genuinely raw HTML projects with no build system. Use before deploying a plain HTML site, or when the deploy skill references this as a pre-deploy step.
 ---
 
 # Fix Paths for Subpath Hosting
 
-Sites on Simple Host are served at `/sites/<user>/<name>/`, not at the domain root. So root-relative paths like `src="/assets/app.js"` 404 — they skip the subpath prefix.
+A Simple Host site is served at `<owner-host>/<name>/`, or at the root of its own host once it is restricted to named viewers. A root-relative path like `src="/assets/app.js"` 404s on the first; a path with the site name baked in 404s on the second. Relative paths (`assets/app.js`, `./`) work on both.
 
 There are two ways to fix this, and **picking the right one is more important than how well you execute either**:
 
-1. **For framework projects (Vite, Next, React, Svelte, Astro, Nuxt, Angular, Gatsby, etc.)**: tell the framework about the base path at build time. The build tool then bakes the correct paths into the output. **Do not mechanically rewrite the build output** — minified variable names shift build-to-build, dynamic-import chunk loaders prepend a configured base to every chunk, and string-replacement is fragile.
+1. **For framework projects (Vite, Next, React, Svelte, Astro, Nuxt, Angular, Gatsby, etc.)**: set the framework's base path at build time. The build tool then bakes the correct paths into the output. **Do not mechanically rewrite the build output** — minified variable names shift build-to-build, dynamic-import chunk loaders prepend a configured base to every chunk, and string-replacement is fragile.
 2. **For raw HTML/CSS/JS projects with no build step**: mechanically rewrite root-relative paths to relative paths in source. This is the only option for plain HTML, but it is a fallback, not a default.
 
 ## Step 1: Detect the framework first
@@ -154,7 +154,7 @@ Service workers and web workers run in their own context — use their own files
 // At the top of the shared JS file:
 const scriptUrl = document.currentScript?.src || '';
 // Remove the filename and its parent directory to get the site root
-// e.g., "http://host/sites/user/mysite/shared/nav.js" -> "http://host/sites/user/mysite/"
+// e.g., "https://owner.host/mysite/shared/nav.js" -> "https://owner.host/mysite/"
 const siteRoot = scriptUrl.replace(/\/[^/]+\/[^/]+$/, '/');
 
 // Then use siteRoot for all dynamic paths:
@@ -249,7 +249,7 @@ Fix `start_url`, `scope`, and icon paths:
 4. **Verify:** Scan for remaining root-relative paths:
    - macOS/Linux: `grep -rn '"/[a-zA-Z]' .` and `grep -rn "'/[a-zA-Z]" .`
    - Windows PowerShell: `Get-ChildItem -Recurse -File | Select-String -Pattern '"/[a-zA-Z]', "'/[a-zA-Z]"`
-5. **Test:** Access the site at its subpath URL and check browser console for 404s
+5. **Test:** Open the `url` the deploy returned and check browser console for 404s
 
 ## Common Pitfalls
 

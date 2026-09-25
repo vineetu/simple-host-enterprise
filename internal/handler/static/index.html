@@ -1015,7 +1015,7 @@
 
 Browser platform is unknown. Detect and verify the actual operating system and shell before continuing.
 
-First check whether you can actually read and write files on my computer. If you cannot — an ordinary ChatGPT chat window cannot — then stop, do not guess, and do not work around it. Tell me plainly that this has to run in the ChatGPT desktop app's coding agent, the part that can open a folder and edit files, and that I can ask in Slack #simple-host-support if I cannot find it.
+First check whether you can actually read and write files on my computer. If you cannot — an ordinary ChatGPT chat window cannot — then stop, do not guess, and do not work around it. Tell me plainly that this has to run in the ChatGPT desktop app's coding agent, the part that can open a folder and edit files, and that I can ask my platform team if I cannot find it.
 
 Work out my home folder using the shell you are actually in: $HOME on macOS or in PowerShell, %USERPROFILE% only in cmd. Install into exactly one folder:
   Claude Code            &lt;home&gt;/.claude/skills
@@ -1023,10 +1023,10 @@ Work out my home folder using the shell you are actually in: $HOME on macOS or i
 
 1. Read {{SIMPLE_HOST_ORIGIN}}/skills/version as JSON. Download the /skills.zip it names, then check the file's size and SHA-256 against that manifest.
 2. Copy the three folders (simple-host, simple-host-builder, fix-paths-for-subpath-hosting) straight into the skills folder, with no extra folder wrapped around them. Do not run anything out of the archive. Confirm all three SKILL.md files exist and none still says {{VERSION}}.
-3. From the exact skills root you selected, directly read &lt;selected-root&gt;/simple-host/references/account-recovery.md completely. Do not rely on the newly copied skill being discoverable yet. Follow that file before account creation, including its existing-config check, exact-destination preflight, and single-call save-and-verify transaction. Ask me for my work email only when that workflow requires it.
+3. From the exact skills root you selected, directly read &lt;selected-root&gt;/simple-host/references/account-recovery.md completely. Do not rely on the newly copied skill being discoverable yet. Follow that file to get me signed in and holding an API key, including its existing-config check, exact-destination preflight, and save-and-verify steps.
 4. Tell me my username, and that I may need a new chat or an app restart before the skills show up.
 
-Before changing anything, tell me conversationally in one or two sentences that Simple Host will install its tools in the selected skills root and save publishing access in the resolved config path, then wait for one yes covering both. Still show and honor every approval required by the host, tool, sandbox, or operating system. If anything fails, say what happened without exposing credentials and tell me to ask in Slack #simple-host-support.</code></pre>
+Before changing anything, tell me conversationally in one or two sentences that Simple Host will install its tools in the selected skills root and save publishing access in the resolved config path, then wait for one yes covering both. Still show and honor every approval required by the host, tool, sandbox, or operating system. If anything fails, say what happened without exposing credentials and tell me to ask my platform team.</code></pre>
               </div>
             </details>
           </div>
@@ -1046,7 +1046,7 @@ Before changing anything, tell me conversationally in one or two sentences that 
                 This step needs JavaScript to build your prompt. With it turned off,
                 install Simple Host using step 1, then ask your coding agent directly:
                 describe the website you want, tell it to use the simple-host skill to
-                publish, and give it your work email so it can set up your account.
+                publish, and sign in when it sends you a link.
               </p>
             </noscript>
 
@@ -1067,26 +1067,6 @@ Before changing anything, tell me conversationally in one or two sentences that 
                   adds that to the brief for you.
                 </p>
                 <p class="field-error" id="websiteBriefError" aria-live="polite"></p>
-              </div>
-
-              <div class="builder-field">
-                <label class="work-email-label" for="workEmail">Work email</label>
-                <input
-                  class="work-email"
-                  id="workEmail"
-                  type="email"
-                  inputmode="email"
-                  autocomplete="email"
-                  placeholder="firstname.lastname@example.com"
-                  aria-describedby="workEmailHelp workEmailError agentPromptGenerationStatus"
-                  required
-                >
-                <p class="field-help" id="workEmailHelp">
-                  Your email goes into the prompt so your agent can set up your account.
-                  It is remembered on this device for a day so you do not retype it, and
-                  is never sent to the AI, added to a URL, or included in analytics.
-                </p>
-                <p class="field-error" id="workEmailError" aria-live="polite"></p>
               </div>
 
               <button class="home-button" id="createAgentPrompt" type="submit">Create and copy my prompt</button>
@@ -1147,11 +1127,11 @@ Before changing anything, tell me conversationally in one or two sentences that 
           <div class="step-content">
             <h3>Find it and share it</h3>
             <p class="step-lead">
-              When your agent finishes, it gives you a link. All your sites live here:
+              When your agent finishes, it gives you a link. Every site you can
+              work on is listed on your dashboard:
             </p>
 
-            <p class="site-home-url"><a id="siteHomeUrl" class="home-text-link" href="/sites/your-name/" target="_blank" rel="noopener">/sites/your-name/</a></p>
-            <p class="field-help" id="siteHomeUrlHelp">This is where every site you publish will show up.</p>
+            <p class="site-home-url"><a id="siteHomeUrl" class="home-text-link" href="/dashboard" target="_blank" rel="noopener">Your dashboard</a></p>
 
             <div class="step-share">
               <p><strong>Share it to build together.</strong> Invite teammates as
@@ -1220,8 +1200,8 @@ Before changing anything, tell me conversationally in one or two sentences that 
                 >Copy shared Gantt prompt</button>
                 <p class="copy-status" id="ganttCopyStatus" role="status" aria-live="polite" aria-atomic="true"></p>
                 <p class="state-warning">
-                  Shared site state is public and unauthenticated. Never save
-                  passwords, secrets, API keys, or personal data in it.
+                  Anyone who can open the site can read and change its shared
+                  state. Never save passwords, secrets, API keys, or personal data in it.
                 </p>
               </div>
             </div>
@@ -1259,9 +1239,9 @@ Before changing anything, tell me conversationally in one or two sentences that 
         <details>
           <summary>Where do I get help?</summary>
           <p>
-            Ask in <strong>#simple-host-support</strong> on Slack. If your
-            coding agent gets stuck installing or publishing, paste what it told you
-            into the channel — that is usually enough to sort it out.
+            Ask the platform team that runs Simple Host. If your coding agent
+            gets stuck installing or publishing, paste what it told you — that is
+            usually enough to sort it out.
           </p>
         </details>
         <details>
@@ -1269,8 +1249,8 @@ Before changing anything, tell me conversationally in one or two sentences that 
           <p>
             No. A new site is <strong>unlisted</strong> — it does not appear on the
             <a href="/showcase">Showcase</a> or in search until you choose to make
-            it public. Anyone on your company network who has the direct link can still view
-            it, so keep content internal either way.
+            it public. Anyone in your company who signs in and has the direct link can
+            still view it, unless you restrict it to named viewers.
           </p>
         </details>
         <details>
@@ -1296,10 +1276,9 @@ Before changing anything, tell me conversationally in one or two sentences that 
           <summary>Is the shared data on my site private?</summary>
           <p>
             Each site gets a JSON store — that is what makes shared demos and
-            trackers work. Writes are not authenticated today, so treat it as
-            collaborative rather than protected, and never store passwords, secrets,
-            or personal data in it. Every write is versioned with full history, so
-            anything is one revert away.
+            trackers work. Everyone who can open the site is signed in and can read
+            and change it, so treat it as collaborative rather than protected, and
+            never store passwords, secrets, or personal data in it.
           </p>
         </details>
         <details>
@@ -1308,15 +1287,14 @@ Before changing anything, tell me conversationally in one or two sentences that 
             Prototypes, demos, internal tools, dashboards, and trackers — and as a
             canvas for AI-generated pages. It is static-only, so it is fast by
             construction and nothing runs server-side; up to 100&nbsp;MB per site.
-            Support and takedowns are best-effort through
-            <strong>#simple-host-support</strong>, with no formal SLA.
+            Support and takedowns go through your platform team.
           </p>
         </details>
         <details>
           <summary>Do I need to register first?</summary>
           <p>
-            No. Your first publish request includes your work email, so the skill
-            registers you and saves your API key locally as part of that same step.
+            No. Accounts come from your company sign-in. The first time your agent
+            needs access, it sends you a link to sign in and create an API key.
           </p>
         </details>
         <details>
@@ -1365,8 +1343,6 @@ Before changing anything, tell me conversationally in one or two sentences that 
     var agentPromptForm = document.getElementById('agentPromptForm');
     var websiteBrief = document.getElementById('websiteBrief');
     var websiteBriefError = document.getElementById('websiteBriefError');
-    var workEmail = document.getElementById('workEmail');
-    var workEmailError = document.getElementById('workEmailError');
     var createAgentPrompt = document.getElementById('createAgentPrompt');
     var agentPromptGenerationStatus = document.getElementById('agentPromptGenerationStatus');
     var agentPromptResult = document.getElementById('agentPromptResult');
@@ -1508,7 +1484,7 @@ Before changing anything, tell me conversationally in one or two sentences that 
 
     function saveProgress(patch) {
       var current = loadProgress() || {};
-      var next = { step: current.step || 1, brief: current.brief || '', email: current.email || '' };
+      var next = { step: current.step || 1, brief: current.brief || '' };
       for (var k in patch) if (patch.hasOwnProperty(k)) next[k] = patch[k];
       next.savedAt = Date.now();
       try {
@@ -1548,14 +1524,6 @@ Before changing anything, tell me conversationally in one or two sentences that 
       advanceTo(parseInt(advancer.getAttribute('data-advance-to'), 10));
     });
 
-    function validateWorkEmail() {
-      var value = workEmail.value.trim();
-      var valid = value !== '' && workEmail.validity.valid;
-      workEmail.setAttribute('aria-invalid', valid ? 'false' : 'true');
-      workEmailError.textContent = valid ? '' : 'Enter a valid work email, such as firstname.lastname@example.com.';
-      return valid;
-    }
-
     function validateWebsiteBrief() {
       var valid = websiteBrief.value.trim() !== '';
       websiteBrief.setAttribute('aria-invalid', valid ? 'false' : 'true');
@@ -1584,24 +1552,10 @@ Before changing anything, tell me conversationally in one or two sentences that 
       saveProgress({ brief: websiteBrief.value });
     });
 
-    workEmail.addEventListener('input', function () {
-      resetPromptBuilder();
-      workEmail.setAttribute('aria-invalid', 'false');
-      workEmailError.textContent = '';
-      // Accepted trade-off: the email is persisted on this device for a day so
-      // the user does not retype it. The page copy says so. It is still never
-      // sent over the network, by any means (a test enforces that).
-      saveProgress({ email: workEmail.value });
-      updateSiteHomeUrl();
-    });
-
     websiteBrief.addEventListener('blur', function () {
       if (websiteBrief.value.trim() !== '') validateWebsiteBrief();
     });
 
-    workEmail.addEventListener('blur', function () {
-      if (workEmail.value.trim() !== '') validateWorkEmail();
-    });
 
     // Categorical, not quantitative: the repo gives no write-rate or editor-count
     // threshold. If the described site remembers something shared between
@@ -1614,19 +1568,18 @@ Before changing anything, tell me conversationally in one or two sentences that 
     }
 
     function stateInstruction() {
-      return '\n\nThis site needs to remember things shared between visitors, so store that with Simple Host\'s versioned shared state (GET/PUT the relative nameless path /api/site/state/versioned — the server identifies the calling site from the page\'s own address, so never compute the site name from location.pathname — applying my edit to the current state on a 409 and retrying). ' +
-        'That state is public, unauthenticated, and world-readable and world-writable — anyone with the URL can read or overwrite it. The Referer check is attribution only and forgeable, not authorization, and a key generated in the browser does not make it private. ' +
+      return '\n\nThis site needs to remember things shared between visitors, so store that with Simple Host\'s versioned shared state, exactly as the simple-host skill\'s state reference describes (GET/PUT /api/sites/<site>/state/versioned with the site name written into the page, applying my edit to the current state on a 409 and retrying). ' +
+        'Everyone who can open the site can read and overwrite that state, so show what it holds as text, never as HTML. ' +
         'Never store passwords, API keys, tokens, confidential business data, personal data, private drafts, or per-user data in it, and keep the whole thing under 1 MiB. If what I asked for actually needs private or per-user data, tell me plainly that Simple Host cannot do that yet rather than faking it.';
     }
 
-    function deploymentPrompt(buildRequest, email) {
+    function deploymentPrompt(buildRequest) {
       return 'Before you build anything, check that all three Simple Host skills are installed and usable: simple-host, simple-host-builder, and fix-paths-for-subpath-hosting.\n\n' +
         'If any of them is missing, installing them is your first task, not a reason to stop. Install all three from ' + window.location.origin + ' by following that site\'s install instructions, ask me to approve the install, and then carry on. ' +
         'Do not build the website first and tell me about a publishing problem at the end.\n\n' +
         'If you cannot install them, stop and tell me why in plain language. Do not offer me a workaround: not a downloadable copy of the website, not the website code pasted into the chat, not a different hosting service, and not any publishing or sites feature built into the app you are running in. None of those is a substitute. This website is only finished when it is published to Simple Host and I have the link.\n\n' +
-        'Next, before you build anything, make sure my Simple Host account exists. My work email is ' + email + '. ' +
-        'Use the installed simple-host account-recovery workflow to check the local config and, only if needed, register with that email and transactionally save and verify the returned API key. Never print the key. ' +
-        'Do this first because my username forms part of the published address, and a framework site has to be built for that address — discovering it afterwards means building it again.\n\n' +
+        'Next, before you build anything, make sure you can publish as me: use the Simple Host connector if you have it, otherwise follow the installed simple-host account-recovery workflow, which sends me a link to sign in and create an API key. Never print the key. ' +
+        'Do this first so the site\'s owner is settled before anything is built.\n\n' +
         'Once the skills and the account are both in place:\n\n' +
         buildRequest.trim() +
         (describedSiteNeedsState(buildRequest) ? stateInstruction() : '') + '\n\n' +
@@ -1640,20 +1593,17 @@ Before changing anything, tell me conversationally in one or two sentences that 
     agentPromptForm.addEventListener('submit', async function (event) {
       event.preventDefault();
       var briefIsValid = validateWebsiteBrief();
-      var emailIsValid = validateWorkEmail();
-      if (!briefIsValid || !emailIsValid) {
-        if (!briefIsValid) websiteBrief.focus();
-        else workEmail.focus();
+      if (!briefIsValid) {
+        websiteBrief.focus();
         return;
       }
 
       var generation = ++agentPromptGeneration;
       var brief = websiteBrief.value.trim();
-      var email = workEmail.value.trim();
       createAgentPrompt.disabled = true;
       createAgentPrompt.textContent = 'Creating prompt…';
       agentPromptResult.hidden = false;
-      agentPromptText.value = deploymentPrompt(localBuildRequest(brief), email);
+      agentPromptText.value = deploymentPrompt(localBuildRequest(brief));
       setCopyStatus(agentPromptGenerationStatus, 'Creating your prompt…', false);
       setCopyStatus(agentPromptCopyStatus, '', false);
 
@@ -1711,34 +1661,12 @@ Before changing anything, tell me conversationally in one or two sentences that 
       });
     }
 
-    // --- Step 4: where the sites live --------------------------------------
-    // Mirror the server's deriveUsernameFromEmail exactly: lowercase and trim
-    // the whole address, take the local part, then strip every character
-    // outside [a-z0-9.-] (so +tags and underscores go). Matching it means the
-    // previewed URL is the real one, not a guess that 404s.
-    var siteHomeUrl = document.getElementById('siteHomeUrl');
-    function deriveUsername(email) {
-      var normalized = (email || '').trim().toLowerCase();
-      var at = normalized.indexOf('@');
-      if (at <= 0) return '';
-      return normalized.slice(0, at).replace(/[^a-z0-9.-]+/g, '');
-    }
-    function updateSiteHomeUrl() {
-      if (!siteHomeUrl) return;
-      var user = deriveUsername(workEmail.value);
-      var path = '/sites/' + (user || 'your-name') + '/';
-      siteHomeUrl.textContent = window.location.origin + path;
-      siteHomeUrl.setAttribute('href', path);
-    }
-
     // --- Restore progress on load ------------------------------------------
     (function restoreProgress() {
       var saved = loadProgress();
       if (saved) {
         if (saved.brief) websiteBrief.value = saved.brief;
-        if (saved.email) workEmail.value = saved.email;
       }
-      updateSiteHomeUrl();
       showStep(saved && saved.step && saved.step >= 1 ? saved.step : 1);
     })();
 

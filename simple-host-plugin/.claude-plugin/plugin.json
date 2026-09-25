@@ -1,7 +1,7 @@
 {
   "name": "simple-host",
-  "version": "0.9.0",
-  "description": "Deploy and collaborate on static sites in Simple Host, plus guidance for state and AI forwarder capabilities.",
+  "version": "0.10.0",
+  "description": "Deploy and collaborate on static sites in Simple Host, plus guidance for shared state and uploaded files.",
   "author": {
     "name": "Simple Host"
   },

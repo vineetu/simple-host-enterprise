@@ -116,9 +116,8 @@ owner-qualified collaboration routes with the team's name as `<owner>`, and ever
 update needs the `If-Match` ETag captured before editing. Read
 [`collaboration.md`](collaboration.md).
 
-Build against the composed long path `/sites/<team>/<sitename>/`, and report the
-`url` and `public_path` the API returns, exactly as returned. Compose to build,
-quote to report.
+Build with relative asset paths, and report the `url` and `public_path` the API
+returns, exactly as returned.
 
 ## Wording
 
