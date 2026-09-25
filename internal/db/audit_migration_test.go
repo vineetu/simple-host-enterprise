@@ -39,7 +39,7 @@ func TestAuditMigrationShape(t *testing.T) {
 	}
 
 	// The application role's grant on these two tables must never widen to
-	// UPDATE or DELETE (design 9.3: append-only at the database). Guard
+	// UPDATE or DELETE: audit rows are append-only at the database. Guard
 	// against a future edit accidentally broadening the plain table grant,
 	// as distinct from the narrow SECURITY DEFINER function's own UPDATE.
 	for _, forbidden := range []string{
@@ -53,11 +53,11 @@ func TestAuditMigrationShape(t *testing.T) {
 		}
 	}
 
-	// team_audit is folded, not dropped, in this migration (design section
-	// 14: the drop is one release later); see the migration's own comment
-	// and docs/security-review.md's Deviated section for why.
+	// team_audit is folded, not dropped, in this migration; the drop lands
+	// one release later. See the migration's own comment and
+	// docs/security-review.md's Deviated section for why.
 	if strings.Contains(migration, "DROP TABLE team_audit") {
-		t.Error("migration drops team_audit; design section 14 and internal/db/teams.go both expect the drop to land in a later migration")
+		t.Error("migration drops team_audit; internal/db/teams.go expects the drop to land in a later migration")
 	}
 	if !strings.Contains(migration, "INSERT INTO audit_events (at, actor_id, actor_kind, action, team_id, detail)") {
 		t.Error("migration does not fold team_audit into audit_events")

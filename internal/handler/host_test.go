@@ -109,9 +109,9 @@ func TestNewHostModel(t *testing.T) {
 
 // TestHostModelClassify covers the three shapes: base, owner
 // ("<label>.<base>"), and restricted-site ("<owner label>--<site
-// label>.<base>", design.md 5.2a). "--" is reserved in owner labels, so any
+// label>.<base>"). "--" is reserved in owner labels, so any
 // label containing it that cannot form a valid restricted-site pair (the
-// owner part shorter than three characters, design.md 10.6's RFC 5890 rule)
+// owner part shorter than three characters, per RFC 5890's rule)
 // classifies as unknown rather than as an ordinary owner.
 func TestHostModelClassify(t *testing.T) {
 	m, err := NewHostModel("https://foo.example")
@@ -247,8 +247,8 @@ func TestHostModelRedirectHost(t *testing.T) {
 	}
 }
 
-// TestHostModelSiteURL covers design.md 7.1's "site links are always the
-// absolute short form": there is no long-path fallback any more, only the
+// TestHostModelSiteURL covers the rule that site links are always the
+// absolute short form: there is no long-path fallback any more, only the
 // owner's own host (restricted=false) or the restricted site's own host
 // (restricted=true). An owner whose name cannot be a hostname label, or a
 // restricted site that cannot form its own label, gets "" rather than a

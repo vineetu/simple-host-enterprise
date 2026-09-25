@@ -50,8 +50,6 @@ process refuses to start without it.
 - `internal/handler/static/changelog.html` is the product's release history.
   Two lines were reworded to satisfy the grep; the entries themselves stand.
 - Example team and person names in tests and skill text are fictional.
-- The design lineage the package's plan cites lives in the source
-  repository's `docs/`, not here.
 - The Go module path `github.com/vsriram/simple-host` is an import path, not
   an identifier of the original instance. It changes in one mechanical
   rename when the repository is given a public home.

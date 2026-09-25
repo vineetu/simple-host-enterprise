@@ -93,9 +93,9 @@ func randomHex(t *testing.T, n int) string {
 func mustCreateUserAndSite(t *testing.T, database *sql.DB, username, siteName string) (userID, siteID string) {
 	t.Helper()
 	ctx := context.Background()
-	// Phase 2 dropped users.api_key and db.CreateUser along with it; every
-	// account is now OIDC-bound from creation (identity.go's CreateOIDCUser
-	// doc comment). The sub and email are test-only fixtures with no bearing
+	// users.api_key and db.CreateUser were dropped later; every account is
+	// now OIDC-bound from creation (identity.go's CreateOIDCUser doc
+	// comment). The sub and email are test-only fixtures with no bearing
 	// on what this file actually exercises (asset rows and their site_id/
 	// created_by foreign keys).
 	user, err := CreateOIDCUser(ctx, database, username, "sub-"+username, username+"@example.com", false)

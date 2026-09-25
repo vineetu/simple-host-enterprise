@@ -151,7 +151,7 @@ func requireOwnerRole(w http.ResponseWriter, access db.SiteAccess) bool {
 }
 
 // collaborationSiteResponse reports a site's address on its own owner's
-// host, restricted or not (design.md 5.2a): the owner passed in is the
+// host, restricted or not: the owner passed in is the
 // site's own owner, so a site shared with somebody else is still reported
 // under its owner's host.
 func (h *SiteHandler) collaborationSiteResponse(r *http.Request, site db.Site, ownerUsername string, role db.CollaborationRole, summary db.SiteAnalyticsSummary, downloads map[string]db.FileDownloadStat) collaborationSiteResponse {

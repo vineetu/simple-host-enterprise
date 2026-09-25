@@ -1,4 +1,4 @@
--- Least-privilege application role (design.md 9.3).
+-- Least-privilege application role.
 --
 -- Every migration, including this one, runs as the owning role: the
 -- Postgres superuser the in-cluster component provisions with POSTGRES_USER,
@@ -12,17 +12,15 @@
 --
 -- Numbered 0020: internal/migrate.Apply requires the embedded chain to be
 -- gap-free (TestEmbeddedMigrationsAreOrderedAndUnique), so migrations are
--- numbered by merge order, not by which phase's design section proposed
--- them. Design section 14 pencils identity's migrations in at 0020-0022;
--- since Phase 5 (this file) lands first and takes 0020, later phases number
--- from whatever is next when they actually merge, not from the design's
--- illustrative numbers.
+-- numbered by merge order, not by when they were proposed. Identity's
+-- migrations were pencilled in at 0020-0022, but since this file lands
+-- first and takes 0020, later migrations number from whatever is next
+-- when they actually merge, not from the earlier illustrative numbers.
 --
--- `audit_events` (Phase 4, migration 0027 — Phase 2 owns 0024 and 0025) is
--- deliberately not granted here:
--- design 9.3 gives the app role INSERT and a narrow, function-mediated
--- UPDATE on it, never DELETE, which Phase 4's own migration wires up. Any
--- migration that introduces a new application table must grant this role's
+-- `audit_events` (migration 0027) is deliberately not granted here: the
+-- app role gets INSERT and a narrow, function-mediated UPDATE on it, never
+-- DELETE, which that migration wires up. Any migration that introduces a
+-- new application table must grant this role's
 -- privileges on that table in the same file; nothing here does that
 -- automatically, on purpose, so a new table defaults to no access rather
 -- than to whatever this file happened to grant.

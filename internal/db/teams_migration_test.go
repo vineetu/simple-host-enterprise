@@ -134,8 +134,8 @@ func TestTeamsMigrationStatementsAreGuarded(t *testing.T) {
 }
 
 // There is no role column, and that is a decision rather than an omission:
-// one role, recorded in docs/teams/design.md. A later reintroduction should be
-// a deliberate migration, not a quiet edit to this file.
+// teams have exactly one role. A later reintroduction should be a
+// deliberate migration, not a quiet edit to this file.
 func TestTeamsMigrationHasNoRoleColumn(t *testing.T) {
 	migration := readTeamsMigration(t)
 

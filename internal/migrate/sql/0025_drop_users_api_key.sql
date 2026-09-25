@@ -1,13 +1,13 @@
--- Drop users.api_key (Phase 1 review, folded into Phase 2's one-way schema
--- window; design.md 10.2's expand/contract).
+-- Drop users.api_key (an expand/contract migration: the column goes one
+-- release after the code stopped reading it).
 --
--- Phase 1 stopped the request-authentication path reading this column
--- (internal/auth.Middleware hashes X-API-Key and looks up api_keys instead)
--- and backfilled every existing value into that table. What the review
--- found still reading it live was the pre-OIDC "paste your key" sign-in
--- form (deleted in Phase 2 along with the rest of the base-host per-user
--- page) and its GetUserByAPIKey query (a plaintext, unsalted equality
--- compare against this column — a key revoked through /api/keys kept
+-- An earlier migration stopped the request-authentication path reading this
+-- column (internal/auth.Middleware hashes X-API-Key and looks up api_keys
+-- instead) and backfilled every existing value into that table. What the
+-- review found still reading it live was the pre-OIDC "paste your key"
+-- sign-in form (deleted later along with the rest of the base-host
+-- per-user page) and its GetUserByAPIKey query (a plaintext, unsalted
+-- equality compare against this column — a key revoked through /api/keys kept
 -- working through that form, since revocation only ever touched api_keys).
 -- Every other read of this column across internal/db was a harmless
 -- COALESCE(api_key, '') carried along for no live purpose; all are removed

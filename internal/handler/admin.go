@@ -32,7 +32,7 @@ type AdminHandler struct {
 	store *storage.Store
 	// siteTypes enables the classification backfill endpoint. Optional.
 	siteTypes *sitetype.Worker
-	// auditReader backs GET /api/admin/export (design.md 8.3). Optional:
+	// auditReader backs GET /api/admin/export. Optional:
 	// nil leaves the endpoint returning 503, the same shape siteTypes uses
 	// for its own optional endpoint.
 	auditReader *audit.Reader
@@ -227,7 +227,7 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to load sites", http.StatusInternalServerError)
 		return
 	}
-	// design.md 5.2a: a restricted site's own address is
+	// A restricted site's own address is
 	// "<owner>--<site>.<base>", not "<owner>.<base>/<site>/"; every link this
 	// admin page renders for a site needs to know which one applies.
 	restrictedSiteIDs, err := db.ListRestrictedSiteIDs(r.Context(), h.database)
@@ -425,7 +425,7 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 
 		b.WriteString(`</section>`)
 
-		// Every owner's audit trail and access log (design.md 8.3), plus the
+		// Every owner's audit trail and access log, plus the
 		// export button — the admin-wide equivalent of the per-site
 		// Activity/Visitors tabs the dashboard's own site panel renders
 		// (dashboard.go). Fetch-driven against the same routes, admin-scoped
@@ -602,7 +602,7 @@ func writeSiteRow(b *strings.Builder, hosts HostModel, site db.Site, owner strin
 	)
 }
 
-// disableUser is the offboarding action (design.md 6.4): sessions and keys
+// disableUser is the offboarding action: sessions and keys
 // revoked in the same transaction as the flag, sign-in refused from then on,
 // sites left untouched.
 func (h *AdminHandler) disableUser(w http.ResponseWriter, r *http.Request) {
@@ -683,8 +683,8 @@ func adminActionNoticeHTML(r *http.Request) string {
 
 // writeAdminSignInPrompt renders the page shown instead of the dashboard
 // when the visitor is signed out (username == "") or signed in but not an
-// admin. There is no key-paste form any more: identity is OIDC sign-in
-// (design.md 6.1, 6.2), so the only action here is a link to it.
+// admin. There is no key-paste form any more: identity is OIDC sign-in,
+// so the only action here is a link to it.
 func writeAdminSignInPrompt(w http.ResponseWriter, username string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	body := adminHeadHTML + `<header class="bar"><div class="mast">Simple Host<span class="dot">.</span> <span class="kicker">admin</span></div></header>
@@ -1164,8 +1164,8 @@ const adminListScript = `<script>
 </script>`
 
 // adminActivityScript fills the "admin-activity"/"admin-visitor" cards
-// added to the admin dashboard for design.md 8.3's admin-wide read of
-// audit_events and access_log: no owner filter is passed, so a caller
+// added to the admin dashboard for the admin-wide read of audit_events
+// and access_log: no owner filter is passed, so a caller
 // admin.go has already confirmed is an admin (IsAdmin) sees every
 // namespace's rows, one page (100 rows) of each, newest first — the export
 // links next to each list are how an admin gets more than that.

@@ -1,6 +1,6 @@
 -- Sessions: one row per sign-in, shared by every host cookie minted from it
--- (design.md 6.1). Revoking this row, or disabling the user, signs the
--- person out everywhere within the cache window described there.
+-- — revoking this row, or disabling the user, signs the person out
+-- everywhere within the cache window.
 --
 -- The cookie itself never carries these columns in the clear: it carries a
 -- signed (session_id, user_id, exp) payload, and this table is what a

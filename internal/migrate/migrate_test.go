@@ -72,7 +72,7 @@ func TestApplyAgainstPostgres(t *testing.T) {
 	}
 
 	// Migration 0020 creates the app role with no password; the server's own
-	// connection (design 9.3) depends on this step to make it usable at all.
+	// connection depends on this step to make it usable at all.
 	const appPassword = `o'Reilly "quotes" and a backslash \`
 	if err := SetAppRolePassword(ctx, db, appPassword); err != nil {
 		t.Fatalf("SetAppRolePassword: %v", err)
@@ -110,8 +110,8 @@ func TestApplyAgainstPostgres(t *testing.T) {
 	// throwaway one, and leaving this row behind would make any later
 	// `simple-host migrate` against that same database (or a person
 	// running `-status` by hand) see version 9999 and report the schema
-	// current when it is not — a real, previously-unfixed leak (review
-	// finding, Phase 4 core). A defer, not t.Cleanup: t.Cleanup callbacks
+	// current when it is not — a real, previously-unfixed leak (a review
+	// finding). A defer, not t.Cleanup: t.Cleanup callbacks
 	// run after this function returns, which is after its own
 	// `defer db.Close()` above already ran (defers are LIFO within one
 	// function), so a Cleanup here would find db already closed — this

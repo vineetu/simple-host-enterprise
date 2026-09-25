@@ -123,8 +123,8 @@ func TestAnonymousSearchLimiterIsIsolatedAndCapped(t *testing.T) {
 }
 
 // The site-facing API's rate limit runs before any database access
-// (design.md 7.3's routes are all reached with a real siteAPICall already
-// resolved by the host gate, so there is no path-validation step left in
+// (these routes are all reached with a real siteAPICall already resolved by
+// the host gate, so there is no path-validation step left in
 // SiteAPIHandler itself to test separately — see host_gate_test.go for the
 // gate-level "an unresolvable site never even reaches here" coverage).
 func TestSiteAPIStateReadLimitRunsBeforeDatabaseRead(t *testing.T) {

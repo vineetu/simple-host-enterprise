@@ -45,7 +45,7 @@ func TestUnwrapObjectRotation(t *testing.T) {
 
 	// An object wrapped under the key that is about to be retired must still
 	// unwrap as long as that key is still configured, even though it is no
-	// longer first (design 6.1's rotation shape, reused for the envelope).
+	// longer first.
 	ciphertext, metadata, err := wrapObject(plaintext, oldKey)
 	if err != nil {
 		t.Fatal(err)

@@ -14,8 +14,8 @@ import (
 // The hostname model for per-owner subdomains. The server answers on
 // "<label>.<base>", where base is the hostname of the configured public base
 // URL and label is derived from a username by ownerLabel. It also answers on
-// "<owner label>--<site label>.<base>" for a restricted site (design.md
-// 5.2a): the double hyphen is reserved in owner labels precisely so it can
+// "<owner label>--<site label>.<base>" for a restricted site: the
+// double hyphen is reserved in owner labels precisely so it can
 // never collide with this second shape.
 //
 // There is deliberately no label -> username resolution here, and no site
@@ -124,7 +124,7 @@ const (
 	hostRestrictedSite
 )
 
-// restrictedSiteLabelMinOwnerLen is design.md 10.6's RFC 5890 rule: a label
+// restrictedSiteLabelMinOwnerLen follows RFC 5890's rule: a label
 // whose third and fourth characters are both '-' is a reserved LDH label, so
 // "<owner>--<site>" is only formed when the owner part is at least three
 // characters (positions 0-2), keeping the "--" no earlier than position 3.
@@ -248,7 +248,7 @@ func (m HostModel) RestrictedSiteHost(owner, siteName string) string {
 // can be formed at all: both the owner and site names must fold to valid DNS
 // labels, and the owner label must be at least restrictedSiteLabelMinOwnerLen
 // characters so the composed label does not fall foul of the RFC 5890 "--"
-// reservation (design.md 10.6). A site that fails this cannot be restricted
+// reservation. A site that fails this cannot be restricted
 // to specific viewers until it (or, for the owner, the account) is renamed;
 // the dashboard is expected to say so rather than silently forming a broken
 // address.
@@ -269,7 +269,7 @@ func isAddressableOwner(username string) bool {
 // SiteURL returns the absolute address a person or agent should be given for
 // a site: the short address on the owner's own host, or on the restricted
 // site's own host when restricted is true. Subdomain addressing is the only
-// addressing this server has (design.md 7.1); an owner whose name cannot be
+// addressing this server has; an owner whose name cannot be
 // a hostname label has no address at all, which should not happen for any
 // account created since validateOwnerName started enforcing it, but is
 // reported as "" rather than panicking so a caller can decide how to degrade.

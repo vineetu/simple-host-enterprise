@@ -88,7 +88,7 @@ func NewSearchHandler(
 }
 
 // Register wires the search and click routes behind authMiddleware:
-// design.md 7.2 removes anonymous viewing everywhere, search included, so
+// anonymous viewing was removed everywhere, search included, so
 // both routes now require a valid session or key the same way any other
 // authenticated JSON API does (a 401 in authMiddleware's own shape, not the
 // pseudonymous-cookie treatment these handlers used to be the only routes

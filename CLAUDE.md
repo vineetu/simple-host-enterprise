@@ -10,9 +10,7 @@ The installable package of Simple Host: a Go service that hosts static sites
 with a per-site JSON store, for the people of one organisation, on any
 Kubernetes cluster with Postgres and an S3-compatible bucket. Read
 `docs/security-review.md` and `docs/configuration.md` before changing
-anything: they say what exists and what is deliberately unfinished. Code
-comments that cite "design.md" or "design N.N" refer to the original design
-plan, which is not part of this repository; the code is the authority.
+anything: they say what exists and what is deliberately unfinished.
 
 ## Rules
 
@@ -41,7 +39,7 @@ plan, which is not part of this repository; the code is the authority.
   `restore`, `migrate-storage`, and `prune`.
 - `internal/config` reads the environment. Required values have no default;
   the database DSN and the bucket endpoint are additionally refused if their
-  TLS is weaker than the design requires, unless the local-evaluation
+  TLS is weaker than required, unless the local-evaluation
   override envs are set (`DB_INSECURE_ALLOWED`, `BACKUP_STORAGE_INSECURE_ALLOWED`).
 - `internal/migrate/sql/` is the schema, applied in file order by
   `simple-host migrate`; the server refuses to start against a schema newer

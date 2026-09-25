@@ -22,7 +22,7 @@ import (
 //
 // There is one role. Every route below that requires membership requires only
 // membership: a person is in the team or they are not, and being in it grants
-// all of it. See docs/teams/design.md.
+// all of it.
 type TeamHandler struct {
 	database *sql.DB
 	limits   *AbuseLimits

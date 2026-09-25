@@ -14,7 +14,7 @@ import (
 	db "github.com/vsriram/simple-host/internal/db"
 )
 
-// KeysHandler serves /api/keys (design.md 6.3): mint, list, revoke. Every
+// KeysHandler serves /api/keys: mint, list, revoke. Every
 // route requires a browser session, not an API key — the whole point is that
 // an agent holding one key cannot mint itself another or revoke somebody
 // else's, so the credential that manages credentials is deliberately harder

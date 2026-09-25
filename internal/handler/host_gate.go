@@ -30,8 +30,8 @@ type siteAPIRoutes interface {
 	ServeAsset(w http.ResponseWriter, r *http.Request, call siteAPICall, id string)
 }
 
-// The host gate decides, per hostname, which routes the mux may answer
-// (design.md 7.1). The base host is the control plane only: everything under
+// The host gate decides, per hostname, which routes the mux may answer.
+// The base host is the control plane only: everything under
 // /, /auth/*, /dashboard, /admin, /api/*, /mcp, /docs, /skills.zip passes
 // through untouched, except that a path shaped like the site-facing API
 // (state, and later assets) is refused outright — one mux serves every host,
@@ -39,19 +39,20 @@ type siteAPIRoutes interface {
 // owner host ("<label>.<base>") serves only that owner's hosted content, the
 // site-facing API, and the session hand-off; a restricted site serves the
 // same three things on its own flat label ("<owner label>--<site
-// label>.<base>", design.md 5.2a) instead of at its owner's short path.
+// label>.<base>") instead of at its owner's short path.
 // Anything else — an unrecognised host, a bare IP, a port-forward — answers
 // only the Kubernetes probes.
 
 type hostGate struct {
 	hosts HostModel
-	// files serves site files and carries the only reference to disk storage;
-	// resolveOwner and resolveRestrictedSiteName read it from there.
+	// files serves site files and carries the store client site files live
+	// in (internal/storage's bucket store); resolveOwner and
+	// resolveRestrictedSiteName read it from there.
 	files       *SiteFiles
 	signingKeys []auth.SigningKey
 	// negCache backs VerifyHostedSession: hosted content checks a session's
 	// signature and this 60-second snapshot instead of reading the sessions
-	// table on every request (design.md 5.1, 6.1).
+	// table on every request.
 	negCache *auth.NegativeSessionCache
 	// handoff mints and redeems the hand-off's one-time codes; the gate
 	// calls its unexported methods directly rather than mounting them as
@@ -67,14 +68,14 @@ type hostGate struct {
 	// *sql.Row's concrete type to build a lighter-weight mock from.
 	siteForServing func(r *http.Request, ownerUsername, siteName string) (siteID string, restricted bool, err error)
 	viewerAllowed  func(r *http.Request, siteID, userID string) (bool, error)
-	// writerAllowed is db.WriterAllowed by default (design.md 7.3's
-	// writerAllowed rule), factored the same way as the two fields above.
+	// writerAllowed is db.WriterAllowed by default, factored the same way
+	// as the two fields above.
 	writerAllowed func(r *http.Request, siteID, userID string) (bool, error)
 	// networkOpen is db.NetworkOpen by default: whether an admin has
 	// approved the site for anonymous visitors. Asked only when a request
 	// carries no valid host session; nil means no site is.
 	networkOpen func(r *http.Request, siteID string) (bool, error)
-	// siteAPI serves the site-facing API (state and assets, design.md 7.3)
+	// siteAPI serves the site-facing API (state and assets)
 	// once this gate has resolved which site, authenticated the caller, and
 	// checked viewerAllowed/writerAllowed.
 	siteAPI siteAPIRoutes
@@ -86,7 +87,7 @@ type hostGate struct {
 	authMiddleware func(http.Handler) http.Handler
 	// originCheck is cookieOriginCheck(hosts, publicBaseURL): Origin is
 	// required only for a session-cookie-authenticated, non-safe-method
-	// request (design.md 7.3), and only ever compared against the
+	// request, and only ever compared against the
 	// addressed host's own origin (origin.go's expectedFor).
 	originCheck func(http.Handler) http.Handler
 	// touchHostSession is db.TouchSession by default (wired in NewHostGate),
@@ -169,14 +170,14 @@ func (g *hostGate) wrap(next http.Handler) http.Handler {
 		kind, label := g.hosts.Classify(r.Host)
 		switch kind {
 		case hostBase:
-			// The site-facing API (design.md 7.3) is not a mux route at all
+			// The site-facing API is not a mux route at all
 			// any more — it is served directly by serveOwnerHost and
 			// serveRestrictedSiteHost below. But the base host's own mux
 			// carries a catch-all "GET /" landing-page route (and every
 			// other host-agnostic pattern), so a request shaped like the
 			// site-facing API must still be refused explicitly here, or it
 			// falls through to that catch-all instead of 404ing. This also
-			// catches the pre-Phase-3 two-segment shape
+			// catches the older two-segment shape
 			// (/api/sites/{user}/{site}/state[...]) a stale client or old
 			// bookmark might still probe, even though nothing has served it
 			// since attribution.go was deleted.
@@ -201,7 +202,7 @@ func (g *hostGate) wrap(next http.Handler) http.Handler {
 	})
 }
 
-// applyOwnerHostSecurity sets the headers design.md 7.4 requires on every
+// applyOwnerHostSecurity sets the headers required on every
 // owner-host and restricted-site-host response, and reports whether the
 // request may proceed at all: a Sec-Fetch-Site of same-site or cross-site is
 // refused unless Sec-Fetch-Dest is document, so a navigation from a
@@ -214,7 +215,7 @@ func applyOwnerHostSecurity(w http.ResponseWriter, r *http.Request) bool {
 	w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-	// design.md 7.4: hosted content is authenticated (every viewer signed
+	// Hosted content is authenticated (every viewer signed
 	// in), so a shared cache must never keep a copy — "private, no-cache"
 	// means "revalidate with the origin every time, and never on a shared
 	// cache at all," not merely "vary by cookie." Set for every owner-host
@@ -251,7 +252,7 @@ func (g *hostGate) serveOwnerHost(w http.ResponseWriter, r *http.Request, label 
 		return
 	}
 
-	// The site-facing API (design.md 7.3): the site is named by the {site}
+	// The site-facing API: the site is named by the {site}
 	// path segment, never a Referer. Only the named shape is honoured on an
 	// owner host — the nameless convenience shape (/api/site/...) would be
 	// ambiguous the moment an owner has more than one site, with nothing left
@@ -304,7 +305,7 @@ func (g *hostGate) serveOwnerHost(w http.ResponseWriter, r *http.Request, label 
 	}
 	if restricted {
 		// This site's address moved to its own host the moment it gained a
-		// first viewer (design.md 5.2a); the owner-host short path no
+		// first viewer; the owner-host short path no
 		// longer serves it, the same way a deleted site does not.
 		http.NotFound(w, r)
 		return
@@ -325,7 +326,7 @@ func (g *hostGate) serveOwnerHost(w http.ResponseWriter, r *http.Request, label 
 	if !anonymous && !g.checkViewerAllowed(w, r, siteID, userID) {
 		return
 	}
-	// GET /{site}/_assets/{id}[/{name}] (design.md 7.3): a top-level
+	// GET /{site}/_assets/{id}[/{name}]: a top-level
 	// "_assets" entry can never exist in a real upload (tarball refuses it),
 	// so this interception is always unambiguous. Reuses every check above
 	// (owner and site resolution, restriction, session, viewerAllowed) —
@@ -338,7 +339,7 @@ func (g *hostGate) serveOwnerHost(w http.ResponseWriter, r *http.Request, label 
 }
 
 // serveRestrictedSiteHost is the exhaustive allow-list for a restricted
-// site's own host, "<owner label>--<site label>.<base>" (design.md 5.2a).
+// site's own host, "<owner label>--<site label>.<base>".
 // The whole host is dedicated to one site, so there is no "/<site>/"
 // segment: the request path is the site's own file path directly.
 func (g *hostGate) serveRestrictedSiteHost(w http.ResponseWriter, r *http.Request, label string, next http.Handler) {
@@ -372,7 +373,7 @@ func (g *hostGate) serveRestrictedSiteHost(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// The site-facing API (design.md 7.3): a restricted site's own host
+	// The site-facing API: a restricted site's own host
 	// serves exactly one site, so the nameless convenience shape
 	// (/api/site/...) is unambiguous here — this is the one place it is
 	// honoured. The named shape (/api/sites/{site}/...) is accepted too, but
@@ -398,7 +399,7 @@ func (g *hostGate) serveRestrictedSiteHost(w http.ResponseWriter, r *http.Reques
 	if !restricted {
 		// This address exists only for a site that currently has viewers;
 		// an unrestricted site is not reachable here even if the labels
-		// happen to match (design.md 5.2a).
+		// happen to match.
 		http.NotFound(w, r)
 		return
 	}
@@ -414,7 +415,7 @@ func (g *hostGate) serveRestrictedSiteHost(w http.ResponseWriter, r *http.Reques
 	if !g.checkViewerAllowed(w, r, siteID, userID) {
 		return
 	}
-	// GET /_assets/{id}[/{name}] (design.md 7.3): root-served, matching how
+	// GET /_assets/{id}[/{name}]: root-served, matching how
 	// hosted content itself has no site segment on this host kind.
 	if assetID, _, ok := parseAssetServePath(strings.TrimPrefix(r.URL.Path, "/")); ok {
 		g.siteAPI.ServeAsset(w, r, siteAPICall{Owner: owner, SiteName: sitename, SiteID: siteID, Restricted: restricted}, assetID)
@@ -425,15 +426,15 @@ func (g *hostGate) serveRestrictedSiteHost(w http.ResponseWriter, r *http.Reques
 
 // requireHostSession authenticates a hosted-content request from its
 // __Host-sh_session cookie alone, with no database read beyond the
-// negative-cache refresh loop (design.md 5.1, 6.1) — except for
-// touchHostSession, a fire-and-forget, self-throttled last_seen_at write
-// (db.TouchSession already matches zero rows outside its own five-minute
-// window, design.md 6.1: "at most once per five minutes from hosted
-// content") on every successful hosted-content auth. Without this, an
-// actively-browsing viewer's session goes idle and is killed by
-// SESSION_IDLE even while they keep viewing, because nothing on the
-// hosted-content path ever told the row they were still there — Phase 2
-// review finding. Missing or invalid, a navigation is sent through the
+// negative-cache refresh loop — except for touchHostSession, a
+// fire-and-forget, self-throttled last_seen_at write (db.TouchSession
+// already matches zero rows outside its own five-minute window: at most
+// once per five minutes from hosted content) on every successful
+// hosted-content auth. Without this, an actively-browsing viewer's session
+// goes idle and is killed by SESSION_IDLE even while they keep viewing,
+// because nothing on the hosted-content path ever told the row they were
+// still there — a review finding. Missing or invalid, a navigation is sent
+// through the
 // hand-off (beginHandoff writes the response itself); anything else — a
 // script's fetch, an asset request, an agent with no cookie at all — gets
 // 401, so it fails fast rather than following a redirect chain built for a
@@ -489,7 +490,7 @@ func (g *hostGate) requireHostSessionOrNetwork(w http.ResponseWriter, r *http.Re
 	return uid, sid, false, ok
 }
 
-// viewerAllowed applies design.md 7.2's rule and writes a 404 (never 403: a
+// viewerAllowed applies its own rule and writes a 404 (never 403: a
 // restricted site's existence is not confirmed to somebody it refuses) when
 // it does not hold.
 func (g *hostGate) checkViewerAllowed(w http.ResponseWriter, r *http.Request, siteID, userID string) bool {
@@ -514,7 +515,7 @@ func siteAPIRecorder(h *SiteAPIHandler) audit.Recorder {
 	return h.audit
 }
 
-// siteAPIRouteKind is which of design.md 7.3's site-facing API routes a
+// siteAPIRouteKind is which of the site-facing API routes a
 // path names. assetsCollection covers both GET (list) and POST (create) on
 // /assets; the method is decided by serveSiteAPI, same as GET/PUT on state.
 type siteAPIRouteKind int
@@ -526,7 +527,7 @@ const (
 	siteAPIAssetItem
 )
 
-// looksLikeSiteFacingAPIPath is parseSiteAPIPath plus the pre-Phase-3
+// looksLikeSiteFacingAPIPath is parseSiteAPIPath plus the older
 // two-segment shape (/api/sites/{user}/{site}/state[/versioned], names
 // ignored) that attribution.go used to attribute from Referer. Nothing
 // serves that shape any more; this exists only so the base host's own
@@ -547,8 +548,8 @@ func looksLikeSiteFacingAPIPath(p string) bool {
 	return len(parts) == 3 || (len(parts) == 4 && parts[3] == "versioned")
 }
 
-// parseSiteAPIPath recognises every site-facing API path shape (design.md
-// 7.3), state and assets alike, in both the named form
+// parseSiteAPIPath recognises every site-facing API path shape, state and
+// assets alike, in both the named form
 // (/api/sites/{site}/...) and the nameless convenience form (/api/site/...,
 // honoured only on a restricted site's own host — see serveRestrictedSiteHost).
 // It does not recognise the asset *serve* route
@@ -594,7 +595,7 @@ func parseSiteAPISuffix(suffix string) (kind siteAPIRouteKind, assetID string, o
 	return 0, "", false
 }
 
-// parseAssetServePath recognises design.md 7.3's asset-serving path once the
+// parseAssetServePath recognises the asset-serving path once the
 // site (or, on a restricted host, nothing) has already been stripped off:
 // "_assets/{id}" or "_assets/{id}/{name}". name is display-only — id alone
 // resolves the file — so an invalid name does not fail the parse.
@@ -755,10 +756,10 @@ func (g *hostGate) checkSiteAPIOrigin(w http.ResponseWriter, r *http.Request) bo
 	return ok
 }
 
-// checkSiteAccess applies design.md 7.2's viewerAllowed to every route (a
+// checkSiteAccess applies the view check (viewerAllowed) to every route (a
 // site a caller may not even view does not confirm its own existence, so a
-// failure here is 404) and, for a route that writes, design.md 7.3's
-// writerAllowed on top (a caller who may view but not write gets 403: the
+// failure here is 404) and, for a route that writes, the write check
+// (writerAllowed) on top (a caller who may view but not write gets 403: the
 // site's existence is already established by the successful view check).
 func (g *hostGate) checkSiteAccess(w http.ResponseWriter, r *http.Request, siteID, userID string, needsWrite bool) bool {
 	allowed, err := g.viewerAllowed(r, siteID, userID)
@@ -789,16 +790,16 @@ func (g *hostGate) checkSiteAccess(w http.ResponseWriter, r *http.Request, siteI
 	return true
 }
 
-// viaSiteObserved corroborates the via_site claim (design.md 7.3's audit
-// paragraph) where the browser allows it: Sec-Fetch-Dest must be "empty" (a
+// viaSiteObserved corroborates the via_site claim where the browser allows
+// it: Sec-Fetch-Dest must be "empty" (a
 // fetch, not a navigation — a hosted page's own script call looks like
 // this; a top-level page load does not), and, when a Referer is present,
 // its first path segment must agree with the claimed site name. Most
 // callers send neither header, so false is the common case and is not
 // itself a sign of anything wrong — see the field's own doc comment.
 // viaSiteObserved corroborates the via_site claim two different ways
-// depending on host kind, because a restricted site is root-served
-// (design.md 5.2a) and so has no "/<site>/" path segment for its own pages
+// depending on host kind, because a restricted site is root-served and so
+// has no "/<site>/" path segment for its own pages
 // to carry at all — comparing the Referer's first path segment against the
 // site name there would always fail, silently marking every legitimate
 // restricted-site write as unobserved (review finding). For a restricted

@@ -2,8 +2,8 @@
 // discovery, the Authorization Code flow with PKCE, and id_token
 // verification against the provider's published JWKS. It has no dependency
 // beyond the standard library — Google and Dex (the two providers this
-// package is proven against, design.md 6.5 and 10.6) both fit inside RFC
-// 6749 + PKCE + RS256, and that is deliberately all this package promises.
+// package is proven against) both fit inside RFC 6749 + PKCE + RS256, and
+// that is deliberately all this package promises.
 //
 // What it does NOT do: refresh tokens (sessions are the package's own
 // concept, not the provider's), userinfo endpoint calls (every claim this
@@ -102,7 +102,7 @@ func NewAuthRequest() (AuthRequest, error) {
 // AuthCodeURL builds the authorization request URL. hintDomain, when
 // non-empty, is sent as the provider's domain hint (Google: "hd") — a
 // narrowing of the account chooser only; the callback still checks the
-// claims independently (design.md 6.1).
+// claims independently.
 func (p *Provider) AuthCodeURL(req AuthRequest, hintDomain string) string {
 	q := url.Values{}
 	q.Set("response_type", "code")
@@ -172,16 +172,15 @@ func (p *Provider) Exchange(ctx context.Context, code, codeVerifier string) (Tok
 // Claims is the verified, decoded content of an id_token that this
 // application acts on. EmailVerifiedSet distinguishes "the provider said
 // false or true" from "the provider sent no such claim at all" — Entra's
-// common endpoint is the reference case that omits it, and design.md 6.1
-// requires treating that difference as meaningful rather than defaulting one
-// way.
+// common endpoint is the reference case that omits it, and that difference
+// must be treated as meaningful rather than defaulting one way.
 type Claims struct {
 	Subject          string
 	Email            string
 	EmailVerified    bool
 	EmailVerifiedSet bool
 	// HostedDomain is Google's "hd" claim when present: the Workspace domain
-	// for a Workspace account, absent for a consumer account (design.md 6.5).
+	// for a Workspace account, absent for a consumer account.
 	HostedDomain string
 	Raw          map[string]any
 }
@@ -220,8 +219,8 @@ func (c Claims) HasClaimValue(name, value string) bool {
 }
 
 // VerifyIDToken verifies signature (RS256 via the provider's JWKS), issuer,
-// audience, expiry and nonce, per design.md 6.1's list, then decodes the
-// claims this application reads.
+// audience, expiry and nonce, then decodes the claims this application
+// reads.
 func (p *Provider) VerifyIDToken(ctx context.Context, rawToken, expectedNonce string) (Claims, error) {
 	header, payload, signingInput, signature, err := splitJWT(rawToken)
 	if err != nil {

@@ -30,8 +30,8 @@ func TestSecurityHeaders(t *testing.T) {
 			if got := response.Header().Get("Content-Security-Policy"); got != contentSecurityPolicy {
 				t.Fatalf("Content-Security-Policy = %q, want %q", got, contentSecurityPolicy)
 			}
-			// Phase 2 review finding: Referrer-Policy was never set on the
-			// base host at all (design.md 7.4's control-plane bullet).
+			// Referrer-Policy was never set on the
+			// base host at all.
 			if got := response.Header().Get("Referrer-Policy"); got != "strict-origin-when-cross-origin" {
 				t.Fatalf("Referrer-Policy = %q, want strict-origin-when-cross-origin", got)
 			}
@@ -46,12 +46,12 @@ func TestSecurityHeaders(t *testing.T) {
 	}
 }
 
-// design.md 7.4: "Cache-Control: no-store on every authenticated page and
-// API response" on the control plane. SecurityHeaders runs before any
+// Cache-Control: no-store is set on every authenticated page and
+// API response on the control plane. SecurityHeaders runs before any
 // handler authenticates the request, so it reads "authenticated" as "the
 // request carries a credential" (session cookie or X-API-Key) rather than
-// waiting to learn whether that credential is valid — Phase 2 review
-// finding: this used to be set ad hoc per handler (showcase.go, only when a
+// waiting to learn whether that credential is valid. This used to be set
+// ad hoc per handler (showcase.go, only when a
 // search query was present), missing every other authenticated base-host
 // route entirely.
 func TestSecurityHeadersSetsNoStoreForAuthenticatedBaseHostRequests(t *testing.T) {

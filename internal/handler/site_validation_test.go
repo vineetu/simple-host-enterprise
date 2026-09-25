@@ -38,4 +38,4 @@ func TestDeriveUsernameRejectsUnsafeFilesystemSegments(t *testing.T) {
 // directly) is exercised by internal/handler/host_gate_test.go's
 // TestHostGateRouting; the long-path redirect this test once covered
 // (redirectToTrailingSlash, mux-registered on the base host) is gone with
-// the rest of design.md 7.1's base-host site serving.
+// the rest of the old base-host site serving.

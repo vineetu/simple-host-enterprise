@@ -1,25 +1,25 @@
--- Audit events and access log (design.md 8.1, 8.2, 9.3).
+-- Audit events and access log.
 --
 -- Both tables are partitioned by month on their timestamp column so
 -- retention is a partition drop (`simple-host prune`, cmd/server/subcommands.go)
--- rather than a DELETE: design 9.3 gives the application role INSERT and
--- SELECT on audit_events and access_log, never DELETE, so the running server
+-- rather than a DELETE: the application role gets only INSERT and SELECT
+-- on audit_events and access_log, never DELETE, so the running server
 -- process is structurally unable to erase its own trail. Dropping a
 -- partition is DDL, which only the owning role (this migration's role) can
 -- do, which is why pruning runs as its own subcommand under the owner
 -- credential and never inside the request path.
 --
--- Every partitioned table here also gets one DEFAULT partition. This is not
--- in design.md's table sketch; it exists so an INSERT never fails with "no
--- partition of relation found for row" if audit_ensure_partitions below has
--- fallen behind the calendar, and so the team_audit fold a few statements
--- down has somewhere to land regardless of how old its rows are, without
--- this migration needing to compute that table's full historical date
--- range. A default partition is not part of the date-bounded retention
--- sweep `simple-host prune` runs; see internal/audit/prune.go.
+-- Every partitioned table here also gets one DEFAULT partition, so an
+-- INSERT never fails with "no partition of relation found for row" if
+-- audit_ensure_partitions below has fallen behind the calendar, and so the
+-- team_audit fold a few statements down has somewhere to land regardless
+-- of how old its rows are, without this migration needing to compute that
+-- table's full historical date range. A default partition is not part of
+-- the date-bounded retention sweep `simple-host prune` runs; see
+-- internal/audit/prune.go.
 --
--- state_write coalescing (design 8.1: "one row per (actor, site, five-minute
--- window)") is the one place the application role writes to an existing
+-- state_write coalescing ("one row per (actor, site, five-minute window)")
+-- is the one place the application role writes to an existing
 -- row instead of only inserting one, so it is carved out narrowly: a
 -- SECURITY DEFINER function that can only ever bump detail.count on a
 -- state_write row it just upserted, never touch any other column or action.
@@ -67,8 +67,8 @@ CREATE INDEX IF NOT EXISTS audit_events_actor_at_idx ON audit_events (actor_id, 
 -- excludes a NULL site_id or actor_id: Postgres never considers one NULL
 -- equal to another, so a unique index alone would let every state_write
 -- missing either column insert its own row forever instead of coalescing
--- (design 8.1's "one row per window") — a real bug this migration
--- originally shipped with (review finding, Phase 4 core). Every real
+-- (the "one row per window" rule) — a real bug this migration
+-- originally shipped with (a review finding). Every real
 -- state_write has both columns; audit_bump_state_write below also refuses
 -- a NULL in either, so this predicate should never actually exclude a row
 -- in practice, but the index stays correct even if some future caller
@@ -163,7 +163,7 @@ SELECT audit_ensure_partitions(2);
 -- they are the arbiter's key alongside p_window_start, and Postgres never
 -- considers one NULL equal to another, so a NULL in either would insert a
 -- fresh, never-coalescing row every call instead of upserting one per
--- window (review finding, Phase 4 core — internal/audit's DBRecorder and
+-- window (a review finding — internal/audit's DBRecorder and
 -- internal/db's BumpStateWrite both already refuse this before it reaches
 -- here; this is the same rule enforced again at the one place every path
 -- to this table must pass through).
@@ -199,23 +199,22 @@ BEGIN
 END;
 $$;
 
--- team_audit fold-in (design 8.1: "team_audit is folded into this table;
--- migration 0019's table is migrated and dropped"; design section 14 is
--- explicit that the drop itself is a separate, later migration -- "ONE-WAY:
--- drops team_audit one release after 0025"). This migration does only the
--- fold, deliberately not the drop: internal/db/teams.go still reads and
--- writes team_audit as of this migration (Phase 2's team work is in
--- flight in parallel with this one), so dropping the table here would take
--- down a live code path this package does not own. Guarded by existence
--- so re-running this file after a prior attempt that got this far (and
--- then failed later in the same transaction, which rolls the fold back
--- too) does not double-insert. The actual DROP TABLE belongs to a follow-up
--- migration once nothing references team_audit any more -- see
--- docs/security-review.md.
+-- team_audit fold-in: team_audit is folded into this table, and migration
+-- 0019's table is migrated and dropped; the drop itself is a separate,
+-- later, one-way migration that drops team_audit one release after 0025.
+-- This migration does only the fold, deliberately not the drop:
+-- internal/db/teams.go still reads and writes team_audit as of this
+-- migration (team work is in flight in parallel with this one), so
+-- dropping the table here would take down a live code path this package
+-- does not own. Guarded by existence so re-running this file after a
+-- prior attempt that got this far (and then failed later in the same
+-- transaction, which rolls the fold back too) does not double-insert. The
+-- actual DROP TABLE belongs to a follow-up migration once nothing
+-- references team_audit any more -- see docs/security-review.md.
 --
--- subject_id has no column of its own in audit_events (design's shape has
--- none); it moves into detail, alongside the free-text note team_audit
--- already used member add/remove for.
+-- subject_id has no column of its own in audit_events; it moves into
+-- detail, alongside the free-text note team_audit already used member
+-- add/remove for.
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'team_audit')
@@ -242,8 +241,8 @@ BEGIN
 END
 $$;
 
--- Least-privilege grants (design 9.3): INSERT and SELECT only, no UPDATE, no
--- DELETE. A bigserial id, unlike every uuid/gen_random_uuid() primary key
+-- Least-privilege grants: INSERT and SELECT only, no UPDATE, no DELETE. A
+-- bigserial id, unlike every uuid/gen_random_uuid() primary key
 -- elsewhere in this schema, needs its backing sequence's privileges granted
 -- explicitly — table-level INSERT does not imply permission to call the
 -- column default's nextval().

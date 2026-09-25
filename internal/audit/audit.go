@@ -1,11 +1,9 @@
 // Package audit defines the recording interface every mutation handler calls
-// and, as of Phase 4, a real implementation of it: a partitioned
-// audit_events table (design.md 8.1), an access log (8.2), and the query
-// shapes /api/audit and /api/access will read (8.3) once a later phase
-// wires those routes up. Every call site design.md 8.1 says must audit an
-// action already calls through this package's Recorder, so this phase
-// replaces one implementation (NoOp -> DBRecorder) rather than touching
-// every handler — see docs/security-review.md.
+// and a real implementation of it: a partitioned audit_events table, an
+// access log, and the query shapes /api/audit and /api/access read. Every
+// call site that must audit an action already calls through this package's
+// Recorder, so it replaces one implementation (NoOp -> DBRecorder) rather
+// than touching every handler — see docs/security-review.md.
 package audit
 
 import (
@@ -17,7 +15,7 @@ import (
 	dbstore "github.com/vsriram/simple-host/internal/db"
 )
 
-// Event is one recordable action. Fields mirror design.md 8.1's shape:
+// Event is one recordable action. Fields mirror the audit_events table's shape:
 // actor, action, and the subject(s) the action concerned. Every field
 // beyond ActorID/Action/Detail is optional and "" (or the zero value) when
 // it does not apply to a given action, matching the table's nullable
@@ -26,20 +24,20 @@ type Event struct {
 	// ActorID is the authenticated user performing the action. Empty for an
 	// event with no authenticated actor.
 	ActorID string
-	// ActorKind is "person", "key", or "system" (design 8.1). Defaults to
+	// ActorKind is "person", "key", or "system". Defaults to
 	// "person" when empty, which is every call site that predates this
 	// field.
 	ActorKind string
 	// KeyID is the api_keys row the actor authenticated with, when the
 	// action was taken over an API key rather than a session.
 	KeyID string
-	// Action is a short, stable verb from design.md 8.1's list: "sign_in",
+	// Action is a short, stable verb: "sign_in",
 	// "sign_out", "key_mint", "key_revoke", "session_revoke", "state_write",
 	// and so on.
 	Action string
 	// SubjectID is who or what the action was taken on, when it differs
 	// from the actor — an admin disabling somebody else, for instance.
-	// design.md 8.1's audit_events shape has no subject_id column; the
+	// audit_events has no subject_id column; the
 	// DBRecorder folds this into detail.subject_id rather than dropping it,
 	// which is also what the team_audit fold in migration 0027 does for
 	// team_audit's own subject_id column.
@@ -60,7 +58,7 @@ type Event struct {
 	IP        string
 	UserAgent string
 	// RequestID ties this event back to the structured request log
-	// (design 8.3) sharing the same id.
+	// sharing the same id.
 	RequestID string
 	// Detail is a short, human-readable note: a session id, a key's
 	// prefix, nothing secret. Persisted as detail.note in the jsonb column;
@@ -120,19 +118,19 @@ func (e Event) row(at time.Time) dbstore.AuditEvent {
 // Recorder records an audit event. Record must not block the request path
 // on a slow sink; a Recorder that cannot keep up should drop and log rather
 // than stall the caller. RecordTx is for a caller that already holds the
-// mutation's transaction and wants design 8.1's stronger guarantee ("a
+// mutation's transaction and wants the stronger guarantee ("a
 // mutation without its audit row cannot commit"): it returns an error so
 // the caller can roll the transaction back, rather than only logging one.
 //
 // Both methods exist on every implementation so that widening this
-// interface (added in Phase 4) does not require touching Phase 1 and 2's
+// interface does not require touching the existing
 // call sites, which only ever call Record.
 type Recorder interface {
 	Record(ctx context.Context, event Event)
 	RecordTx(ctx context.Context, tx *sql.Tx, event Event) error
 }
 
-// NoOp is the Phase 1 recorder: it logs at info level and keeps nothing. It
+// NoOp is a recorder that logs at info level and keeps nothing. It
 // still exists (rather than being deleted now that DBRecorder can replace
 // it) for a deployment with no database migrated yet, and for tests that
 // construct a handler without wiring a real audit sink.

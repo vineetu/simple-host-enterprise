@@ -25,10 +25,10 @@ import (
 //
 // A dedicated database per test, not internal/migrate's own
 // DROP-SCHEMA-public-on-MIGRATE_TEST_DSN's-own-database convention:
-// internal/db/assets_db_test.go's assetsTestDB found (Phase 3's report,
-// "Deviated") that running more than one MIGRATE_TEST_DSN-gated package's
-// tests together races that shared DROP SCHEMA and corrupts both. This
-// mirrors that fix exactly rather than reintroducing the same hazard here.
+// internal/db/assets_db_test.go's assetsTestDB found that running more than
+// one MIGRATE_TEST_DSN-gated package's tests together races that shared
+// DROP SCHEMA and corrupts both. This mirrors that fix exactly rather than
+// reintroducing the same hazard here.
 func openPruneTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	dsn := os.Getenv("MIGRATE_TEST_DSN")

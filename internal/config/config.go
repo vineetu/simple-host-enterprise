@@ -48,7 +48,7 @@ const (
 	// signingKeyLength is the fixed size of a SESSION_SIGNING_KEY entry: 32
 	// random bytes, used directly as an HMAC-SHA256 key.
 	signingKeyLength = 32
-	// maxSigningKeys is the rotation shape design 6.1 describes: the first
+	// maxSigningKeys is the rotation shape: the first
 	// key signs every new cookie, and every configured key is tried to
 	// verify one already out in a browser.
 	maxSigningKeys = 2
@@ -58,15 +58,15 @@ const (
 	defaultSessionTTL     = 12 * time.Hour
 	defaultSessionIdle    = 1 * time.Hour
 
-	// Asset upload limits (design.md 7.3): a per-file size cap, a per-site
+	// Asset upload limits: a per-file size cap, a per-site
 	// total-bytes cap, and a per-site count cap. All three are overridable —
 	// an installation with more storage to spare, or a plan tier, may want
-	// higher ceilings than the design's own reference numbers.
+	// higher ceilings than these defaults.
 	defaultAssetMaxFileBytes = 25 << 20  // 25 MiB
 	defaultAssetMaxSiteBytes = 500 << 20 // 500 MiB
 	defaultAssetMaxSiteCount = 5000
 
-	// Audit/access-log retention defaults (design.md 8.2).
+	// Audit/access-log retention defaults.
 	defaultAuditRetentionDays     = 400
 	defaultAccessLogRetentionDays = 90
 	defaultAccessLogVisibility    = "counts"
@@ -95,11 +95,11 @@ type Config struct {
 	Session               SessionConfig
 	// ReservedLabels extends the built-in set in names.go with
 	// installation-specific hostnames that must never belong to an account,
-	// on top of the built-in set (design.md 7.1).
+	// on top of the built-in set.
 	ReservedLabels []string
 	SecureMode     bool
 	Backup         BackupConfig
-	// Assets bounds an upload through the site-facing API (design.md 7.3):
+	// Assets bounds an upload through the site-facing API:
 	// per-file size, per-site total bytes, and per-site count.
 	Assets AssetLimits
 	// TrustedProxies is TRUSTED_PROXY_CIDRS: peers whose X-Forwarded-For
@@ -109,11 +109,11 @@ type Config struct {
 	// APIKeyMaxDays is API_KEY_MAX_DAYS: the longest lifetime a new API key
 	// may be minted with (1 to 365, default 365).
 	APIKeyMaxDays int64
-	// Audit is design.md 8.2's retention and visibility knobs. cmd/server's
-	// prune subcommand read these two directly from the environment ahead
-	// of this field existing (docs/security-review.md's
-	// "Deviated"); both now go through this package instead, the same
-	// place every other environment-derived setting lives.
+	// Audit is the retention and visibility knobs for audit_events and
+	// access_log. cmd/server's prune subcommand read these two directly
+	// from the environment ahead of this field existing (see
+	// docs/security-review.md); both now go through this package instead,
+	// the same place every other environment-derived setting lives.
 	Audit AuditConfig
 	// OAuthRedirectHosts is where an AI app connecting to /mcp may be sent
 	// back after sign-in (OAUTH_REDIRECT_HOSTS): hostnames for https
@@ -128,12 +128,12 @@ type Config struct {
 // agents on the person's own machine (Claude Code, Codex).
 const defaultOAuthRedirectHosts = "chatgpt.com,claude.ai,vscode.dev,localhost,cursor://anysphere.cursor-mcp"
 
-// AuditConfig is design.md 8.2's retention and visibility settings for
+// AuditConfig holds the retention and visibility settings for
 // audit_events and access_log.
 type AuditConfig struct {
 	// RetentionDays and AccessLogRetentionDays bound how long
 	// audit_events and access_log rows are kept before `simple-host
-	// prune` drops their partition (design.md 8.2).
+	// prune` drops their partition.
 	RetentionDays          int64
 	AccessLogRetentionDays int64
 	// AccessLogVisibility is "counts" (the default: an owner and their team
@@ -175,7 +175,7 @@ type BackupConfig struct {
 	SSE string
 	// SSEKMSKeyID is required when SSE is "aws:kms" and rejected otherwise.
 	SSEKMSKeyID string
-	// EnvelopeKeys is optional client-side envelope encryption (design 9.1).
+	// EnvelopeKeys is optional client-side envelope encryption.
 	// Empty means backups travel with only the SSE header above. 1 or 2 keys
 	// mirror the SESSION_SIGNING_KEY rotation shape: the first wraps every
 	// new object, and every key here is tried to unwrap an existing one.
@@ -191,7 +191,7 @@ type EnvelopeKey struct {
 }
 
 // SigningKey is one named 32-byte HMAC key for signing and verifying the
-// session cookie (design.md 6.1). Shares the rotation shape EnvelopeKey
+// session cookie. Shares the rotation shape EnvelopeKey
 // uses: the first entry signs every new cookie, every entry is tried, by
 // id, to verify one already out in a browser.
 type SigningKey struct {
@@ -199,8 +199,8 @@ type SigningKey struct {
 	Key []byte
 }
 
-// OIDCConfig is the provider and claim-mapping configuration for sign-in
-// (design.md 6.1, 6.5). Nothing here is a secret except ClientSecret.
+// OIDCConfig is the provider and claim-mapping configuration for sign-in.
+// Nothing here is a secret except ClientSecret.
 type OIDCConfig struct {
 	Issuer       string
 	ClientID     string
@@ -528,7 +528,7 @@ func LoadDatabase() (string, error) {
 }
 
 // LoadAppRolePassword returns the password the migrate subcommand sets on the
-// least-privilege application role (design 9.3). It is required whenever
+// least-privilege application role. It is required whenever
 // migrate runs: a role granted in a migration with no password to give it
 // would sit unusable, and a silently-skipped step is worse than a startup
 // failure that names what is missing.
@@ -549,7 +549,7 @@ func LoadAppRolePassword() (string, error) {
 }
 
 // refuseSharedDatabasePassword refuses an application-role password equal to
-// the owning role's (design 9.3: the two roles never share one), checked
+// the owning role's — the two roles never share one — checked
 // wherever both may be present.
 func refuseSharedDatabasePassword(appPassword string) error {
 	owner, err := secretEnv("DB_PASSWORD")
@@ -591,7 +591,7 @@ func serverDatabaseDSN() (string, []string, error) {
 	return databaseDSNAs(appUser, password, need)
 }
 
-// LoadAuditRetention reads design.md 8.2's three retention/visibility
+// LoadAuditRetention reads the three retention/visibility
 // settings on their own, the same narrow-loader shape LoadDatabase and
 // LoadAppRolePassword use: `simple-host prune` (cmd/server/subcommands.go)
 // needs only these three values, plus config.LoadDatabase's own DSN, never
@@ -714,7 +714,7 @@ func normalizeDatabaseDSNURL(raw string) (string, error) {
 // validateDatabaseSSL refuses a DSN whose sslmode is anything but
 // verify-full, and refuses verify-full with no sslrootcert to check the
 // server certificate against, unless insecureAllowed is set. It is the one
-// line design 9.2 asks for, applied wherever a DSN is produced: databaseDSN's
+// required verify-full check, applied wherever a DSN is produced: databaseDSN's
 // own default is already verify-full, but a DSN supplied whole through
 // DB_DSN, or a DB_SSLMODE override, bypasses that default and must be
 // checked here instead. By the time a DSN reaches this function it has
@@ -768,7 +768,7 @@ func validateBackupSSE(b BackupConfig) error {
 // parseEnvelopeKeys reads BACKUP_ENVELOPE_KEY: empty disables the client-side
 // envelope; otherwise 1 or 2 comma-separated "<id>:<base64 32 bytes>" entries,
 // the first of which wraps every new backup object while every entry is
-// tried, by id, to unwrap an existing one (the rotation shape design 6.1 uses
+// tried, by id, to unwrap an existing one (the same rotation shape used
 // for SESSION_SIGNING_KEY).
 func parseEnvelopeKeys(raw string) ([]EnvelopeKey, error) {
 	parsed, err := parseKeys(raw, envelopeKeyLength, maxEnvelopeKeys)

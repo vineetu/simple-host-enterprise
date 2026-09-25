@@ -5,12 +5,11 @@
 -- nothing here creates a credential and nothing revokes one.
 --
 -- There is deliberately no role column. One role: you are in the team or you
--- are not. See docs/teams/design.md, "One role. You are in the team, or you
--- are not." A role column added later is one additive migration; a column
+-- are not. A role column added later is one additive migration; a column
 -- nothing reads is a second source of truth free to drift.
 --
--- The number is assigned by the table in docs/namespaces/roadmap.md phase 1,
--- which reserved 0018 for the canonical-name index and 0019 for this.
+-- The number continues the reserved sequence: 0018 is for the canonical-name
+-- index, 0019 for this.
 --
 -- Applied by hand through a port-forward, before the binary that reads any of
 -- it is deployed:

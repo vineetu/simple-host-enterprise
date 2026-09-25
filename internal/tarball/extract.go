@@ -428,11 +428,11 @@ func shouldSkip(name string) bool {
 	return base == ".DS_Store" || strings.HasPrefix(base, "._")
 }
 
-// reservedAssetsPath is the top-level name design.md 7.3 reserves for
-// site-facing assets served at /{site}/_assets/{id}: an archive containing
-// it (as a file or a directory, or anything under it) is refused rather
-// than extracted, so an uploaded site version can never shadow the asset
-// route with content of its own.
+// reservedAssetsPath is the top-level name reserved for site-facing assets
+// served at /{site}/_assets/{id}: an archive containing it (as a file or a
+// directory, or anything under it) is refused rather than extracted, so an
+// uploaded site version can never shadow the asset route with content of
+// its own.
 const reservedAssetsPath = "_assets"
 
 func isReservedAssetsPath(name string) bool {

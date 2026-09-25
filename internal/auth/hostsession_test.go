@@ -9,10 +9,10 @@ var hostSessionTestKeys = []SigningKey{{ID: "k1", Key: []byte("0123456789abcdef0
 
 // TestVerifyHostedSessionBindsToItsHost is the review-requested case: a
 // cookie minted for one owner host must not verify on another. Without the
-// Host claim (design.md 6.1's hardening, docs/security-review.md's
-// deviation record), a cookie captured or mis-delivered from alice's host
-// would authenticate a request on bob's host too, since the session row
-// itself is shared on purpose.
+// Host claim (see docs/security-review.md's deviation record), a cookie
+// captured or mis-delivered from alice's host would authenticate a
+// request on bob's host too, since the session row itself is shared on
+// purpose.
 func TestVerifyHostedSessionBindsToItsHost(t *testing.T) {
 	cookie, err := SignHostSession(hostSessionTestKeys, "session-1", "user-1", "alice.example.com", time.Now().Add(time.Hour))
 	if err != nil {

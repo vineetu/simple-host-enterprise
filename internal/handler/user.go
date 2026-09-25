@@ -40,7 +40,7 @@ func NewUserHandler(database *sql.DB, limits ...*AbuseLimits) *UserHandler {
 // the reset-request intake (POST /api/reset-requests) are gone: identity now
 // comes from OIDC sign-in (internal/handler/auth.go), and a lost credential
 // is a lost API key, revoked and re-minted from the dashboard rather than
-// recovered by emailing the platform. See design.md 6.1, 6.3.
+// recovered by emailing the platform.
 func (h *UserHandler) Register(mux *http.ServeMux, authMiddleware, skillVersionMiddleware func(http.Handler) http.Handler) {
 	mux.Handle("GET /api/me", authMiddleware(skillVersionMiddleware(http.HandlerFunc(h.me))))
 
@@ -49,8 +49,7 @@ func (h *UserHandler) Register(mux *http.ServeMux, authMiddleware, skillVersionM
 	// for, and net/http's own behavior for a path that pattern DOES match
 	// but on the wrong method is 405, not 404 — so without these, an old
 	// client's POST here would see "Method Not Allowed" instead of the
-	// "this route doesn't exist" signal design.md's Phase 1 exit criteria
-	// calls for.
+	// "this route doesn't exist" signal that old clients rely on.
 	mux.HandleFunc("POST /api/auth", http.NotFound)
 	mux.HandleFunc("POST /api/reset-requests", http.NotFound)
 }

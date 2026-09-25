@@ -12,8 +12,8 @@ import (
 	db "github.com/vsriram/simple-host/internal/db"
 )
 
-// AuditHandler serves design.md 8.3's two read routes: GET /api/audit (the
-// action log, design 8.1) and GET /api/access (the visit log, design 8.2).
+// AuditHandler serves two read routes: GET /api/audit (the
+// action log) and GET /api/access (the visit log).
 // Both are scoped identically in spirit — an admin sees everything, anyone
 // else sees only their own namespace and the namespaces of teams they
 // belong to — but audit_events and access_log disagree on how a namespace
@@ -56,8 +56,8 @@ func (h *AuditHandler) limitReadClient(next http.Handler) http.Handler {
 	})
 }
 
-// callerNamespaceScope resolves design 8.3's "the caller's own namespace and
-// every team they belong to": their own user id, plus the id of every team
+// callerNamespaceScope resolves the caller's own namespace and every team
+// they belong to: their own user id, plus the id of every team
 // db.ListTeamsForUser reports. Used by /api/audit (a list of owner_id
 // values ANDed into the query) and, by way of the labels it derives, by
 // /api/access's authorization check.
@@ -98,7 +98,7 @@ func containsString(list []string, want string) bool {
 }
 
 // auditEventResponse is one row of GET /api/audit's JSON body. Field names
-// match design.md 8.1's column names, not Go convention, since this is
+// match the audit_events column names, not Go convention, since this is
 // consumed by the dashboard's own JavaScript and by an agent reading the
 // API directly.
 type auditEventResponse struct {
@@ -134,7 +134,7 @@ type auditListResponse struct {
 	NextCursor string               `json:"next_cursor,omitempty"`
 }
 
-// listAudit answers GET /api/audit (design 8.3): scope is the caller's own
+// listAudit answers GET /api/audit: scope is the caller's own
 // namespace and teams unless they are an admin, in which case any owner may
 // be named. owner/actor are usernames (or team names, which live in the
 // same users table — see internal/db/teams.go), resolved to ids here so
@@ -262,7 +262,7 @@ type accessListResponse struct {
 	NextCursor string                   `json:"next_cursor,omitempty"`
 }
 
-// listAccess answers GET /api/access (design 8.3). Unlike /api/audit,
+// listAccess answers GET /api/access. Unlike /api/audit,
 // access_log's owner/site columns are plain labels/names, not ids, so no
 // database lookup is needed to filter by them — but that also means
 // authorization has to be checked here rather than left to a WHERE clause:

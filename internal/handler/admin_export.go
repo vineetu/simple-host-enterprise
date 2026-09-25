@@ -23,8 +23,8 @@ var accessLogCSVHeader = []string{
 	"path", "method", "status", "bytes", "ip", "user_agent", "client_kind",
 }
 
-// exportAuditOrAccess answers GET /api/admin/export (design.md 8.3): admin
-// only, streamed, itself audited as admin_export. kind selects audit_events
+// exportAuditOrAccess answers GET /api/admin/export: admin only, streamed,
+// itself audited as admin_export. kind selects audit_events
 // or access_log; format selects CSV or newline-delimited JSON. Both kinds
 // are admin-scoped reads (every owner, no namespace restriction) — the
 // scoping /api/audit and /api/access apply for a non-admin caller does not

@@ -33,12 +33,12 @@ var (
 	// is the database's (db.CreateAssetWithinQuota), so this is that error.
 	ErrAssetQuotaExceeded = db.ErrAssetQuotaExceeded
 	// ErrAssetTypeNotAllowed is returned when the sniffed content does not
-	// classify into the allowlist: design.md 7.3's image/*, video/*,
-	// audio/*, application/pdf, application/json, text/csv, text/plain,
+	// classify into the allowlist: image/*, video/*, audio/*,
+	// application/pdf, application/json, text/csv, text/plain,
 	// application/octet-stream, plus application/zip and application/gzip
-	// (or its sniffed alias application/x-gzip) — extended beyond design
-	// 7.3's literal table so a site can offer a plain archive download; see
-	// classifyContentType and docs/security-review.md. This is
+	// (or its sniffed alias application/x-gzip) — extended to also allow a
+	// site to offer a plain archive download; see classifyContentType and
+	// docs/security-review.md. This is
 	// deliberately about the bytes, not the client's declared Content-Type:
 	// an HTML file relabeled as text/plain is still refused, because it
 	// still sniffs as text/html. An executable and everything else Go's
@@ -55,13 +55,13 @@ var (
 // package state, so a test — or a future per-plan override — never has to
 // fight a package-level default.
 type AssetLimits struct {
-	// MaxFileBytes bounds one upload. Design.md 7.3's default is 25 MiB.
+	// MaxFileBytes bounds one upload. The default is 25 MiB.
 	MaxFileBytes int64
-	// MaxSiteBytes bounds a site's total live-asset bytes. Design.md 7.3's
-	// default is 500 MiB.
+	// MaxSiteBytes bounds a site's total live-asset bytes. The default is
+	// 500 MiB.
 	MaxSiteBytes int64
-	// MaxSiteCount bounds a site's total live-asset count. Design.md 7.3's
-	// default is 5,000.
+	// MaxSiteCount bounds a site's total live-asset count. The default is
+	// 5,000.
 	MaxSiteCount int64
 }
 
@@ -81,9 +81,9 @@ func (l AssetLimits) validate() error {
 // StoredAsset describes what CreateAsset actually wrote: the id it minted,
 // the content type it classified the bytes as (not necessarily the
 // client's declared type), the byte count it verified while streaming, and
-// its SHA-256. Inline reports whether design.md 7.3 wants this type served
-// with no Content-Disposition (image/*, video/*, audio/*, application/pdf)
-// or with "attachment" (everything else in the allowlist).
+// its SHA-256. Inline reports whether this type is served with no
+// Content-Disposition (image/*, video/*, audio/*, application/pdf) or with
+// "attachment" (everything else in the allowlist).
 type StoredAsset struct {
 	ID          string
 	ContentType string
@@ -151,7 +151,7 @@ func writeAssetContent(destination io.Writer, source io.Reader, declaredContentT
 // its sniffed alias application/x-gzip) are allowed and served as
 // attachments — a site may legitimately offer a plain archive download,
 // and an archive is inert once served with Content-Disposition: attachment
-// (design.md 7.4) rather than executed. An executable, and everything else
+// rather than executed. An executable, and everything else
 // the sniffer names specifically that is not on this list, is refused.
 // Anything the sniffer calls text/html, text/xml, or any other type
 // outside the allowlist is refused outright — there is no path through
@@ -201,9 +201,9 @@ func mediaTypeBase(contentType string) string {
 	return strings.ToLower(base)
 }
 
-// isInlineContentType reports whether design.md 7.3 wants this stored type
-// served with no Content-Disposition at all (true) or "attachment"
-// (false). Only classifyContentType's output should ever reach this.
+// isInlineContentType reports whether this stored type is served with no
+// Content-Disposition at all (true) or "attachment" (false). Only
+// classifyContentType's output should ever reach this.
 func isInlineContentType(contentType string) bool {
 	base := mediaTypeBase(contentType)
 	return strings.HasPrefix(base, "image/") || strings.HasPrefix(base, "video/") || strings.HasPrefix(base, "audio/") || base == "application/pdf"

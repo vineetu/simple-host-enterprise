@@ -28,7 +28,7 @@ const (
 
 func (k clientKind) isBot() bool { return k == clientBot }
 
-// String is access_log's client_kind column (design.md 8.2), a plain string
+// String is access_log's client_kind column, a plain string
 // so internal/audit (which must not depend on this package) can accept it.
 func (k clientKind) String() string {
 	if k == clientBot {

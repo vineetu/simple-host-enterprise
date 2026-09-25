@@ -11,7 +11,7 @@ import (
 	dbstore "github.com/vsriram/simple-host/internal/db"
 )
 
-// AccessEvent is one visit for access_log (design.md 8.2). ClientKind is a
+// AccessEvent is one visit for access_log. ClientKind is a
 // plain string, not internal/handler's clientKind type: that type is
 // unexported, and this package must not depend on internal/handler (the
 // dependency runs the other way — a handler calls into audit, never the
@@ -36,7 +36,7 @@ const (
 	// AccessWriterQueueSize bounds how many unflushed visits can queue up
 	// before Enqueue starts dropping. Generous relative to
 	// fileDownloadRecorder's 128 (download_recorder.go): access_log gets
-	// every visit, not just file downloads, design 8.2's stated traffic.
+	// every visit, not just file downloads.
 	AccessWriterQueueSize = 4096
 	// AccessWriterBatchSize is the largest single INSERT this writer sends;
 	// hit under load, missed (and flushed on the interval below) when
@@ -48,9 +48,9 @@ const (
 	accessWriterWriteTimeout  = 5 * time.Second
 )
 
-// AccessWriter batches access_log inserts off the request path (design 8.2:
-// "written from serveSite's status recorder through a batching writer... :
-// best effort, never blocks serving, drops with a counter under pressure").
+// AccessWriter batches access_log inserts off the request path: written
+// from serveSite's status recorder through a batching writer that is best
+// effort, never blocks serving, and drops with a counter under pressure.
 // Enqueue never blocks; a full queue increments Dropped and returns false
 // rather than waiting for room.
 //
@@ -122,8 +122,8 @@ func (w *AccessWriter) Enqueue(event AccessEvent) bool {
 }
 
 // Dropped is the running count of events Enqueue could not admit because
-// the queue was full — the "drops with a counter under pressure" design 8.2
-// calls for.
+// the queue was full — dropping with a counter under pressure, rather
+// than blocking.
 func (w *AccessWriter) Dropped() int64 {
 	if w == nil {
 		return 0

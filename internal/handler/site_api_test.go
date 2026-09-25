@@ -53,7 +53,7 @@ func (r *siteAPITestRecorder) last() audit.Event {
 // shape, answer canned rows" pattern collaboration_archive_integration_test.go
 // and showcase_test.go already use for this package's other DB-backed tests
 // (no live Postgres in internal/handler; internal/db's own tests, and this
-// phase's site_viewers_db_test.go, are what integration-test the SQL itself).
+// its site_viewers_db_test.go, are what integration-test the SQL itself).
 type siteAPITestState struct {
 	mu sync.Mutex
 	// retired records keys queued in storage_retired.
@@ -106,8 +106,8 @@ func (c *siteAPITestConn) Prepare(string) (driver.Stmt, error) {
 func (c *siteAPITestConn) Close() error { return nil }
 
 // Begin backs the transactions site_api.go now opens around each write and
-// its audit_events row (design 8.1, "a mutation without its audit row
-// cannot commit"). database/sql routes a *sql.Tx's own ExecContext/
+// its audit_events row (a mutation without its audit row
+// must not commit). database/sql routes a *sql.Tx's own ExecContext/
 // QueryContext straight through to this same driver.Conn (a driver-level
 // "transaction" is a marker on the connection, not a separate object with
 // its own query methods), so nothing else about the fake driver's
@@ -485,7 +485,7 @@ func TestSiteAPIDeleteAssetRetiresObjectWithRow(t *testing.T) {
 }
 
 // TestSiteAPIAuditEventResolvesOwnerUsernameToID guards against a real bug
-// found while wiring Phase 4's DBRecorder in: siteAPICall.Owner is the
+// found while wiring a real DBRecorder in: siteAPICall.Owner is the
 // owner's *username* (every disk path and URL in this file correctly keys
 // on it), but audit_events.owner_id is a uuid column, so passing the
 // username straight through failed every state_write/asset_create/
@@ -521,7 +521,7 @@ func TestSiteAPIAuditEventResolvesOwnerUsernameToID(t *testing.T) {
 }
 
 // TestSiteAPIPutStateFailureRecordsNoAudit is the reviewer-requested
-// guard for design 8.1's other direction: not just "a mutation without
+// guard for the other direction of the audit rule: not just "a mutation without
 // its audit row cannot commit" (proven by the transactions PutState/
 // PutStateVersioned/CreateAsset/DeleteAsset now open around their own
 // write and RecordTx call), but also "a write that never happened must
@@ -549,8 +549,8 @@ func TestSiteAPIPutStateFailureRecordsNoAudit(t *testing.T) {
 }
 
 // TestSiteAPIPutStateReportsFailureWhenAuditRecordingFails covers the
-// other half of design 8.1's "a mutation without its audit row cannot
-// commit": when the DB write itself succeeds but RecordTx fails, PutState
+// other half of the audit rule ("a mutation without its audit row cannot
+// commit"): when the DB write itself succeeds but RecordTx fails, PutState
 // must report the failure to the caller (500) rather than committing the
 // write and silently discarding the audit error — the earlier-return
 // structure this asserts is what makes `tx.Commit()` unreachable on this

@@ -186,7 +186,7 @@ func (s *collaborationArchiveDBState) exec(query string, args []driver.NamedValu
 	case strings.Contains(normalized, "UPDATE site_assets SET deleted_at = now()"):
 		// Backs db.SoftDeleteAsset, called inside the transaction
 		// assets_admin.go's deleteCollaborationAsset now shares with its
-		// RecordTx call (design 8.1).
+		// RecordTx call.
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if !s.assetExists || s.assetDeleted {
@@ -685,8 +685,8 @@ func TestRollbackRoutesSwitchTheLiveVersion(t *testing.T) {
 // assets_admin.go's deleteCollaborationAsset (the dashboard's own mirror
 // of site_api.go's DeleteAsset): the site_assets soft-delete and its
 // asset_delete audit row must be recorded through RecordTx, not the
-// non-transactional Record every other call site here predates (design
-// 8.1). Reuses this file's own harness/fake driver rather than building a
+// non-transactional Record every other call site here predates. Reuses
+// this file's own harness/fake driver rather than building a
 // second one, per the team lead's "unit test if the existing fakes
 // allow."
 func TestDeleteCollaborationAssetRecordsAuditInOneTransaction(t *testing.T) {

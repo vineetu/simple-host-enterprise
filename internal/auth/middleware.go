@@ -42,7 +42,7 @@ func GenerateAPIKey() (string, error) {
 	return APIKeyPrefix + hex.EncodeToString(key), nil
 }
 
-// Middleware authenticates a request one of three ways (design.md 6.3): an
+// Middleware authenticates a request one of three ways: an
 // X-API-Key header, hashed and looked up in api_keys; an OAuth access token
 // in "Authorization: Bearer" (handler/connector.go); or the
 // SessionCookieName session cookie, verified against signingKeys and then
@@ -53,7 +53,7 @@ func GenerateAPIKey() (string, error) {
 //
 // There is no more synthetic admin principal and no ADMIN_API_KEY: every
 // principal this middleware produces is a real *db.User row, and admin
-// status is whatever users.is_admin says (design.md 6.2).
+// status is whatever users.is_admin says.
 func Middleware(database *sql.DB, signingKeys []SigningKey, sessionIdle time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -167,9 +167,9 @@ func RequireAdmin(next http.Handler) http.Handler {
 // RequireRealUser previously rejected a synthetic header/cookie admin
 // principal (a fixed, non-UUID id with no users row) from owner-scoped
 // endpoints, because feeding it into a `user_id = $1` UUID filter threw a
-// Postgres cast error. That principal no longer exists (design.md 6.2: the
+// Postgres cast error. That principal no longer exists: the
 // ADMIN_API_KEY-backed synthetic admin is deleted, and every principal
-// Middleware produces is a real users row with a real UUID), so this is now
+// Middleware produces is a real users row with a real UUID, so this is now
 // a pass-through kept only so call sites in site.go and team.go do not need
 // to change: every authenticated user reaching this point is already real.
 func RequireRealUser(next http.Handler) http.Handler {

@@ -12,8 +12,8 @@ import (
 	"time"
 )
 
-// SessionCookieName is the one browser session cookie for this application
-// (design.md 6.1): __Host- prefixed, so a browser refuses to set or send it
+// SessionCookieName is the one browser session cookie for this application:
+// __Host- prefixed, so a browser refuses to set or send it
 // unless the connection is Secure, the path is "/", and no Domain attribute
 // is present. There is no insecure-mode variant — a cookie this shaped
 // cannot have one.
@@ -35,13 +35,12 @@ type SigningKey struct {
 //
 // Host is empty for the base-host session cookie (SignSession) and set for
 // a per-owner/restricted-site host cookie (SignHostSession, minted only at
-// hand-off redemption): design.md 6.1 says "same signed payload" for every
-// host a session mints a cookie on, but that let a cookie minted for
+// hand-off redemption): the original intent was the same signed payload for
+// every host a session mints a cookie on, but that let a cookie minted for
 // alice.<base> be replayed on bob.<base> if it were ever captured or
-// mis-delivered — the session row itself is shared on purpose (design.md
-// 6.1's whole point), but each host's own cookie should only ever be
-// accepted back on that same host. Recorded as a deviation from that
-// wording in docs/security-review.md.
+// mis-delivered — the session row itself is shared on purpose, but each
+// host's own cookie should only ever be accepted back on that same host.
+// Recorded as a deviation from that original intent in docs/security-review.md.
 type sessionPayload struct {
 	SessionID string `json:"sid"`
 	UserID    string `json:"uid"`

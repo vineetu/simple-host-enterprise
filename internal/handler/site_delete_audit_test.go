@@ -178,7 +178,7 @@ func (r *siteDeleteAuditRows) Next(destination []driver.Value) error {
 }
 
 // TestDeleteSiteCommitsAuditAfterSiteRowIsGone is the fake-driver
-// regression test for the Phase 7 verification bug: deleteSiteForTarget
+// regression test for a verification bug found later: deleteSiteForTarget
 // (site.go) runs db.DeleteSite and then h.audit.RecordTx for site_delete
 // in the same transaction, so by the time the audit INSERT runs, the site
 // row its site_id names is already gone. Migration 0028 is the actual fix

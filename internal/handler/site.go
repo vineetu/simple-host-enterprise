@@ -34,7 +34,7 @@ type SiteHandler struct {
 	limits    *AbuseLimits
 	// audit defaults to audit.NoOp{} (see WithAudit); its only caller today
 	// is the dashboard's asset-delete route (assets_admin.go), the one
-	// mutation this handler owns that design.md 7.3 requires an audit row
+	// mutation this handler owns that requires an audit row
 	// for. WithAudit exists rather than a constructor parameter so every
 	// existing NewSiteHandler(...) call site (production and test alike)
 	// keeps compiling unchanged, the same shape AdminHandler.WithStore
@@ -133,7 +133,7 @@ func (h *SiteHandler) discardVersion(siteID string, version int) {
 }
 
 // stateUsageMarkerKey is shared with SiteAPIHandler.markStateUsage
-// (site_api.go), which now owns every state route (design.md 7.3) and so
+// (site_api.go), which now owns every state route and so
 // owns the fire-and-forget uses_state/uses_versioned_state marker too;
 // SiteHandler itself no longer reads or writes state at all.
 func stateUsageMarkerKey(siteID string, versioned bool) string {
@@ -145,7 +145,7 @@ func stateUsageMarkerKey(siteID string, versioned bool) string {
 
 // siteURL is the absolute address reported for a site in deploy and rollback
 // responses: the short address on the owner's own host, or on the
-// restricted site's own host once it has any viewers (design.md 5.2a).
+// restricted site's own host once it has any viewers.
 func (h *SiteHandler) siteURL(ctx context.Context, username, siteName, siteID string) string {
 	restricted, err := db.IsSiteRestricted(ctx, h.database, siteID)
 	if err != nil {
@@ -155,7 +155,7 @@ func (h *SiteHandler) siteURL(ctx context.Context, username, siteName, siteID st
 }
 
 func (h *SiteHandler) Register(mux *http.ServeMux, authMiddleware, skillVersionMiddleware func(http.Handler) http.Handler) {
-	// State and assets moved to the site-facing API (design.md 7.3): they are
+	// State and assets moved to the site-facing API: they are
 	// no longer mux routes at all. The host gate resolves the site from the
 	// owner/restricted-site host and the request path directly (never a
 	// Referer, which this package no longer reads anywhere) and dispatches
@@ -165,8 +165,8 @@ func (h *SiteHandler) Register(mux *http.ServeMux, authMiddleware, skillVersionM
 	// compatibility guard so invalid credentials retain their 401 response.
 	//
 	// The single-site routes are owner-scoped: they filter by the caller's
-	// user_id (a UUID). RequireRealUser is a pass-through today (design.md
-	// 6.2: the ADMIN_API_KEY-backed synthetic admin — a fixed, non-UUID id
+	// user_id (a UUID). RequireRealUser is a pass-through today (the
+	// ADMIN_API_KEY-backed synthetic admin — a fixed, non-UUID id
 	// with no users row — is gone; every principal auth.Middleware produces
 	// is a real users row with a real UUID) and is kept only so this call
 	// site needs no change. Admin capability now lives entirely in
@@ -321,7 +321,7 @@ func selfTarget(user *db.User) mutationTarget {
 // JavaScript does `fetch(...).then(r => r.json())` against the state
 // routes, so the body must be exactly what was stored, never re-wrapped.
 // Shared with SiteAPIHandler (site_api.go), which now owns every state
-// route (design.md 7.3).
+// route.
 func writeRawJSON(w http.ResponseWriter, status int, body json.RawMessage) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

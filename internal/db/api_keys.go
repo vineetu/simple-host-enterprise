@@ -8,10 +8,10 @@ import (
 	"time"
 )
 
-// APIKey is one row of the api_keys table (design.md 6.3): a named,
-// individually revocable credential for X-API-Key. The plaintext is
-// returned once, at mint time, and never stored — key_hash (SHA-256 of the
-// 32 random plaintext bytes) is all this row ever holds.
+// APIKey is one row of the api_keys table: a named, individually revocable
+// credential for X-API-Key. The plaintext is returned once, at mint time,
+// and never stored — key_hash (SHA-256 of the 32 random plaintext bytes)
+// is all this row ever holds.
 type APIKey struct {
 	ID         string
 	UserID     string

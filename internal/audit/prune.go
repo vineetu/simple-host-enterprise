@@ -37,7 +37,7 @@ type PrunedPartition struct {
 }
 
 // PruneOptions configures one Prune run. AuditRetentionDays and
-// AccessRetentionDays are design 8.2's AUDIT_RETENTION_DAYS (400) and
+// AccessRetentionDays are the AUDIT_RETENTION_DAYS (400) and
 // ACCESS_LOG_RETENTION_DAYS (90) defaults, read from the environment by
 // cmd/server/subcommands.go's prune subcommand — this package takes them as
 // plain ints so it does not need to know how they were sourced.
@@ -60,11 +60,10 @@ type PruneResult struct {
 }
 
 // Prune drops (or, under DryRun, lists) partitions of audit_events and
-// access_log wholly older than their configured retention (design 8.1,
-// 8.2: "retention is a partition drop," design 9.3: "retention... [is] the
-// owner role's work"). db must connect as the owning role — the
-// application role has no DROP privilege on these tables at all (design
-// 9.3), so this is never called with the server's own connection pool.
+// access_log wholly older than their configured retention. Retention is a
+// partition drop, and that is the owner role's work: db must connect as the
+// owning role — the application role has no DROP privilege on these tables
+// at all, so this is never called with the server's own connection pool.
 //
 // Each call also runs audit_ensure_partitions first, so a monthly prune
 // job is also what keeps the calendar ahead of the current month; a

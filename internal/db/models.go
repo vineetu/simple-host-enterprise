@@ -26,9 +26,9 @@ type User struct {
 	// account at sign-in, and never grants access on its own. Empty means
 	// either unknown or not loaded by this query.
 	Email string
-	// DisabledAt is users.disabled_at (migration 0023, design.md 6.4): set by
-	// an admin offboarding a person. Nil means active, or not loaded by this
-	// query — only ListAllUsers populates it today.
+	// DisabledAt is users.disabled_at (migration 0023): set by an admin
+	// offboarding a person. Nil means active, or not loaded by this query
+	// — only ListAllUsers populates it today.
 	DisabledAt *time.Time
 }
 

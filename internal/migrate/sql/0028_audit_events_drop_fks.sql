@@ -1,5 +1,5 @@
--- Drop the foreign keys on audit_events and access_log (Phase 7
--- verification finding: DELETE /api/sites/{site} always 500s).
+-- Drop the foreign keys on audit_events and access_log (with them,
+-- DELETE /api/sites/{site} always failed with a 500).
 --
 -- deleteSiteForTarget (internal/handler/site.go) runs db.DeleteSite and then
 -- h.audit.RecordTx for the site_delete event in the same transaction. By the
@@ -13,8 +13,8 @@
 -- INSERT time and ON DELETE SET NULL quietly nulls team_id out from under
 -- it afterwards. That ordering is incidental, not a rule anyone enforces,
 -- and the same problem will resurface the moment a user-removal path is
--- added (design.md's audit trail is explicitly meant to outlive the users,
--- keys, owners, sites and teams it describes).
+-- added (the audit trail is meant to outlive the users, keys, owners,
+-- sites and teams it describes).
 --
 -- The real fix is schema-level: audit_events and access_log are an
 -- append-only record of what happened, not a live view of what still

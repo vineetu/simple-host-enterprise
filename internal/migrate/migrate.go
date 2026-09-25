@@ -318,7 +318,7 @@ func Check(ctx context.Context, db *sql.DB) error {
 
 // AppRoleName is the least-privilege role the server connects as once
 // migration 0020 has granted it SELECT/INSERT/UPDATE/DELETE on the
-// application tables (design 9.3). It has no default password: migration
+// application tables. It has no default password: migration
 // files carry no secrets, so SetAppRolePassword sets it separately, from an
 // operator-supplied value, every time migrate runs.
 const AppRoleName = "simplehost_app"
@@ -365,9 +365,10 @@ func isUndefinedTable(err error) bool {
 // CheckLeastPrivilege refuses a server connection whose role could rewrite
 // the audit trail: one that owns audit_events (or can act as its owner, a
 // superuser included) or holds UPDATE, DELETE or TRUNCATE on it. The server
-// is meant to connect as AppRoleName (design 9.3); this catches every way a
-// deployment could end up connecting as the owning role instead — a DB_DSN
-// naming it, a password-file override that won, a hand-edited manifest.
+// is meant to connect as AppRoleName, the least-privilege role; this catches
+// every way a deployment could end up connecting as the owning role instead
+// — a DB_DSN naming it, a password-file override that won, a hand-edited
+// manifest.
 func CheckLeastPrivilege(ctx context.Context, db *sql.DB) error {
 	const query = `
 		SELECT current_user,

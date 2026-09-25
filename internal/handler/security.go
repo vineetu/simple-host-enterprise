@@ -21,7 +21,7 @@ type CookiePolicy struct {
 }
 
 // SecurityHeaders applies headers owned by the application, split by host
-// kind rather than by path (design.md 7.1, 7.4): with the owner-host
+// kind rather than by path: with the owner-host
 // management preview gone, an owner or restricted-site host serves nothing
 // but hosted content, the site-facing API, and the session hand-off, none of
 // which is this application's own control-plane UI, so frame-ancestors never
@@ -33,24 +33,23 @@ type CookiePolicy struct {
 // nothing to lose by defending it too.
 //
 // HSTS is emitted on every host in explicit secure mode; the base host adds
-// includeSubDomains, since design.md 7.4 treats it as dedicated to this
+// includeSubDomains, since the base host is dedicated to this
 // application (an owner or restricted-site host is a subdomain of it, so
 // that instruction already covers them without repeating it there).
 //
 // The owner-host-specific headers CORP and the Sec-Fetch-Site refusal
-// (design.md 7.4) are applied by the host gate itself, not here: they are
+// are applied by the host gate itself, not here: they are
 // part of deciding whether the gate answers a request at all, not a
 // blanket header pass.
 func SecurityHeaders(next http.Handler, secureMode bool, hosts HostModel) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		// design.md 7.4: "Control plane: as today (nosniff, frame-ancestors
-		// 'none', HSTS), plus Referrer-Policy: strict-origin-when-cross-origin."
-		// Set unconditionally, for every host this middleware sees: an owner
+		// Referrer-Policy: strict-origin-when-cross-origin is set here
+		// unconditionally, for every host this middleware sees: an owner
 		// or restricted-site host response gets the identical value again
 		// from applyOwnerHostSecurity downstream (host_gate.go), and the base
 		// host — which nothing else in this chain ever touched — finally
-		// gets it at all. Phase 2 review finding: it was never set on the
+		// gets it at all. It was previously never set on the
 		// base host.
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		kind, _ := hosts.Classify(r.Host)
@@ -58,14 +57,14 @@ func SecurityHeaders(next http.Handler, secureMode bool, hosts HostModel) http.H
 		if !hostedContent {
 			w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
 		}
-		// design.md 7.4: "Cache-Control: no-store on every authenticated
-		// page and API response" on the control plane. This middleware runs
+		// Cache-Control: no-store is set on every authenticated
+		// page and API response on the control plane. This middleware runs
 		// before any handler authenticates the request, so "authenticated"
 		// is read here as "the request itself carries a credential" (a
 		// session cookie or X-API-Key) rather than "the credential turned
 		// out valid" — a request whose credential is rejected still gets
-		// no-store, which is the safer direction to round on. Phase 2
-		// review finding: this used to be set ad hoc per handler (e.g.
+		// no-store, which is the safer direction to round on. This used to
+		// be set ad hoc per handler (e.g.
 		// showcase.go, only when a search query was present); doing it once
 		// here covers every base-host route uniformly, including ones that
 		// never set it themselves.

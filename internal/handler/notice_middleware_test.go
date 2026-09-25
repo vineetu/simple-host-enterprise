@@ -230,8 +230,8 @@ func TestSkillVersionRouteScopeAndAuthenticationOrdering(t *testing.T) {
 		// versionless about. See TestRegistrationAndResetRoutesAreGone.
 		//
 		// State used to have its own "remains unguarded" cases here
-		// (SiteHandler.Register used to mux-register it directly). Design.md
-		// 7.3 moved state and assets off the mux entirely: the host gate
+		// (SiteHandler.Register used to mux-register it directly). State and
+		// assets have since moved off the mux entirely: the host gate
 		// dispatches them straight to SiteAPIHandler, which
 		// skillVersionMiddleware never wraps because it is never in the
 		// chain at all — the property this test file checks for every other

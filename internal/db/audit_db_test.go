@@ -7,8 +7,8 @@ import (
 )
 
 // TestBumpStateWriteCoalescesRepeatedCallsIntoOneRow proves the actual
-// upsert design 8.1 calls for ("one row per (actor, site, five-minute
-// window) with detail.count"), against a real Postgres — nothing about a
+// upsert behavior (one row per (actor, site, five-minute window) with
+// detail.count), against a real Postgres — nothing about a
 // partial unique index and an ON CONFLICT DO UPDATE is faithfully
 // mockable. Companion to the review finding that the arbiter is NULL-unsafe:
 // this test uses real, non-empty ActorID/SiteID, which is exactly the case

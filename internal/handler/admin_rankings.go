@@ -287,7 +287,7 @@ type newUser struct {
 	username  string
 	joined    time.Time
 	siteCount int
-	// disabled is a person an admin has offboarded (design.md 6.4). A team
+	// disabled is a person an admin has offboarded. A team
 	// is never disabled — it is marked as a team instead.
 	disabled bool
 	team     bool

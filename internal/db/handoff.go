@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// HandoffCodeTTL is the one-time hand-off code's lifetime (design.md 6.1):
-// "mint one-time code bound to (session_id, target host, n), 60s, single use."
+// HandoffCodeTTL is the one-time hand-off code's lifetime: the code is
+// minted bound to (session_id, target host, n), valid for 60s, single use.
 const HandoffCodeTTL = 60 * time.Second
 
 // ErrHandoffCodeInvalid covers every reason a code may not be redeemed: not

@@ -14,7 +14,7 @@ import (
 	"github.com/lib/pq"
 )
 
-// AuditEvent is one row of audit_events (design.md 8.1). String fields that
+// AuditEvent is one row of audit_events. String fields that
 // are optional on the table (RequestID, ActorID, KeyID, OwnerID, SiteID,
 // TeamID, ViaSiteLabel, ViaSiteName, IP, UserAgent) use "" for NULL; every
 // insert path below turns "" back into NULL with NULLIF, the same
@@ -45,11 +45,10 @@ func marshalDetail(detail map[string]any) ([]byte, error) {
 	return json.Marshal(detail)
 }
 
-// InsertAuditEvent writes one row. q may be *sql.DB or *sql.Tx: design 8.1
-// calls for "audit.Record(ctx, tx, event), called inside the mutation's
-// transaction where one exists," and Querier is what lets this function
-// serve both that caller and the plain non-transactional one Phase 1's
-// handlers already use.
+// InsertAuditEvent writes one row. q may be *sql.DB or *sql.Tx: it is
+// called inside the mutation's transaction where one exists, and Querier
+// is what lets this function serve both that caller and the plain
+// non-transactional one already used elsewhere in the handlers.
 func InsertAuditEvent(ctx context.Context, q Querier, e AuditEvent) error {
 	if e.Action == "" {
 		return errors.New("db: InsertAuditEvent requires an action")
@@ -82,8 +81,8 @@ func InsertAuditEvent(ctx context.Context, q Querier, e AuditEvent) error {
 	return err
 }
 
-// BumpStateWriteParams is one state_write coalescing call (design 8.1: "one
-// row per (actor, site, five-minute window) with detail.count, upserted").
+// BumpStateWriteParams is one state_write coalescing call: one row per
+// (actor, site, five-minute window) with detail.count, upserted.
 // WindowStart is still sent (the function's signature is kept for a
 // rollout) but ignored: since migration 0030 the database computes the
 // window from its own clock.
@@ -99,10 +98,10 @@ type BumpStateWriteParams struct {
 	UserAgent   string
 }
 
-// BumpStateWrite creates or increments the coalesced state_write row for one
-// window, through the SECURITY DEFINER function migration 0027 grants the
-// application role EXECUTE on (design 9.3): the app role has no general
-// UPDATE on audit_events, only this one narrow upsert.
+// BumpStateWrite creates or increments the coalesced state_write row for
+// one window, through the SECURITY DEFINER function migration 0027 grants
+// the application role EXECUTE on: the app role has no general UPDATE on
+// audit_events, only this one narrow upsert.
 func BumpStateWrite(ctx context.Context, q Querier, p BumpStateWriteParams) error {
 	if p.WindowStart.IsZero() {
 		return errors.New("db: BumpStateWrite requires a WindowStart")
@@ -111,7 +110,7 @@ func BumpStateWrite(ctx context.Context, q Querier, p BumpStateWriteParams) erro
 	// every NULL as distinct from every other NULL, so a row with either
 	// column NULL would never conflict with itself and every state_write
 	// for that (missing) actor or site would insert a fresh row instead of
-	// coalescing — silently defeating design 8.1's "one row per window."
+	// coalescing — silently defeating the one-row-per-window guarantee.
 	// Every real state_write has both, so refuse before it ever reaches
 	// the upsert rather than let it coalesce incorrectly.
 	if p.ActorID == "" || p.SiteID == "" {
@@ -132,12 +131,12 @@ func BumpStateWrite(ctx context.Context, q Querier, p BumpStateWriteParams) erro
 // AuditEventFilter narrows ListAuditEvents. Every field beyond Admin and
 // OwnerScope is optional; a zero value means "no restriction on this
 // field." OwnerScope, when non-empty, restricts results to rows whose
-// owner_id or team_id is one of these ids (design 8.3: "scope: the
-// caller's namespace and every team they belong to"). Admin must be true
+// owner_id or team_id is one of these ids: the caller's namespace and
+// every team they belong to. Admin must be true
 // for a caller that passes OwnerScope empty — ListAuditEvents refuses
 // !Admin with an empty OwnerScope rather than silently returning every
 // owner's events, the same fail-closed rule ListAccessLog already applies
-// (review finding, Phase 4 core: this filter had no such guard).
+// (review finding: this filter had no such guard).
 type AuditEventFilter struct {
 	Admin      bool
 	OwnerScope []string
@@ -187,8 +186,8 @@ func decodeAuditCursor(s string) (auditCursor, error) {
 	return auditCursor{At: at, ID: id}, nil
 }
 
-// auditPageSize is the fixed page size for both /api/audit and /api/access
-// (design 8.3). One constant so the two endpoints paginate identically.
+// auditPageSize is the fixed page size for both /api/audit and /api/access.
+// One constant so the two endpoints paginate identically.
 const auditPageSize = 100
 
 // AuditEventPage is one page of ListAuditEvents, newest first.
@@ -220,7 +219,7 @@ const listAuditEventsQuery = `
 	LIMIT $10
 `
 
-// ListAuditEvents runs one page of /api/audit (design 8.3). db is a *sql.DB
+// ListAuditEvents runs one page of /api/audit. db is a *sql.DB
 // because a read endpoint has no transaction to share.
 func ListAuditEvents(ctx context.Context, database *sql.DB, filter AuditEventFilter, cursor string) (AuditEventPage, error) {
 	if !filter.Admin && len(filter.OwnerScope) == 0 {
@@ -286,7 +285,7 @@ func ListAuditEvents(ctx context.Context, database *sql.DB, filter AuditEventFil
 	return page, nil
 }
 
-// AccessLogEvent is one row to write to access_log (design.md 8.2), as
+// AccessLogEvent is one row to write to access_log, as
 // internal/audit.AccessWriter batches them. Distinct from AccessLogEntry
 // below (a row read back) so a write-side caller is not tempted to fill in
 // ID or the fields ListAccessLog redacts for an owner-scoped read.
@@ -307,8 +306,8 @@ type AccessLogEvent struct {
 
 // InsertAccessLogBatch writes many access_log rows in one statement. Called
 // only by internal/audit.AccessWriter's background worker, never on the
-// request path directly (design 8.2: "written... through a batching
-// writer"). Empty entries is a no-op, not an error, since a flush timer can
+// request path directly: writes always go through a batching writer.
+// Empty entries is a no-op, not an error, since a flush timer can
 // legitimately fire with nothing queued.
 func InsertAccessLogBatch(ctx context.Context, q Querier, entries []AccessLogEvent) error {
 	if len(entries) == 0 {
@@ -335,10 +334,10 @@ func InsertAccessLogBatch(ctx context.Context, q Querier, entries []AccessLogEve
 	return err
 }
 
-// AccessLogEntry is one row of access_log (design.md 8.2). IP and UserAgent
-// are populated by ListAccessLog only for an admin-scoped read; an
-// owner-scoped read leaves them "" regardless of what the row holds (design
-// 8.3: "ip and user_agent only to admins").
+// AccessLogEntry is one row of access_log. IP and UserAgent are populated
+// by ListAccessLog only for an admin-scoped read; an owner-scoped read
+// leaves them "" regardless of what the row holds — ip and user_agent go
+// only to admins.
 type AccessLogEntry struct {
 	ID         int64
 	At         time.Time
@@ -386,7 +385,7 @@ const listAccessLogQuery = `
 	LIMIT $7
 `
 
-// ListAccessLog runs one page of /api/access (design 8.3).
+// ListAccessLog runs one page of /api/access.
 func ListAccessLog(ctx context.Context, database *sql.DB, filter AccessLogFilter, cursor string) (AccessLogPage, error) {
 	if !filter.Admin && filter.Owner == "" {
 		return AccessLogPage{}, errors.New("db: ListAccessLog requires Owner unless Admin")

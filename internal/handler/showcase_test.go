@@ -21,7 +21,7 @@ import (
 )
 
 // newTestShowcaseHandler builds a ShowcaseHandler whose sessionUser always
-// reports a fake signed-in caller (design.md 7.2: the showcase now lives
+// reports a fake signed-in caller (the showcase now lives
 // behind the base session), so these tests can go on driving the same
 // database/sql/driver fake they always have without also faking the
 // sessions/users join a real session check would run.

@@ -131,9 +131,8 @@ func run() (runErr error) {
 	signingKeys := toAuthSigningKeys(cfg.Session.SigningKeys)
 	log.Printf("session cookie: %s", auth.DescribeSigningKeys(signingKeys))
 	authMW := auth.Middleware(database, signingKeys, cfg.Session.Idle)
-	// auditRecorder persists audit_events (design.md 8.1); accessWriter
-	// batches access_log (design.md 8.2). Both are real, database-backed
-	// sinks as of Phase 4 — see docs/security-review.md.
+	// auditRecorder persists audit_events; accessWriter batches access_log.
+	// Both are real, database-backed sinks — see docs/security-review.md.
 	// accessWriter is closed in applicationResources.close(), which runs
 	// only after runServersWithShutdownHook's http.Server.Shutdown calls
 	// have returned, per its own doc comment's ordering requirement.
@@ -220,8 +219,8 @@ func run() (runErr error) {
 	}, auditRecorder, hosts, abuseLimits)
 
 	// The negative session cache is hosted content's substitute for a
-	// per-request read of the sessions table (design.md 5.1, 6.1): it
-	// refreshes every 60 seconds and the host gate consults the in-memory
+	// per-request read of the sessions table: it refreshes every 60
+	// seconds and the host gate consults the in-memory
 	// snapshot instead. Started after every other dependency exists and
 	// stopped before the database connection closes.
 	negativeSessionCache := auth.NewNegativeSessionCache(database, cfg.Session.Idle)
@@ -290,7 +289,7 @@ func run() (runErr error) {
 	connector.StartSweep(ctx)
 	// Indexed pages carry whatever address SiteLink gives, so the index
 	// follows the cutover; existing documents are reindexed by hand after the
-	// flip (docs/subdomains/migration.md phase 4).
+	// flip.
 	searchWorker, err := search.StartWorker(ctx, database, searchVersions{siteStore}, hosts.SiteLink)
 	if err != nil {
 		return fmt.Errorf("start site search worker: %w", err)
@@ -453,7 +452,7 @@ type applicationResources struct {
 	// loop. Stopped alongside the other workers, before the database
 	// connection closes.
 	sessionCache *auth.NegativeSessionCache
-	// accessWriter batches access_log inserts (design.md 8.2). Closed here,
+	// accessWriter batches access_log inserts. Closed here,
 	// after every worker has stopped and after runServersWithShutdownHook's
 	// http.Server.Shutdown calls have already returned (close runs from a
 	// defer registered before that call, so it always runs after run()

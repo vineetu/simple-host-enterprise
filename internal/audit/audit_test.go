@@ -88,7 +88,7 @@ func TestCoalesceWindowTruncatesToAnAbsoluteBoundary(t *testing.T) {
 	// Two calls straddling the same five-minute boundary, from two
 	// independent goroutines with no shared "first call" reference, must
 	// truncate to the identical instant for audit_bump_state_write's
-	// upsert to coalesce them into one row (design 8.1).
+	// upsert to coalesce them into one row.
 	a := time.Date(2026, 9, 17, 14, 3, 10, 0, time.UTC)
 	b := time.Date(2026, 9, 17, 14, 4, 59, 999000000, time.UTC)
 	wantWindow := time.Date(2026, 9, 17, 14, 0, 0, 0, time.UTC)

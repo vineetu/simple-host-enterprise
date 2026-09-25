@@ -11,16 +11,15 @@ import (
 	db "github.com/vsriram/simple-host/internal/db"
 )
 
-// Asset administration from the dashboard (design.md 14's Phase 3 "an
-// assets list per site"). This is deliberately a base-host,
-// owner-role-gated pair of routes — the same shape collaboration.go and
-// viewers.go already use — rather than the site-facing API in site_api.go:
-// the dashboard is served on the base host, the asset routes live on the
-// owner or restricted-site host, and no route on any host ever emits an
-// Access-Control-* header (design.md 7.4), so a dashboard page cannot call
-// the site-facing API cross-origin at all. This pair answers the same
-// underlying storage and site_assets rows through the owner's existing
-// base-host session instead.
+// Asset administration from the dashboard (an assets list per site). This
+// is deliberately a base-host, owner-role-gated pair of routes — the same
+// shape collaboration.go and viewers.go already use — rather than the
+// site-facing API in site_api.go: the dashboard is served on the base host,
+// the asset routes live on the owner or restricted-site host, and no route
+// on any host ever emits an Access-Control-* header, so a dashboard page
+// cannot call the site-facing API cross-origin at all. This pair answers
+// the same underlying storage and site_assets rows through the owner's
+// existing base-host session instead.
 type assetAdminResponse struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`

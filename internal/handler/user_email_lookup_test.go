@@ -89,7 +89,7 @@ func TestOIDCResolveUserRefusesToGuessWhenAnAddressIsShared(t *testing.T) {
 // newTestAuthHandler builds an AuthHandler with no OIDC provider (these
 // tests exercise resolveUser/createUser directly, never the provider) and
 // the given allowed email domain, which is what gates binding an existing
-// account by email at all (design.md 6.1).
+// account by email at all.
 func newTestAuthHandler(database *sql.DB, allowedDomain string) *AuthHandler {
 	return NewAuthHandler(
 		database, nil,

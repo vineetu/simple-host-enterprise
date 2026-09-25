@@ -66,7 +66,7 @@ func (h *ShowcaseHandler) realSessionUser(r *http.Request) *db.User {
 
 func (h *ShowcaseHandler) page(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	// design.md 7.2: the showcase lives on the base host behind the base
+	// The showcase lives on the base host behind the base
 	// session — there is no more anonymous viewing of anything this server
 	// serves, the showcase included.
 	if h.sessionUser(r) == nil {
@@ -76,9 +76,9 @@ func (h *ShowcaseHandler) page(w http.ResponseWriter, r *http.Request) {
 	hosts := h.hosts
 
 	// Cache-Control: no-store is set once, for every authenticated base-host
-	// response, in SecurityHeaders (design.md 7.4; Phase 2 review finding —
-	// this used to be set here only when a query was present, missing the
-	// plain page view).
+	// response, in SecurityHeaders — this used to be set here only when a
+	// query was present, missing the
+	// plain page view.
 	queryValues := r.URL.Query()["q"]
 	query := ""
 	if len(queryValues) > 0 {
@@ -95,7 +95,7 @@ func (h *ShowcaseHandler) page(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to load sites", http.StatusInternalServerError)
 		return
 	}
-	// design.md 7.2: a restricted site is not public, whatever its own
+	// A restricted site is not public, whatever its own
 	// public flag says. Filtered here, alongside the public-flag check
 	// below, rather than in ListAllSites, which several other unrelated
 	// callers (the admin dashboard, rankings) also use unfiltered.

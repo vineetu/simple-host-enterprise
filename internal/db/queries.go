@@ -154,7 +154,7 @@ func GetSiteState(ctx context.Context, db *sql.DB, username, sitename string) (j
 
 // UpdateSiteState takes a Querier, not a concrete *sql.DB, so a caller that
 // wants the write and its audit_events row in one all-or-nothing commit
-// (design 8.1) can pass a *sql.Tx (site_api.go's PutState does).
+// can pass a *sql.Tx (site_api.go's PutState does).
 func UpdateSiteState(ctx context.Context, db Querier, username, sitename string, state json.RawMessage) error {
 	const query = `
 		UPDATE sites s
@@ -250,7 +250,7 @@ func GetSiteStateVersioned(ctx context.Context, db *sql.DB, username, sitename s
 // ErrVersionConflict if the version moved (caller re-reads for the 409 body).
 // UpdateSiteStateCAS takes a Querier for the same reason UpdateSiteState
 // does: PutStateVersioned runs it inside a *sql.Tx shared with the
-// audit_events row (design 8.1).
+// audit_events row.
 func UpdateSiteStateCAS(ctx context.Context, db Querier, username, sitename string, state json.RawMessage, expectedVersion int64) (int64, error) {
 	const query = `
 		UPDATE sites s

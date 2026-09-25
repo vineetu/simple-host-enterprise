@@ -125,7 +125,7 @@ func TestLoadCompleteConfiguration(t *testing.T) {
 	}
 }
 
-// TestLoadAuditRetention covers design.md 8.2's three retention/visibility
+// TestLoadAuditRetention covers the three retention/visibility
 // settings on their own, independent of Load's much larger required-value
 // set — this is what cmd/server's `simple-host prune` subcommand calls, and
 // it must succeed with none of Load's other environment variables set.
@@ -196,8 +196,8 @@ func TestLoadReportsEveryMissingValue(t *testing.T) {
 }
 
 func TestLoadHasNoAdminAPIKey(t *testing.T) {
-	// ADMIN_API_KEY and the synthetic admin it backed are gone (design.md
-	// 6.2): admin status now follows OIDC claims, and Load must not require
+	// ADMIN_API_KEY and the synthetic admin it backed are gone: admin
+	// status now follows OIDC claims, and Load must not require
 	// or read the old variable at all.
 	completeEnv(t)
 	t.Setenv("ADMIN_API_KEY", "leftover-from-an-old-environment")
@@ -328,8 +328,8 @@ func TestDatabaseDSNFromParts(t *testing.T) {
 	}
 }
 
-// TestDatabaseDSNRefusesKeywordValueForm is the first half of the Phase 5
-// review finding folded into Phase 1: lib/pq accepts a keyword/value DSN
+// TestDatabaseDSNRefusesKeywordValueForm covers a review finding:
+// lib/pq accepts a keyword/value DSN
 // ("host=... sslmode=..." — no "://" anywhere) as well as a URL, but
 // validateDatabaseSSL used to run url.Parse on whatever DB_DSN held
 // regardless of shape. A keyword/value string has no query component for
@@ -480,7 +480,7 @@ func TestLoadParsesReservedLabels(t *testing.T) {
 	})
 }
 
-// TestLoadRefusesWeakDatabaseTLS is design 9.2's one line: verify-full with a
+// TestLoadRefusesWeakDatabaseTLS is the DB TLS rule: verify-full with a
 // root cert, or the process does not start, unless the local-evaluation
 // override is set.
 func TestLoadRefusesWeakDatabaseTLS(t *testing.T) {

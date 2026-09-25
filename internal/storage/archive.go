@@ -26,7 +26,7 @@ import (
 // canonicalises every entry path, refuses anything but regular files and
 // directories, refuses duplicates and file/directory conflicts, bounds the
 // totals, and writes through an *os.Root so nothing can land outside the
-// destination — the same guarantees the site tree on disk used to give.
+// destination.
 
 // Bounds applied when a version archive is unpacked. Deploys are already
 // held to smaller limits by internal/tarball; these exist so a tampered or

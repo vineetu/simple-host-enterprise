@@ -87,13 +87,13 @@ type SiteFiles struct {
 	// looking" check.
 	signingKeys []auth.SigningKey
 	sessionIdle time.Duration
-	// access batches access_log inserts (design.md 8.2) for every hosted-
+	// access batches access_log inserts for every hosted-
 	// content response serveSite produces, including the owner's and
 	// team members' own — the isSelfTraffic exclusion above applies only to the
 	// analytics counters, never to this log. Defaults to nil, in which case
 	// Enqueue is skipped entirely (audit.(*AccessWriter).Enqueue is also
 	// nil-safe, but skipping avoids building an AccessEvent nobody reads
-	// when Phase 4 has not wired a real writer in yet).
+	// when no real writer has been wired in yet).
 	access *audit.AccessWriter
 }
 
@@ -121,8 +121,8 @@ func (s *SiteFiles) WithAccessWriter(access *audit.AccessWriter) *SiteFiles {
 // the decoded URL path the site is mounted at with no trailing slash, for
 // example "/my-site". The request path must begin
 // with prefix followed by "/". userID and sessionID are the host session the
-// gate already authenticated the request against (design.md 8.1's
-// requireHostSession) — recorded on the access_log row this method writes
+// gate already authenticated the request against (requireHostSession) —
+// recorded on the access_log row this method writes
 // for every response, including the owner's and team members' own. Every mounted
 // route requires a host session before reaching here.
 func (s *SiteFiles) serveSite(w http.ResponseWriter, r *http.Request, user, siteName, prefix, userID, sessionID string) {
@@ -200,7 +200,7 @@ func (s *SiteFiles) serveSite(w http.ResponseWriter, r *http.Request, user, site
 	fileServer.ServeHTTP(recorder, r)
 
 	// Every hosted-content response is logged here, including the owner's
-	// and team members' own (design.md 8.2): the isSelfTraffic exclusion above
+	// and team members' own: the isSelfTraffic exclusion above
 	// applies only to the pageview/download analytics counters, never to
 	// this log. Enqueue is best-effort and non-blocking (audit.AccessWriter's
 	// own contract); a nil s.access (no writer configured, or a test using

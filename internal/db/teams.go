@@ -361,8 +361,8 @@ const deleteTeamQuery = `
 // with it through ON DELETE CASCADE.
 //
 // It refuses with ErrTeamHasSites rather than cascading into sites: deleting a
-// namespace must never be a way to delete hosted content, and the site tree on
-// disk is not in this transaction. Returns sql.ErrNoRows when teamID is not a
+// namespace must never be a way to delete hosted content, and site files in the
+// bucket are not in this transaction. Returns sql.ErrNoRows when teamID is not a
 // team. The caller is expected to hold LockTeam in the same transaction so a
 // site cannot be created between the count and the delete.
 func DeleteTeam(ctx context.Context, q Querier, teamID string) error {

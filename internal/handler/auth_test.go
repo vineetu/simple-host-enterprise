@@ -8,8 +8,8 @@ import (
 
 // sanitizeRedirectPath is shared by the post-sign-in redirect (auth.go) and
 // the hand-off's final redirect (handoff.go's redeemHandoffSession) — one
-// validator for both "to" parameters design.md 6.1 describes. This table is
-// the adversarial half: every shape a login-CSRF or open-redirect attempt
+// validator for both "to" parameters. This table is the adversarial half:
+// every shape a login-CSRF or open-redirect attempt
 // against either caller would try, plus the ordinary accepted and rejected
 // shapes the rule states in plain words.
 func TestSanitizeRedirectPath(t *testing.T) {

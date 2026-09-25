@@ -300,7 +300,6 @@ func writeSkillsVersion(w http.ResponseWriter, baseURL string) {
 	// deterministic for a fixed binary). The agent verifies the downloaded zip
 	// against this before extracting — an integrity checksum, not a signature.
 	// Do NOT cache: the per-request rebuild is what keeps them in lockstep.
-	// See docs/secure-skill-install/design.md.
 	data, err := buildSkillsZip(baseURL)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)

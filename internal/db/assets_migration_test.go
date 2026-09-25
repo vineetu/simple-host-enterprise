@@ -49,9 +49,9 @@ func TestSiteAssetsMigrationShape(t *testing.T) {
 		t.Fatal("site_assets schema and its grant are not enclosed by the migration transaction")
 	}
 
-	// Least privilege (design.md 9.3, and this migration's own comment):
-	// the app role must never get DELETE on this table, only SELECT/INSERT/
-	// UPDATE — deletion is soft (an UPDATE of deleted_at).
+	// Least privilege, per this migration's own comment: the app role must
+	// never get DELETE on this table, only SELECT/INSERT/UPDATE — deletion
+	// is soft (an UPDATE of deleted_at).
 	if strings.Contains(migration, "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE site_assets") {
 		t.Fatal("site_assets must not grant DELETE to simplehost_app")
 	}

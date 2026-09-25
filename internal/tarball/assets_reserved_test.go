@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestExtractRefusesReservedAssetsPath covers design.md 7.3: an archive
+// TestExtractRefusesReservedAssetsPath covers the rule that an archive
 // must not be able to shadow the /{site}/_assets/{id} route with content
 // of its own, at the top level or nested under it, as a file or a
 // directory, in either archive format.

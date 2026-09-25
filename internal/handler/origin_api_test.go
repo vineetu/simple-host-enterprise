@@ -65,7 +65,7 @@ func TestManagementWritesRequireOriginOnCookiePath(t *testing.T) {
 			switch test.credential {
 			case cookie, adminCookie:
 				// Both cases exercise the same cookie mechanism now: there
-				// is one browser session cookie (design.md 6.1), not a
+				// is one browser session cookie, not a
 				// separate admin cookie.
 				request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session-value"})
 			case apiKey:

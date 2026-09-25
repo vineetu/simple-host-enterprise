@@ -1,4 +1,4 @@
--- Restricted-site viewing and the session hand-off (design.md 5.2a, 6.1, 7.2).
+-- Restricted-site viewing and the session hand-off.
 --
 -- site_viewers is the per-site allow-list: no rows means "any signed-in
 -- person may view," one or more rows means only those principals (a person
@@ -8,15 +8,13 @@
 -- has no column for that, the application derives it from row presence
 -- alone, so the two can never disagree.
 --
--- state_write_mode governs the site-facing API's writerAllowed rule
--- (design.md 7.3, built in Phase 3): 'anyone' is today's behaviour, minus
--- anonymous access, and 'editors' restricts writes to the owner, an
--- owner-team member, or an editor. Added here, a phase early, because it is
--- one column on an existing table and the dashboard's viewer-list page is a
--- natural place to expose it alongside the viewer list itself.
+-- state_write_mode governed the site-facing API's writerAllowed rule:
+-- 'anyone' was the default, minus anonymous access, and 'editors'
+-- restricted writes to the owner, an owner-team member, or an editor.
+-- Migration 0033 later dropped this column along with editor grants.
 --
--- handoff_codes backs the one-time hand-off (design.md 6.1): a code minted
--- by GET <base>/auth/handoff and redeemed exactly once by
+-- handoff_codes backs the one-time hand-off: a code minted by
+-- GET <base>/auth/handoff and redeemed exactly once by
 -- <label>.<base>/auth/session, bound to the session, the target host, and a
 -- hash of the nonce cookie set on that host. Single use is enforced by
 -- redeemed_at; the 60-second window is enforced by created_at at redemption
@@ -57,7 +55,7 @@ CREATE TABLE IF NOT EXISTS handoff_codes (
 
 -- Codes outlive their 60-second usefulness by design (an audit trail of the
 -- attempt), so nothing here deletes them; a later retention pass can prune
--- rows older than a day the same way audit_events will be pruned (Phase 4).
+-- rows older than a day the same way audit_events will be pruned.
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE site_viewers TO simplehost_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE handoff_codes TO simplehost_app;

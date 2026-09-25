@@ -13,7 +13,7 @@
 //     version-check and integrity verification.
 //
 // Install is agent-driven and pure HTTPS — no git, no npm, no registry,
-// no install script. See docs/secure-skill-install/design.md.
+// no install script.
 package plugin
 
 import "embed"

@@ -21,7 +21,7 @@ import (
 // newHostGateTestHandler builds a mux that stands in for the real one: the
 // real file handler, the real health routes, and recognisable stubs for the
 // control-plane routes the gate must distinguish. State and assets are no
-// longer mux routes at all (design.md 7.3): the gate dispatches those
+// longer mux routes at all: the gate dispatches those
 // directly to a fake siteAPIRoutes (see testHostGate), never through this
 // mux. It is wrapped in a gate whose siteForServing/viewerAllowed always
 // admit an unrestricted site to any signed-in caller, which is what every
@@ -243,7 +243,7 @@ func TestHostGateRouting(t *testing.T) {
 		}
 	}
 	// Base host: the site-facing API shape is refused outright — it is not a
-	// mux route on the base host at all any more (design.md 7.3), so these
+	// mux route on the base host at all any more, so these
 	// simply find no route to answer them.
 	for _, path := range []string{"/api/site/state", "/api/site/state/versioned", "/api/sites/my-site/state", "/api/sites/alice/my-site/state"} {
 		response := gateRequest(handler, http.MethodGet, "foo.example", path)
@@ -300,8 +300,8 @@ func TestHostGateRouting(t *testing.T) {
 	}
 	// Owner host: probes still answer with no session at all, and every
 	// owner-host response carries the CORP and Cache-Control headers
-	// regardless of the path (design.md 7.4; the latter is a Phase 2
-	// review finding — hosted content never got Cache-Control at all).
+	// regardless of the path (the latter was added later, a review
+	// finding — hosted content never got Cache-Control at all).
 	for _, path := range []string{"/healthz", "/readyz"} {
 		response = gateRequest(handler, http.MethodGet, "alice.foo.example", path)
 		if response.Code != http.StatusOK {
@@ -422,7 +422,7 @@ func TestHostGateSiteAPISessionBoundToHost(t *testing.T) {
 }
 
 // A site that fails viewerAllowed is 404, not 403: its existence must not be
-// confirmed to somebody it refuses (design.md 7.2).
+// confirmed to somebody it refuses.
 func TestHostGateViewerNotAllowedIs404(t *testing.T) {
 	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "private", "private-index")
@@ -476,8 +476,8 @@ func TestHostGateServesRestrictedSiteHost(t *testing.T) {
 	}
 }
 
-// A host session cookie is bound to the host it was minted for (design.md
-// 6.1's hardening over "same signed payload" — see
+// A host session cookie is bound to the host it was minted for (a
+// hardening over "same signed payload" — see
 // docs/security-review.md's deviation record): a cookie
 // alice's host handed out must not authenticate a request on bob's host,
 // even though both are ordinary owner hosts under the same base domain and
@@ -516,10 +516,10 @@ func TestHostGateSessionCookieBoundToItsOwnHost(t *testing.T) {
 	}
 }
 
-// Phase 2 review finding: hosted-content auth never touched last_seen_at,
+// A review finding: hosted-content auth never touched last_seen_at,
 // so an actively-browsing viewer's session went idle and was killed by
-// SESSION_IDLE even while they kept viewing (design.md 6.1: "at most once
-// per five minutes from hosted content"). requireHostSession must call
+// SESSION_IDLE even while they kept viewing (touchHostSession runs at most
+// once per five minutes from hosted content). requireHostSession must call
 // touchHostSession on every successful auth. touchHostSession's own
 // signature (no return value) is what makes "never block serving on its
 // error" structural rather than a runtime check: NewHostGate's default
@@ -542,7 +542,7 @@ func TestHostGateTouchesSessionOnSuccessfulHostedAuth(t *testing.T) {
 	}
 }
 
-// design.md 7.4: a sibling-origin subresource load (Sec-Fetch-Site same-site
+// A sibling-origin subresource load (Sec-Fetch-Site same-site
 // or cross-site, Sec-Fetch-Dest anything but document) is refused even
 // though the request otherwise carries no credential problem; a navigation
 // (Sec-Fetch-Dest document) is let through to the ordinary checks.
@@ -791,7 +791,7 @@ func TestParseAssetServePath(t *testing.T) {
 	}
 }
 
-// Review finding: a restricted site is root-served (design.md 5.2a), so its
+// Review finding: a restricted site is root-served, so its
 // own pages carry no "/<site>/" path segment for the owner-host rule to
 // find — comparing the Referer's first path segment against the site name
 // there always fails, silently marking every legitimate restricted-site
@@ -844,7 +844,7 @@ func apiKeyGateRequest(method, host, target string) *http.Request {
 }
 
 // The route auth matrix (session, key, none), on both an owner host and a
-// restricted site's own host (design.md 7.3's explicit ask: "restricted
+// restricted site's own host (the explicit ask was "restricted
 // sites get working state routes on their own host").
 func TestHostGateSiteAPIAuthMatrix(t *testing.T) {
 	store := newTestStore(t)
@@ -946,7 +946,7 @@ func TestHostGateSiteAPIWriterAllowedTable(t *testing.T) {
 }
 
 // Origin is required only on a non-safe method, and only when the caller is
-// session-authenticated (design.md 7.3); it must equal the addressed host's
+// session-authenticated; it must equal the addressed host's
 // own origin, not the base origin, on both an owner host and a restricted
 // site's own host (origin.go's expectedFor).
 func TestHostGateSiteAPIOriginCheckedOnNonSafeMethodsOnly(t *testing.T) {

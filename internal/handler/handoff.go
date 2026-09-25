@@ -18,7 +18,7 @@ import (
 
 // handoffNonceCookie is set on the owner or restricted-site host itself, at
 // the moment it first redirects an unauthenticated navigation to the base
-// host (design.md 6.1). Its value is never sent anywhere except back to the
+// host. Its value is never sent anywhere except back to the
 // same host's own /auth/session, which is what stops a login CSRF: an
 // attacker who starts a hand-off under their own session cannot make a
 // colleague's browser redeem the resulting code, because the colleague's
@@ -26,8 +26,8 @@ import (
 const handoffNonceCookie = "__Host-sh_handoff"
 const handoffNonceMaxAge = 120 // seconds
 
-// HandoffHandler serves the base-host leg of the session hand-off
-// (design.md 6.1): GET /auth/handoff mints a one-time code for a validated
+// HandoffHandler serves the base-host leg of the session hand-off:
+// GET /auth/handoff mints a one-time code for a validated
 // target host, using the caller's existing base session. The target host's
 // own leg, redeemHandoffSession, is called directly by the host gate (it is
 // not a normal mux route: every owner and restricted-site host must answer
@@ -101,7 +101,7 @@ func (h *HandoffHandler) handoff(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, target.String(), http.StatusFound)
 }
 
-// validateHandoffTarget applies design.md 6.1's rule for `to`: scheme https,
+// validateHandoffTarget applies the rule for `to`: scheme https,
 // host classifies as an owner or restricted-site host of this base, no
 // userinfo, no fragment. It returns the target host (as Classify normalized
 // it, with the base suffix restored) and the path+query to redirect to
@@ -132,7 +132,7 @@ func (h *HandoffHandler) validateHandoffTarget(to string) (targetHost, targetPat
 	return normalizeHost(parsed.Host), path, true
 }
 
-// redeemHandoffSession is the target host's own leg (design.md 6.1): it
+// redeemHandoffSession is the target host's own leg: it
 // requires the __Host-sh_handoff cookie this host itself set, redeems the
 // code only if the request's own host matches what the code was minted for
 // and sha256 of the cookie matches the nonce hash the code carries, mints
@@ -212,8 +212,8 @@ func (h *HandoffHandler) redeemHandoffSession(w http.ResponseWriter, r *http.Req
 	http.Redirect(w, r, target, http.StatusFound)
 }
 
-// beginHandoff is the owner/restricted-site host's own first hop
-// (design.md 6.1): it sets the nonce cookie on this host and redirects the
+// beginHandoff is the owner/restricted-site host's own first hop: it
+// sets the nonce cookie on this host and redirects the
 // browser to <base>/auth/handoff, naming this exact request's URL (which
 // /auth/session will send the browser back to, path-only, once the round
 // trip completes) as `to`. Called by the host gate when a navigation
@@ -258,7 +258,7 @@ func randomURLSafeToken(n int) (string, error) {
 }
 
 // wantsNavigation reports whether a request is a browser navigation rather
-// than a script's fetch or an agent's plain request: design.md 7.2's rule
+// than a script's fetch or an agent's plain request: the rule
 // for whether a missing host session gets the hand-off redirect (a
 // navigation) or a 401 (anything else, so a page's own fetch calls fail
 // fast and predictably instead of following a redirect chain a script was

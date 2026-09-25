@@ -87,7 +87,7 @@ func TestVerifySessionCookieRejectsMalformedValue(t *testing.T) {
 	}
 }
 
-// TestKeyRotationShape exercises design.md 6.1's rotation sequence: add the
+// TestKeyRotationShape exercises the rotation sequence: add the
 // new key second (both present, old still signs), swap the order (new
 // signs, both still verify), remove the old key.
 func TestKeyRotationShape(t *testing.T) {

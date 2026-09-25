@@ -7,9 +7,9 @@ import (
 	"time"
 )
 
-// Session is one row of the sessions table (design.md 6.1): one per sign-in,
-// shared by every host cookie minted from it. Revoking it, or disabling the
-// owning user, signs the person out everywhere within the cache window.
+// Session is one row of the sessions table: one per sign-in, shared by
+// every host cookie minted from it. Revoking it, or disabling the owning
+// user, signs the person out everywhere within the cache window.
 type Session struct {
 	ID         string
 	UserID     string
@@ -92,7 +92,7 @@ func GetValidSession(ctx context.Context, db *sql.DB, sessionID string, idleTime
 // touchSessionInterval bounds how often TouchSession actually writes: the
 // serving path calls it on every authenticated control-plane request, and a
 // write every request would put every page view a write lock away from a
-// slow session table. See design.md 6.1's "at most once per five minutes."
+// slow session table, so writes happen at most once per five minutes.
 const touchSessionInterval = 5 * time.Minute
 
 // TouchSession updates last_seen_at, but only if it has not been touched
@@ -168,10 +168,10 @@ const listBlockedSessionIDsQuery = `
 
 // ListBlockedSessionIDs returns every session id that must be treated as
 // invalid on the hosted-content path: revoked, expired, idle past
-// idleTimeout, or belonging to a disabled user. This is design.md 6.1's
-// negative cache source: hosted content verifies the signed cookie and
-// consults an in-memory set built from this query every 60 seconds, rather
-// than reading the sessions table on every page view or asset request.
+// idleTimeout, or belonging to a disabled user. This is the negative cache
+// source: hosted content verifies the signed cookie and consults an
+// in-memory set built from this query every 60 seconds, rather than
+// reading the sessions table on every page view or asset request.
 func ListBlockedSessionIDs(ctx context.Context, db *sql.DB, idleTimeout time.Duration) ([]string, error) {
 	rows, err := db.QueryContext(ctx, listBlockedSessionIDsQuery, idleTimeout.Seconds())
 	if err != nil {
@@ -189,10 +189,10 @@ func ListBlockedSessionIDs(ctx context.Context, db *sql.DB, idleTimeout time.Dur
 	return ids, rows.Err()
 }
 
-// RevokeAllSessionsForUser revokes every live session for a user: called on
-// sign-out-everywhere and on offboarding (design.md 6.4). Runs against the
-// given Querier so a caller can fold it into the same transaction as
-// disabling the account.
+// RevokeAllSessionsForUser revokes every live session for a user: called
+// on sign-out-everywhere and on offboarding. Runs against the given
+// Querier so a caller can fold it into the same transaction as disabling
+// the account.
 func RevokeAllSessionsForUser(ctx context.Context, q Querier, userID string) error {
 	const query = `UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`
 	_, err := q.ExecContext(ctx, query, userID)

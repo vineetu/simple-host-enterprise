@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Asset is one row of site_assets (design.md 7.3, migration 0026): the
+// Asset is one row of site_assets (migration 0026): the
 // metadata for a file uploaded to a site's asset store. The bytes
 // themselves are the bucket object sites/<site-id>/assets/<ID>
 // (internal/storage); this row is what a listing, the audit trail, and the
@@ -66,7 +66,7 @@ func GetAsset(ctx context.Context, q Querier, siteID, id string) (Asset, error) 
 }
 
 // ListAssets returns a site's live assets, newest first, for the assets
-// list API (design.md 7.3: GET /api/sites/{site}/assets).
+// list API (GET /api/sites/{site}/assets).
 func ListAssets(ctx context.Context, q Querier, siteID string) ([]Asset, error) {
 	const query = `
 		SELECT id, site_id, name, content_type, size, sha256, created_by, created_at, deleted_at
@@ -116,9 +116,9 @@ func SoftDeleteAsset(ctx context.Context, q Querier, siteID, id string) error {
 }
 
 // AssetUsage is a site's current live-asset footprint: how many rows count
-// against MaxSiteCount and how many bytes count against MaxSiteBytes
-// (design.md 7.3's per-site limits). This table is the only record of it;
-// CreateAssetWithinQuota checks it under a per-site lock.
+// against MaxSiteCount and how many bytes count against MaxSiteBytes.
+// This table is the only record of it; CreateAssetWithinQuota checks it
+// under a per-site lock.
 type AssetUsage struct {
 	Count int64
 	Bytes int64

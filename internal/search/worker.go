@@ -181,7 +181,7 @@ type workerDependencies struct {
 }
 
 // Worker is a single sequential reconciliation loop. Stop is idempotent and
-// Wait lets application shutdown join the loop before its DB and disk
+// Wait lets application shutdown join the loop before its database and storage
 // dependencies are closed.
 type Worker struct {
 	cancel   context.CancelFunc

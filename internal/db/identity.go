@@ -29,7 +29,7 @@ func GetUserByOIDCSub(ctx context.Context, db *sql.DB, sub string) (User, error)
 // racing the first either loses (sql.ErrNoRows: fall back to re-reading by
 // sub, which the racer's own write just satisfied) or the row was already
 // somebody else's binding target, which the caller must not silently
-// overwrite either way — design.md 6.1's "and only once."
+// overwrite either way: binding happens only once.
 func BindOIDCSub(ctx context.Context, db *sql.DB, userID, sub string) error {
 	const query = `UPDATE users SET oidc_sub = $2 WHERE id = $1 AND oidc_sub IS NULL`
 	result, err := db.ExecContext(ctx, query, userID, sub)
@@ -63,8 +63,8 @@ func CreateOIDCUser(ctx context.Context, db *sql.DB, username, sub, email string
 }
 
 // RefreshAdminStatus sets is_admin from the outcome of the current sign-in's
-// claim check. design.md 6.2: "refreshed at every sign-in from the
-// provider, never edited by hand" — so a person removed from ADMIN_EMAILS
+// claim check: admin status is refreshed at every sign-in from the
+// provider, never edited by hand — so a person removed from ADMIN_EMAILS
 // loses admin on their next sign-in, without anyone touching their row.
 func RefreshAdminStatus(ctx context.Context, db *sql.DB, userID string, isAdmin bool) error {
 	const query = `UPDATE users SET is_admin = $2 WHERE id = $1`
@@ -73,7 +73,7 @@ func RefreshAdminStatus(ctx context.Context, db *sql.DB, userID string, isAdmin 
 }
 
 // ErrAccountDisabled is returned by sign-in resolution when the matched
-// account has been disabled by an admin (design.md 6.4). The provider may
+// account has been disabled by an admin. The provider may
 // still be willing to authenticate the person; this application refuses
 // regardless.
 var ErrAccountDisabled = errors.New("account is disabled")
@@ -111,8 +111,8 @@ func IsUserDisabled(ctx context.Context, db *sql.DB, userID string) (bool, error
 	return disabled, err
 }
 
-// SetUserDisabled sets or clears disabled_at (design.md 6.4). Disabling also
-// revokes every session, API key and connected app in the same transaction, so the
+// SetUserDisabled sets or clears disabled_at. Disabling also revokes every
+// session, API key and connected app in the same transaction, so the
 // takedown is atomic: a request already in flight when this commits either
 // sees the old, valid credential (before commit) or a revoked one (after),
 // never a disabled account with a still-live session.

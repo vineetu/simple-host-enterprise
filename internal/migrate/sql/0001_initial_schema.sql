@@ -1,5 +1,5 @@
 -- The tables every later migration alters. The original instance created these
--- by hand from its design document; this file is that DDL as the code reads it
+-- by hand; this file is that DDL as the code reads it
 -- (plaintext api_key, no S3 columns beyond the version prefix the code still
 -- carries), so a fresh database and the migration chain agree.
 

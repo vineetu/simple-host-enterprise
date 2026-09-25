@@ -79,9 +79,9 @@ const publicSiteSearchQuery = `
 			ON live_site.id = document.site_id
 			AND live_site.public = true
 			AND live_site.active_version = document.version_number
-			-- A restricted site is not public (design.md 5.2a, 7.2), whatever
-			-- its own public flag says: search must not surface it to anyone
-			-- who is not already on its viewer list.
+			-- A restricted site is not public, whatever its own public flag
+			-- says: search must not surface it to anyone who is not
+			-- already on its viewer list.
 			AND NOT EXISTS (SELECT 1 FROM site_viewers sv WHERE sv.site_id = live_site.id)
 		CROSS JOIN parsed_input
 		WHERE document.search_vector @@ parsed_input.parsed_query

@@ -161,7 +161,7 @@ func TestOwnerHostRootDoesNotEnumerateUsersWithoutSession(t *testing.T) {
 }
 
 // Every response past the session check is written to the access log, the
-// way every other hosted-content response is (design.md 8.2). A page that
+// way every other hosted-content response is. A page that
 // discloses one person's site list to a named caller is exactly what the
 // audit trail exists to record.
 func TestOwnerHostRootIsAccessLogged(t *testing.T) {

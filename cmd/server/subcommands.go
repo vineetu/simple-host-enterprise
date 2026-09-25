@@ -108,7 +108,7 @@ func runMigrate(args []string) error {
 	}
 
 	// The application role's grants come from a migration, but its password
-	// never does (design 9.3): set it every run, applied migrations or not,
+	// never does: set it every run, applied migrations or not,
 	// so a rotated DB_APP_PASSWORD takes effect the next time migrate runs
 	// without needing a schema change to carry it.
 	appPassword, err := config.LoadAppRolePassword()
@@ -385,7 +385,7 @@ func openDatabaseAndObjects(cfg config.Config) (*sql.DB, *storage.S3Objects, err
 }
 
 // runPrune drops (or, under -dry-run, lists) expired audit_events and
-// access_log partitions: design 9.3 gives the application role no DELETE on
+// access_log partitions: the application role has no DELETE on
 // either table, so retention has to run as its own subcommand under the
 // owning credential (the same DSN `migrate` connects with — see
 // config.LoadDatabase), never from the server process. This is what

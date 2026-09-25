@@ -11,12 +11,12 @@ import (
 	"github.com/vsriram/simple-host/internal/db"
 )
 
-// NegativeSessionCacheInterval is the refresh period design.md 5.1 and 6.1
-// specify: "the cache window is 60 seconds."
+// NegativeSessionCacheInterval is the refresh period: the cache window is
+// 60 seconds.
 const NegativeSessionCacheInterval = 60 * time.Second
 
 // NegativeSessionCache is the hosted-content path's substitute for a
-// per-request database read (design.md 5.1): a background goroutine loads
+// per-request database read: a background goroutine loads
 // the set of session ids that must be treated as invalid (revoked, expired,
 // idle, or belonging to a disabled user) every NegativeSessionCacheInterval,
 // and VerifyHostedSession consults the in-memory snapshot instead of the

@@ -59,7 +59,7 @@ type ownerIndexEntry struct {
 // The owner sees everything they have published. Everyone else sees only the
 // sites the owner marked public, and never a restricted one: a restricted
 // site's whole point is that its existence is not discoverable from anywhere
-// except its own host, which checks the viewer list (design.md 5.2a). A site
+// except its own host, which checks the viewer list. A site
 // with no active version is listed for nobody — there is nothing to link to.
 func ownerIndexVisible(owner string, sites []db.Site, restricted map[string]bool, isOwner bool, hosts HostModel) []ownerIndexEntry {
 	entries := make([]ownerIndexEntry, 0, len(sites))
@@ -107,7 +107,7 @@ func (g *hostGate) serveOwnerIndex(w http.ResponseWriter, r *http.Request, label
 		return
 	}
 	// Every response past the session check is logged, the same way every
-	// hosted-content response is (design.md 8.2, serve.go). This page
+	// hosted-content response is (see serve.go). This page
 	// discloses one person's site list to a named caller, so it is exactly
 	// the kind of access the audit trail exists to record — including the
 	// refusals, which is why status and bytes are captured and written on

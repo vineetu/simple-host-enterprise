@@ -14,8 +14,8 @@ import (
 )
 
 // dashboardHeadHTML reuses the admin dashboard's own head and CSS block
-// (design.md 14, Phase 1: "match the existing admin/dashboard style"),
-// retitled. Sharing the constant, rather than a second copy of ~350 lines of
+// (it matches the existing admin/dashboard style), retitled. Sharing the
+// constant, rather than a second copy of ~350 lines of
 // CSS, is what keeps the two pages from drifting apart in appearance.
 var dashboardHeadHTML = strings.Replace(adminHeadHTML, "Simple Host · Admin", "Simple Host · Dashboard", 1)
 
@@ -148,7 +148,7 @@ func adminBadge(isAdmin bool) string {
 // optionalUser resolves the session cookie without requiring one — the
 // dashboard renders a sign-in prompt rather than a 401 when there is none.
 // It intentionally does not accept X-API-Key: minting a key requires a
-// session (design.md 6.3), so an agent presenting a key here should see the
+// session, so an agent presenting a key here should see the
 // sign-in prompt, not a keys page it cannot act on.
 func (h *DashboardHandler) optionalUser(r *http.Request) *db.User {
 	c, err := r.Cookie(auth.SessionCookieName)
@@ -229,11 +229,10 @@ const dashboardScript = `<script>
 // dashboardSitesScript renders the signed-in person's accessible sites and,
 // for a site they own or belong to the owning team of (requireOwnerRole's
 // gate), an access-level control, a viewer list and an asset list, each
-// backed by the existing collaboration API
-// (design.md 14, Phase 3: "reuse the share dialog pattern" — the pattern
-// reused here is fetch-driven panels against the same endpoints the share
-// dialog itself calls, not the dialog markup verbatim, since these live
-// inline per site row rather than in one global modal).
+// backed by the existing collaboration API — fetch-driven panels against
+// the same endpoints the share dialog itself calls, not the dialog markup
+// verbatim, since these live inline per site row rather than in one global
+// modal.
 //
 // Every fetch to a site-management endpoint carries
 // X-Simple-Host-Client: control-ui, which is what exempts a browser

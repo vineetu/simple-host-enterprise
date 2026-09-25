@@ -30,7 +30,7 @@ import (
 const oauthStateCookie = "__Host-sh_oauth"
 const oauthStateMaxAge = 10 * 60 // 10 minutes
 
-// OIDCClaimConfig is the claim-mapping half of design.md 6.1's OIDC_*
+// OIDCClaimConfig is the claim-mapping half of the OIDC_*
 // configuration — everything AuthHandler needs beyond the oidc.Provider
 // itself. Mirrors config.OIDCConfig; the handler package does not import
 // internal/config, the same convention internal/storage's EnvelopeKey
@@ -129,10 +129,9 @@ func isEntraIssuer(issuer string) bool {
 }
 
 // AuthHandler serves sign-in, callback, sign-out and the sessions page on
-// the base host (design.md 6.1). There is no equivalent on an owner host in
-// this phase: the hand-off that gives an owner host its own session cookie
-// is design.md 6.1's own "hand-off to an owner host" section, explicitly
-// deferred to Phase 2 (handoff.md's Phase 1 row).
+// the base host. There is no equivalent on an owner host: the hand-off that
+// gives an owner host its own session cookie is a separate mechanism,
+// implemented in handoff.go.
 type AuthHandler struct {
 	database     *sql.DB
 	provider     *oidc.Provider
@@ -186,8 +185,8 @@ func (h *AuthHandler) Register(mux *http.ServeMux, authMiddleware func(http.Hand
 }
 
 // requireSessionAuth rejects a request authenticated with an API key rather
-// than a browser session. Design.md 6.3 scopes /api/keys to "session
-// required"; the same reasoning applies to sign-out and session management —
+// than a browser session. /api/keys is scoped to "session required" for the
+// same reason; that reasoning applies equally to sign-out and session management —
 // an agent holding one key must not be able to sign out or revoke sessions
 // on the human's behalf. Must run after authMiddleware.
 func requireSessionAuth(next http.Handler) http.Handler {
@@ -382,11 +381,11 @@ func (h *AuthHandler) signInFailed(r *http.Request, reason, email string) {
 	h.audit.Record(r.Context(), audit.Event{Action: "sign_in_failed", Detail: email, Extra: map[string]any{"reason": reason}})
 }
 
-// resolveUser finds or creates the account this sign-in belongs to, per
-// design.md 6.1: by oidc_sub first, then by email but only inside an allowed
+// resolveUser finds or creates the account this sign-in belongs to: by
+// oidc_sub first, then by email but only inside an allowed
 // domain and only once, then by creating a new person. It also refreshes
-// is_admin on every sign-in (design.md 6.2) and refuses a disabled account
-// (design.md 6.4) regardless of which path found it.
+// is_admin on every sign-in and refuses a disabled account
+// regardless of which path found it.
 func (h *AuthHandler) resolveUser(ctx context.Context, sub, email, usernameHint string, isAdmin bool) (db.User, string, error) {
 	user, err := db.GetUserByOIDCSub(ctx, h.database, sub)
 	if err == nil {
@@ -397,8 +396,8 @@ func (h *AuthHandler) resolveUser(ctx context.Context, sub, email, usernameHint 
 	}
 
 	// Not bound yet. Try binding an existing account by email, but only
-	// inside an allowed domain — design.md 6.1: "without the list, an
-	// existing row is never claimed by email." An empty AllowedEmailDomains
+	// inside an allowed domain: without the list, an existing row is never
+	// claimed by email. An empty AllowedEmailDomains
 	// list therefore skips this branch entirely rather than claiming an
 	// arbitrary account by address alone.
 	if len(h.claims.AllowedEmailDomains) > 0 {
@@ -452,8 +451,8 @@ func (h *AuthHandler) createUser(ctx context.Context, sub, email, usernameHint s
 		return db.User{}, "", errors.New("could not derive a valid username from the sign-in email")
 	}
 
-	// A derived name may be unusable in two different ways: reserved (design
-	// 6.1's "on collision, append a short suffix and tell the person" — an
+	// A derived name may be unusable in two different ways: reserved (the
+	// rule is to append a short suffix and tell the person on collision — an
 	// admin's own address is very often "admin@...", which is exactly
 	// reservedLabels["admin"]) or actually malformed (not a valid DNS label
 	// at all, which a numeric suffix cannot fix). Only the first is worth
@@ -594,8 +593,8 @@ func writeAuthError(w http.ResponseWriter, status int, message string) {
 </main></body></html>`, html.EscapeString(message))
 }
 
-// sanitizeRedirectPath is the "to" validation design.md 6.1 specifies,
-// shared by the post-sign-in redirect here and by the hand-off's own final
+// sanitizeRedirectPath is the "to" validation shared by the post-sign-in
+// redirect here and by the hand-off's own final
 // redirect (handoff.go's redeemHandoffSession, called after redeeming the
 // one-time code): must start with a single "/", must not start with "//" or
 // "/\\", must contain no backslash, no scheme, no host. Anything else

@@ -18,7 +18,7 @@ import (
 	"github.com/vsriram/simple-host/internal/storage"
 )
 
-// SiteAPIHandler serves design.md 7.3's site-facing API: state and assets,
+// SiteAPIHandler serves the site-facing API: state and assets,
 // reached only through the host gate on an owner or restricted-site host.
 // The gate has already resolved which site is being addressed (from the
 // host label plus the request path — never a Referer, which this package no
@@ -43,7 +43,7 @@ type SiteAPIHandler struct {
 }
 
 // NewSiteAPIHandler constructs the handler. recorder may be audit.NoOp{}
-// (main.go's current default; a real DBRecorder is Phase 4's wiring) —
+// (main.go's current default; a real DBRecorder is wired in separately) —
 // every write here calls Record regardless, so the audit trail activates
 // the moment main.go swaps the recorder, with no change here.
 func NewSiteAPIHandler(database *sql.DB, store *storage.Store, assetLimits storage.AssetLimits, recorder audit.Recorder, hosts HostModel, limits ...*AbuseLimits) *SiteAPIHandler {
@@ -63,7 +63,7 @@ func NewSiteAPIHandler(database *sql.DB, store *storage.Store, assetLimits stora
 
 // siteAPICall is what the host gate has already established before calling
 // into any handler method: which site, which actor, and the via_site claim
-// design.md 7.3's audit paragraph asks every state and asset write to
+// every state and asset write is asked to
 // carry. ActorKind and KeyID mirror audit.Event's own fields exactly.
 type siteAPICall struct {
 	Owner      string
@@ -85,7 +85,7 @@ type siteAPICall struct {
 	// fetch, not a navigation) and the Referer's first path segment, when
 	// present, agrees with ViaSiteName. A false does not mean the claim is
 	// wrong — most clients send neither header — only that it was not
-	// independently corroborated (design.md 7.3).
+	// independently corroborated.
 	ViaSiteObserved bool
 }
 
@@ -95,14 +95,14 @@ type siteAPICall struct {
 // URL in this file correctly keys on but which fails outright as a uuid
 // literal. Resolving it here (a live bug found and fixed in this pass: see
 // docs/security-review.md) is what lets a non-admin owner's
-// own GET /api/audit scope (design 8.3, matched against owner_id) ever see
+// own GET /api/audit scope (matched against owner_id) ever see
 // their own site's state/asset writes at all — a NULL owner_id would be
 // invisible to that scope regardless of any site_id filter also given.
 // q is the same Querier the caller is about to write through — h.database
 // for a caller with no transaction of its own, or the open *sql.Tx for one
 // of this file's four write methods (PutState, PutStateVersioned,
 // CreateAsset, DeleteAsset), all of which now build this event and record
-// it inside the same transaction as their own write (design 8.1). Passing
+// it inside the same transaction as their own write. Passing
 // h.database here instead, while a transaction on that same *sql.DB is
 // open and unfinished, is not just wasteful: with a small connection pool
 // (this package's own tests run MaxOpenConns(1)) it deadlocks outright,
@@ -144,7 +144,7 @@ func (h *SiteAPIHandler) resolveOwnerID(ctx context.Context, q db.Querier, usern
 
 // siteURL returns the address this call's asset routes are reachable at:
 // the short owner-host address, or the restricted site's own root, per
-// design.md 7.3's URL in the {id, url} create response.
+// the URL in the {id, url} create response.
 func (h *SiteAPIHandler) siteURL(call siteAPICall) string {
 	return h.hosts.SiteURL(call.Owner, call.SiteName, call.Restricted)
 }
@@ -201,7 +201,7 @@ func (h *SiteAPIHandler) PutState(w http.ResponseWriter, r *http.Request, call s
 	}
 	state := json.RawMessage(body)
 
-	// design 8.1: "a mutation without its audit row cannot commit." The
+	// A mutation without its audit row must not commit. The
 	// write and its audit_events row share one transaction so a failure
 	// recording the audit row rolls the state write back with it, rather
 	// than leaving a write with no trail (or vice versa).
@@ -374,7 +374,7 @@ func (h *SiteAPIHandler) markStateUsage(siteID, username, siteName string, versi
 	})
 }
 
-// createAssetResponse is design.md 7.3's POST response shape.
+// createAssetResponse is the POST response shape.
 type createAssetResponse struct {
 	ID  string `json:"id"`
 	URL string `json:"url"`
@@ -490,7 +490,7 @@ func (h *SiteAPIHandler) CreateAsset(w http.ResponseWriter, r *http.Request, cal
 
 	// The object is uploaded before this transaction, under a fresh id
 	// nothing refers to yet. The row and its audit_events row commit
-	// together (design 8.1). If the transaction is known not to have
+	// together. If the transaction is known not to have
 	// committed, the object is deleted again; after an ambiguous commit it
 	// is left, since the row may exist.
 	keepObject := false
@@ -629,7 +629,7 @@ func retireAssetObject(ctx context.Context, tx *sql.Tx, siteID, id string) error
 
 // ServeAsset answers GET /{site}/_assets/{id}[/{name}] (or its restricted-
 // host root-served equivalent) — viewerAllowed only, never writerAllowed:
-// design.md 7.3 lists this as a read for anyone who may view the site.
+// This is a read for anyone who may view the site.
 func (h *SiteAPIHandler) ServeAsset(w http.ResponseWriter, r *http.Request, call siteAPICall, id string) {
 	if decision := h.limits.allow(stateReadClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)

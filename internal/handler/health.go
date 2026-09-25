@@ -32,7 +32,7 @@ type healthResponse struct {
 //
 // expected_team_triggers no longer lists users_teams_have_no_key: migration
 // 0025 drops that trigger (and the users.api_key column it guarded) outright,
-// one-way, per design.md 9.3/10.2. Probing for a trigger a later migration in
+// one-way. Probing for a trigger a later migration in
 // this same chain deliberately removes made every binary built after 0025
 // permanently unready. The other two 0019 triggers still apply unchanged.
 const requiredSchemaProbe = `

@@ -1,4 +1,4 @@
--- API keys, addressable and revocable one at a time (design.md 6.3).
+-- API keys, addressable and revocable one at a time.
 --
 -- Replaces the single users.api_key column as the credential an agent
 -- presents in X-API-Key: a person may hold several, each named and each
@@ -13,8 +13,8 @@
 -- and looks up this table instead); the column is backfilled into this
 -- table below so an existing key keeps working unless its holder later
 -- revokes it and mints a fresh one. Dropping users.api_key is a later,
--- one-way migration (design.md 10.2 expand/contract) once nothing depends
--- on it being present at all — tracked in docs/security-review.md.
+-- one-way expand/contract migration once nothing depends on it being
+-- present at all — tracked in docs/security-review.md.
 
 BEGIN;
 

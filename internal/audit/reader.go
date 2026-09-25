@@ -8,9 +8,9 @@ import (
 	dbstore "github.com/vsriram/simple-host/internal/db"
 )
 
-// Reader answers /api/audit and /api/access (design 8.3). It is deliberately
+// Reader answers /api/audit and /api/access. It is deliberately
 // thin — internal/db/audit.go already carries the query shapes and the
-// owner-scope/ip-redaction rules — so that whichever later phase wires up
+// owner-scope/ip-redaction rules — so that the handler wiring up
 // the two routes has one obvious seam to call into, and so a handler test
 // can fake this interface without a database.
 type Reader struct {
@@ -25,7 +25,7 @@ func NewReader(database *sql.DB) *Reader {
 	return &Reader{db: database}
 }
 
-// AuditQuery is GET /api/audit's parameters (design 8.3). OwnerScope is the
+// AuditQuery is GET /api/audit's parameters. OwnerScope is the
 // caller's own namespace plus every team they belong to; the handler
 // resolves that list (from session + team membership, neither of which
 // this package knows about) and passes it here. Admin must be true for a
@@ -71,7 +71,7 @@ func (r *Reader) ListAuditEvents(ctx context.Context, q AuditQuery) (AuditPage, 
 	return AuditPage{Events: page.Events, NextCursor: page.NextCursor}, nil
 }
 
-// AccessQuery is GET /api/access's parameters (design 8.3). Owner scope
+// AccessQuery is GET /api/access's parameters. Owner scope
 // (Admin false) must name exactly the one site it is asking about — the
 // handler is what checks the caller may see that owner/site at all, the
 // same division of responsibility as AuditQuery.OwnerScope above. Admin
@@ -86,8 +86,8 @@ type AccessQuery struct {
 }
 
 // AccessPage is one page of access log entries, newest first. Every entry's
-// IP and UserAgent are already "" unless q.Admin was true — design 8.3's
-// "ip and user_agent only to admins" — so a handler rendering this page
+// IP and UserAgent are already "" unless q.Admin was true — ip and
+// user_agent go only to admins — so a handler rendering this page
 // never has to apply that rule itself.
 type AccessPage struct {
 	Entries    []dbstore.AccessLogEntry
@@ -95,7 +95,7 @@ type AccessPage struct {
 }
 
 // ListAccess runs one page of q. Owner-scoped (q.Admin false) queries
-// require q.Owner; ACCESS_LOG_VISIBILITY=admin (design 8.2) is the
+// require q.Owner; ACCESS_LOG_VISIBILITY=admin is the
 // handler's decision to make by only ever constructing an Admin query in
 // that mode, not something this package reads from the environment itself.
 func (r *Reader) ListAccess(ctx context.Context, q AccessQuery) (AccessPage, error) {

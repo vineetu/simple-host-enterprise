@@ -9,8 +9,8 @@ import (
 )
 
 // EnvelopeKey is one named 32-byte AES-256 key for the optional client-side
-// envelope (design 9.1). The first configured key wraps every new object;
-// every configured key is tried, by id, to unwrap an existing one.
+// envelope. The first configured key wraps every new object; every
+// configured key is tried, by id, to unwrap an existing one.
 //
 // Objects are immutable and kept for as long as the version or asset they
 // hold is retained, so an object wrapped under a key needs that key for as

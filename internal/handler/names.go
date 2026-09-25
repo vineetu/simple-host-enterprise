@@ -70,7 +70,7 @@ var reservedLabels = map[string]bool{
 }
 
 // extraReservedLabels is populated once at startup from config.ReservedLabels
-// (design.md 7.1's RESERVED_LABELS) via SetExtraReservedLabels. It is checked
+// (the RESERVED_LABELS setting) via SetExtraReservedLabels. It is checked
 // alongside the built-in reservedLabels map everywhere that map is; kept
 // separate rather than merged into it so the built-in set stays a compile-time
 // constant an installer's configuration cannot accidentally shrink.
