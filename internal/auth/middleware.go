@@ -29,13 +29,17 @@ type errorResponse struct {
 	Error string `json:"error"`
 }
 
+// APIKeyPrefix starts every newly minted key, so secret scanners (and
+// people) can recognise one in a log, a commit or a paste.
+const APIKeyPrefix = "shk_"
+
 func GenerateAPIKey() (string, error) {
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
 		return "", err
 	}
 
-	return hex.EncodeToString(key), nil
+	return APIKeyPrefix + hex.EncodeToString(key), nil
 }
 
 // Middleware authenticates a request one of two ways (design.md 6.3): an
