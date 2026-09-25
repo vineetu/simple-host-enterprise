@@ -456,3 +456,20 @@ func TestBatchIsReportedAsInvalidRequest(t *testing.T) {
 		t.Errorf("error code = %v, want %d (invalid request, not parse error)", code, codeInvalidRequest)
 	}
 }
+
+// Final legacy revisions current editor and CLI clients send are answered in
+// their own version; older ones are not listed and get this server's.
+func TestLegacyInitializeKeepsSupportedRevisions(t *testing.T) {
+	for requested, want := range map[string]string{
+		"2025-11-25": "2025-11-25",
+		"2025-06-18": "2025-06-18",
+		"2025-03-26": protocolVersion,
+	} {
+		rec := post(t, testServer(),
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"`+requested+`","capabilities":{}}}`, nil)
+		res := decode(t, rec)["result"].(map[string]any)
+		if res["protocolVersion"] != want {
+			t.Errorf("initialize %s: protocolVersion = %v, want %s", requested, res["protocolVersion"], want)
+		}
+	}
+}

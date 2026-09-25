@@ -42,8 +42,9 @@ func GenerateAPIKey() (string, error) {
 	return APIKeyPrefix + hex.EncodeToString(key), nil
 }
 
-// Middleware authenticates a request one of two ways (design.md 6.3): an
-// X-API-Key header, hashed and looked up in api_keys, or the
+// Middleware authenticates a request one of three ways (design.md 6.3): an
+// X-API-Key header, hashed and looked up in api_keys; an OAuth access token
+// in "Authorization: Bearer" (handler/connector.go); or the
 // SessionCookieName session cookie, verified against signingKeys and then
 // checked against the sessions table. The header takes precedence when both
 // are present — an agent presenting a key on a browser-shared origin should
@@ -72,6 +73,24 @@ func Middleware(database *sql.DB, signingKeys []SigningKey, sessionIdle time.Dur
 				ctx := context.WithValue(r.Context(), userContextKey, &user)
 				ctx = context.WithValue(ctx, apiKeyIDContextKey, keyID)
 				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
+			// An OAuth access token from an AI app connected on the person's
+			// behalf. Checked before the cookie, and never falls through to
+			// it: a bad token is a bad token even with a browser session.
+			if token, ok := BearerToken(r); ok {
+				user, _, err := db.GetUserByOAuthAccessToken(r.Context(), database, db.HashAPIKey(token))
+				if err != nil {
+					if errors.Is(err, sql.ErrNoRows) {
+						writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
+						return
+					}
+					writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+					return
+				}
+				reqlog.SetUser(r.Context(), user.ID)
+				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userContextKey, &user)))
 				return
 			}
 
@@ -105,6 +124,16 @@ func Middleware(database *sql.DB, signingKeys []SigningKey, sessionIdle time.Dur
 			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
 		})
 	}
+}
+
+// BearerToken returns the token of an "Authorization: Bearer" header.
+func BearerToken(r *http.Request) (string, bool) {
+	authz := r.Header.Get("Authorization")
+	if len(authz) < 7 || !strings.EqualFold(authz[:7], "bearer ") {
+		return "", false
+	}
+	token := strings.TrimSpace(authz[7:])
+	return token, token != ""
 }
 
 // touchAPIKey and touchSession are detached from the request context — a

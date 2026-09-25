@@ -109,7 +109,18 @@ type Config struct {
 	// "Deviated"); both now go through this package instead, the same
 	// place every other environment-derived setting lives.
 	Audit AuditConfig
+	// OAuthRedirectHosts is where an AI app connecting to /mcp may be sent
+	// back after sign-in (OAUTH_REDIRECT_HOSTS): hostnames for https
+	// redirects, "localhost" for loopback redirects of apps on the person's
+	// own machine, "scheme://host" for an app's own URL scheme, or "*" for
+	// any https host.
+	OAuthRedirectHosts []string
 }
+
+// defaultOAuthRedirectHosts covers the AI apps a company is most likely to
+// connect: ChatGPT, Claude, VS Code (Copilot), Cursor, and command-line
+// agents on the person's own machine (Claude Code, Codex).
+const defaultOAuthRedirectHosts = "chatgpt.com,claude.ai,vscode.dev,localhost,cursor://anysphere.cursor-mcp"
 
 // AuditConfig is design.md 8.2's retention and visibility settings for
 // audit_events and access_log.
@@ -299,6 +310,7 @@ func Load() (Config, error) {
 			SSEKMSKeyID:     os.Getenv("BACKUP_SSE_KEY_ID"),
 		},
 	}
+	cfg.OAuthRedirectHosts = splitLowerTrimmed(getEnvOrDefault("OAUTH_REDIRECT_HOSTS", defaultOAuthRedirectHosts))
 	dsn, dbMissing, dsnErr := serverDatabaseDSN()
 	if dsnErr != nil {
 		return Config{}, dsnErr

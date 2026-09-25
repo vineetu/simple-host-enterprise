@@ -112,7 +112,7 @@ func IsUserDisabled(ctx context.Context, db *sql.DB, userID string) (bool, error
 }
 
 // SetUserDisabled sets or clears disabled_at (design.md 6.4). Disabling also
-// revokes every session and API key in the same transaction, so the
+// revokes every session, API key and connected app in the same transaction, so the
 // takedown is atomic: a request already in flight when this commits either
 // sees the old, valid credential (before commit) or a revoked one (after),
 // never a disabled account with a still-live session.
@@ -168,6 +168,9 @@ func SetUserDisabled(ctx context.Context, database *sql.DB, userID string, disab
 			return err
 		}
 		if err := RevokeAllAPIKeysForUser(ctx, tx, userID); err != nil {
+			return err
+		}
+		if err := DeleteOAuthGrantsForUser(ctx, tx, userID); err != nil {
 			return err
 		}
 	}

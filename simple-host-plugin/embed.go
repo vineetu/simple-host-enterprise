@@ -5,6 +5,10 @@
 //     into the active agent root: ~/.agents/skills (current ChatGPT desktop app),
 //     ~/.claude/skills (Claude Code), or the root another agent reports.
 //     Existing ~/.codex/skills copies remain supported as legacy installs.
+//   - Serve /plugin.zip: the same skills plus the Claude plugin manifest
+//     (.claude-plugin/plugin.json, .mcp.json) and the Agent Plugins one
+//     (plugin.json, mcp.json), with {{BASE_URL}} filled in at serve time so
+//     the plugin points at this instance's /mcp.
 //   - Serve /skills/version ({version, sha256}) for the agent's
 //     version-check and integrity verification.
 //
@@ -14,5 +18,5 @@ package plugin
 
 import "embed"
 
-//go:embed all:skills all:.claude-plugin
+//go:embed all:skills all:.claude-plugin .mcp.json plugin.json mcp.json
 var FS embed.FS

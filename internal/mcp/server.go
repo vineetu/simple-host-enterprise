@@ -21,7 +21,12 @@ const protocolVersion = "2026-07-28"
 // supportedVersions are answered for. The older revisions negotiated a session
 // with an initialize handshake; that era is still common in deployed clients,
 // so it is accepted and answered in its own idiom rather than refused.
-var supportedVersions = []string{"2026-07-28"}
+// 2025-11-25 and 2025-06-18 are final revisions, not deprecated, and are what
+// editor and command-line clients (Copilot, Cursor, Codex) still send; both
+// authorize with the same OAuth resource-server model /mcp implements.
+// Earlier ones predate that model, and 2024-11-05's HTTP+SSE transport is
+// deprecated, so they are not listed.
+var supportedVersions = []string{"2026-07-28", "2025-11-25", "2025-06-18"}
 
 // maxRequestBytes bounds one message. Inline deploys travel in the body, so
 // this sits above the inline archive limit with room for base64 expansion.
@@ -531,7 +536,7 @@ func statusHint(status int, tool Tool) string {
 		return "The request was rejected as invalid. The message above says what is wrong with it — correct the arguments, " +
 			"because sending the same call again fails the same way."
 	case http.StatusUnauthorized:
-		return "The credential is missing or not valid. Ask the user for their Simple Host API key."
+		return "The credential is missing, expired or not valid. Ask the user to reconnect Simple Host in this app, or for a Simple Host API key."
 	case http.StatusForbidden:
 		if tool.family == familyTeam {
 			// A team is acted on by a member, as themselves; there is no
