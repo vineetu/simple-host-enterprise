@@ -85,7 +85,7 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 
 <section>
   <h2 class="section-title">API keys</h2>
-  <p class="login-copy">A key authenticates your agent as you. Mint one per agent or machine so each can be revoked without touching the others.</p>
+  <p class="login-copy">A key authenticates CI or other automation as you. Mint one per job or machine so each can be revoked without touching the others. Keys expire; mint a fresh one when yours does.</p>
   <form id="mint-form" class="login-form" onsubmit="return false">
     <input type="text" id="key-name" placeholder="Name (e.g. laptop, CI)" maxlength="200" autocomplete="off">
     <button type="button" id="mint-button" class="btn-login">Create key</button>
@@ -101,14 +101,17 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 		status := "active"
 		if k.RevokedAt != nil {
 			status = "revoked"
+		} else if !k.ExpiresAt.After(time.Now()) {
+			status = "expired"
 		}
 		fmt.Fprintf(&b, `<div class="rank-row" data-key-id="%s">
-  <span class="rank-name">%s <span class="rank-sub">%s · created %s</span></span>
+  <span class="rank-name">%s <span class="rank-sub">%s · created %s · expires %s</span></span>
   <span class="rank-metric">%s</span>`,
 			html.EscapeString(k.ID),
 			html.EscapeString(k.Name),
 			html.EscapeString(k.Prefix),
 			localTimeHTML(k.CreatedAt, "datetime"),
+			localTimeHTML(k.ExpiresAt, "datetime"),
 			html.EscapeString(status),
 		)
 		if status == "active" {
@@ -152,7 +155,7 @@ func (h *DashboardHandler) optionalUser(r *http.Request) *db.User {
 	if err != nil || c.Value == "" {
 		return nil
 	}
-	verified, err := auth.VerifySessionCookie(h.signingKeys, c.Value)
+	verified, err := auth.VerifyBaseSessionCookie(h.signingKeys, c.Value)
 	if err != nil {
 		return nil
 	}

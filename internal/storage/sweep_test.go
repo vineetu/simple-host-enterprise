@@ -61,7 +61,7 @@ func sweepTestDB(t *testing.T) *sql.DB {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { database.Close() })
-	if _, err := migrate.Apply(context.Background(), database, nil); err != nil {
+	if _, err := migrate.Apply(context.Background(), database, 0, nil); err != nil {
 		t.Fatalf("apply migrations: %v", err)
 	}
 	return database

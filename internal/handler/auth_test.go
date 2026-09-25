@@ -1,6 +1,10 @@
 package handler
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/vsriram/simple-host/internal/oidc"
+)
 
 // sanitizeRedirectPath is shared by the post-sign-in redirect (auth.go) and
 // the hand-off's final redirect (handoff.go's redeemHandoffSession) — one
@@ -50,6 +54,37 @@ func TestSanitizeRedirectPath(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			if got := sanitizeRedirectPath(test.in); got != test.want {
 				t.Errorf("sanitizeRedirectPath(%q) = %q, want %q", test.in, got, test.want)
+			}
+		})
+	}
+}
+
+func TestRefuseIdentity(t *testing.T) {
+	verified := func(extra map[string]any) oidc.Claims {
+		return oidc.Claims{EmailVerified: true, EmailVerifiedSet: true, Raw: extra}
+	}
+	for _, test := range []struct {
+		name       string
+		cfg        OIDCClaimConfig
+		claims     oidc.Claims
+		email      string
+		wantReason string
+	}{
+		{"verified", OIDCClaimConfig{Issuer: "https://dex.example"}, verified(nil), "a@corp.com", ""},
+		{"email_verified absent", OIDCClaimConfig{Issuer: "https://dex.example"}, oidc.Claims{}, "a@corp.com", "email_not_verified"},
+		{"email_verified false", OIDCClaimConfig{Issuer: "https://dex.example"}, oidc.Claims{EmailVerifiedSet: true}, "a@corp.com", "email_not_verified"},
+		{"entra with xms_edov", OIDCClaimConfig{Issuer: "https://login.microsoftonline.com/tid/v2.0"}, oidc.Claims{Raw: map[string]any{"xms_edov": true}}, "a@corp.com", ""},
+		{"entra without xms_edov", OIDCClaimConfig{Issuer: "https://login.microsoftonline.com/tid/v2.0"}, oidc.Claims{Raw: map[string]any{}}, "a@corp.com", "email_not_verified"},
+		{"xms_edov from a non-Entra issuer", OIDCClaimConfig{Issuer: "https://dex.example"}, oidc.Claims{Raw: map[string]any{"xms_edov": true}}, "a@corp.com", "email_not_verified"},
+		{"domain not allowed", OIDCClaimConfig{AllowedEmailDomains: []string{"corp.com"}}, verified(nil), "a@evil.com", "domain_not_allowed"},
+		{"google consumer account at the company domain", OIDCClaimConfig{Issuer: "https://accounts.google.com", AllowedEmailDomains: []string{"corp.com"}}, verified(nil), "a@corp.com", "google_hd_missing"},
+		{"google workspace account", OIDCClaimConfig{Issuer: "https://accounts.google.com", AllowedEmailDomains: []string{"corp.com"}}, oidc.Claims{EmailVerified: true, EmailVerifiedSet: true, HostedDomain: "corp.com"}, "a@corp.com", ""},
+		{"google other workspace", OIDCClaimConfig{Issuer: "https://accounts.google.com", AllowedEmailDomains: []string{"corp.com"}}, oidc.Claims{EmailVerified: true, EmailVerifiedSet: true, HostedDomain: "other.com"}, "a@corp.com", "google_hd_not_allowed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reason, message := test.cfg.refuseIdentity(test.claims, test.email)
+			if reason != test.wantReason || (reason == "") != (message == "") {
+				t.Fatalf("refuseIdentity = %q, %q; want reason %q", reason, message, test.wantReason)
 			}
 		})
 	}

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 )
@@ -69,5 +70,42 @@ func TestInboundRequestIDIsNotTrusted(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if got := rec.Header().Get(Header); got == "attacker-chosen" || got == "" {
 		t.Fatalf("X-Request-Id = %q, want a server-generated id", got)
+	}
+}
+
+func TestClientIP(t *testing.T) {
+	t.Cleanup(func() { SetTrustedProxies(nil) })
+	request := func(peer string, xff ...string) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.RemoteAddr = peer
+		for _, v := range xff {
+			r.Header.Add("X-Forwarded-For", v)
+		}
+		return r
+	}
+
+	SetTrustedProxies(nil)
+	if got := ClientIP(request("192.0.2.10:4321", "203.0.113.99")); got != "192.0.2.10" {
+		t.Fatalf("no trusted proxies: %q, want the peer", got)
+	}
+
+	SetTrustedProxies([]netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")})
+	for _, test := range []struct {
+		name string
+		r    *http.Request
+		want string
+	}{
+		{"untrusted peer's header ignored", request("192.0.2.10:1", "203.0.113.99"), "192.0.2.10"},
+		{"trusted peer, one hop", request("10.1.2.3:1", "203.0.113.99"), "203.0.113.99"},
+		{"client-supplied entries left of the real one are ignored", request("10.1.2.3:1", "1.1.1.1, 203.0.113.99"), "203.0.113.99"},
+		{"trusted hops skipped right to left", request("10.1.2.3:1", "203.0.113.99, 10.9.9.9"), "203.0.113.99"},
+		{"multiple header lines", request("10.1.2.3:1", "1.1.1.1", "203.0.113.99"), "203.0.113.99"},
+		{"no header from a trusted peer", request("10.1.2.3:1"), "10.1.2.3"},
+		{"garbage stops the walk", request("10.1.2.3:1", "203.0.113.99, junk"), "10.1.2.3"},
+		{"unparseable peer", request("pipe"), ""},
+	} {
+		if got := ClientIP(test.r); got != test.want {
+			t.Errorf("%s: ClientIP = %q, want %q", test.name, got, test.want)
+		}
 	}
 }

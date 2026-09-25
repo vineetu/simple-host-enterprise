@@ -7,7 +7,6 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/fs"
 	"net/http"
 	"strconv"
@@ -29,9 +28,10 @@ const (
 	skillBundleName      = "simple-host-skills"
 	skillBundleURL       = "/skills.zip"
 	// skillReleaseType is hand-set, so it has to move with the version above
-	// it. 0.9.0 adds teams: new tools, a new reference, and a changed deploy
-	// contract, which is a minor release rather than a patch. An agent reads
-	// this to decide how loudly to mention the update.
+	// it. 0.10.0 changes the build contract (relative asset paths), the state
+	// routes the builder teaches, and adds connector tools, which is a minor
+	// release rather than a patch. An agent reads this to decide how loudly to
+	// mention the update.
 	skillReleaseType     = "minor"
 	skillReleaseNotesURL = "/changelog.html"
 
@@ -88,42 +88,75 @@ func PluginVersion() (string, error) {
 	return manifest.Version, nil
 }
 
-func RegisterUIRoutes(mux *http.ServeMux) {
+// SkillBaseURLPlaceholder is the text a served skill file uses for this
+// installation's own origin. Every Markdown file in a served bundle has it
+// replaced with PUBLIC_BASE_URL by ExpandSkillText, so the package ships no
+// hostname of its own. Anything else that serves the skill files (a plugin
+// zip, for one) must expand them the same way.
+const SkillBaseURLPlaceholder = "{{BASE_URL}}"
+
+// skillVersionPlaceholder is replaced in SKILL.md files only, as it always
+// has been: a reference may name the placeholder literally when telling an
+// agent what an unexpanded bundle looks like.
+const skillVersionPlaceholder = "{{VERSION}}"
+
+// ExpandSkillText fills the placeholders in one served skill file. baseURL
+// must be the validated PUBLIC_BASE_URL; an empty one is refused rather than
+// serving instructions that point nowhere.
+func ExpandSkillText(path string, body []byte, version, baseURL string) ([]byte, error) {
+	if !strings.HasSuffix(strings.ToLower(path), ".md") {
+		return body, nil
+	}
+	if strings.TrimSpace(baseURL) == "" {
+		return nil, fmt.Errorf("skill %s: no public base URL to expand %s with", path, SkillBaseURLPlaceholder)
+	}
+	text := strings.ReplaceAll(string(body), SkillBaseURLPlaceholder, strings.TrimRight(baseURL, "/"))
+	if strings.HasSuffix(path, "SKILL.md") {
+		text = strings.ReplaceAll(text, skillVersionPlaceholder, version)
+	}
+	return []byte(text), nil
+}
+
+// RegisterUIRoutes serves the landing pages and the skill bundle. baseURL is
+// PUBLIC_BASE_URL, written into every served skill file.
+func RegisterUIRoutes(mux *http.ServeMux, baseURL string) {
 	sub, _ := fs.Sub(staticFiles, "static")
 	fileServer := http.FileServerFS(sub)
 
-	mux.HandleFunc("GET "+agentSkillsDiscoveryRoot+"index.json", serveAgentSkillsDiscoveryIndex)
-	mux.HandleFunc("HEAD "+agentSkillsDiscoveryRoot+"index.json", serveAgentSkillsDiscoveryIndex)
+	mux.HandleFunc("GET "+agentSkillsDiscoveryRoot+"index.json", serveAgentSkillsDiscoveryIndex(baseURL))
+	mux.HandleFunc("HEAD "+agentSkillsDiscoveryRoot+"index.json", serveAgentSkillsDiscoveryIndex(baseURL))
 	for _, skillName := range agentSkillsDiscoveryAllowlist {
 		archivePath := agentSkillsDiscoveryRoot + skillName + ".zip"
-		handler := serveAgentSkillArchive(skillName)
+		handler := serveAgentSkillArchive(skillName, baseURL)
 		mux.HandleFunc("GET "+archivePath, handler)
 		mux.HandleFunc("HEAD "+archivePath, handler)
 	}
 
-	mux.HandleFunc("GET /skills.zip", serveSkillsZip)
-	mux.HandleFunc("GET /skills/version", serveSkillsVersion)
-	mux.HandleFunc("GET /skills/sha256/{digest}/skills.zip", serveImmutableSkillsZip)
+	mux.HandleFunc("GET /skills.zip", serveSkillsZip(baseURL))
+	mux.HandleFunc("GET /skills/version", serveSkillsVersion(baseURL))
+	mux.HandleFunc("GET /skills/sha256/{digest}/skills.zip", serveImmutableSkillsZip(baseURL))
 	mux.Handle("GET /", fileServer)
 }
 
-func serveAgentSkillsDiscoveryIndex(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-
-	data, err := buildAgentSkillsDiscoveryIndex()
-	if err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return
-	}
-
-	serveAgentSkillsRepresentation(w, r, "application/json", data)
-}
-
-func serveAgentSkillArchive(skillName string) http.HandlerFunc {
+func serveAgentSkillsDiscoveryIndex(baseURL string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 
-		data, err := buildAgentSkillArchive(skillName)
+		data, err := buildAgentSkillsDiscoveryIndex(baseURL)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+
+		serveAgentSkillsRepresentation(w, r, "application/json", data)
+	}
+}
+
+func serveAgentSkillArchive(skillName, baseURL string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+
+		data, err := buildAgentSkillArchive(skillName, baseURL)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
@@ -144,14 +177,14 @@ func serveAgentSkillsRepresentation(w http.ResponseWriter, r *http.Request, cont
 	_, _ = w.Write(data)
 }
 
-func buildAgentSkillsDiscoveryIndex() ([]byte, error) {
+func buildAgentSkillsDiscoveryIndex(baseURL string) ([]byte, error) {
 	entries := make([]agentSkillDiscoveryEntry, 0, len(agentSkillsDiscoveryAllowlist))
 	for _, skillName := range agentSkillsDiscoveryAllowlist {
 		description, err := agentSkillDescription(skillName)
 		if err != nil {
 			return nil, err
 		}
-		archive, err := buildAgentSkillArchive(skillName)
+		archive, err := buildAgentSkillArchive(skillName, baseURL)
 		if err != nil {
 			return nil, err
 		}
@@ -196,7 +229,7 @@ func agentSkillDescription(skillName string) (string, error) {
 	return "", fmt.Errorf("skill %q has no frontmatter description", skillName)
 }
 
-func buildAgentSkillArchive(skillName string) ([]byte, error) {
+func buildAgentSkillArchive(skillName, baseURL string) ([]byte, error) {
 	if !isAgentSkillDiscoverable(skillName) {
 		return nil, fmt.Errorf("skill %q is not discoverable", skillName)
 	}
@@ -227,7 +260,7 @@ func buildAgentSkillArchive(skillName string) ([]byte, error) {
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("skill %q contains non-regular file %q", skillName, path)
 		}
-		return writeZipEntry(zw, skillFS, path, version)
+		return writeZipEntry(zw, skillFS, path, version, baseURL)
 	})
 	if err != nil {
 		return nil, err
@@ -247,7 +280,13 @@ func isAgentSkillDiscoverable(skillName string) bool {
 	return false
 }
 
-func serveSkillsVersion(w http.ResponseWriter, r *http.Request) {
+func serveSkillsVersion(baseURL string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeSkillsVersion(w, baseURL)
+	}
+}
+
+func writeSkillsVersion(w http.ResponseWriter, baseURL string) {
 	version, err := PluginVersion()
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -260,7 +299,7 @@ func serveSkillsVersion(w http.ResponseWriter, r *http.Request) {
 	// against this before extracting — an integrity checksum, not a signature.
 	// Do NOT cache: the per-request rebuild is what keeps them in lockstep.
 	// See docs/secure-skill-install/design.md.
-	data, err := buildSkillsZip()
+	data, err := buildSkillsZip(baseURL)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
@@ -304,8 +343,14 @@ func immutableBundleURL(digest string) string {
 // The mutable /skills.zip stays permanently: every skill at or below 0.8.1
 // hardcodes it and validates bundle_url == "/skills.zip". Removing it, or
 // pointing bundle_url here, would strand every existing install.
-func serveImmutableSkillsZip(w http.ResponseWriter, r *http.Request) {
-	data, err := buildSkillsZip()
+func serveImmutableSkillsZip(baseURL string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		immutableSkillsZip(w, r, baseURL)
+	}
+}
+
+func immutableSkillsZip(w http.ResponseWriter, r *http.Request, baseURL string) {
+	data, err := buildSkillsZip(baseURL)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
@@ -328,16 +373,18 @@ func serveImmutableSkillsZip(w http.ResponseWriter, r *http.Request) {
 
 // serveSkillsZip returns a flat zip of the three skill folders, suitable for
 // extraction directly into ~/.claude/skills or ~/.agents/skills.
-func serveSkillsZip(w http.ResponseWriter, r *http.Request) {
-	data, err := buildSkillsZip()
-	if err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return
-	}
+func serveSkillsZip(baseURL string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		data, err := buildSkillsZip(baseURL)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
 
-	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", `attachment; filename="simple-host-skills.zip"`)
-	http.ServeContent(w, r, "simple-host-skills.zip", skillsModTime, bytes.NewReader(data))
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", `attachment; filename="simple-host-skills.zip"`)
+		http.ServeContent(w, r, "simple-host-skills.zip", skillsModTime, bytes.NewReader(data))
+	}
 }
 
 // buildSkillsZip walks the embedded skills/ tree and emits a flat zip.
@@ -345,10 +392,11 @@ func serveSkillsZip(w http.ResponseWriter, r *http.Request) {
 // via hot-deploy serve immediately. Cheap — the embedded FS lives in RAM
 // and the result is a few hundred KB.
 //
-// SKILL.md content has {{VERSION}} placeholders replaced with the current
-// plugin.json version so the client-side version check and X-Skill-Version
-// header stay in lockstep with the server without any human discipline.
-func buildSkillsZip() ([]byte, error) {
+// Every file passes through ExpandSkillText: SKILL.md gets the current
+// plugin.json version, so the client-side version check and X-Skill-Version
+// header stay in lockstep with the server, and every Markdown file gets this
+// installation's origin.
+func buildSkillsZip(baseURL string) ([]byte, error) {
 	version, err := PluginVersion()
 	if err != nil {
 		return nil, err
@@ -370,7 +418,7 @@ func buildSkillsZip() ([]byte, error) {
 			return nil
 		}
 
-		if err := writeZipEntry(zw, skillsRoot, path, version); err != nil {
+		if err := writeZipEntry(zw, skillsRoot, path, version, baseURL); err != nil {
 			return err
 		}
 		return nil
@@ -385,31 +433,21 @@ func buildSkillsZip() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// writeZipEntry copies one file from src into zw. For SKILL.md files, the
-// content is read into memory and {{VERSION}} placeholders are replaced
-// with the current plugin version before writing. Other files stream
-// through unchanged.
-func writeZipEntry(zw *zip.Writer, src fs.FS, path, version string) error {
-	in, err := src.Open(path)
+// writeZipEntry copies one file from src into zw, expanded by
+// ExpandSkillText.
+func writeZipEntry(zw *zip.Writer, src fs.FS, path, version, baseURL string) error {
+	body, err := fs.ReadFile(src, path)
 	if err != nil {
 		return err
 	}
-	defer in.Close()
-
+	body, err = ExpandSkillText(path, body, version, baseURL)
+	if err != nil {
+		return err
+	}
 	out, err := zw.Create(path)
 	if err != nil {
 		return err
 	}
-
-	if strings.HasSuffix(path, "SKILL.md") {
-		body, err := io.ReadAll(in)
-		if err != nil {
-			return err
-		}
-		_, err = out.Write([]byte(strings.ReplaceAll(string(body), "{{VERSION}}", version)))
-		return err
-	}
-
-	_, err = io.Copy(out, in)
+	_, err = out.Write(body)
 	return err
 }

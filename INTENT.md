@@ -3,13 +3,13 @@
 ## What this is, and why it exists
 
 Simple Host Enterprise is one Go service that gives every person in an organisation a place to
-put the things their AI agent builds for them — under their own name, private by default, and
+put the things their AI agent builds for them — under their own name, unlisted by default, and
 live the moment it exists.
 
 AI agents already produce artifacts constantly. Every one of them lands at a random UUID on a
 vendor's domain: unattributable, unfindable a week later, and hosted on someone else's internet
 whether or not that is what anyone wanted. That is the problem this solves. Here the artifact
-lives under its author's own subdomain, it is theirs, and it stays private until they decide
+lives under its author's own subdomain, it is theirs, and it stays unlisted until they decide
 otherwise.
 
 The result is closer to a portfolio than to a web host. The unit is the person, not the
@@ -32,8 +32,10 @@ artifact.
   No repo, no pipeline, no YAML, no per-artifact subdomain to provision.
 - A person accumulates hundreds of artifacts without that becoming a problem — one subdomain
   each, not one per artifact.
-- Nothing is visible to anyone else until its author shares it. Private is the default and the
-  default is never a surprise.
+- Nothing is listed or searchable until its author shares it. Unlisted is the default: any
+  signed-in colleague with the link can open the site and write its saved data. Adding named
+  viewers makes a site private: only they, the owner, the owner's team and editors can open it,
+  on its own host. The default is never a surprise.
 - When it is shared, the author gets the credit and a colleague can find it by searching for
   the person.
 - What gets published can actually *do* something — a prototype, a tracker — not just render.
@@ -73,8 +75,11 @@ artifact.
 - **2026-09-23 — The unit is the person, not the artifact.** Each user owns one subdomain; all
   their work lives beneath it. Rejected: a subdomain per artifact, which does not survive
   someone making hundreds.
-- **2026-09-23 — Private by default** (`sites.public = false`, migration 0006). Most artifacts
-  are made for their author. Sharing is a deliberate act.
+- **2026-09-23 — Unlisted by default** (`sites.public = false`, migration 0006). A new site is
+  absent from search and the showcase, but any signed-in colleague with the link can open it
+  and write its saved data; named viewers make it private. Most artifacts are made for their
+  author. Listing is a deliberate act. (Wording corrected 2026-09-25: this line said "private",
+  which the access model never was.)
 - **2026-09-23 — Attribution is the discovery mechanism.** Search, AI site classification and
   `/showcase` exist so a shared artifact is findable by its author's name, and so publishing
   earns the author visibility. This is why search is in a hosting product.

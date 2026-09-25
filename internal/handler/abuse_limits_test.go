@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vsriram/simple-host/internal/auth"
+	db "github.com/vsriram/simple-host/internal/db"
 	"github.com/vsriram/simple-host/internal/ratelimit"
 	"github.com/vsriram/simple-host/internal/storage"
 )
@@ -21,14 +23,16 @@ func testAbuseLimits(now func() time.Time) *AbuseLimits {
 	)
 }
 
-func TestRemoteClientKeyUsesPeerAndIgnoresForwardedHeaders(t *testing.T) {
+func TestClientLimitKeyPrefersTheSignedInUser(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	request.RemoteAddr = "192.0.2.10:4321"
 	request.Header.Set("X-Forwarded-For", "203.0.113.99")
-	request.Header.Set("X-Real-IP", "203.0.113.98")
-
-	if got := remoteClientKey(request); got != "192.0.2.10" {
-		t.Fatalf("remoteClientKey = %q, want peer IP", got)
+	if got := clientLimitKey(request); got != "192.0.2.10" {
+		t.Fatalf("anonymous clientLimitKey = %q, want the peer (no trusted proxies configured)", got)
+	}
+	request = request.WithContext(auth.ContextWithTestAuth(request.Context(), &db.User{ID: "u1"}, "s1", ""))
+	if got := clientLimitKey(request); got != "user:u1" {
+		t.Fatalf("signed-in clientLimitKey = %q, want the user", got)
 	}
 }
 

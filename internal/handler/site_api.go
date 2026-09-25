@@ -153,7 +153,7 @@ func (h *SiteAPIHandler) siteURL(call siteAPICall) string {
 // this only after confirming it); this method's own job is the query and
 // the response shape.
 func (h *SiteAPIHandler) GetState(w http.ResponseWriter, r *http.Request, call siteAPICall) {
-	if decision := h.limits.allow(stateReadClientPolicy, remoteClientKey(r)); !decision.Allowed {
+	if decision := h.limits.allow(stateReadClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -176,7 +176,7 @@ func (h *SiteAPIHandler) GetState(w http.ResponseWriter, r *http.Request, call s
 
 // PutState answers PUT .../state.
 func (h *SiteAPIHandler) PutState(w http.ResponseWriter, r *http.Request, call siteAPICall) {
-	if decision := h.limits.allow(stateClientPolicy, remoteClientKey(r)); !decision.Allowed {
+	if decision := h.limits.allow(stateClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -234,7 +234,7 @@ func (h *SiteAPIHandler) PutState(w http.ResponseWriter, r *http.Request, call s
 
 // GetStateVersioned answers GET .../state/versioned.
 func (h *SiteAPIHandler) GetStateVersioned(w http.ResponseWriter, r *http.Request, call siteAPICall) {
-	if decision := h.limits.allow(stateReadClientPolicy, remoteClientKey(r)); !decision.Allowed {
+	if decision := h.limits.allow(stateReadClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -257,7 +257,7 @@ func (h *SiteAPIHandler) GetStateVersioned(w http.ResponseWriter, r *http.Reques
 
 // PutStateVersioned answers PUT .../state/versioned.
 func (h *SiteAPIHandler) PutStateVersioned(w http.ResponseWriter, r *http.Request, call siteAPICall) {
-	if decision := h.limits.allow(stateClientPolicy, remoteClientKey(r)); !decision.Allowed {
+	if decision := h.limits.allow(stateClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -397,7 +397,7 @@ type listAssetsResponse struct {
 // inserted with the same id, by db.CreateAssetWithinQuota, which enforces
 // the per-site quota under a per-site lock in the same transaction.
 func (h *SiteAPIHandler) CreateAsset(w http.ResponseWriter, r *http.Request, call siteAPICall) {
-	if decision := h.limits.allow(stateClientPolicy, remoteClientKey(r)); !decision.Allowed {
+	if decision := h.limits.allow(stateClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -530,7 +530,7 @@ func (h *SiteAPIHandler) CreateAsset(w http.ResponseWriter, r *http.Request, cal
 
 // ListAssets answers GET .../assets.
 func (h *SiteAPIHandler) ListAssets(w http.ResponseWriter, r *http.Request, call siteAPICall) {
-	if decision := h.limits.allow(stateReadClientPolicy, remoteClientKey(r)); !decision.Allowed {
+	if decision := h.limits.allow(stateReadClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -562,7 +562,7 @@ func (h *SiteAPIHandler) ListAssets(w http.ResponseWriter, r *http.Request, call
 // object queued for the sweep in one transaction with the audit row, so the
 // object goes if and only if the delete commits.
 func (h *SiteAPIHandler) DeleteAsset(w http.ResponseWriter, r *http.Request, call siteAPICall, id string) {
-	if decision := h.limits.allow(stateClientPolicy, remoteClientKey(r)); !decision.Allowed {
+	if decision := h.limits.allow(stateClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -621,7 +621,7 @@ func retireAssetObject(ctx context.Context, tx *sql.Tx, siteID, id string) error
 // host root-served equivalent) — viewerAllowed only, never writerAllowed:
 // design.md 7.3 lists this as a read for anyone who may view the site.
 func (h *SiteAPIHandler) ServeAsset(w http.ResponseWriter, r *http.Request, call siteAPICall, id string) {
-	if decision := h.limits.allow(stateReadClientPolicy, remoteClientKey(r)); !decision.Allowed {
+	if decision := h.limits.allow(stateReadClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}

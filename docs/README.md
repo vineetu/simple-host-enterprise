@@ -1,15 +1,12 @@
 # Documentation
 
-The package is built in phases from a plan that lives outside this
-repository. What is here:
-
-- `phases/` — one record per completed phase: what was built, how it was
-  verified, where it deviated from the plan and why, what the reviewer
-  found, and what remains. Newest last. Read the latest before changing
-  anything.
-- `install.md`, `configuration.md`, `security-review.md` — written in the
-  documentation phase; absent until then.
+- `install.md` — installing on a local cluster, then on a real one.
+- `cloud/` — per-cloud notes for managed Kubernetes, Postgres and buckets.
+- `configuration.md` — every environment variable the server reads.
+- `security-review.md` — the controls, the pen-test list and what was run,
+  and the accepted limitations.
+- `site-isolation.md` — which pages share a browser origin and why.
 
 The top-level `README.md` says how to run the package locally, `CLAUDE.md`
 and `AGENTS.md` carry the working rules, and `SCRUB.md` is the checklist that
-keeps the original instance's identifiers out of this tree.
+keeps identifiers of the code this package was derived from out of this tree.

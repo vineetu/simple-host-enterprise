@@ -8,7 +8,7 @@
 #   BASE=simple-host.127-0-0-1.nip.io CLUSTER_CONTEXT=docker-desktop \
 #     NAMESPACE=simple-host ./scripts/smoke.sh
 #
-# Identity is OIDC sign-in now (design.md 6.1), not a pasted admin key, so
+# Identity is OIDC sign-in now, not a pasted admin key, so
 # this script drives the whole Authorization Code + PKCE dance against Dex
 # with curl and a cookie jar. Dex's issuer is the in-cluster Service DNS
 # name (deploy/components/dex/configmap.yaml) because every call it drives
@@ -26,7 +26,7 @@ set -u
 BASE="${BASE:?set BASE to the base hostname}"
 CLUSTER_CONTEXT="${CLUSTER_CONTEXT:-docker-desktop}"
 NAMESPACE="${NAMESPACE:-simple-host}"
-SKILL_VERSION="${SKILL_VERSION:-0.9.0}"
+SKILL_VERSION="${SKILL_VERSION:-0.10.0}"
 DEX_HOST="dex.simple-host.svc.cluster.local"
 DEX_PORT="5556"
 
@@ -118,7 +118,7 @@ expect 200 "$BASE" /
 expect 200 "$BASE" /docs.html
 expect_header "$BASE" / X-Request-Id
 expect 401 "$BASE" /api/sites
-echo "== registration is gone (design 6.1 replaces it with OIDC sign-in)"
+echo "== registration is gone (OIDC sign-in replaces it)"
 expect 404 "$BASE" /api/auth -X POST
 expect 404 "$BASE" /api/reset-requests -X POST
 
@@ -197,7 +197,7 @@ if [ -z "$owner" ]; then
   echo "passed $pass, failed $((fails+1))"; exit $((fails+1))
 fi
 
-echo "== API keys: mint, use, list, revoke (design 6.3)"
+echo "== API keys: mint, use, list, revoke"
 mint_body="$(curl -sS -b "$admin_jar" -H "Origin: https://$BASE" -H "Content-Type: application/json" \
   -X POST "https://$BASE/api/keys" -d '{"name":"smoke-test-key"}')"
 key="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["api_key"])' "$mint_body" 2>/dev/null || true)"
@@ -215,7 +215,7 @@ expect 401 "$BASE" /api/sites -H "X-API-Key: $key" -H "X-Skill-Version: $SKILL_V
 echo "== a session cookie authenticates the same X-API-Key-shaped routes"
 expect 200 "$BASE" /api/sites -b "$admin_jar"
 
-echo "== an authenticated base-host response carries Referrer-Policy and Cache-Control: no-store (design 7.4, review findings)"
+echo "== an authenticated base-host response carries Referrer-Policy and Cache-Control: no-store (review findings)"
 expect_header_value "$BASE" /api/sites Referrer-Policy strict-origin-when-cross-origin -b "$admin_jar"
 expect_header_value "$BASE" /api/sites Cache-Control no-store -b "$admin_jar"
 
@@ -239,25 +239,22 @@ expect 201 "$BASE" "/api/collaboration/sites/$owner/$name" -X POST \
 label="$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]' | tr . -)"
 owner_host="$label.$BASE"
 
-echo "== the base host no longer serves site content or the site-facing API (design 7.1)"
-expect 404 "$BASE" "/sites/$owner/$name/"
+echo "== the base host no longer serves site content or the site-facing API"
 expect 404 "$BASE" "/$name/"
 expect 404 "$BASE" "/api/sites/$owner/$name/state"
 expect 404 "$BASE" "/api/site/state"
 
-echo "== the owner host $owner_host refuses everything but hosted content, the site-facing API, the hand-off, and probes (design 7.1)"
+echo "== the owner host $owner_host refuses everything but hosted content, the site-facing API, the hand-off, and probes"
 expect 404 "$owner_host" "/"
 expect 404 "$owner_host" "/admin"
-expect 404 "$owner_host" "/sites/$owner/$name/"
-expect 404 "$owner_host" "/sites/nobody-else/"
 expect 200 "$owner_host" "/healthz"
 
-echo "== viewing hosted content on the owner host requires a session (design 7.2)"
+echo "== viewing hosted content on the owner host requires a session"
 expect 401 "$owner_host" "/$name/"
 
 # hand_off_session <base-jar-with-a-signed-in-session> <jar-to-fill> <host> <path>
 #
-# Drives the full session hand-off (design.md 6.1) with curl: the target
+# Drives the full session hand-off with curl: the target
 # host's own first hop (an unauthenticated navigation) sets the nonce
 # cookie and redirects to the base host's own /auth/handoff; that mints a
 # one-time code, authenticated by the caller's base session, and redirects
@@ -296,15 +293,15 @@ owner_jar="$work/cj-owner"
 check "hand-off mints a session on $owner_host" hand_off_session "$admin_jar" "$owner_jar" "$owner_host" "/$name/"
 expect 200 "$owner_host" "/$name/" -b "$owner_jar"
 
-echo "== every owner-host response carries the CORP and Cache-Control headers (design 7.4)"
+echo "== every owner-host response carries the CORP and Cache-Control headers"
 expect_header "$owner_host" "/$name/" Cross-Origin-Resource-Policy
 expect_header_value "$owner_host" "/$name/" Cache-Control "private, no-cache" -b "$owner_jar"
 
-echo "== a sibling-origin subresource load is refused; a navigation still works (design 7.4)"
+echo "== a sibling-origin subresource load is refused; a navigation still works"
 expect 403 "$owner_host" "/$name/" -b "$owner_jar" -H "Sec-Fetch-Site: same-site" -H "Sec-Fetch-Dest: script"
 expect 200 "$owner_host" "/$name/" -b "$owner_jar" -H "Sec-Fetch-Site: same-site" -H "Sec-Fetch-Dest: document"
 
-echo "== hosted-content auth advances sessions.last_seen_at (design 6.1, review finding)"
+echo "== hosted-content auth advances sessions.last_seen_at (review finding)"
 owner_id="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["id"])' "$admin_me" 2>/dev/null || true)"
 if [ -n "$owner_id" ] && db_query "SELECT 1" >/dev/null 2>&1; then
   db_query "UPDATE sessions SET last_seen_at = now() - interval '10 minutes' WHERE user_id = '$owner_id'::uuid" >/dev/null
@@ -316,14 +313,14 @@ else
   echo "  (skipped: could not resolve the admin's user id or reach Postgres directly from this script)"
 fi
 
-echo "== state on the owner host, by session and by X-API-Key (design 7.3)"
+echo "== state on the owner host, by session and by X-API-Key"
 expect 200 "$owner_host" "/api/sites/$name/state/versioned" -b "$owner_jar"
 put_body="$(curl -sS -b "$owner_jar" -H "Origin: https://$owner_host" -H "Content-Type: application/json" \
   -X PUT "https://$owner_host/api/sites/$name/state/versioned" -d '{"version":0,"state":{"hello":"world"}}')"
 check "session state write returns version 1" bash -c "printf '%s' '$put_body' | grep -q '\"version\":1'"
 get_body="$(curl -sS -b "$owner_jar" "https://$owner_host/api/sites/$name/state/versioned")"
 check "state read reflects the session write" bash -c "printf '%s' '$get_body' | grep -q '\"hello\":\"world\"'"
-echo "== PUT with a session but no Origin is refused (design 7.3: Origin required on non-safe methods)"
+echo "== PUT with a session but no Origin is refused (Origin required on non-safe methods)"
 expect 403 "$owner_host" "/api/sites/$name/state/versioned" -b "$owner_jar" -X PUT -H "Content-Type: application/json" -d '{"version":1,"state":{}}'
 echo "== an X-API-Key needs no Origin at all"
 key_put_body="$(curl -sS -H "X-API-Key: $key" -H "Content-Type: application/json" \
@@ -331,7 +328,7 @@ key_put_body="$(curl -sS -H "X-API-Key: $key" -H "Content-Type: application/json
 check "key state write returns version 2" bash -c "printf '%s' '$key_put_body' | grep -q '\"version\":2'"
 expect 401 "$owner_host" "/api/sites/$name/state/versioned"
 
-echo "== assets: upload, list, serve headers, attachment disposition (design 7.3)"
+echo "== assets: upload, list, serve headers, attachment disposition"
 printf 'hello asset world\n' > "$work/asset.txt"
 asset_upload_body="$(curl -sS -b "$owner_jar" -H "Origin: https://$owner_host" \
   -F "file=@$work/asset.txt;filename=notes.txt;type=text/plain" \
@@ -355,7 +352,7 @@ if [ -n "$asset_id" ]; then
   expect 404 "$owner_host" "/$name/_assets/$asset_id/notes.txt" -b "$owner_jar"
 fi
 
-echo "== an archive with a top-level _assets/ entry is refused at upload (design 7.3, pen item)"
+echo "== an archive with a top-level _assets/ entry is refused at upload (pen item)"
 mkdir -p "$work/bad-site/_assets"
 printf '<!doctype html><title>bad</title>\n' > "$work/bad-site/index.html"
 printf 'shadowing the asset route\n' > "$work/bad-site/_assets/evil.txt"
@@ -369,7 +366,7 @@ printf '<html><body>not really text</body></html>\n' > "$work/fake.txt"
 expect 415 "$owner_host" "/api/sites/$name/assets" -b "$owner_jar" -H "Origin: https://$owner_host" \
   -F "file=@$work/fake.txt;filename=fake.txt;type=text/plain"
 
-echo "== every state and asset write lands a real audit_events row (design 8.1)"
+echo "== every state and asset write lands a real audit_events row"
 site_id="$(db_query "SELECT id FROM sites WHERE user_id = '$owner_id'::uuid AND name = '$name'" 2>/dev/null)"
 if [ -n "$site_id" ] && db_query "SELECT 1" >/dev/null 2>&1; then
   # The session write (version 1) and the key write (version 2) above are
@@ -388,7 +385,7 @@ else
   echo "  (skipped: could not resolve this run's site id or reach Postgres directly from this script)"
 fi
 
-echo "== every hosted-content view is logged to access_log, including the owner's own (design 8.2)"
+echo "== every hosted-content view is logged to access_log, including the owner's own"
 if [ -n "$site_id" ] && db_query "SELECT 1" >/dev/null 2>&1; then
   # $owner_jar viewed $owner_host/$name/ several times above; the
   # isSelfTraffic exclusion is documented as applying only to the
@@ -402,13 +399,13 @@ else
   echo "  (skipped: could not resolve this run's site id or reach Postgres directly from this script)"
 fi
 
-echo "== restricting a site moves it to its own host (design 5.2a)"
+echo "== restricting a site moves it to its own host"
 curl -sS -b "$admin_jar" -H "Origin: https://$BASE" -H "Content-Type: application/json" \
   -X POST "https://$BASE/api/collaboration/sites/$owner/$name/viewers" -d "{\"usernames\":[\"$owner\"]}" >/dev/null
 restricted_host="${label}--${name}.$BASE"
 expect 404 "$owner_host" "/$name/" -b "$owner_jar"
 
-echo "== a host session cookie is refused on a different host, even the same owner's (design 6.1 hardening, pen item: session fixation across hosts)"
+echo "== a host session cookie is refused on a different host, even the same owner's (pen item: session fixation across hosts)"
 # owner_jar's cookie was minted for $owner_host and admin is a listed
 # viewer of the now-restricted site — without the host binding this would
 # wrongly serve 200 on $restricted_host too, since the session and the
@@ -428,7 +425,7 @@ if [ -n "$person_username" ] && [ -f "$person_jar" ]; then
 fi
 expect_header "$restricted_host" "/" Cross-Origin-Resource-Policy
 
-echo "== state on the restricted site's own host, by session (design 7.3: restricted sites get a working state route too)"
+echo "== state on the restricted site's own host, by session (restricted sites get a working state route too)"
 restricted_owner_jar="$work/cj-owner-restricted"
 check "hand-off to the restricted host for its own owner" \
   hand_off_session "$admin_jar" "$restricted_owner_jar" "$restricted_host" "/"
@@ -446,7 +443,7 @@ echo "== the base host never answers a state or asset route for any site (pen it
 expect 404 "$BASE" "/api/sites/$name/state"
 expect 404 "$BASE" "/api/sites/$name/assets"
 
-echo "== GET /api/audit and GET /api/access (design 8.3)"
+echo "== GET /api/audit and GET /api/access"
 audit_body="$(curl -sS -b "$admin_jar" -H "X-Simple-Host-Client: control-ui" "https://$BASE/api/audit?owner=$owner&site=$name")"
 check "GET /api/audit as the owner sees this run's state_write action" bash -c "printf '%s' '$audit_body' | grep -q '\"action\":\"state_write\"'"
 if [ -n "$person_username" ]; then
@@ -486,14 +483,14 @@ if [ -n "$person_username" ]; then
     person_own_access_body="$(curl -sS -b "$person_jar" -H "X-Simple-Host-Client: control-ui" "https://$BASE/api/access?owner=$person_username&site=$person_site")"
     check "GET /api/access as a real non-admin owner sees their own view" \
       bash -c "printf '%s' '$person_own_access_body' | grep -q '\"site_name\":\"$person_site\"'"
-    check "GET /api/access owner scope carries no ip (design 8.3)" \
+    check "GET /api/access owner scope carries no ip" \
       bash -c "! printf '%s' '$person_own_access_body' | grep -q '\"ip\":'"
   else
     echo "  (skipped the owner-scope-has-no-ip check: could not publish a site for the non-admin test account, status $person_create_status)"
   fi
 fi
 
-echo "== GET /api/admin/export streams CSV and JSONL, admin only, itself audited (design 8.3)"
+echo "== GET /api/admin/export streams CSV and JSONL, admin only, itself audited"
 expect 403 "$BASE" "/api/admin/export?kind=audit&format=jsonl" -b "$person_jar" -H "X-Simple-Host-Client: control-ui"
 export_csv="$(curl -sS -b "$admin_jar" -H "X-Simple-Host-Client: control-ui" "https://$BASE/api/admin/export?kind=audit&format=csv")"
 check "the CSV export starts with its header row" bash -c "printf '%s' '$export_csv' | head -1 | grep -q '^id,at,request_id,'"
@@ -508,7 +505,7 @@ if [ -n "$site_id" ] && db_query "SELECT 1" >/dev/null 2>&1; then
   check "the export itself is audited as admin_export" bash -c "[ '$admin_export_rows' -ge 1 ]"
 fi
 
-echo "== simple-host prune -dry-run lists partitions without dropping them (design 8.2, 9.3)"
+echo "== simple-host prune -dry-run lists partitions without dropping them"
 prune_job="smoke-prune-$$"
 # A Job's pod template is immutable once created, so the "-dry-run" flag has
 # to go in before the Job object exists: render it client-side, patch args

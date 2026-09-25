@@ -103,10 +103,10 @@ func (s *siteDeleteAuditState) exec(query string, args []driver.NamedValue) (dri
 		// db.InsertAuditEvent, via the real audit.DBRecorder (not a fake
 		// audit.Recorder) so the actual SQL and argument binding run.
 		// Positional args mirror internal/db/audit.go's InsertAuditEvent
-		// query: $6 is action, $8 is site_id.
+		// query: $5 is action, $7 is site_id.
 		s.mu.Lock()
-		s.auditActions = append(s.auditActions, namedString(args, 5))
-		s.auditSiteIDs = append(s.auditSiteIDs, namedString(args, 7))
+		s.auditActions = append(s.auditActions, namedString(args, 4))
+		s.auditSiteIDs = append(s.auditSiteIDs, namedString(args, 6))
 		s.mu.Unlock()
 		return driver.RowsAffected(1), nil
 	default:

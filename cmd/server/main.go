@@ -21,8 +21,10 @@ import (
 	"github.com/vsriram/simple-host/internal/audit"
 	"github.com/vsriram/simple-host/internal/auth"
 	"github.com/vsriram/simple-host/internal/config"
+	dbstore "github.com/vsriram/simple-host/internal/db"
 	"github.com/vsriram/simple-host/internal/handler"
 	"github.com/vsriram/simple-host/internal/mcp"
+	"github.com/vsriram/simple-host/internal/metrics"
 	"github.com/vsriram/simple-host/internal/migrate"
 	"github.com/vsriram/simple-host/internal/oidc"
 	"github.com/vsriram/simple-host/internal/reqlog"
@@ -71,6 +73,7 @@ func main() {
 }
 
 func run() (runErr error) {
+	log.Print(versionString())
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -90,6 +93,13 @@ func run() (runErr error) {
 		database.Close()
 		return fmt.Errorf("schema check: %w", err)
 	}
+	if err := migrate.CheckLeastPrivilege(context.Background(), database); err != nil {
+		database.Close()
+		return err
+	}
+	if cfg.DBInClusterEvaluation {
+		log.Print("WARNING: the database is the in-cluster evaluation Postgres (deploy/components/postgres-incluster). Nothing backs it up and it has no failover; use a managed Postgres with point-in-time recovery for anything real.")
+	}
 	resources := applicationResources{
 		database:               database,
 		workersShutdownTimeout: searchWorkerShutdownTimeout,
@@ -104,6 +114,7 @@ func run() (runErr error) {
 	}
 	resources.store = siteStore
 
+	reqlog.SetTrustedProxies(cfg.TrustedProxies)
 	mux := http.NewServeMux()
 	hosts, err := handler.NewHostModel(cfg.PublicBaseURL)
 	if err != nil {
@@ -140,7 +151,21 @@ func run() (runErr error) {
 	if err != nil {
 		return fmt.Errorf("discover OIDC provider: %w", err)
 	}
+	// ADMIN_EMAILS is re-applied at every start, so removing someone from
+	// it demotes them on the next deploy, not at their next sign-in. With
+	// OIDC_ADMIN_CLAIM also in use the claim can only be read at sign-in,
+	// so there the sign-in refresh (and SESSION_TTL) is the bound.
+	if cfg.OIDC.AdminClaim == "" {
+		changed, err := dbstore.SyncAdminEmails(context.Background(), database, cfg.OIDC.AdminEmails)
+		if err != nil {
+			return fmt.Errorf("apply ADMIN_EMAILS: %w", err)
+		}
+		if changed > 0 {
+			log.Printf("ADMIN_EMAILS: updated admin status for %d account(s)", changed)
+		}
+	}
 	oidcClaims := handler.OIDCClaimConfig{
+		Issuer:              cfg.OIDC.Issuer,
 		EmailClaim:          cfg.OIDC.EmailClaim,
 		UsernameClaim:       cfg.OIDC.UsernameClaim,
 		AdminClaim:          cfg.OIDC.AdminClaim,
@@ -166,7 +191,7 @@ func run() (runErr error) {
 	log.Printf("simple-host skill version: %s", pluginVersion)
 
 	handler.RegisterHealthRoutes(mux, database, siteStore.Ping)
-	publicSearchHandler.Register(mux, authMW)
+	publicSearchHandler.Register(mux, authMW, handler.CookieOriginCheck(hosts, cfg.PublicBaseURL))
 	handler.NewUserHandler(database, abuseLimits).Register(mux, authMW, skillVersionMW)
 	handler.NewSiteHandler(database, siteStore, cfg.PublicBaseURL, hosts, abuseLimits).WithAudit(auditRecorder).Register(mux, authMW, skillVersionMW)
 	handler.NewTeamHandler(database, abuseLimits).WithAudit(auditRecorder).Register(mux, authMW, skillVersionMW, hosts, cfg.PublicBaseURL)
@@ -179,11 +204,14 @@ func run() (runErr error) {
 	handler.NewAuditHandler(database, auditReader, cfg.Audit.AccessLogVisibility, abuseLimits).Register(mux, authMW, skillVersionMW)
 	handler.NewShowcaseHandler(database, hosts, signingKeys, cfg.Session.Idle).Register(mux)
 	handler.NewAuthHandler(database, oidcProvider, oidcClaims, signingKeys, cfg.Session.TTL, cfg.Session.Idle, auditRecorder, hosts, cfg.PublicBaseURL, abuseLimits).Register(mux, authMW)
-	handler.NewKeysHandler(database, auditRecorder, hosts, cfg.PublicBaseURL, abuseLimits).Register(mux, authMW)
+	handler.NewKeysHandler(database, auditRecorder, hosts, cfg.PublicBaseURL, abuseLimits).WithMaxKeyDays(int(cfg.APIKeyMaxDays)).Register(mux, authMW)
 	handler.NewDashboardHandler(database, signingKeys, cfg.Session.Idle).Register(mux, authMW)
 	handoffHandler := handler.NewHandoffHandler(database, signingKeys, hosts, auditRecorder, abuseLimits)
 	handoffHandler.Register(mux, authMW)
-	handler.RegisterUIRoutes(mux)
+	handler.RegisterUIRoutes(mux, cfg.PublicBaseURL)
+	handler.RegisterPluginRoute(mux, cfg.PublicBaseURL)
+	connector := handler.NewConnectorHandler(database, cfg.PublicBaseURL, cfg.OAuthRedirectHosts, signingKeys, cfg.Session.Idle, auditRecorder, hosts, abuseLimits)
+	connector.Register(mux, authMW)
 	siteFiles := handler.NewSiteFiles(siteStore, database, cookiePolicy, signingKeys, cfg.Session.Idle).WithAccessWriter(accessWriter)
 	siteAPIHandler := handler.NewSiteAPIHandler(database, siteStore, storage.AssetLimits{
 		MaxFileBytes: cfg.Assets.MaxFileBytes,
@@ -207,10 +235,13 @@ func run() (runErr error) {
 	// method conflicts with the UI's "GET /" catch-all, and GET and DELETE must
 	// answer 405 themselves so an older client can detect the era instead of
 	// being handed the landing page.
+	// Every method needs an API key or an OAuth access token first, so an
+	// unauthenticated client of any method is told where to sign in.
 	mcpServer := mcp.NewServer(mux, "simple-host", pluginVersion)
-	mux.Handle("POST /mcp", mcpServer)
-	mux.Handle("GET /mcp", mcpServer)
-	mux.Handle("DELETE /mcp", mcpServer)
+	protectedMCP := connector.ProtectMCP(authMW, mcpServer)
+	mux.Handle("POST /mcp", protectedMCP)
+	mux.Handle("GET /mcp", protectedMCP)
+	mux.Handle("DELETE /mcp", protectedMCP)
 
 	// The host gate sits directly around the mux: it decides, per hostname,
 	// which routes the mux may answer. The base host is control plane only
@@ -223,8 +254,26 @@ func run() (runErr error) {
 	// id and every request, including one the gate refuses, is on record.
 	requestLog := reqlog.Middleware(slog.New(slog.NewJSONHandler(os.Stdout, nil)), reqlog.ProbePaths)
 	hostGate := handler.NewHostGate(hosts, siteFiles, database, signingKeys, negativeSessionCache, handoffHandler, siteAPIHandler, authMW, cfg.PublicBaseURL)
-	applicationServer := newApplicationServer(":"+cfg.Port, requestLog(handler.SecurityHeaders(hostGate(mux), cfg.SecureMode, hosts)))
-	servers := []managedServer{manageHTTPServer("application", applicationServer)}
+	gated := hostGate(mux)
+	// The state tools reach the site API the way a page does: on the owner's
+	// own host, through the host gate and its access checks.
+	mcpServer.WithSiteAPI(gated, hosts.SiteHostResolver(database))
+	requestMetrics := metrics.New()
+	applicationServer := newApplicationServer(":"+cfg.Port, requestMetrics.Middleware(requestLog(handler.SecurityHeaders(gated, cfg.SecureMode, hosts))))
+	schemaVersion := "unknown"
+	if latest, err := migrate.Latest(); err == nil {
+		schemaVersion = fmt.Sprintf("%04d", latest)
+	}
+	// Its own listener, answering /metrics and nothing else. The Service
+	// routes only the application port, so this is reachable in-cluster by
+	// a scraper that targets the pod, never through the Ingress. The redirect
+	// server's short timeouts suit it.
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("GET /metrics", requestMetrics.Handler(database, metrics.Build{Version: version, Commit: commit, Schema: schemaVersion}))
+	servers := []managedServer{
+		manageHTTPServer("application", applicationServer),
+		manageHTTPServer("metrics", newRedirectServer(":"+cfg.MetricsPort, metricsMux)),
+	}
 	if cfg.SecureMode {
 		redirectHandler, err := newHTTPSRedirectHandler(cfg.PublicBaseURL, hosts)
 		if err != nil {
@@ -238,6 +287,7 @@ func run() (runErr error) {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	connector.StartSweep(ctx)
 	// Indexed pages carry whatever address SiteLink gives, so the index
 	// follows the cutover; existing documents are reindexed by hand after the
 	// flip (docs/subdomains/migration.md phase 4).

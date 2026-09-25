@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+
+	"github.com/lib/pq"
 )
 
 // GetUserByOIDCSub finds the account already bound to a provider subject.
@@ -76,6 +78,31 @@ func RefreshAdminStatus(ctx context.Context, db *sql.DB, userID string, isAdmin 
 // regardless.
 var ErrAccountDisabled = errors.New("account is disabled")
 
+// ErrLastAdmin refuses disabling the only enabled admin: nobody would be
+// left who could re-enable anyone.
+var ErrLastAdmin = errors.New("cannot disable the last enabled admin")
+
+// SyncAdminEmails sets is_admin on every person to whether their email is in
+// adminEmails (lowercased). Run at startup so removing someone from
+// ADMIN_EMAILS takes effect on the next deploy rather than on their next
+// sign-in; only valid when ADMIN_EMAILS is the sole source of admin status.
+func SyncAdminEmails(ctx context.Context, db *sql.DB, adminEmails []string) (changed int64, err error) {
+	const query = `
+		UPDATE users
+		SET is_admin = COALESCE(lower(email) = ANY($1), false)
+		WHERE kind = 'person'
+		  AND is_admin IS DISTINCT FROM COALESCE(lower(email) = ANY($1), false)
+	`
+	if adminEmails == nil {
+		adminEmails = []string{}
+	}
+	result, err := db.ExecContext(ctx, query, pq.Array(adminEmails))
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 // IsUserDisabled reports whether a user's disabled_at is set.
 func IsUserDisabled(ctx context.Context, db *sql.DB, userID string) (bool, error) {
 	const query = `SELECT disabled_at IS NOT NULL FROM users WHERE id = $1`
@@ -85,7 +112,7 @@ func IsUserDisabled(ctx context.Context, db *sql.DB, userID string) (bool, error
 }
 
 // SetUserDisabled sets or clears disabled_at (design.md 6.4). Disabling also
-// revokes every session and API key in the same transaction, so the
+// revokes every session, API key and connected app in the same transaction, so the
 // takedown is atomic: a request already in flight when this commits either
 // sees the old, valid credential (before commit) or a revoked one (after),
 // never a disabled account with a still-live session.
@@ -96,6 +123,29 @@ func SetUserDisabled(ctx context.Context, database *sql.DB, userID string, disab
 	}
 	defer tx.Rollback()
 
+	if disabled {
+		// Lock every enabled admin row first, so two admins disabling each
+		// other concurrently cannot both see the other as the one left.
+		var others int
+		err := tx.QueryRowContext(ctx, `
+			SELECT count(*) FROM (
+				SELECT id FROM users
+				WHERE is_admin AND disabled_at IS NULL AND kind = 'person'
+				FOR UPDATE
+			) admins WHERE id <> $1
+		`, userID).Scan(&others)
+		if err != nil {
+			return err
+		}
+		var targetIsAdmin bool
+		err = tx.QueryRowContext(ctx, `SELECT is_admin AND disabled_at IS NULL FROM users WHERE id = $1`, userID).Scan(&targetIsAdmin)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if targetIsAdmin && others == 0 {
+			return ErrLastAdmin
+		}
+	}
 	var query string
 	if disabled {
 		query = `UPDATE users SET disabled_at = now() WHERE id = $1 AND kind = 'person'`
@@ -118,6 +168,9 @@ func SetUserDisabled(ctx context.Context, database *sql.DB, userID string, disab
 			return err
 		}
 		if err := RevokeAllAPIKeysForUser(ctx, tx, userID); err != nil {
+			return err
+		}
+		if err := DeleteOAuthGrantsForUser(ctx, tx, userID); err != nil {
 			return err
 		}
 	}

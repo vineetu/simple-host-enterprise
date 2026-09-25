@@ -10,13 +10,12 @@ const (
 	hstsPolicy                = "max-age=31536000"
 	hstsPolicyBase            = hstsPolicy + "; includeSubDomains"
 	contentSecurityPolicy     = "frame-ancestors 'none'"
-	searchSessionCookieName   = "simple_host_search_session"
+	searchSessionCookieName   = "__Host-simple_host_search_session"
 	searchSessionCookieMaxAge = 180 * 24 * 60 * 60
 )
 
 // CookiePolicy is trusted deployment configuration. It must not be inferred
-// from request headers because the application listener is behind a layer-4
-// load balancer and those headers are client controlled.
+// from request headers such as X-Forwarded-Proto: the client can set them.
 type CookiePolicy struct {
 	Secure bool
 }
@@ -103,7 +102,7 @@ func (p CookiePolicy) searchSession(value string) *http.Cookie {
 		Value:    value,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   p.Secure,
+		Secure:   true, // required by the __Host- prefix
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   searchSessionCookieMaxAge,
 	}

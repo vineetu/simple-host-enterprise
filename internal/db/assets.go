@@ -9,9 +9,9 @@ import (
 
 // Asset is one row of site_assets (design.md 7.3, migration 0026): the
 // metadata for a file uploaded to a site's asset store. The bytes
-// themselves live on disk at <site>/assets/<ID> (internal/storage); this
-// row is what a listing, the audit trail, and the per-site quota query
-// read without touching the filesystem.
+// themselves are the bucket object sites/<site-id>/assets/<ID>
+// (internal/storage); this row is what a listing, the audit trail, and the
+// per-site quota query read.
 type Asset struct {
 	ID          string
 	SiteID      string
@@ -29,8 +29,8 @@ type Asset struct {
 var ErrAssetNotFound = errors.New("asset not found")
 
 // CreateAsset inserts one asset row. id comes from the storage layer,
-// which already used it as the on-disk filename before this is called, so
-// the row and the file always agree on what to call it — this does not
+// which already used it in the object key before this is called, so the
+// row and the object always agree on what to call it — this does not
 // default it from the column's own DEFAULT gen_random_uuid().
 func CreateAsset(ctx context.Context, q Querier, id, siteID, name, contentType string, size int64, sha256Sum []byte, createdBy *string) (Asset, error) {
 	const query = `
@@ -117,11 +117,8 @@ func SoftDeleteAsset(ctx context.Context, q Querier, siteID, id string) error {
 
 // AssetUsage is a site's current live-asset footprint: how many rows count
 // against MaxSiteCount and how many bytes count against MaxSiteBytes
-// (design.md 7.3's per-site limits). Storage's own quota check computes
-// the same numbers by walking disk rather than querying this table
-// (internal/storage.CreateAsset's usage check) so an outage or drift in
-// either store cannot let the other one be bypassed — see
-// docs/security-review.md.
+// (design.md 7.3's per-site limits). This table is the only record of it;
+// CreateAssetWithinQuota checks it under a per-site lock.
 type AssetUsage struct {
 	Count int64
 	Bytes int64

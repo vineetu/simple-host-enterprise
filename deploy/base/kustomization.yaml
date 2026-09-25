@@ -16,7 +16,10 @@ resources:
   - pdb.yaml
   - cronjob-prune.yaml
 
+# Fully qualified, and a digest that is deliberately not one: an overlay that
+# forgets to pin the image fails `make preflight` rather than pulling
+# whatever an unqualified `simple-host:latest` resolves to on some registry.
 images:
   - name: simple-host
-    newName: simple-host
-    newTag: latest
+    newName: ghcr.io/vineetu/simple-host-enterprise
+    digest: sha256:REPLACE_WITH_THE_RELEASE_DIGEST

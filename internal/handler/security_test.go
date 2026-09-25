@@ -151,34 +151,26 @@ func newTestHostModel(t *testing.T, publicBaseURL string) HostModel {
 	return hosts
 }
 
-func TestVisitCookieUsesInjectedPolicy(t *testing.T) {
-	secureCookie := visitCookie(escapePathSegments("/demo#ops?100%")+"/", CookiePolicy{Secure: true})
-	if !secureCookie.Secure || !secureCookie.HttpOnly || secureCookie.MaxAge <= 0 || secureCookie.Path != "/demo%23ops%3F100%25/" {
-		t.Fatalf("secure visit cookie = %+v", secureCookie)
+// Both cookies are __Host- prefixed, which a browser accepts only with
+// Secure, Path "/" and no Domain.
+func TestVisitCookieIsHostPrefixedAndPerSite(t *testing.T) {
+	a, b := visitCookie("demo"), visitCookie("other")
+	if !strings.HasPrefix(a.Name, "__Host-") || !a.Secure || !a.HttpOnly || a.Path != "/" || a.Domain != "" || a.MaxAge <= 0 {
+		t.Fatalf("visit cookie = %+v", a)
 	}
-	localCookie := visitCookie("/demo/", CookiePolicy{})
-	if localCookie.Secure {
-		t.Fatalf("local visit cookie = %+v", localCookie)
-	}
-	// On an owner host the site is served at the short path, and the cookie
-	// must follow it or every view there would count as a new visit.
-	shortCookie := visitCookie(escapePathSegments("/my site")+"/", CookiePolicy{})
-	if shortCookie.Path != "/my%20site/" {
-		t.Fatalf("short-path visit cookie = %+v", shortCookie)
+	if a.Name == b.Name {
+		t.Fatal("two sites on one owner host share a visit cookie")
 	}
 }
 
-func TestSearchSessionCookieUsesInjectedPolicy(t *testing.T) {
-	secureCookie := (CookiePolicy{Secure: true}).searchSession("anonymous-token")
-	if secureCookie.Name != searchSessionCookieName || secureCookie.Value != "anonymous-token" ||
-		secureCookie.Path != "/" || !secureCookie.HttpOnly || !secureCookie.Secure ||
-		secureCookie.SameSite != http.SameSiteLaxMode || secureCookie.MaxAge != searchSessionCookieMaxAge {
-		t.Fatalf("secure search session cookie = %+v", secureCookie)
-	}
-
-	localCookie := (CookiePolicy{}).searchSession("anonymous-token")
-	if localCookie.Secure {
-		t.Fatalf("local search session cookie = %+v", localCookie)
+func TestSearchSessionCookieIsHostPrefixed(t *testing.T) {
+	for _, policy := range []CookiePolicy{{Secure: true}, {}} {
+		c := policy.searchSession("anonymous-token")
+		if c.Name != searchSessionCookieName || !strings.HasPrefix(c.Name, "__Host-") || c.Value != "anonymous-token" ||
+			c.Path != "/" || !c.HttpOnly || !c.Secure || c.Domain != "" ||
+			c.SameSite != http.SameSiteLaxMode || c.MaxAge != searchSessionCookieMaxAge {
+			t.Fatalf("search session cookie = %+v", c)
+		}
 	}
 }
 

@@ -2,7 +2,8 @@ openapi: 3.0.3
 info:
   title: Simple Host API
   description: |
-    Internal static website hosting at `/sites/{user}/{sitename}/`. Uploads may
+    Internal static website hosting at `<owner>.<base>/<sitename>/` (or a
+    restricted site's own `<owner>--<sitename>.<base>/`). Uploads may
     be gzip-compressed tar or ZIP archives; nested regular-file downloads such
     as ZIP and DMG artifacts are supported.
 
@@ -13,12 +14,11 @@ info:
     deploy JavaScript, and hosted pages still share an origin with management
     surfaces.
 
-    Shared state is public and unauthenticated. Its Referer-path check is
-    forgeable attribution, not access control, and hosted pages share an origin
-    with the control pages and API. Browser session cookies are ambient API
-    credentials on that origin, so hosted JavaScript can send authenticated
-    requests in a signed-in browser even though it cannot read HttpOnly cookies.
-    Never store secrets or PII in state or uploaded files.
+    Shared state and uploaded files are served on each site's own host and
+    need a signed-in viewer (or an API key); anyone who may open a site may
+    read and write its state. The control pages and management API live on
+    the base host, never on a site's host. Never store secrets or PII in state
+    or uploaded files.
 
     Rate-limited operations return `429` with an integer-seconds
     `Retry-After` header. These limits are process-local and reset when the
@@ -319,8 +319,8 @@ paths:
         including nested ZIP and DMG downloads, are supported, except entries
         whose basename is `.DS_Store` or starts with `._`; those macOS metadata
         files are omitted. The response's `url` is the site's address; use it as
-        returned rather than composing `/sites/{username}/{sitename}/` by hand,
-        because the canonical address is changing.
+        returned rather than composing it by hand: a site restricted to named
+        viewers moves to its own address.
       tags: [Sites]
       security:
         - apiKey: []
@@ -1084,23 +1084,21 @@ paths:
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
-  /api/site/state:
+  /api/sites/{sitename}/state:
     get:
-      summary: Read the calling site's shared state
+      summary: Read a site's shared state
       description: |
-        Nameless form of `/api/sites/{username}/{sitename}/state`, for use by
-        a deployed page with a relative URL. The server resolves which site is
-        calling from the page's own address (the `Referer` the browser sends
-        automatically), so the page never needs to know its own site name.
-        Works on the current address and will work on the per-owner
-        addresses sites are moving to. Same
-        response, status codes, and semantics as the named route: the raw JSON
-        document, `{}` for a site that has never saved.
-
-        **Authentication: none.** The Referer is forgeable and is attribution,
-        not access control. Treat the blob as public and shared across
-        visitors. Do not put secrets or PII in state.
+        Returns the raw JSON document, `{}` for a site that has never saved.
+        Served only on the site's own host (its owner's `<owner>.<base>`, or
+        a restricted site's `<owner>--<site>.<base>`), never on the base host.
+        The caller is the signed-in viewer's session (or an `X-API-Key`), and
+        anyone who may open the site may read and write its state. On a
+        restricted site's own host the nameless form `/api/site/...` also
+        works. A `401` means the session expired: reload the page. Do not put
+        secrets or PII in state.
       tags: [State]
+      parameters:
+        - $ref: '#/components/parameters/sitename'
       responses:
         '200':
           description: The raw state document
@@ -1108,7 +1106,7 @@ paths:
             application/json:
               schema: {}
         '403':
-          description: Referer is missing or does not name a site
+          description: The caller may not open this site, or a browser write came from another origin
           content:
             application/json:
               schema:
@@ -1122,15 +1120,20 @@ paths:
     put:
       summary: Save the calling site's shared state (last write wins)
       description: |
-        Nameless form of `PUT /api/sites/{username}/{sitename}/state`. The
-        server resolves which site is calling from the page's own address
-        (the `Referer`); same body, response, status codes, and semantics as
-        the named route. Explicit last-write-wins: new stateful sites should
-        use `/api/site/state/versioned` and use this endpoint only when
+        Explicit last-write-wins: new stateful sites should use
+        `/api/sites/{sitename}/state/versioned` and use this endpoint only when
         unconditional saves are deliberately required. Body is the raw
         document (any valid JSON, up to 1 MiB); response echoes it back.
-        Unauthenticated; the forgeable Referer only attributes the target site.
+        Served only on the site's own host (its owner's `<owner>.<base>`, or
+        a restricted site's `<owner>--<site>.<base>`), never on the base host.
+        The caller is the signed-in viewer's session (or an `X-API-Key`), and
+        anyone who may open the site may read and write its state. On a
+        restricted site's own host the nameless form `/api/site/...` also
+        works. A `401` means the session expired: reload the page. Do not put
+        secrets or PII in state.
       tags: [State]
+      parameters:
+        - $ref: '#/components/parameters/sitename'
       requestBody:
         required: true
         content:
@@ -1146,7 +1149,7 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
-          description: Referer check failed
+          description: The caller may not open this site, or a browser write came from another origin
           content:
             application/json:
               schema:
@@ -1166,21 +1169,24 @@ paths:
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
-  /api/site/state/versioned:
+  /api/sites/{sitename}/state/versioned:
     get:
       summary: Read the calling site's state with its version
       description: |
-        The default state endpoint for new stateful sites. Nameless form of
-        `/api/sites/{username}/{sitename}/state/versioned`, called with a
-        relative URL from a deployed page; the server resolves which site is
-        calling from the page's own address (the `Referer`), so the page never
-        computes its own name from `location.pathname`. Works on the current
-        address and will work on the per-owner addresses sites are moving
-        to. Returns
+        The default state endpoint for new stateful sites. Returns
         `{"version": N, "state": {...}}`; a never-saved site reads
-        `{"version": 0, "state": {}}`. Same public, unauthenticated state and
-        forgeable Referer attribution as the named route.
+        `{"version": 0, "state": {}}`. A page writes its own site name into
+        the call rather than reading it from `location.pathname`.
+        Served only on the site's own host (its owner's `<owner>.<base>`, or
+        a restricted site's `<owner>--<site>.<base>`), never on the base host.
+        The caller is the signed-in viewer's session (or an `X-API-Key`), and
+        anyone who may open the site may read and write its state. On a
+        restricted site's own host the nameless form `/api/site/...` also
+        works. A `401` means the session expired: reload the page. Do not put
+        secrets or PII in state.
       tags: [State]
+      parameters:
+        - $ref: '#/components/parameters/sitename'
       responses:
         '200':
           description: Current version and state
@@ -1189,7 +1195,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/VersionedState'
         '403':
-          description: Referer check failed
+          description: The caller may not open this site, or a browser write came from another origin
           content:
             application/json:
               schema:
@@ -1203,219 +1209,22 @@ paths:
     put:
       summary: Save the calling site's state only if the version still matches
       description: |
-        Nameless form of `PUT /api/sites/{username}/{sitename}/state/versioned`;
-        the server resolves the calling site from the page's own address (the
-        `Referer`). Same body, response, status codes, and semantics as the
-        named route. Send `{"version": N, "state": {...}}` where `N` is the
+        Send `{"version": N, "state": {...}}` where `N` is the
         version you read. If nothing has changed since, the save applies and
         you get the new version back. If someone else saved first, you get
         **409** with the *current* version and state: reapply the user's
         semantic mutation to that freshest state and retry; never retry a
         stale whole snapshot. `version` is required; first save on a fresh
-        site sends `version: 0`. 1 MiB cap. Unauthenticated; the Referer is
-        attribution, not authorization.
-      tags: [State]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [version, state]
-              properties:
-                version:
-                  type: integer
-                  format: int64
-                  minimum: 0
-                  description: The version you read; the save applies only if it still matches.
-                  example: 7
-                state:
-                  description: The full state document to store.
-      responses:
-        '200':
-          description: Saved
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  version:
-                    type: integer
-                    format: int64
-                    example: 8
-        '400':
-          description: Missing/invalid version or state, or invalid JSON
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '403':
-          description: Referer check failed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Site not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '409':
-          description: Version moved — someone else saved first. Body carries the current version and state; re-merge and retry.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VersionedStateConflict'
-        '413':
-          description: Body exceeds 1 MiB
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-
-  /api/sites/{username}/{sitename}/state:
-    get:
-      summary: Read per-site shared state (named route)
-      description: |
-        Named form, still supported for existing sites. New pages call the
-        nameless `/api/site/state` with a relative URL instead of computing
-        their own site name. Returns the site's shared JSON blob (the raw
-        document — no wrapper). A site that has never saved returns `{}`.
-
-        **Authentication: none.** The server only compares the parsed path in
-        `Referer` with `/sites/{username}/{sitename}/...`; this header is
-        forgeable and is attribution, not access control. Treat the blob as
-        public and shared across visitors. Hosted pages, control pages, and the
-        API also share an origin. Do not put secrets or PII in state.
+        site sends `version: 0`. 1 MiB cap.
+        Served only on the site's own host (its owner's `<owner>.<base>`, or
+        a restricted site's `<owner>--<site>.<base>`), never on the base host.
+        The caller is the signed-in viewer's session (or an `X-API-Key`), and
+        anyone who may open the site may read and write its state. On a
+        restricted site's own host the nameless form `/api/site/...` also
+        works. A `401` means the session expired: reload the page. Do not put
+        secrets or PII in state.
       tags: [State]
       parameters:
-        - $ref: '#/components/parameters/username'
-        - $ref: '#/components/parameters/sitename'
-      responses:
-        '200':
-          description: The raw state document
-          content:
-            application/json:
-              schema: {}
-        '403':
-          description: Referer is missing or its parsed site path does not match
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Site not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-    put:
-      summary: Save per-site shared state (last write wins, named route)
-      description: |
-        Named form, still supported for existing sites; new pages call the
-        nameless `/api/site/state`. Legacy, explicit last-write-wins operation.
-        New stateful sites should use `/state/versioned`; use this endpoint
-        only when unconditional saves are deliberately required. It overwrites the site's shared JSON blob. Body is the
-        raw document (any valid JSON, up to 1 MiB); response echoes it back.
-        Concurrent or stale writers can silently overwrite newer state.
-
-        This endpoint is unauthenticated. The forgeable Referer-path check only
-        attributes the target site; it does not authorize the writer.
-      tags: [State]
-      parameters:
-        - $ref: '#/components/parameters/username'
-        - $ref: '#/components/parameters/sitename'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              description: The full state document to store (raw, no wrapper).
-      responses:
-        '200':
-          description: Saved; the stored document echoed back
-          content:
-            application/json:
-              schema: {}
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '403':
-          description: Referer check failed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Site not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '413':
-          description: Body exceeds 1 MiB
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-
-  /api/sites/{username}/{sitename}/state/versioned:
-    get:
-      summary: Read shared state with its version (named route)
-      description: |
-        Named form, still supported for existing sites. New pages call the
-        nameless `/api/site/state/versioned` with a relative URL instead of
-        computing their own site name from `location.pathname`. Returns
-        `{"version": N, "state": {...}}`. The version increases on
-        every save (through either state endpoint). A never-saved site reads
-        `{"version": 0, "state": {}}`. This is the same public,
-        unauthenticated state and forgeable Referer-path attribution as
-        `/state`.
-      tags: [State]
-      parameters:
-        - $ref: '#/components/parameters/username'
-        - $ref: '#/components/parameters/sitename'
-      responses:
-        '200':
-          description: Current version and state
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/VersionedState'
-        '403':
-          description: Referer check failed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '404':
-          description: Site not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-    put:
-      summary: Save shared state only if the version still matches (named route)
-      description: |
-        Named form, still supported for existing sites; new pages call the
-        nameless `/api/site/state/versioned`. Compare-and-set save for
-        concurrent editors. Send
-        `{"version": N, "state": {...}}` where `N` is the version you read.
-        If nothing has changed since, the save applies and you get the new
-        version back. If someone else saved first, you get **409** with the
-        *current* version and state. Reapply the user's semantic mutation to
-        that freshest state and retry; never retry a stale whole snapshot.
-
-        `version` is required here (use plain `/state` for unconditional
-        saves). First save on a fresh site sends `version: 0`. Same Referer
-        attribution check and 1 MiB cap as `/state`; it is not authorization.
-      tags: [State]
-      parameters:
-        - $ref: '#/components/parameters/username'
         - $ref: '#/components/parameters/sitename'
       requestBody:
         required: true
@@ -1452,7 +1261,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '403':
-          description: Referer check failed
+          description: The caller may not open this site, or a browser write came from another origin
           content:
             application/json:
               schema:
@@ -1900,10 +1709,10 @@ components:
           description: Whether the canonical site participates in Showcase and public search.
         public_path:
           type: string
-          example: /sites/alice.smith/my-cool-site/
+          example: https://alice-smith.simple-host.example.com/my-cool-site/
         url:
           type: string
-          example: https://simple-host.example.com/sites/alice.smith/my-cool-site/
+          example: https://alice-smith.simple-host.example.com/my-cool-site/
         etag:
           type: string
           example: '"site-4b256b3b-9d15-4ce5-bba7-b04ef26f49e5-v7"'
@@ -1995,7 +1804,7 @@ components:
             note:
               type: string
               description: Human-readable info about the site URL
-              example: "Site is available at /sites/alice.smith/my-cool-site/."
+              example: "Site is available at https://alice-smith.simple-host.example.com/my-cool-site/"
 
     Version:
       type: object
@@ -2078,8 +1887,8 @@ components:
           description: Relative path of the best-matching HTML page inside the active site version.
         url:
           type: string
-          description: Same-origin `/sites/{owner}/{site}/...` path for the matching page.
-          example: /sites/alice.smith/release-notes/archive/release.html
+          description: Absolute address of the matching page, on its owner's host.
+          example: https://alice-smith.simple-host.example.com/release-notes/archive/release.html
         title:
           type: string
         snippet:

@@ -8,8 +8,8 @@ restricted to named viewers, in which case it moves to its own dedicated
 hostname and refuses everyone else with a 404. Every mutation and every
 visit is recorded to an audit trail and access log an owner or admin can
 read back or export. The same process serves the API, the sites, the
-dashboard, and an MCP endpoint so agents reach every operation through one
-tool surface.
+dashboard, and an MCP endpoint through which agents publish and manage
+sites, teams, sharing, and site state.
 
 This repository is the installable package: the server, its schema
 migrations, a container image, and Kubernetes manifests that run on any
@@ -51,7 +51,8 @@ accounts (`admin@example.com` / `person@example.com`) to sign in with; see
 
 ## Layout
 
-- `cmd/server` — the binary. `simple-host` serves; `simple-host migrate`
+- `cmd/server` — the binary. `simple-host` serves; `simple-host version`
+  prints the release, commit and schema; `simple-host migrate`
   applies the schema and is what the pod's init container runs;
   `simple-host restore` copies a stored version of any site, live or
   deleted, into a site as its next version; `simple-host migrate-storage`
@@ -67,7 +68,7 @@ accounts (`admin@example.com` / `person@example.com`) to sign in with; see
   `reqlog` the request log, `mcp` the tool adapter.
 - `deploy/base` — the application's manifests, including the `prune`
   CronJob. `deploy/components` add an
-  in-cluster Postgres, MinIO, or Dex. `deploy/overlays` are environments:
+  in-cluster Postgres (evaluation only), MinIO, or Dex. `deploy/overlays` are environments:
   `local` is complete, `byo` / `staging` / `production` are templates for
   managed services.
 - `simple-host-plugin/` — the skill bundle agents install.
@@ -115,7 +116,8 @@ make vuln      # govulncheck
 - `docs/security-review.md` — threat model, controls matrix, pen-test list.
 - `docs/site-isolation.md` — why sites under one owner share an origin, and the recorded path to per-page isolation if it is ever needed
 - `docs/cloud/` — per-cloud checklists for the platform pieces a real
-  install needs (AWS, GKE, AKS, Oracle Cloud).
+  install needs (AWS, GCP, Azure, Oracle Cloud).
+- `CHANGELOG.md` — the releases.
 
 ## Licence
 

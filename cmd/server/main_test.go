@@ -152,7 +152,8 @@ func TestPublicSearchHandlerConstructionAndRouteRegistration(t *testing.T) {
 	// This test is about route registration and request-body handling, not
 	// the session requirement design.md 7.2 added around search, so a
 	// pass-through stands in for the real auth middleware.
-	searchHandler.Register(mux, func(next http.Handler) http.Handler { return next })
+	passThrough := func(next http.Handler) http.Handler { return next }
+	searchHandler.Register(mux, passThrough, passThrough)
 
 	getRequest := httptest.NewRequest(http.MethodGet, "/api/search", nil)
 	getRequest.RemoteAddr = "192.0.2.60:1234"

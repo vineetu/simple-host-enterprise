@@ -61,23 +61,21 @@ func InsertAuditEvent(ctx context.Context, q Querier, e AuditEvent) error {
 	if err != nil {
 		return fmt.Errorf("marshal audit detail: %w", err)
 	}
-	at := e.At
-	if at.IsZero() {
-		at = time.Now()
-	}
+	// No `at`: the column's default and migration 0030's trigger set it
+	// from the database clock, whatever a caller would have sent.
 	const query = `
 		INSERT INTO audit_events (
-			at, request_id, actor_id, actor_kind, key_id, action,
+			request_id, actor_id, actor_kind, key_id, action,
 			owner_id, site_id, team_id, via_site_label, via_site_name,
 			via_site_observed, ip, user_agent, detail
 		) VALUES (
-			$1, NULLIF($2, ''), NULLIF($3, '')::uuid, $4, NULLIF($5, '')::uuid, $6,
-			NULLIF($7, '')::uuid, NULLIF($8, '')::uuid, NULLIF($9, '')::uuid, NULLIF($10, ''), NULLIF($11, ''),
-			$12, NULLIF($13, '')::inet, NULLIF($14, ''), $15::jsonb
+			NULLIF($1, ''), NULLIF($2, '')::uuid, $3, NULLIF($4, '')::uuid, $5,
+			NULLIF($6, '')::uuid, NULLIF($7, '')::uuid, NULLIF($8, '')::uuid, NULLIF($9, ''), NULLIF($10, ''),
+			$11, NULLIF($12, '')::inet, NULLIF($13, ''), $14::jsonb
 		)
 	`
 	_, err = q.ExecContext(ctx, query,
-		at, e.RequestID, e.ActorID, e.ActorKind, e.KeyID, e.Action,
+		e.RequestID, e.ActorID, e.ActorKind, e.KeyID, e.Action,
 		e.OwnerID, e.SiteID, e.TeamID, e.ViaSiteLabel, e.ViaSiteName,
 		e.ViaSiteObserved, e.IP, e.UserAgent, detail,
 	)
@@ -86,9 +84,9 @@ func InsertAuditEvent(ctx context.Context, q Querier, e AuditEvent) error {
 
 // BumpStateWriteParams is one state_write coalescing call (design 8.1: "one
 // row per (actor, site, five-minute window) with detail.count, upserted").
-// WindowStart is the deterministic window key the caller computes (the
-// event time truncated to the coalescing interval); it is also the row's
-// `at`, so two calls in the same window always target the same row.
+// WindowStart is still sent (the function's signature is kept for a
+// rollout) but ignored: since migration 0030 the database computes the
+// window from its own clock.
 type BumpStateWriteParams struct {
 	WindowStart time.Time
 	ActorID     string

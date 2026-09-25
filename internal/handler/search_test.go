@@ -150,7 +150,7 @@ func TestPublicSearchServeMuxRejectsHEADBeforeAllHandlerSideEffects(t *testing.T
 	// This test is about handleSearch's own method handling, not the
 	// session requirement design.md 7.2 added around it, so Register is
 	// given a pass-through in place of the real auth middleware.
-	handler.Register(mux, func(next http.Handler) http.Handler { return next })
+	handler.Register(mux, func(next http.Handler) http.Handler { return next }, func(next http.Handler) http.Handler { return next })
 	peer := "192.0.2.11"
 	request := httptest.NewRequest(http.MethodHead, "/api/search?q=release", nil)
 	request.RemoteAddr = peer + ":4321"
@@ -1185,3 +1185,31 @@ type searchFailingReader struct {
 }
 
 func (reader searchFailingReader) Read([]byte) (int, error) { return 0, reader.err }
+
+// A cookie-authenticated click needs the base host's own Origin, like every
+// other cookie-authenticated mutation.
+func TestSearchClickRequiresOriginWithACookie(t *testing.T) {
+	hosts := testHostModel(t)
+	handler := NewSearchHandler(nil, nil, CookiePolicy{})
+	mux := http.NewServeMux()
+	handler.Register(mux, func(next http.Handler) http.Handler { return next }, cookieOriginCheck(hosts, "https://foo.example"))
+	for _, test := range []struct {
+		origin string
+		want   int
+	}{
+		{"https://evil.example", http.StatusForbidden},
+		{"", http.StatusForbidden},
+	} {
+		request := httptest.NewRequest(http.MethodPost, "/api/search/click", strings.NewReader(`{}`))
+		request.Host = "foo.example"
+		request.AddCookie(&http.Cookie{Name: "__Host-sh_session", Value: "x"})
+		if test.origin != "" {
+			request.Header.Set("Origin", test.origin)
+		}
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		if response.Code != test.want {
+			t.Fatalf("origin %q: status = %d, want %d", test.origin, response.Code, test.want)
+		}
+	}
+}

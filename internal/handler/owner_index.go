@@ -13,6 +13,7 @@ import (
 
 	"github.com/vsriram/simple-host/internal/audit"
 	"github.com/vsriram/simple-host/internal/db"
+	"github.com/vsriram/simple-host/internal/reqlog"
 )
 
 // ownerIndexData is what the root of an owner host needs from the database:
@@ -166,7 +167,7 @@ func (g *hostGate) recordOwnerIndexVisit(r *http.Request, label, userID, session
 		Method:     r.Method,
 		Status:     status,
 		Bytes:      written,
-		IP:         remoteClientKey(r),
+		IP:         reqlog.ClientIP(r),
 		UserAgent:  r.UserAgent(),
 		ClientKind: classifyClient(r).String(),
 	})

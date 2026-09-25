@@ -39,12 +39,22 @@ func runSubcommand(name string, args []string) error {
 	}
 }
 
+// version and commit are set at build time:
+//
+//	-ldflags "-X main.version=v1.1.0 -X main.commit=<sha>"
+//
+// A plain `go build` says dev/unknown, which is what it is.
+var (
+	version = "dev"
+	commit  = "unknown"
+)
+
 func versionString() string {
 	latest, err := migrate.Latest()
 	if err != nil {
-		return "simple-host (schema: unknown: " + err.Error() + ")"
+		return fmt.Sprintf("simple-host %s (commit %s, schema unknown: %v)", version, commit, err)
 	}
-	return fmt.Sprintf("simple-host (schema %04d)", latest)
+	return fmt.Sprintf("simple-host %s (commit %s, schema %04d)", version, commit, latest)
 }
 
 // runMigrate applies pending migrations, or with --status only reports them.
@@ -54,6 +64,7 @@ func runMigrate(args []string) error {
 	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
 	status := fs.Bool("status", false, "report pending migrations without applying them")
 	wait := fs.Duration("wait", 2*time.Minute, "how long to wait for the database to accept connections")
+	lockWait := fs.Duration("lock-wait", migrate.DefaultLockWait, "how long to wait for another migrator to finish")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -85,7 +96,7 @@ func runMigrate(args []string) error {
 		}
 		return nil
 	}
-	applied, err := migrate.Apply(ctx, db, func(msg string) { log.Print(msg) })
+	applied, err := migrate.Apply(ctx, db, *lockWait, func(msg string) { log.Print(msg) })
 	for _, name := range applied {
 		log.Printf("applied %s", name)
 	}

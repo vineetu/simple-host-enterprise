@@ -8,6 +8,7 @@ import (
 	"time"
 
 	dbstore "github.com/vsriram/simple-host/internal/db"
+	"github.com/vsriram/simple-host/internal/reqlog"
 )
 
 // coalesceWindow is design 8.1's "five-minute window" for state_write.
@@ -65,6 +66,7 @@ func (r *DBRecorder) RecordTx(ctx context.Context, tx *sql.Tx, event Event) erro
 }
 
 func (r *DBRecorder) write(ctx context.Context, q dbstore.Querier, event Event) error {
+	event = withRequestInfo(ctx, event)
 	now := time.Now()
 	if event.Action == "state_write" {
 		// The coalescing arbiter is (site_id, actor_id, at); Postgres never
@@ -89,4 +91,24 @@ func (r *DBRecorder) write(ctx context.Context, q dbstore.Querier, event Event) 
 		})
 	}
 	return dbstore.InsertAuditEvent(ctx, q, event.row(now))
+}
+
+// withRequestInfo fills the request id, client address and User-Agent from
+// the request log's record when the caller did not set them, so every
+// audit row carries them without each call site having to.
+func withRequestInfo(ctx context.Context, event Event) Event {
+	record := reqlog.FromContext(ctx)
+	if record == nil {
+		return event
+	}
+	if event.RequestID == "" {
+		event.RequestID = record.ID
+	}
+	if event.IP == "" {
+		event.IP = record.IP
+	}
+	if event.UserAgent == "" {
+		event.UserAgent = record.UserAgent
+	}
+	return event
 }

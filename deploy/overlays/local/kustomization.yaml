@@ -29,7 +29,7 @@ secretGenerator:
     envs: [secrets.env]
 
 images:
-  - name: simple-host
+  - name: ghcr.io/vineetu/simple-host-enterprise
     newName: simple-host
     newTag: local
 

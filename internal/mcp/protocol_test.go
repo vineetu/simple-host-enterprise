@@ -20,7 +20,7 @@ func echoUpstream() http.Handler {
 	})
 }
 
-func testServer() *Server { return NewServer(echoUpstream(), "simple-host", "0.9.0") }
+func testServer() *Server { return NewServer(echoUpstream(), "simple-host", "0.10.0") }
 
 // post sends one message with the headers a conforming client would send.
 func post(t *testing.T, s *Server, body string, headers map[string]string) *httptest.ResponseRecorder {
@@ -416,7 +416,7 @@ func TestStructuredContentIsAlwaysAnObject(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`[{"version_number":2},{"version_number":1}]`))
 	})
-	s := NewServer(arrayUpstream, "simple-host", "0.9.0")
+	s := NewServer(arrayUpstream, "simple-host", "0.10.0")
 	rec := post(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_site_versions","arguments":{"site":"d"},`+meta+`}}`,
 		modern("tools/call", "list_site_versions"))
 
@@ -454,5 +454,22 @@ func TestBatchIsReportedAsInvalidRequest(t *testing.T) {
 		map[string]string{"MCP-Protocol-Version": protocolVersion, "Mcp-Method": "tools/list"})
 	if code := errorCode(t, rec); code != codeInvalidRequest {
 		t.Errorf("error code = %v, want %d (invalid request, not parse error)", code, codeInvalidRequest)
+	}
+}
+
+// Final legacy revisions current editor and CLI clients send are answered in
+// their own version; older ones are not listed and get this server's.
+func TestLegacyInitializeKeepsSupportedRevisions(t *testing.T) {
+	for requested, want := range map[string]string{
+		"2025-11-25": "2025-11-25",
+		"2025-06-18": "2025-06-18",
+		"2025-03-26": protocolVersion,
+	} {
+		rec := post(t, testServer(),
+			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"`+requested+`","capabilities":{}}}`, nil)
+		res := decode(t, rec)["result"].(map[string]any)
+		if res["protocolVersion"] != want {
+			t.Errorf("initialize %s: protocolVersion = %v, want %s", requested, res["protocolVersion"], want)
+		}
 	}
 }

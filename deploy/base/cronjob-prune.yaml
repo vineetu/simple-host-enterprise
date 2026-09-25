@@ -1,5 +1,4 @@
-# Drops expired audit_events and access_log partitions (design.md 8.1, 8.2,
-# 9.3). Runs `simple-host prune`, which also rolls audit_ensure_partitions
+# Drops expired audit_events and access_log partitions. Runs `simple-host prune`, which also rolls audit_ensure_partitions
 # forward before it prunes, so this is the only scheduled job the rolling
 # partition scheme needs.
 #
@@ -8,7 +7,7 @@
 # simplehost_app role: it inherits the owning role's credentials from
 # simple-host-secrets' plain DB_PASSWORD, the same credential the migrate
 # init container in deployment.yaml connects as. That is deliberate, not an
-# oversight — design 9.3 gives the application role no DROP privilege on
+# oversight — the application role has no DROP privilege on
 # these tables at all, so retention can only ever run as the owning role,
 # and never from the server's own connection pool.
 #

@@ -8,11 +8,12 @@ import (
 	"io"
 	"math"
 	"net/http"
-	"net/netip"
 	"strconv"
 	"time"
 
+	"github.com/vsriram/simple-host/internal/auth"
 	"github.com/vsriram/simple-host/internal/ratelimit"
+	"github.com/vsriram/simple-host/internal/reqlog"
 )
 
 const (
@@ -60,9 +61,8 @@ var (
 	adminIdentityPolicy = ratelimit.Policy{
 		Name: "admin-identity", Burst: 10, RefillPerSecond: 0.1,
 	}
-	// A layer-4 load balancer leaves its own peers in RemoteAddr. These peer
-	// buckets therefore provide coarse aggregate load-shed, not end-user quotas;
-	// forwarded headers remain untrusted and are never used as limiter keys.
+	// Keyed by clientLimitKey like every other per-caller limit; these are
+	// the coarse load-shed buckets, the session ones below are the quotas.
 	searchQueryPeerPolicy = ratelimit.Policy{
 		Name: "search-query-peer", Burst: 200, RefillPerSecond: 20,
 	}
@@ -174,15 +174,16 @@ func (l *AbuseLimits) acquireArchiveDownload() (func(), bool) {
 	}
 }
 
-// remoteClientKey deliberately trusts only net/http's peer address and rejects
-// forwarded headers as identity input. They are client-controlled at the current
-// layer-4 NLB boundary, where E1 intentionally observes the NLB peer.
-func remoteClientKey(r *http.Request) string {
-	if address, err := netip.ParseAddrPort(r.RemoteAddr); err == nil {
-		return address.Addr().Unmap().String()
+// clientLimitKey is the per-caller key for the client rate limits: the
+// signed-in user when the route has already authenticated one (so a
+// company behind one egress address does not share a bucket), otherwise
+// the client address (reqlog.ClientIP, which honours TRUSTED_PROXY_CIDRS).
+func clientLimitKey(r *http.Request) string {
+	if user := auth.GetUser(r.Context()); user != nil {
+		return "user:" + user.ID
 	}
-	if address, err := netip.ParseAddr(r.RemoteAddr); err == nil {
-		return address.Unmap().String()
+	if ip := reqlog.ClientIP(r); ip != "" {
+		return ip
 	}
 	return "unknown"
 }

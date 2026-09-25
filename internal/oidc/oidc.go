@@ -51,10 +51,13 @@ type Provider struct {
 }
 
 // Discover fetches the issuer's discovery document and prepares its JWKS
-// cache. httpClient may be nil, in which case http.DefaultClient is used.
+// cache. httpClient may be nil, in which case a client with a 15-second
+// timeout is used.
 func Discover(ctx context.Context, cfg Config, httpClient *http.Client) (*Provider, error) {
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		// Never http.DefaultClient: it has no timeout, so a provider that
+		// stops answering would hang sign-in (and startup) indefinitely.
+		httpClient = &http.Client{Timeout: 15 * time.Second}
 	}
 	if cfg.Issuer == "" || cfg.ClientID == "" || cfg.ClientSecret == "" || cfg.RedirectURL == "" {
 		return nil, errors.New("oidc: issuer, client id, client secret and redirect URL are all required")

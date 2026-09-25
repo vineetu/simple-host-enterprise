@@ -37,7 +37,7 @@ type SiteHandler struct {
 	// mutation this handler owns that design.md 7.3 requires an audit row
 	// for. WithAudit exists rather than a constructor parameter so every
 	// existing NewSiteHandler(...) call site (production and test alike)
-	// keeps compiling unchanged, the same shape AdminHandler.WithDiskStorage
+	// keeps compiling unchanged, the same shape AdminHandler.WithStore
 	// already uses.
 	audit audit.Recorder
 }
@@ -240,7 +240,7 @@ func (h *SiteHandler) limitUploadConcurrency(next http.Handler) http.Handler {
 
 func (h *SiteHandler) limitManagementClient(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if decision := h.limits.allow(managementClientPolicy, remoteClientKey(r)); !decision.Allowed {
+		if decision := h.limits.allow(managementClientPolicy, clientLimitKey(r)); !decision.Allowed {
 			writeRateLimit(w, decision)
 			return
 		}

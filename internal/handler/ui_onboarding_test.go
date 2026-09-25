@@ -245,39 +245,10 @@ func TestHomepageOnboardingJourneyAndEmailPrivacy(t *testing.T) {
 	collaboration := onboardingSingleElementWithClass(t, document, "section", "collaboration")
 	assertOnboardingElementText(t, collaboration, "h2", "One site, shared with editors")
 
-	var emailLabels []*htmlnode.Node
-	for _, label := range onboardingElements(document, "label") {
-		if target, _ := onboardingAttribute(label, "for"); target == "workEmail" {
-			emailLabels = append(emailLabels, label)
-		}
-	}
-	if len(emailLabels) != 1 || onboardingText(emailLabels[0]) != "Work email" {
-		t.Fatalf("work-email labels = %d with text %q, want one visible Work email label", len(emailLabels), onboardingTextOrEmpty(emailLabels))
-	}
-	if onboardingHasAttribute(emailLabels[0], "hidden") || onboardingHasClass(emailLabels[0], "visually-hidden") || onboardingHasClass(emailLabels[0], "sr-only") {
-		t.Error("work-email label is visually hidden")
-	}
-	emailInputs := onboardingElementsByID(document, "workEmail")
-	if len(emailInputs) != 1 {
-		t.Fatalf("found %d workEmail inputs, want 1", len(emailInputs))
-	}
-	if inputType, _ := onboardingAttribute(emailInputs[0], "type"); inputType != "email" {
-		t.Errorf("workEmail type = %q, want email", inputType)
-	}
-
-	// The privacy promise changed deliberately: the email is now remembered on
-	// the device for a day (the product owner accepted this), so the copy must
-	// say so plainly. It is still never transmitted — asserted below. A promise
-	// the code contradicts is worse than a longer promise that is true.
-	privacy := onboardingElementsByID(document, "workEmailHelp")
-	if len(privacy) != 1 {
-		t.Fatalf("found %d workEmailHelp elements, want 1", len(privacy))
-	}
-	privacyText := onboardingText(privacy[0])
-	for _, want := range []string{"remembered on this device", "never sent to the AI", "added to a URL", "analytics"} {
-		if !strings.Contains(privacyText, want) {
-			t.Errorf("work-email privacy copy is missing %q; it must state what is stored and that it is not transmitted", want)
-		}
+	// Accounts come from the company's sign-in: the page asks for no email and
+	// the prompt never tells an agent to register one.
+	if got := onboardingElementsByID(document, "workEmail"); len(got) != 0 {
+		t.Error("homepage still asks for a work email")
 	}
 
 	installPrompt := onboardingSingleElementByID(t, document, "installPrompt")
@@ -321,7 +292,7 @@ func TestHomepageOnboardingJourneyAndEmailPrivacy(t *testing.T) {
 		t.Error("agent prompt result block must start hidden")
 	}
 
-	clientScript := onboardingScriptContaining(t, document, "var workEmail =")
+	clientScript := onboardingScriptContaining(t, document, "function deploymentPrompt(")
 	for _, want := range []string{
 		"function classifyInstallPlatform(browserNavigator)",
 		"browserNavigator.userAgentData.platform",
@@ -335,15 +306,13 @@ func TestHomepageOnboardingJourneyAndEmailPrivacy(t *testing.T) {
 	if strings.Contains(homepage, "{{PLATFORM_HINT}}") {
 		t.Error("homepage raw HTML still contains an unresolved platform-hint token")
 	}
-	emailScript := onboardingSubstringFrom(t, clientScript, "var workEmail =")
+	emailScript := onboardingSubstringFrom(t, clientScript, "function deploymentPrompt(")
 	for _, want := range []string{
-		"'Next, before you build anything, make sure my Simple Host account exists. My work email is ' + email",
+		"make sure you can publish as me",
 		"agentPromptText.value = deploymentPrompt",
 		"localBuildRequest(brief)",
-		// The username forms part of the published base path, so a framework
-		// site built before registration is built for the wrong address. See
-		// references/account-recovery.md.
-		"Do this first because my username forms part of the published address",
+		// The owner is settled before the build. See SKILL.md section 3.
+		"Do this first so the site",
 		// The generated prompt must gate on the skills before any build work,
 		// and must refuse the workarounds agents reach for when the skills are
 		// absent — a downloadable archive, code pasted into chat, a different
@@ -354,7 +323,7 @@ func TestHomepageOnboardingJourneyAndEmailPrivacy(t *testing.T) {
 		"installing them is your first task",
 		"Do not build the website first",
 		"Do not offer me a workaround",
-		"Use the installed simple-host account-recovery workflow",
+		"the installed simple-host account-recovery workflow",
 		"copyText(agentPromptText.value)",
 		"agentPromptText.select()",
 	} {
@@ -362,8 +331,10 @@ func TestHomepageOnboardingJourneyAndEmailPrivacy(t *testing.T) {
 			t.Errorf("work-email client code is missing %q", want)
 		}
 	}
-	if strings.Contains(emailScript, "save the returned API key the normal way") {
-		t.Error("generated deployment prompt bypasses the installed account-recovery workflow")
+	for _, stale := range []string{"save the returned API key the normal way", "register with that email", "work email"} {
+		if strings.Contains(emailScript, stale) {
+			t.Errorf("generated deployment prompt still says %q", stale)
+		}
 	}
 	// Local persistence is now permitted; transmission and URL/cookie exposure
 	// are not. The email may be written to localStorage but must never reach the
@@ -379,11 +350,8 @@ func TestHomepageOnboardingJourneyAndEmailPrivacy(t *testing.T) {
 		}
 	}
 	// The only persistence sink allowed is localStorage under the documented key,
-	// and it must carry an expiry so the email is not kept indefinitely.
-	if !strings.Contains(emailScript, "localStorage") {
-		t.Error("email persistence expected via localStorage but none found")
-	}
-	if !strings.Contains(emailScript, "STORE_TTL_MS") {
+	// and it must carry an expiry so the brief is not kept indefinitely.
+	if !strings.Contains(clientScript, "STORE_TTL_MS") {
 		t.Error("persisted onboarding data must expire; no TTL found")
 	}
 
@@ -459,13 +427,14 @@ func TestHomepageStatesInstallPrerequisiteWithoutClaimingToVerify(t *testing.T) 
 	// itself and the disclosure carries the affordance on its own.
 	// Support routing must survive in the prompt's dead ends, not only on the
 	// page: someone who pasted the prompt into their agent is no longer reading
-	// this site when they get stuck.
+	// this site when they get stuck. The package names no chat channel of its
+	// own; the installation's platform team is where help comes from.
 	prompt := onboardingRawText(onboardingSingleElementByID(t, document, "installPrompt"))
-	if got := strings.Count(prompt, "#simple-host-support"); got < 2 {
-		t.Errorf("install prompt names the support channel %d times, want it at every dead end", got)
+	if got := strings.Count(prompt, "platform team"); got < 2 {
+		t.Errorf("install prompt names the platform team %d times, want it at every dead end", got)
 	}
-	if !strings.Contains(onboardingVisibleText(document), "#simple-host-support") {
-		t.Error("homepage never names the support channel outside the prompt")
+	if !strings.Contains(onboardingVisibleText(document), "platform team") {
+		t.Error("homepage never names where to get help outside the prompt")
 	}
 
 	// The "Not sure if it's installed?" affordance is a single disclosure, not
@@ -499,10 +468,7 @@ func TestHomepageProgressiveRevealWiring(t *testing.T) {
 		// backend detection adds the state instruction and its warning
 		"function describedSiteNeedsState(",
 		"versioned shared state",
-		"world-readable and world-writable",
-		// the username preview mirrors the server derivation
-		"function deriveUsername(",
-		"[^a-z0-9.-]+",
+		"never as HTML",
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("progressive-reveal wiring is missing %q", want)
@@ -711,12 +677,12 @@ func TestInstallRecommendedAgentPromptContract(t *testing.T) {
 		// owns registration and persistence before skill discovery is available.
 		"Do not rely on the newly copied skill being discoverable yet.",
 		"exact-destination preflight",
-		"single-call save-and-verify transaction",
+		"save-and-verify steps",
 		"one yes covering both",
 		"honor every approval required by the host, tool, sandbox, or operating system",
 		// A successful install looks broken without this.
 		"a new chat or an app restart",
-		"#simple-host-support",
+		"ask my platform team",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("agent install prompt is missing %q", want)
@@ -730,6 +696,8 @@ func TestInstallRecommendedAgentPromptContract(t *testing.T) {
 		"npx",
 		"permissioned updater",
 		"Before approval:",
+		"#simple-host-support",
+		"work email",
 	} {
 		if strings.Contains(prompt, gone) {
 			t.Errorf("agent install prompt reintroduced %q; it is not relevant to a first install", gone)

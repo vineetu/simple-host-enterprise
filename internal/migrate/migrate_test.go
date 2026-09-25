@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 
 	_ "github.com/lib/pq"
@@ -58,7 +59,7 @@ func TestApplyAgainstPostgres(t *testing.T) {
 	if err := Check(ctx, db); err == nil {
 		t.Fatal("Check passed on an empty database")
 	}
-	applied, err := Apply(ctx, db, nil)
+	applied, err := Apply(ctx, db, 0, nil)
 	if err != nil {
 		t.Fatalf("Apply: %v (applied %v)", err, applied)
 	}
@@ -91,8 +92,14 @@ func TestApplyAgainstPostgres(t *testing.T) {
 	if _, err := appDB.ExecContext(ctx, `TRUNCATE users`); err == nil {
 		t.Fatal("app role was able to TRUNCATE; least-privilege grant is too broad")
 	}
+	if err := CheckLeastPrivilege(ctx, appDB); err != nil {
+		t.Fatalf("CheckLeastPrivilege as the app role: %v", err)
+	}
+	if err := CheckLeastPrivilege(ctx, db); err == nil {
+		t.Fatal("CheckLeastPrivilege accepted the owning role")
+	}
 
-	again, err := Apply(ctx, db, nil)
+	again, err := Apply(ctx, db, 0, nil)
 	if err != nil || len(again) != 0 {
 		t.Fatalf("second Apply = %v, %v; want nothing to do", again, err)
 	}
@@ -116,6 +123,61 @@ func TestApplyAgainstPostgres(t *testing.T) {
 	}()
 	if err := Check(ctx, db); err == nil {
 		t.Fatal("Check accepted a schema newer than the binary")
+	}
+	// A newer migration recorded as backward-compatible is what lets the
+	// previous image start again after a rollback.
+	if _, err := db.ExecContext(ctx, `UPDATE schema_migrations SET backward_compatible = true WHERE version = 9999`); err != nil {
+		t.Fatal(err)
+	}
+	if err := Check(ctx, db); err != nil {
+		t.Fatalf("Check refused a newer, backward-compatible schema: %v", err)
+	}
+
+	// A failing file leaves neither its changes nor its record behind.
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	bad := Migration{Version: 9998, Name: "9998_bad.sql", body: "CREATE TABLE half_applied (id int);\nSELECT 1/0;"}
+	if err := applyOne(ctx, conn, bad); err == nil {
+		t.Fatal("applyOne succeeded on a failing file")
+	}
+	var leftovers int
+	if err := db.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM schema_migrations WHERE version = 9998) + (SELECT count(*) FROM pg_tables WHERE tablename = 'half_applied')`).Scan(&leftovers); err != nil {
+		t.Fatal(err)
+	}
+	if leftovers != 0 {
+		t.Fatal("a failed migration left its table or its record behind")
+	}
+}
+
+// Every file runs inside the transaction Apply opens, so any transaction
+// control left after stripping BEGIN;/COMMIT; would end that transaction early
+// and record nothing atomically.
+func TestMigrationsCarryNoOtherTransactionControl(t *testing.T) {
+	all, err := All()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range all {
+		for _, line := range strings.Split(withoutTransactionControl(m.body), "\n") {
+			upper := strings.ToUpper(strings.TrimSpace(line))
+			for _, control := range []string{"BEGIN;", "BEGIN TRANSACTION", "START TRANSACTION", "COMMIT", "END;", "END TRANSACTION", "ROLLBACK", "SAVEPOINT", "RELEASE SAVEPOINT"} {
+				if strings.HasPrefix(upper, control) && !(control == "END;" && strings.Contains(m.body, "$$")) {
+					t.Errorf("%s: %q; Apply already wraps each file in a transaction", m.Name, strings.TrimSpace(line))
+				}
+			}
+		}
+	}
+}
+
+func TestBackwardCompatibleMarker(t *testing.T) {
+	if !(Migration{body: CompatibleMarker + "\nALTER TABLE x ADD COLUMN y int;"}).BackwardCompatible() {
+		t.Error("marker on the first line was not recognised")
+	}
+	if (Migration{body: "ALTER TABLE x DROP COLUMN y;\n" + CompatibleMarker}).BackwardCompatible() {
+		t.Error("marker off the first line was recognised")
 	}
 }
 

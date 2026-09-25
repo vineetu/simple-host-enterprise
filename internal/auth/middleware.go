@@ -9,6 +9,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/vsriram/simple-host/internal/db"
@@ -21,11 +22,16 @@ const (
 	userContextKey contextKey = iota
 	sessionIDContextKey
 	apiKeyIDContextKey
+	sessionHostContextKey
 )
 
 type errorResponse struct {
 	Error string `json:"error"`
 }
+
+// APIKeyPrefix starts every newly minted key, so secret scanners (and
+// people) can recognise one in a log, a commit or a paste.
+const APIKeyPrefix = "shk_"
 
 func GenerateAPIKey() (string, error) {
 	key := make([]byte, 32)
@@ -33,11 +39,12 @@ func GenerateAPIKey() (string, error) {
 		return "", err
 	}
 
-	return hex.EncodeToString(key), nil
+	return APIKeyPrefix + hex.EncodeToString(key), nil
 }
 
-// Middleware authenticates a request one of two ways (design.md 6.3): an
-// X-API-Key header, hashed and looked up in api_keys, or the
+// Middleware authenticates a request one of three ways (design.md 6.3): an
+// X-API-Key header, hashed and looked up in api_keys; an OAuth access token
+// in "Authorization: Bearer" (handler/connector.go); or the
 // SessionCookieName session cookie, verified against signingKeys and then
 // checked against the sessions table. The header takes precedence when both
 // are present — an agent presenting a key on a browser-shared origin should
@@ -69,8 +76,32 @@ func Middleware(database *sql.DB, signingKeys []SigningKey, sessionIdle time.Dur
 				return
 			}
 
+			// An OAuth access token from an AI app connected on the person's
+			// behalf. Checked before the cookie, and never falls through to
+			// it: a bad token is a bad token even with a browser session.
+			if token, ok := BearerToken(r); ok {
+				user, _, err := db.GetUserByOAuthAccessToken(r.Context(), database, db.HashAPIKey(token))
+				if err != nil {
+					if errors.Is(err, sql.ErrNoRows) {
+						writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
+						return
+					}
+					writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+					return
+				}
+				reqlog.SetUser(r.Context(), user.ID)
+				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userContextKey, &user)))
+				return
+			}
+
 			if c, err := r.Cookie(SessionCookieName); err == nil && c.Value != "" {
 				verified, err := VerifySessionCookie(signingKeys, c.Value)
+				if err == nil && !strings.EqualFold(verified.Host, ExpectedSessionHost(r.Context())) {
+					// A cookie is accepted only on the host it was minted
+					// for: a base-host cookie carries no Host, and a hand-off
+					// cookie names its owner or restricted-site host.
+					err = ErrSessionCookieInvalid
+				}
 				if err == nil {
 					withUser, dbErr := db.GetValidSession(r.Context(), database, verified.SessionID, sessionIdle)
 					if dbErr == nil && withUser.Session.UserID == verified.UserID {
@@ -93,6 +124,16 @@ func Middleware(database *sql.DB, signingKeys []SigningKey, sessionIdle time.Dur
 			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
 		})
 	}
+}
+
+// BearerToken returns the token of an "Authorization: Bearer" header.
+func BearerToken(r *http.Request) (string, bool) {
+	authz := r.Header.Get("Authorization")
+	if len(authz) < 7 || !strings.EqualFold(authz[:7], "bearer ") {
+		return "", false
+	}
+	token := strings.TrimSpace(authz[7:])
+	return token, token != ""
 }
 
 // touchAPIKey and touchSession are detached from the request context — a
@@ -139,6 +180,33 @@ func RequireRealUser(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// WithExpectedSessionHost tells Middleware which host a session cookie on
+// this request must be bound to. The host gate sets it for the site-facing
+// API on an owner or restricted-site host; left unset (the base host), only
+// a cookie with no Host binding is accepted.
+func WithExpectedSessionHost(ctx context.Context, host string) context.Context {
+	return context.WithValue(ctx, sessionHostContextKey, strings.ToLower(host))
+}
+
+// ExpectedSessionHost is the host WithExpectedSessionHost recorded, or "".
+func ExpectedSessionHost(ctx context.Context) string {
+	host, _ := ctx.Value(sessionHostContextKey).(string)
+	return host
+}
+
+// VerifyBaseSessionCookie is VerifySessionCookie for a base-host page: a
+// cookie bound to an owner or restricted-site host is refused.
+func VerifyBaseSessionCookie(keys []SigningKey, value string) (VerifiedSession, error) {
+	verified, err := VerifySessionCookie(keys, value)
+	if err != nil {
+		return VerifiedSession{}, err
+	}
+	if verified.Host != "" {
+		return VerifiedSession{}, ErrSessionCookieInvalid
+	}
+	return verified, nil
 }
 
 func GetUser(ctx context.Context) *db.User {

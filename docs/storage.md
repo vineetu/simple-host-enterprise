@@ -15,6 +15,10 @@ Postgres decides what is served: `sites.active_version` names the live
 version, and switching versions is a row update, not a file operation. The
 state document, users, teams and audit log live only in Postgres.
 
+Serving therefore depends on the database being up: every page request
+looks up the site's live version there, so a database outage takes the
+sites down with it (they answer 503), not just deploys and sign-in.
+
 Each pod keeps a local cache of the versions it serves in an `emptyDir` at
 `CACHE_DIR`, emptied on start and bounded by `CACHE_MAX_BYTES` (versions
 being served are pinned, so the volume is sized at about 3x that). A pod

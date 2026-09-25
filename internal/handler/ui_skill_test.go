@@ -62,7 +62,7 @@ func TestCollaborationSkillReleaseIsPackaged(t *testing.T) {
 		"Replace transactionally", // a failed update must not leave a mixed root
 		"A failed update must leave the prior active\ninstallation intact.",
 		"invoke the original task again", // reload, or hand back to the user
-		"#simple-host-support",           // somewhere to go when it breaks
+		"your platform team",             // somewhere to go when it breaks
 	} {
 		if !strings.Contains(updating, want) {
 			t.Errorf("packaged update reference is missing %q", want)
@@ -84,8 +84,8 @@ func TestAccountRecoveryTransactionIsPackaged(t *testing.T) {
 		// The sign-in link comes before every stop condition, because handing
 		// over one URL is what replaced "explain the failure and give up".
 		"## Get a key",
-		"not send the user to Slack",
-		"<base>/auth/login",
+		"not send the user elsewhere",
+		testSkillBaseURL+"/auth/login",
 		"Wait for the user to paste back the key",
 		"## Prove the exact destination first",
 		"## Persist and verify",
@@ -99,10 +99,66 @@ func TestAccountRecoveryTransactionIsPackaged(t *testing.T) {
 	)
 }
 
+// testSkillBaseURL stands in for PUBLIC_BASE_URL. It is deliberately not the
+// placeholder hostname the package's docs use, so a file that still carries
+// that hostname is caught by TestServedSkillFilesCarryThisInstallationsOrigin.
+const testSkillBaseURL = "https://hosting.corp.test"
+
+// Every served copy of the skills — the flat bundle and each discovery
+// archive — must name this installation's own origin and nothing else.
+func TestServedSkillFilesCarryThisInstallationsOrigin(t *testing.T) {
+	bundles := map[string][]byte{}
+	flat, err := buildSkillsZip(testSkillBaseURL)
+	if err != nil {
+		t.Fatalf("buildSkillsZip: %v", err)
+	}
+	bundles["skills.zip"] = flat
+	for _, name := range agentSkillsDiscoveryAllowlist {
+		archive, err := buildAgentSkillArchive(name, testSkillBaseURL)
+		if err != nil {
+			t.Fatalf("buildAgentSkillArchive(%s): %v", name, err)
+		}
+		bundles[name+".zip"] = archive
+	}
+	sawOrigin := false
+	for bundle, data := range bundles {
+		reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+		if err != nil {
+			t.Fatalf("%s: %v", bundle, err)
+		}
+		for _, entry := range reader.File {
+			opened, err := entry.Open()
+			if err != nil {
+				t.Fatalf("%s/%s: %v", bundle, entry.Name, err)
+			}
+			body, _ := io.ReadAll(opened)
+			opened.Close()
+			text := string(body)
+			for _, stale := range []string{SkillBaseURLPlaceholder, "simple-host.example.com", "#simple-host-support"} {
+				if strings.Contains(text, stale) {
+					t.Errorf("%s/%s still contains %q", bundle, entry.Name, stale)
+				}
+			}
+			if strings.HasSuffix(entry.Name, "SKILL.md") && strings.Contains(text, skillVersionPlaceholder) {
+				t.Errorf("%s/%s still contains %q", bundle, entry.Name, skillVersionPlaceholder)
+			}
+			if strings.Contains(text, testSkillBaseURL) {
+				sawOrigin = true
+			}
+		}
+	}
+	if !sawOrigin {
+		t.Error("no served skill file names the installation's origin")
+	}
+	if _, err := buildSkillsZip(""); err == nil {
+		t.Error("a bundle was built with no base URL to expand")
+	}
+}
+
 func packagedSkillFiles(t *testing.T) map[string]string {
 	t.Helper()
 
-	bundle, err := buildSkillsZip()
+	bundle, err := buildSkillsZip(testSkillBaseURL)
 	if err != nil {
 		t.Fatalf("buildSkillsZip: %v", err)
 	}
@@ -140,7 +196,7 @@ func assertSkillSubstringsInOrder(t *testing.T, value string, markers ...string)
 
 func TestSkillsVersionManifestMatchesServedBundle(t *testing.T) {
 	recorder := httptest.NewRecorder()
-	serveSkillsVersion(recorder, httptest.NewRequest(http.MethodGet, "/skills/version", nil))
+	serveSkillsVersion(testSkillBaseURL)(recorder, httptest.NewRequest(http.MethodGet, "/skills/version", nil))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -153,7 +209,7 @@ func TestSkillsVersionManifestMatchesServedBundle(t *testing.T) {
 		t.Fatalf("decode manifest: %v", err)
 	}
 	zipRecorder := httptest.NewRecorder()
-	serveSkillsZip(zipRecorder, httptest.NewRequest(http.MethodGet, "/skills.zip", nil))
+	serveSkillsZip(testSkillBaseURL)(zipRecorder, httptest.NewRequest(http.MethodGet, "/skills.zip", nil))
 	if zipRecorder.Code != http.StatusOK {
 		t.Fatalf("skills.zip status = %d, want 200", zipRecorder.Code)
 	}
@@ -205,7 +261,7 @@ func TestSkillsVersionManifestMatchesServedBundle(t *testing.T) {
 // would make each of those installs reject its own update and strand itself.
 func TestMutableBundleContractSurvivesForInstalledSkills(t *testing.T) {
 	recorder := httptest.NewRecorder()
-	serveSkillsVersion(recorder, httptest.NewRequest(http.MethodGet, "/skills/version", nil))
+	serveSkillsVersion(testSkillBaseURL)(recorder, httptest.NewRequest(http.MethodGet, "/skills/version", nil))
 
 	var manifest skillVersionManifest
 	if err := json.Unmarshal(recorder.Body.Bytes(), &manifest); err != nil {
@@ -216,7 +272,7 @@ func TestMutableBundleContractSurvivesForInstalledSkills(t *testing.T) {
 	}
 
 	legacyRecorder := httptest.NewRecorder()
-	serveSkillsZip(legacyRecorder, httptest.NewRequest(http.MethodGet, "/skills.zip", nil))
+	serveSkillsZip(testSkillBaseURL)(legacyRecorder, httptest.NewRequest(http.MethodGet, "/skills.zip", nil))
 	if legacyRecorder.Code != http.StatusOK {
 		t.Fatalf("/skills.zip status = %d, want 200", legacyRecorder.Code)
 	}
@@ -230,9 +286,9 @@ func TestMutableBundleContractSurvivesForInstalledSkills(t *testing.T) {
 // follow its immutable_bundle_url, verify size and digest.
 func TestImmutableBundleIsContentAddressedAndFollowable(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /skills.zip", serveSkillsZip)
-	mux.HandleFunc("GET /skills/version", serveSkillsVersion)
-	mux.HandleFunc("GET /skills/sha256/{digest}/skills.zip", serveImmutableSkillsZip)
+	mux.HandleFunc("GET /skills.zip", serveSkillsZip(testSkillBaseURL))
+	mux.HandleFunc("GET /skills/version", serveSkillsVersion(testSkillBaseURL))
+	mux.HandleFunc("GET /skills/sha256/{digest}/skills.zip", serveImmutableSkillsZip(testSkillBaseURL))
 
 	manifestRecorder := httptest.NewRecorder()
 	mux.ServeHTTP(manifestRecorder, httptest.NewRequest(http.MethodGet, "/skills/version", nil))

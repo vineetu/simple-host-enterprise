@@ -45,8 +45,33 @@ func TestBumpStateWriteCoalescesRepeatedCallsIntoOneRow(t *testing.T) {
 	if count, _ := got.Detail["count"].(float64); count != 3 {
 		t.Fatalf("detail.count = %v, want 3", got.Detail["count"])
 	}
-	if got.RequestID != "req-3" {
-		t.Fatalf("RequestID = %q, want the latest call's %q", got.RequestID, "req-3")
+	// The first write in the window keeps its request id and address: a
+	// later write only bumps the count (migration 0030).
+	if got.RequestID != "req-1" || got.IP != "10.0.0.1" {
+		t.Fatalf("RequestID = %q, IP = %q, want the first call's req-1 / 10.0.0.1", got.RequestID, got.IP)
+	}
+}
+
+// audit_events.at is the database's clock (migration 0030): a caller cannot
+// back-date a row within the month, and a row asking for another month is
+// refused outright.
+func TestAuditEventTimeIsServerSide(t *testing.T) {
+	database := assetsTestDB(t)
+	ctx := context.Background()
+	if _, err := database.ExecContext(ctx, `INSERT INTO audit_events (at, action) VALUES (now() - interval '40 days', 'backdated_far')`); err == nil {
+		t.Fatal("a row dated 40 days ago was accepted")
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO audit_events (at, action) VALUES (date_trunc('month', now()), 'backdated_near')`); err != nil {
+		t.Fatal(err)
+	}
+	var age time.Duration
+	var seconds float64
+	if err := database.QueryRowContext(ctx, `SELECT extract(epoch FROM now() - at) FROM audit_events WHERE action = 'backdated_near'`).Scan(&seconds); err != nil {
+		t.Fatal(err)
+	}
+	age = time.Duration(seconds * float64(time.Second))
+	if age < 0 || age > time.Minute {
+		t.Fatalf("stored at is %v away from now; the caller's timestamp was kept", age)
 	}
 }
 

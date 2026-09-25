@@ -93,9 +93,12 @@ func NewSearchHandler(
 // authenticated JSON API does (a 401 in authMiddleware's own shape, not the
 // pseudonymous-cookie treatment these handlers used to be the only routes
 // answering unauthenticated).
-func (h *SearchHandler) Register(mux *http.ServeMux, authMiddleware func(http.Handler) http.Handler) {
+//
+// originCheck guards the click POST the way every other cookie-authenticated
+// mutation is guarded (cookieOriginCheck in production).
+func (h *SearchHandler) Register(mux *http.ServeMux, authMiddleware, originCheck func(http.Handler) http.Handler) {
 	mux.Handle("GET /api/search", authMiddleware(http.HandlerFunc(h.handleSearch)))
-	mux.Handle("POST /api/search/click", authMiddleware(http.HandlerFunc(h.handleSearchClick)))
+	mux.Handle("POST /api/search/click", originCheck(authMiddleware(http.HandlerFunc(h.handleSearchClick))))
 }
 
 type publicSearchResponse struct {
@@ -127,7 +130,7 @@ func (h *SearchHandler) handleSearch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "search unavailable"})
 		return
 	}
-	if decision := h.limits.allowSearch(searchQueryPeerPolicy, remoteClientKey(r)); !decision.Allowed {
+	if decision := h.limits.allowSearch(searchQueryPeerPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -412,7 +415,7 @@ func (h *SearchHandler) handleSearchClick(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "search unavailable"})
 		return
 	}
-	if decision := h.limits.allowSearch(searchClickPeerPolicy, remoteClientKey(r)); !decision.Allowed {
+	if decision := h.limits.allowSearch(searchClickPeerPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}

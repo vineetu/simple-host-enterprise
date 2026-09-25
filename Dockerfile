@@ -5,19 +5,24 @@
 # target instead of emulating it. The binary is CGO-free, so Go does this for
 # free; without it, building an amd64 image on an arm64 machine runs the whole
 # Go toolchain under QEMU and takes minutes rather than seconds.
-FROM --platform=$BUILDPLATFORM golang:1.25 AS build
+# Base images are pinned by digest so a rebuild uses the same bytes; Dependabot
+# (.github/dependabot.yml) proposes digest bumps. golang:1.25.14 and
+# distroless static:nonroot as of 2026-09-25.
+FROM --platform=$BUILDPLATFORM golang:1.25.14@sha256:699337d620559a59b4a2bb298ad59611e535d2ee755a34cf2d2a98f37578dc80 AS build
 ARG TARGETOS
 ARG TARGETARCH
+ARG VERSION=dev
+ARG COMMIT=unknown
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
-    go build -trimpath -ldflags="-s -w" -o /out/simple-host ./cmd/server
+    go build -trimpath -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" -o /out/simple-host ./cmd/server
 
-FROM gcr.io/distroless/static:nonroot
+FROM gcr.io/distroless/static:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
 # ca-certificates ships in distroless; the database CA is mounted, not baked.
 COPY --from=build /out/simple-host /simple-host
 USER 65532:65532
-EXPOSE 8080 8081
+EXPOSE 8080 8081 9090
 ENTRYPOINT ["/simple-host"]

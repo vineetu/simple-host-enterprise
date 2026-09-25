@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -21,6 +22,7 @@ const (
 	defaultCacheMaxBytes = 1 << 30
 	defaultPort          = "8080"
 	defaultRedirectPort  = "8081"
+	defaultMetricsPort   = "9090"
 	defaultDBPort        = "5432"
 	defaultDBSSLMode     = "verify-full"
 	defaultBackupPrefix  = "backups/"
@@ -68,6 +70,10 @@ const (
 	defaultAuditRetentionDays     = 400
 	defaultAccessLogRetentionDays = 90
 	defaultAccessLogVisibility    = "owner"
+
+	// maxAPIKeyDays caps API_KEY_MAX_DAYS: an API key is for CI and never
+	// lives longer than a year.
+	maxAPIKeyDays = 365
 )
 
 type Config struct {
@@ -78,9 +84,15 @@ type Config struct {
 	CacheMaxBytes int64
 	Port          string
 	RedirectPort  string
+	// MetricsPort serves /metrics on its own listener, which the Service and
+	// Ingress never expose.
+	MetricsPort   string
 	PublicBaseURL string
-	OIDC          OIDCConfig
-	Session       SessionConfig
+	// DBInClusterEvaluation is set by deploy/components/postgres-incluster:
+	// a single unbacked-up Postgres fit only for evaluation.
+	DBInClusterEvaluation bool
+	OIDC                  OIDCConfig
+	Session               SessionConfig
 	// ReservedLabels extends the built-in set in names.go with
 	// installation-specific hostnames that must never belong to an account,
 	// on top of the built-in set (design.md 7.1).
@@ -90,13 +102,31 @@ type Config struct {
 	// Assets bounds an upload through the site-facing API (design.md 7.3):
 	// per-file size, per-site total bytes, and per-site count.
 	Assets AssetLimits
+	// TrustedProxies is TRUSTED_PROXY_CIDRS: peers whose X-Forwarded-For
+	// is believed when working out a request's client address. Empty means
+	// the TCP peer is the client.
+	TrustedProxies []netip.Prefix
+	// APIKeyMaxDays is API_KEY_MAX_DAYS: the longest lifetime a new API key
+	// may be minted with (1 to 365, default 365).
+	APIKeyMaxDays int64
 	// Audit is design.md 8.2's retention and visibility knobs. cmd/server's
 	// prune subcommand read these two directly from the environment ahead
 	// of this field existing (docs/security-review.md's
 	// "Deviated"); both now go through this package instead, the same
 	// place every other environment-derived setting lives.
 	Audit AuditConfig
+	// OAuthRedirectHosts is where an AI app connecting to /mcp may be sent
+	// back after sign-in (OAUTH_REDIRECT_HOSTS): hostnames for https
+	// redirects, "localhost" for loopback redirects of apps on the person's
+	// own machine, "scheme://host" for an app's own URL scheme, or "*" for
+	// any https host.
+	OAuthRedirectHosts []string
 }
+
+// defaultOAuthRedirectHosts covers the AI apps a company is most likely to
+// connect: ChatGPT, Claude, VS Code (Copilot), Cursor, and command-line
+// agents on the person's own machine (Claude Code, Codex).
+const defaultOAuthRedirectHosts = "chatgpt.com,claude.ai,vscode.dev,localhost,cursor://anysphere.cursor-mcp"
 
 // AuditConfig is design.md 8.2's retention and visibility settings for
 // audit_events and access_log.
@@ -266,12 +296,14 @@ func Load() (Config, error) {
 
 	var need missing
 	cfg := Config{
-		CacheDir:       getEnvOrDefault("CACHE_DIR", defaultCacheDir),
-		Port:           getEnvOrDefault("PORT", defaultPort),
-		RedirectPort:   getEnvOrDefault("HTTPS_REDIRECT_PORT", defaultRedirectPort),
-		PublicBaseURL:  need.require("PUBLIC_BASE_URL"),
-		ReservedLabels: splitLowerTrimmed(os.Getenv("RESERVED_LABELS")),
-		SecureMode:     secureMode,
+		CacheDir:              getEnvOrDefault("CACHE_DIR", defaultCacheDir),
+		Port:                  getEnvOrDefault("PORT", defaultPort),
+		RedirectPort:          getEnvOrDefault("HTTPS_REDIRECT_PORT", defaultRedirectPort),
+		MetricsPort:           getEnvOrDefault("METRICS_PORT", defaultMetricsPort),
+		DBInClusterEvaluation: os.Getenv("DB_INCLUSTER_EVALUATION") == "true",
+		PublicBaseURL:         need.require("PUBLIC_BASE_URL"),
+		ReservedLabels:        splitLowerTrimmed(os.Getenv("RESERVED_LABELS")),
+		SecureMode:            secureMode,
 		Backup: BackupConfig{
 			Endpoint:        need.require("BACKUP_STORAGE_ENDPOINT"),
 			Region:          getEnvOrDefault("BACKUP_STORAGE_REGION", defaultBackupRegion),
@@ -284,7 +316,8 @@ func Load() (Config, error) {
 			SSEKMSKeyID:     os.Getenv("BACKUP_SSE_KEY_ID"),
 		},
 	}
-	dsn, dbMissing, dsnErr := databaseDSN()
+	cfg.OAuthRedirectHosts = splitLowerTrimmed(getEnvOrDefault("OAUTH_REDIRECT_HOSTS", defaultOAuthRedirectHosts))
+	dsn, dbMissing, dsnErr := serverDatabaseDSN()
 	if dsnErr != nil {
 		return Config{}, dsnErr
 	}
@@ -348,6 +381,24 @@ func Load() (Config, error) {
 		MaxSiteCount: assetMaxSiteCount,
 	}
 
+	trusted, set := os.LookupEnv("TRUSTED_PROXY_CIDRS")
+	if !set {
+		// Unset means the usual in-cluster case: the ingress controller sits
+		// on a private address. Set it (even to "") to override.
+		trusted = defaultTrustedProxies
+	}
+	cfg.TrustedProxies, err = parseTrustedProxies(trusted)
+	if err != nil {
+		return Config{}, fmt.Errorf("TRUSTED_PROXY_CIDRS: %w", err)
+	}
+	cfg.APIKeyMaxDays, err = int64Env("API_KEY_MAX_DAYS", maxAPIKeyDays)
+	if err != nil {
+		return Config{}, err
+	}
+	if cfg.APIKeyMaxDays < 1 || cfg.APIKeyMaxDays > maxAPIKeyDays {
+		return Config{}, fmt.Errorf("API_KEY_MAX_DAYS must be between 1 and %d, got %d", maxAPIKeyDays, cfg.APIKeyMaxDays)
+	}
+
 	auditCfg, err := LoadAuditRetention()
 	if err != nil {
 		return Config{}, err
@@ -361,6 +412,9 @@ func Load() (Config, error) {
 		return Config{}, secretErr
 	}
 
+	if err := validateOIDCIssuer(cfg.OIDC.Issuer); err != nil {
+		return Config{}, fmt.Errorf("OIDC_ISSUER: %w", err)
+	}
 	if len(cfg.OIDC.AdminClaim) > 0 != (len(cfg.OIDC.AdminValue) > 0) {
 		return Config{}, errors.New("OIDC_ADMIN_CLAIM and OIDC_ADMIN_VALUE must be set together")
 	}
@@ -376,6 +430,9 @@ func Load() (Config, error) {
 	if cfg.SecureMode && cfg.RedirectPort == cfg.Port {
 		return Config{}, errors.New("HTTPS_REDIRECT_PORT must differ from PORT in secure mode")
 	}
+	if cfg.MetricsPort == cfg.Port || (cfg.SecureMode && cfg.MetricsPort == cfg.RedirectPort) {
+		return Config{}, errors.New("METRICS_PORT must differ from PORT and HTTPS_REDIRECT_PORT")
+	}
 	if err := validateBackupEndpoint(cfg.Backup); err != nil {
 		return Config{}, fmt.Errorf("BACKUP_STORAGE_ENDPOINT: %w", err)
 	}
@@ -389,11 +446,63 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("BACKUP_ENVELOPE_KEY: %w", err)
 	}
+	// Checked again here: an unreadable BACKUP_ENVELOPE_KEY_FILE must stop
+	// startup, not quietly leave backups without their envelope.
+	if secretErr != nil {
+		return Config{}, secretErr
+	}
 	cfg.Backup.EnvelopeKeys = envelopeKeys
 	if err := validateDatabaseSSL(cfg.DBDSN, dbInsecureAllowed); err != nil {
 		return Config{}, fmt.Errorf("database TLS: %w", err)
 	}
 	return cfg, nil
+}
+
+// parseTrustedProxies reads a comma-separated list of CIDRs (a bare address
+// counts as a single-address prefix).
+// defaultTrustedProxies are the private and carrier-grade NAT ranges an
+// ingress controller or cloud load balancer reaches the pod from.
+const defaultTrustedProxies = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,fc00::/7"
+
+func parseTrustedProxies(raw string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, item := range strings.Split(raw, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if prefix, err := netip.ParsePrefix(item); err == nil {
+			out = append(out, prefix.Masked())
+			continue
+		}
+		addr, err := netip.ParseAddr(item)
+		if err != nil {
+			return nil, fmt.Errorf("%q is not a CIDR or an IP address", item)
+		}
+		out = append(out, netip.PrefixFrom(addr.Unmap(), addr.Unmap().BitLen()))
+	}
+	return out, nil
+}
+
+// validateOIDCIssuer refuses Entra ID's multi-tenant endpoints: with
+// /common, /organizations or /consumers any Microsoft account from any
+// tenant can sign in, and the email it presents is whatever that tenant
+// says. Use the tenant-specific issuer
+// (https://login.microsoftonline.com/<tenant id>/v2.0).
+func validateOIDCIssuer(issuer string) error {
+	u, err := url.Parse(strings.ToLower(strings.TrimSpace(issuer)))
+	if err != nil {
+		return errors.New("must be a URL")
+	}
+	if u.Host != "login.microsoftonline.com" {
+		return nil
+	}
+	tenant, _, _ := strings.Cut(strings.TrimPrefix(u.Path, "/"), "/")
+	switch tenant {
+	case "common", "organizations", "consumers":
+		return fmt.Errorf("the multi-tenant Entra ID endpoint /%s is refused; use your tenant's own issuer, https://login.microsoftonline.com/<tenant id>/v2.0", tenant)
+	}
+	return nil
 }
 
 // LoadDatabase returns only the database DSN. The migrate subcommand runs in
@@ -432,10 +541,53 @@ func LoadAppRolePassword() (string, error) {
 	if secretErr != nil {
 		return "", secretErr
 	}
-	if secretErr != nil {
-		return "", secretErr
+	if err := refuseSharedDatabasePassword(password); err != nil {
+		return "", err
 	}
 	return password, nil
+}
+
+// refuseSharedDatabasePassword refuses an application-role password equal to
+// the owning role's (design 9.3: the two roles never share one), checked
+// wherever both may be present.
+func refuseSharedDatabasePassword(appPassword string) error {
+	owner, err := secretEnv("DB_PASSWORD")
+	if err != nil {
+		return nil // an unreadable owner password is databaseDSN's error to report
+	}
+	if owner = strings.TrimSpace(owner); owner != "" && owner == appPassword {
+		return errors.New("DB_PASSWORD and DB_APP_PASSWORD must differ: the application role must not share the owning role's password")
+	}
+	return nil
+}
+
+// serverDatabaseDSN is the DSN the server itself connects with. With
+// DB_APP_USER set it is built from the DB_HOST/DB_NAME parts plus
+// DB_APP_USER and DB_APP_PASSWORD (or DB_APP_PASSWORD_FILE), so the owning
+// role's DB_PASSWORD/DB_PASSWORD_FILE never decides the server's
+// credential. Without it, the server uses DB_DSN or DB_USER/DB_PASSWORD as
+// before; either way the server checks at startup that the role it got
+// cannot rewrite audit_events (migrate.CheckLeastPrivilege).
+func serverDatabaseDSN() (string, []string, error) {
+	appUser := strings.TrimSpace(os.Getenv("DB_APP_USER"))
+	if appUser == "" {
+		return databaseDSN()
+	}
+	if strings.TrimSpace(os.Getenv("DB_DSN")) != "" {
+		return "", nil, errors.New("DB_APP_USER cannot be combined with DB_DSN; put the application role in DB_DSN itself, or use the DB_HOST/DB_NAME parts")
+	}
+	var need missing
+	var secretErr error
+	password := need.requireSecret("DB_APP_PASSWORD", &secretErr)
+	if secretErr != nil {
+		return "", nil, secretErr
+	}
+	if password != "" {
+		if err := refuseSharedDatabasePassword(password); err != nil {
+			return "", nil, err
+		}
+	}
+	return databaseDSNAs(appUser, password, need)
 }
 
 // LoadAuditRetention reads design.md 8.2's three retention/visibility
@@ -488,13 +640,19 @@ func databaseDSN() (string, []string, error) {
 	}
 	var need missing
 	var secretErr error
-	host := need.require("DB_HOST")
 	user := need.require("DB_USER")
 	password := need.requireSecret("DB_PASSWORD", &secretErr)
-	name := need.require("DB_NAME")
 	if secretErr != nil {
 		return "", nil, secretErr
 	}
+	return databaseDSNAs(user, password, need)
+}
+
+// databaseDSNAs builds the parts-form DSN for user/password; need carries
+// whatever the caller already found missing.
+func databaseDSNAs(user, password string, need missing) (string, []string, error) {
+	host := need.require("DB_HOST")
+	name := need.require("DB_NAME")
 	if len(need) > 0 {
 		return "", []string{"DB_DSN or DB_HOST, DB_USER, DB_PASSWORD, DB_NAME (missing: " + strings.Join(need, ", ") + ")"}, nil
 	}
@@ -538,7 +696,9 @@ func normalizeDatabaseDSNURL(raw string) (string, error) {
 	const wantShape = `must be a URL of the form "postgres://user:password@host:port/dbname?sslmode=verify-full&sslrootcert=...", not a keyword/value DSN`
 	parsed, err := url.Parse(raw)
 	if err != nil {
-		return "", fmt.Errorf("parse URL: %w", err)
+		// Not wrapped: url.Parse's error quotes the whole input, password
+		// included, and this message goes to the pod log.
+		return "", errors.New("could not be parsed as a URL (value not shown: it may contain a password)")
 	}
 	scheme := strings.ToLower(parsed.Scheme)
 	if scheme != "postgres" && scheme != "postgresql" {
@@ -566,7 +726,7 @@ func validateDatabaseSSL(dsn string, insecureAllowed bool) error {
 	}
 	parsed, err := url.Parse(dsn)
 	if err != nil {
-		return fmt.Errorf("parse DSN: %w", err)
+		return errors.New("parse DSN: not a valid URL (value not shown)")
 	}
 	query := parsed.Query()
 	sslmode := query.Get("sslmode")
@@ -759,7 +919,9 @@ func validatePublicBaseURL(raw string, secureMode bool) (string, error) {
 	}
 	parsed, err := url.Parse(raw)
 	if err != nil {
-		return "", fmt.Errorf("parse URL: %w", err)
+		// Not wrapped: url.Parse's error quotes the whole input, password
+		// included, and this message goes to the pod log.
+		return "", errors.New("could not be parsed as a URL (value not shown: it may contain a password)")
 	}
 	if parsed.Scheme == "" || parsed.Host == "" || parsed.Hostname() == "" || !parsed.IsAbs() {
 		return "", errors.New("must be an absolute URL with a host")
