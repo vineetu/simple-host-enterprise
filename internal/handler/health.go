@@ -24,7 +24,9 @@ type healthResponse struct {
 // this SQL by hand against production before the binary goes out. Migrations
 // 0013 to 0018 are still unprobed, which is a known gap and a separate change.
 //
-// site_collaborators (0012) is no longer probed: migration 0033 drops it
+// Migration 0033's access level, network request and saved-data history
+// columns are probed (expected_access_columns). site_collaborators (0012) is
+// no longer probed: migration 0033 drops it
 // with per-site editor grants; versions.uploaded_by from the same migration
 // still is.
 //
@@ -37,7 +39,20 @@ const requiredSchemaProbe = `
 	WITH expected_site_columns (column_name, udt_name, column_default) AS (
 		VALUES
 			('uses_state', 'bool', 'false'),
-			('uses_versioned_state', 'bool', 'false')
+			('uses_versioned_state', 'bool', 'false'),
+			('access', 'text', '''only_me''::text')
+	),
+	expected_access_columns (table_name, column_name, udt_name, is_nullable) AS (
+		VALUES
+			('sites', 'network_requested_at', 'timestamptz', 'YES'),
+			('sites', 'network_requested_by', 'uuid', 'YES'),
+			('sites', 'network_request_reason', 'text', 'YES'),
+			('site_state_history', 'id', 'int8', 'NO'),
+			('site_state_history', 'site_id', 'uuid', 'NO'),
+			('site_state_history', 'state_version', 'int8', 'NO'),
+			('site_state_history', 'state', 'jsonb', 'NO'),
+			('site_state_history', 'written_by', 'uuid', 'YES'),
+			('site_state_history', 'created_at', 'timestamptz', 'NO')
 	),
 	expected_download_columns (column_name, udt_name) AS (
 		VALUES
@@ -160,6 +175,16 @@ const requiredSchemaProbe = `
 			AND actual.udt_name = expected.udt_name
 			AND actual.is_nullable = 'NO'
 			AND actual.column_default = expected.column_default
+	),
+	access_columns_ready AS (
+		SELECT count(*) = (SELECT count(*) FROM expected_access_columns) AS ready
+		FROM expected_access_columns AS expected
+		JOIN information_schema.columns AS actual
+			ON actual.table_schema = 'public'
+			AND actual.table_name = expected.table_name
+			AND actual.column_name = expected.column_name
+			AND actual.udt_name = expected.udt_name
+			AND actual.is_nullable = expected.is_nullable
 	),
 	download_columns_ready AS (
 		SELECT count(*) = (SELECT count(*) FROM expected_download_columns) AS ready
@@ -552,6 +577,7 @@ const requiredSchemaProbe = `
 	)
 	SELECT
 		site_columns_ready.ready
+		AND access_columns_ready.ready
 		AND download_columns_ready.ready
 		AND download_index_ready.ready
 		AND collaboration_columns_ready.ready
@@ -571,6 +597,7 @@ const requiredSchemaProbe = `
 		AND team_triggers_ready.ready
 	FROM
 		site_columns_ready,
+		access_columns_ready,
 		download_columns_ready,
 		download_index_ready,
 		collaboration_columns_ready,

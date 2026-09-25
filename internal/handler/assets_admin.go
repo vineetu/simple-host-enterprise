@@ -30,7 +30,7 @@ type assetAdminResponse struct {
 }
 
 // registerAssetAdminRoutes is called from (*SiteHandler).Register alongside
-// the viewer and editor routes it mirrors.
+// the viewer routes it mirrors.
 func (h *SiteHandler) registerAssetAdminRoutes(mux *http.ServeMux, ownerMutation func(http.Handler) http.Handler, browserWrite func(http.Handler) http.Handler) {
 	mux.Handle("GET /api/collaboration/sites/{owner}/{sitename}/assets", ownerMutation(http.HandlerFunc(h.listCollaborationAssets)))
 	mux.Handle("DELETE /api/collaboration/sites/{owner}/{sitename}/assets/{id}", browserWrite(ownerMutation(http.HandlerFunc(h.deleteCollaborationAsset))))

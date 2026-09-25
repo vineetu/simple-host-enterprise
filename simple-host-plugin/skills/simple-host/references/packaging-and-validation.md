@@ -143,32 +143,32 @@ Invoke-WebRequest -UseBasicParsing -Method Post `
     -Headers $Headers -ContentType 'application/zip' -InFile $Zip
 ```
 
-Creating requires `access_role` `owner` or `member` in that namespace; a per-site
-editor grant elsewhere in the namespace does not permit it.
+Creating requires `access_role` `owner` or `member` in that namespace.
 
 The owner-inferred `POST /api/sites/<sitename>` still exists for older clients.
 Do not use it, and do not use owner-inferred `PUT /api/sites/<sitename>` at all.
-Every existing site—shared or team-owned—must use the owner-qualified
+Every existing site—personal or team-owned—must use the owner-qualified
 collaboration route and retained `If-Match` described in `collaboration.md`.
 
-## Visibility
+## Who can open it
 
-New sites default to unlisted: not in the company showcase, but open to any
-signed-in colleague with the link. The owner or a member of the owning team may
-change the listing; an editor may not:
+A new site opens only for its owner (for a team site, the team's members).
+After a first publish, tell the user that, ask who should see it, and set the
+level (connector: `set_site_access`):
 
 ```http
-POST /api/collaboration/sites/<owner>/<sitename>/visibility
+POST /api/collaboration/sites/<owner>/<sitename>/access
 X-API-Key: <api_key>
 X-Skill-Version: <installed skill version>
 Content-Type: application/json
 
-{"public":true}
+{"level":"company"}
 ```
 
-`public=true` makes the active HTML eligible for the company showcase and search
-after asynchronous indexing. `public=false` excludes it from new search immediately.
-Search returns at most one best active page per site.
+The levels and the rules for `network` are in `collaboration.md` section 6.
+`listed` makes the active HTML eligible for the company showcase and search
+after asynchronous indexing; a lower level drops it from new search
+immediately. Search returns at most one best active page per site.
 
 ## Handle responses
 

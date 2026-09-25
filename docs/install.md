@@ -278,8 +278,8 @@ environment before the one it puts employees on; they copy `byo`'s
 ## 6. Sign-in, hand-off, and restricted sites
 
 Every hosted page and every site-facing API call requires a signed-in host
-session — there is no anonymous viewing and no Referer-based attribution
-anywhere in this package. Signing in on the base host does not, by itself,
+session, except on a site an admin has approved for the network (below).
+There is no Referer-based attribution anywhere in this package. Signing in on the base host does not, by itself,
 authenticate you on `alice.<base>`: the first time you open a page on an
 owner host, the server sets a short-lived nonce cookie on that host,
 redirects you to `<base>/auth/handoff` to mint a one-time code bound to
@@ -289,15 +289,35 @@ extra redirect hop on first visit to each host) and is exactly what
 `scripts/smoke.sh`'s `hand_off_session` helper drives end to end with curl
 and a cookie jar, if you want to see the wire protocol.
 
-A site is open to any signed-in person by default. An owner restricts it
-to a named list of viewers from `/dashboard`'s "Your sites" panel (add or
-remove usernames under a site's "Viewers" section) or through the API
-(`GET`/`POST /api/collaboration/sites/{owner}/{sitename}/viewers`,
-`DELETE .../viewers/{username}`). The moment a site has at least one named
-viewer, it moves to its own dedicated hostname,
+Every site has an access level, set from `/dashboard`'s "Your sites" panel
+("Who can open it") or with `POST /api/sites/{site}/access`
+(`POST /api/collaboration/sites/{owner}/{sitename}/access` for a team's
+site), body `{"level": "..."}`:
+
+| Level | Who can open it |
+|---|---|
+| `only_me` | The owner, or the team's members for a team site. The default for a new site. |
+| `specific` | Also the named viewers (people or teams). |
+| `company` | Anyone signed in with the link. |
+| `listed` | Company, and shown in the showcase and search. |
+| `network` | Anyone who can reach the server, with no sign-in. |
+
+`network` is a request: it needs a `reason`, returns `202`, and the site
+keeps its level until an admin approves it under "Access requests" on
+`/admin` (or `POST /api/admin/access-requests/{owner}/{sitename}/approve`,
+`/decline`, `/revoke`). Anonymous visitors to a network site can read its
+pages, assets and saved data and change nothing; a signed-in person adds
+`?signin` to the address to use their own rights. The owner can move a site
+to any lower level at any time; that ends its network approval.
+
+Named viewers are managed under a site's "Viewers" section or through the
+API (`GET`/`POST /api/collaboration/sites/{owner}/{sitename}/viewers`,
+`DELETE .../viewers/{username}`). Adding one sets the site to `specific`;
+removing the last one leaves it there, open only to the owner or team. A
+`specific` site lives on its own dedicated hostname,
 `<owner>--<site>.simple-host.127-0-0-1.nip.io` on the local overlay, and
 stops being reachable at the ordinary `alice.<base>/<site>/` address at
-all — a non-listed signed-in person gets `404`, not `403`, so the site's
+all — anyone it is not shared with gets `404`, not `403`, so the site's
 existence is never confirmed to someone it isn't shown to. The local
 overlay's wildcard certificate, `*.simple-host.127-0-0-1.nip.io`, already
 covers this address with no extra step: `<owner>--<site>` is one DNS label
@@ -350,6 +370,13 @@ panel, or through the base-host, session-authenticated mirror
 A site archive may not contain a top-level `_assets/` entry; the upload is
 refused before it ever reaches disk.
 
+Anyone who can open a site can read and write its saved data as
+themselves. The last 20 versions are kept; the owner or a team member can
+list them and restore one with
+`GET /api/collaboration/sites/{owner}/{sitename}/state-versions[/{id}]` and
+`POST .../state-versions/{id}/restore` (a restore is a new write, audited
+as `state_restore`).
+
 Every state and asset write is attributed to the viewer and the site it
 was made through (`via_site`); this is exactly what the `state_write`,
 `asset_create`, and `asset_delete` audit rows in section 8 below record,
@@ -363,11 +390,13 @@ Commands in sections 8 and 9 name the cluster with `--context "$CTX"`: set
 cluster).
 
 Every mutation writes an `audit_events` row.
-Sixteen actions write it inside the same database transaction as the
+These actions write it inside the same database transaction as the
 change it records (`internal/audit`'s `RecordTx`), so a mutation in this
 group without its audit row cannot commit: `site_create`, `site_update`,
-`site_delete`, `site_rollback`, `site_visibility`, `editor_grant`,
-`editor_revoke`, `viewer_grant`, `viewer_revoke`, `team_create`,
+`site_delete`, `site_rollback`, `site_access`, `network_access_requested`,
+`network_access_approved`, `network_access_declined`,
+`network_access_reverted`, `state_restore`, `viewer_grant`,
+`viewer_revoke`, `team_create`,
 `team_delete`, `member_add`, `member_remove`, `state_write`,
 `asset_create`, and `asset_delete` — the last three from the site-facing
 API (`internal/handler/site_api.go`'s `PutState`/`PutStateVersioned`/
@@ -387,7 +416,7 @@ admin actions `admin_disable_user`, `admin_enable_user`,
 and site into one row per five-minute window (`detail.count`), so autosave
 at page frequency does not bury every other action; every other action is
 one row each. Separately, `access_log` records every view of hosted
-content, including the owner's and editors' own — the `isSelfTraffic`
+content, including the owner's and team members' own — the `isSelfTraffic`
 exclusion in `serve.go` only ever applied to the dashboard's analytics
 counters, never to this log.
 
@@ -404,10 +433,12 @@ back as an empty page, not a `404`, since a filter that matches nothing is
 not the same claim as a request that failed. A non-admin's results are
 scoped to their own account plus every team they belong to; an admin may
 query any owner. `/api/access` needs an explicit `owner=` from a non-admin
-caller (`400` without one) and redacts `ip`/`user_agent` from a non-admin's
-own results — only an admin sees those two fields. `ACCESS_LOG_VISIBILITY`
-(`docs/configuration.md`, default `owner`) can be set to `admin` to close
-`/api/access` to non-admins entirely, regardless of ownership.
+caller (`400` without one). Under the default `ACCESS_LOG_VISIBILITY=counts`
+(`docs/configuration.md`) a non-admin gets aggregates only —
+`{from, to, unique_viewers, days: [{day, views, unique_viewers}]}`, the
+last 30 days unless `from`/`to` say otherwise — never who. `owner` returns
+rows with user ids but redacts `ip`/`user_agent`; `admin` closes
+`/api/access` to non-admins entirely. Admins always see full rows.
 
 The dashboard's per-site panel gained "Activity" and "Visitors" tabs
 (`/dashboard`, under "Your sites") backed by the same two routes scoped to

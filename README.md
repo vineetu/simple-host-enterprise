@@ -3,11 +3,12 @@
 A single Go service that hosts static sites for the people in one
 organisation. Someone signs in through your own OIDC provider, their coding
 agent publishes a directory, and the result is live at that person's own
-hostname with a JSON data store and an asset store behind it. A site can be
-restricted to named viewers, in which case it moves to its own dedicated
-hostname and refuses everyone else with a 404. Every mutation and every
-visit is recorded to an audit trail and access log an owner or admin can
-read back or export. The same process serves the API, the sites, the
+hostname with a JSON data store and an asset store behind it. A new site is
+open only to its owner (or their team); the owner then shares it with named
+people or teams (on its own dedicated hostname, 404 to everyone else), the
+whole company, the company showcase, or — once an admin approves — anyone
+on the network without sign-in. Every mutation and every visit is recorded
+to an audit trail and access log; owners see view counts, admins see who. The same process serves the API, the sites, the
 dashboard, and an MCP endpoint through which agents publish and manage
 sites, teams, sharing, and site state.
 

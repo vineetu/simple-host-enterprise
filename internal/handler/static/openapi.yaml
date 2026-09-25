@@ -2,21 +2,27 @@ openapi: 3.0.3
 info:
   title: Simple Host API
   description: |
-    Internal static website hosting at `<owner>.<base>/<sitename>/` (or a
-    restricted site's own `<owner>--<sitename>.<base>/`). Uploads may
+    Internal static website hosting at `<owner>.<base>/<sitename>/` (or, for
+    a site shared with named viewers, its own `<owner>--<sitename>.<base>/`). Uploads may
     be gzip-compressed tar or ZIP archives; nested regular-file downloads such
     as ZIP and DMG artifacts are supported.
 
-    A canonical site can be shared with registered editors while keeping one
-    owner, URL, stored copy, analytics history, and version history. Editor
-    mutations use owner-qualified collaboration routes and optimistic `ETag` /
-    `If-Match` protection. Editors are trusted collaborators: an editor can
-    deploy JavaScript, and hosted pages still share an origin with management
-    surfaces.
+    A site is owned by a person or a team. Team members change a team's
+    sites through owner-qualified collaboration routes with optimistic
+    `ETag` / `If-Match` protection.
+
+    Every site has an access level: `only_me` (the owner, or the team's
+    members; the default for a new site), `specific` (plus named viewers, on
+    the site's own host), `company` (anyone signed in with the link),
+    `listed` (company, plus showcase and search), or `network` (anyone who
+    can reach the server, no sign-in). `network` is requested with a reason
+    and applies only once an admin approves it; anonymous visitors can read a
+    network site's pages, assets and state, and change nothing.
 
     Shared state and uploaded files are served on each site's own host and
     need a signed-in viewer (or an API key); anyone who may open a site may
-    read and write its state. The control pages and management API live on
+    read and write its state. The last 20 versions of each site's state are
+    kept and the owner or team can restore one. The control pages and management API live on
     the base host, never on a site's host. Never store secrets or PII in state
     or uploaded files.
 
@@ -319,8 +325,9 @@ paths:
         including nested ZIP and DMG downloads, are supported, except entries
         whose basename is `.DS_Store` or starts with `._`; those macOS metadata
         files are omitted. The response's `url` is the site's address; use it as
-        returned rather than composing it by hand: a site restricted to named
-        viewers moves to its own address.
+        returned rather than composing it by hand: a site shared with named
+        viewers moves to its own address. A new site's access level is
+        `only_me`.
       tags: [Sites]
       security:
         - apiKey: []
@@ -374,7 +381,7 @@ paths:
 
     put:
       summary: Update an existing site
-      description: Upload a new gzip-compressed tar or ZIP version using the same archive safety, type, path, denylist, and size/count limits as site creation. Creates a new version number. Versions beyond the newest 5 are automatically cleaned up. For backward compatibility `If-Match` is optional while the site has no editors; once shared, it is required and stale older clients fail safely.
+      description: Upload a new gzip-compressed tar or ZIP version using the same archive safety, type, path, denylist, and size/count limits as site creation. Creates a new version number. Versions beyond the newest 5 are automatically cleaned up. `If-Match` is optional here, since only the owner deploys a site in their own namespace; team sites use the owner-qualified route, where it is required.
       tags: [Sites]
       security:
         - apiKey: []
@@ -385,7 +392,7 @@ paths:
         - name: If-Match
           in: header
           required: false
-          description: Required when this site currently has one or more editors.
+          description: Optional on this route; send the ETag captured before editing.
           schema:
             type: string
       requestBody:
@@ -510,7 +517,7 @@ paths:
   /api/sites/{sitename}/rollback:
     post:
       summary: Rollback to a previous version
-      description: Rollback a site to a specific version. The version must exist on disk and in the database. `If-Match` is required when the site currently has editors.
+      description: Rollback a site to a specific version. The version must exist on disk and in the database. `If-Match` is optional on this route.
       tags: [Sites]
       security:
         - apiKey: []
@@ -521,7 +528,7 @@ paths:
         - name: If-Match
           in: header
           required: false
-          description: Required when this site currently has one or more editors.
+          description: Optional on this route; send the ETag captured before editing.
           schema:
             type: string
       requestBody:
@@ -573,10 +580,16 @@ paths:
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
-  /api/sites/{sitename}/visibility:
+  /api/sites/{sitename}/access:
     post:
-      summary: Set Showcase visibility
-      description: Owner-only. The canonical direct URL remains reachable; `public=true` opts the active HTML into Showcase and public search, while `public=false` removes it from new discovery queries.
+      summary: Set who can open a site
+      description: |
+        Sets who can open the site. Any level except `network` takes effect at
+        once; moving off `network` ends its approval, and moving to any level
+        withdraws a pending network request. `network` needs a `reason` (at
+        most 500 characters) and returns `202`: the site keeps its level until
+        an admin approves the request. `specific` moves the site to its own
+        address; add viewers through the viewers routes.
       tags: [Sites]
       security:
         - apiKey: []
@@ -589,15 +602,13 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [public]
-              properties:
-                public:
-                  type: boolean
+              $ref: '#/components/schemas/SiteAccessRequest'
       responses:
         '200':
-          description: Visibility updated
+          description: Access level changed
           headers:
+            ETag:
+              $ref: '#/components/headers/SiteETag'
             X-Simple-Host-Latest-Skill-Version:
               $ref: '#/components/headers/LatestSkillVersion'
             X-Simple-Host-Minimum-Skill-Version:
@@ -607,23 +618,35 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SiteWithNote'
+                $ref: '#/components/schemas/SiteAccessResponse'
+        '202':
+          description: Network access requested; the site keeps its current level until an admin approves
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteAccessResponse'
         '400':
           $ref: '#/components/responses/ManagementBadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The site is already open to the network
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
   /api/collaboration/sites:
     get:
-      summary: List owned and shared sites
+      summary: List owned and team sites
       description: |
-        Returns canonical sites the authenticated user owns or may edit. A
-        shared site keeps its owner's URL and is never copied into the editor's
-        namespace. Legacy `GET /api/sites` remains owned-only for normal users.
+        Returns canonical sites the authenticated user owns or that belong to
+        a team the user is in. Legacy `GET /api/sites` remains owned-only for
+        normal users.
       tags: [Collaboration]
       security:
         - apiKey: []
@@ -632,7 +655,7 @@ paths:
         - $ref: '#/components/parameters/SimpleHostClient'
       responses:
         '200':
-          description: Owned and shared sites
+          description: Owned and team sites
           headers:
             X-Simple-Host-Latest-Skill-Version:
               $ref: '#/components/headers/LatestSkillVersion'
@@ -656,7 +679,7 @@ paths:
   /api/collaboration/sites/{owner}/{sitename}:
     get:
       summary: Get an accessible canonical site
-      description: Resolves the owner-qualified site and the caller's owner/editor role.
+      description: Resolves the owner-qualified site and the caller's owner/member role.
       tags: [Collaboration]
       security:
         - apiKey: []
@@ -692,7 +715,7 @@ paths:
     put:
       summary: Deploy a new canonical-site version
       description: |
-        Owner/editor operation. Uploads a complete gzip-compressed TAR or ZIP
+        Owner/member operation. Uploads a complete gzip-compressed TAR or ZIP
         artifact under the resource owner's existing namespace. Capture the
         ETag before editing and send it in `If-Match`; never refresh the ETag
         immediately before uploading a stale local snapshot. A stale validator
@@ -755,7 +778,7 @@ paths:
   /api/collaboration/sites/{owner}/{sitename}/versions:
     get:
       summary: List retained canonical-site versions
-      description: Owner/editor operation. Uploader attribution contains a username only.
+      description: Owner/member operation. Uploader attribution contains a username only.
       tags: [Collaboration]
       security:
         - apiKey: []
@@ -795,12 +818,10 @@ paths:
     get:
       summary: Download an exact retained deployed artifact
       description: |
-        Owner/editor operation. Streams one immutable retained version as a ZIP
+        Owner/member operation. Streams one immutable retained version as a ZIP
         whose root is the deployed website contents. This is the deployed
         artifact, not reconstructed framework source. Responses are private and
-        no-store and have an absolute five-minute streaming deadline. An archive
-        admitted before an owner revokes the editor may finish; every archive
-        request admitted after revoke is denied.
+        no-store and have an absolute five-minute streaming deadline.
       tags: [Collaboration]
       security:
         - apiKey: []
@@ -845,7 +866,7 @@ paths:
   /api/collaboration/sites/{owner}/{sitename}/rollback:
     post:
       summary: Roll back an accessible canonical site
-      description: Owner/editor operation protected by the current site ETag.
+      description: Owner/member operation protected by the current site ETag.
       tags: [Collaboration]
       security:
         - apiKey: []
@@ -895,47 +916,18 @@ paths:
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
-  /api/collaboration/sites/{owner}/{sitename}/editors:
-    get:
-      summary: List current site editors
-      description: Owner-only. Returns usernames and grant timestamps, never API keys.
-      tags: [Collaboration]
-      security:
-        - apiKey: []
-      parameters:
-        - $ref: '#/components/parameters/SkillVersion'
-        - $ref: '#/components/parameters/SimpleHostClient'
-        - $ref: '#/components/parameters/owner'
-        - $ref: '#/components/parameters/sitename'
-      responses:
-        '200':
-          description: Current editors
-          headers:
-            X-Simple-Host-Latest-Skill-Version:
-              $ref: '#/components/headers/LatestSkillVersion'
-            X-Simple-Host-Minimum-Skill-Version:
-              $ref: '#/components/headers/MinimumSkillVersion'
-            X-Simple-Host-Update-URL:
-              $ref: '#/components/headers/SkillUpdateURL'
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/SiteEditor'
-        '400':
-          $ref: '#/components/responses/SkillVersionRequired'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
+  /api/collaboration/sites/{owner}/{sitename}/access:
     post:
-      summary: Grant editor access
-      description: Owner-only, idempotent, existing registered usernames only, at most 50 editors per site.
+      summary: Set who can open an owner-qualified site
+      description: |
+        Owner/member operation. Same as `POST /api/sites/{sitename}/access`, for a
+        site in a team's namespace.
+        Sets who can open the site. Any level except `network` takes effect at
+        once; moving off `network` ends its approval, and moving to any level
+        withdraws a pending network request. `network` needs a `reason` (at
+        most 500 characters) and returns `202`: the site keeps its level until
+        an admin approves the request. `specific` moves the site to its own
+        address; add viewers through the viewers routes.
       tags: [Collaboration]
       security:
         - apiKey: []
@@ -949,20 +941,13 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [usernames]
-              properties:
-                usernames:
-                  type: array
-                  minItems: 1
-                  maxItems: 50
-                  uniqueItems: true
-                  items:
-                    type: string
+              $ref: '#/components/schemas/SiteAccessRequest'
       responses:
         '200':
-          description: Complete current editor list
+          description: Access level changed
           headers:
+            ETag:
+              $ref: '#/components/headers/SiteETag'
             X-Simple-Host-Latest-Skill-Version:
               $ref: '#/components/headers/LatestSkillVersion'
             X-Simple-Host-Minimum-Skill-Version:
@@ -972,25 +957,21 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/SiteEditor'
+                $ref: '#/components/schemas/SiteAccessResponse'
+        '202':
+          description: Network access requested; the site keeps its current level until an admin approves
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteAccessResponse'
         '400':
           $ref: '#/components/responses/ManagementBadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Adding the requested usernames would exceed the 50-editor cap
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '413':
-          description: Request body exceeds 16 KiB
+          description: The site is already open to the network
           content:
             application/json:
               schema:
@@ -998,45 +979,11 @@ paths:
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
-  /api/collaboration/sites/{owner}/{sitename}/editors/{username}:
-    delete:
-      summary: Revoke one editor
-      description: Owner-only. Revocation blocks operations that have not already passed serialized admission, but does not cancel an already-admitted archive, undo deployed content, or erase files already downloaded.
-      tags: [Collaboration]
-      security:
-        - apiKey: []
-      parameters:
-        - $ref: '#/components/parameters/SkillVersion'
-        - $ref: '#/components/parameters/SimpleHostClient'
-        - $ref: '#/components/parameters/owner'
-        - $ref: '#/components/parameters/sitename'
-        - $ref: '#/components/parameters/username'
-      responses:
-        '204':
-          description: Editor revoked
-          headers:
-            X-Simple-Host-Latest-Skill-Version:
-              $ref: '#/components/headers/LatestSkillVersion'
-            X-Simple-Host-Minimum-Skill-Version:
-              $ref: '#/components/headers/MinimumSkillVersion'
-            X-Simple-Host-Update-URL:
-              $ref: '#/components/headers/SkillUpdateURL'
-        '400':
-          $ref: '#/components/responses/SkillVersionRequired'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-
-  /api/collaboration/sites/{owner}/{sitename}/editor-candidates:
+  /api/collaboration/sites/{owner}/{sitename}/state-versions:
     get:
-      summary: Search registered usernames for sharing
-      description: Owner-only. Returns at most 20 minimal username records; no keys, email guesses, or admin flags.
-      tags: [Collaboration]
+      summary: List a site's saved-state history
+      description: Owner/member operation. The last 20 versions of the site's state, newest first, without their contents.
+      tags: [State]
       security:
         - apiKey: []
       parameters:
@@ -1044,21 +991,9 @@ paths:
         - $ref: '#/components/parameters/SimpleHostClient'
         - $ref: '#/components/parameters/owner'
         - $ref: '#/components/parameters/sitename'
-        - name: q
-          in: query
-          schema:
-            type: string
-            maxLength: 100
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 20
-            default: 20
       responses:
         '200':
-          description: Matching registered usernames
+          description: State history, newest first
           headers:
             X-Simple-Host-Latest-Skill-Version:
               $ref: '#/components/headers/LatestSkillVersion'
@@ -1072,28 +1007,272 @@ paths:
                 type: array
                 maxItems: 20
                 items:
-                  $ref: '#/components/schemas/EditorCandidate'
+                  $ref: '#/components/schemas/StateHistoryEntry'
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/collaboration/sites/{owner}/{sitename}/state-versions/{id}:
+    get:
+      summary: Get one saved-state version with its contents
+      description: Owner/member operation.
+      tags: [State]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+        - name: id
+          in: path
+          required: true
+          description: A history entry's `id` (not its state version number).
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: One history entry, including `state`
+          headers:
+            X-Simple-Host-Latest-Skill-Version:
+              $ref: '#/components/headers/LatestSkillVersion'
+            X-Simple-Host-Minimum-Skill-Version:
+              $ref: '#/components/headers/MinimumSkillVersion'
+            X-Simple-Host-Update-URL:
+              $ref: '#/components/headers/SkillUpdateURL'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StateHistoryEntry'
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/collaboration/sites/{owner}/{sitename}/state-versions/{id}/restore:
+    post:
+      summary: Restore a saved-state version
+      description: |
+        Owner/member operation. Makes that version's state current again as a
+        new write, so the state version increases and the replaced state stays
+        in the history. Audited as `state_restore`.
+      tags: [State]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+        - name: id
+          in: path
+          required: true
+          description: A history entry's `id` (not its state version number).
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Restored; the new state version
+          headers:
+            X-Simple-Host-Latest-Skill-Version:
+              $ref: '#/components/headers/LatestSkillVersion'
+            X-Simple-Host-Minimum-Skill-Version:
+              $ref: '#/components/headers/MinimumSkillVersion'
+            X-Simple-Host-Update-URL:
+              $ref: '#/components/headers/SkillUpdateURL'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version]
+                properties:
+                  version:
+                    type: integer
+                    format: int64
         '400':
           $ref: '#/components/responses/ManagementBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/access:
+    get:
+      summary: Read a site's access log
+      description: |
+        A non-admin must pass `owner` (their own username or a team they are
+        in). What comes back depends on `ACCESS_LOG_VISIBILITY`: under
+        `counts` (the default) a non-admin gets `AccessCounts` — views per
+        day and distinct viewers, the last 30 days unless `from`/`to` say
+        otherwise, never who; under `owner` they get rows with user ids but
+        no IP or user agent; under `admin` they are refused. Admins always
+        get full rows. API-key callers send `X-Skill-Version` as on the other
+        management routes.
+      tags: [Audit]
+      security:
+        - apiKey: []
+      parameters:
+        - name: owner
+          in: query
+          schema:
+            type: string
+        - name: site
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Aggregates under `counts` for a non-admin; otherwise a page of rows
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/AccessCounts'
+                  - type: object
+                    properties:
+                      entries:
+                        type: array
+                        items:
+                          type: object
+                      next_cursor:
+                        type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/admin/access-requests:
+    get:
+      summary: List network access requests and network-open sites
+      description: Admin only, browser session only (never an API key). Pending requests carry `requested_by`, `reason` and `requested_at`.
+      tags: [Admin]
+      responses:
+        '200':
+          description: Pending requests and approved network sites
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NetworkAccessEntry'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/admin/access-requests/{owner}/{sitename}/approve:
+    post:
+      summary: Approve a network access request
+      description: Admin only, browser session only (never an API key). Opens the site to anyone who can reach the server. Audited as `network_access_approved`. `409` when nothing is pending.
+      tags: [Admin]
+      parameters:
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+      responses:
+        '200':
+          description: Done
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
+        '409':
+          description: Nothing to approve, decline or revoke
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/admin/access-requests/{owner}/{sitename}/decline:
+    post:
+      summary: Decline a network access request
+      description: Admin only, browser session only (never an API key). The site keeps its current level. Audited as `network_access_declined`. `409` when nothing is pending.
+      tags: [Admin]
+      parameters:
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+      responses:
+        '200':
+          description: Done
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Nothing to approve, decline or revoke
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/admin/access-requests/{owner}/{sitename}/revoke:
+    post:
+      summary: Take a site off the network
+      description: Admin only, browser session only (never an API key). Sets the site to `company`, so signed-in people keep the link. Audited as `network_access_reverted`. `409` when the site is not open to the network.
+      tags: [Admin]
+      parameters:
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+      responses:
+        '200':
+          description: Done
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Nothing to approve, decline or revoke
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/sites/{sitename}/state:
     get:
       summary: Read a site's shared state
       description: |
         Returns the raw JSON document, `{}` for a site that has never saved.
+        On a `network` site anyone may read it without signing in; writes
+        still need a signed-in viewer.
         Served only on the site's own host (its owner's `<owner>.<base>`, or
-        a restricted site's `<owner>--<site>.<base>`), never on the base host.
+        a `specific` site's `<owner>--<site>.<base>`), never on the base host.
         The caller is the signed-in viewer's session (or an `X-API-Key`), and
         anyone who may open the site may read and write its state. On a
-        restricted site's own host the nameless form `/api/site/...` also
+        `specific` site's own host the nameless form `/api/site/...` also
         works. A `401` means the session expired: reload the page. Do not put
         secrets or PII in state.
       tags: [State]
@@ -1125,10 +1304,10 @@ paths:
         unconditional saves are deliberately required. Body is the raw
         document (any valid JSON, up to 1 MiB); response echoes it back.
         Served only on the site's own host (its owner's `<owner>.<base>`, or
-        a restricted site's `<owner>--<site>.<base>`), never on the base host.
+        a `specific` site's `<owner>--<site>.<base>`), never on the base host.
         The caller is the signed-in viewer's session (or an `X-API-Key`), and
         anyone who may open the site may read and write its state. On a
-        restricted site's own host the nameless form `/api/site/...` also
+        `specific` site's own host the nameless form `/api/site/...` also
         works. A `401` means the session expired: reload the page. Do not put
         secrets or PII in state.
       tags: [State]
@@ -1178,10 +1357,10 @@ paths:
         `{"version": 0, "state": {}}`. A page writes its own site name into
         the call rather than reading it from `location.pathname`.
         Served only on the site's own host (its owner's `<owner>.<base>`, or
-        a restricted site's `<owner>--<site>.<base>`), never on the base host.
+        a `specific` site's `<owner>--<site>.<base>`), never on the base host.
         The caller is the signed-in viewer's session (or an `X-API-Key`), and
         anyone who may open the site may read and write its state. On a
-        restricted site's own host the nameless form `/api/site/...` also
+        `specific` site's own host the nameless form `/api/site/...` also
         works. A `401` means the session expired: reload the page. Do not put
         secrets or PII in state.
       tags: [State]
@@ -1217,10 +1396,10 @@ paths:
         stale whole snapshot. `version` is required; first save on a fresh
         site sends `version: 0`. 1 MiB cap.
         Served only on the site's own host (its owner's `<owner>.<base>`, or
-        a restricted site's `<owner>--<site>.<base>`), never on the base host.
+        a `specific` site's `<owner>--<site>.<base>`), never on the base host.
         The caller is the signed-in viewer's session (or an `X-API-Key`), and
         anyone who may open the site may read and write its state. On a
-        restricted site's own host the nameless form `/api/site/...` also
+        `specific` site's own host the nameless form `/api/site/...` also
         works. A `401` means the session expired: reload the page. Do not put
         secrets or PII in state.
       tags: [State]
@@ -1625,7 +1804,7 @@ components:
       name: owner
       in: path
       required: true
-      description: Canonical resource owner's username, including when the caller is an editor.
+      description: The site's owner — a username or a team name.
       schema:
         type: string
       example: alice.smith
@@ -1688,8 +1867,8 @@ components:
 
     CollaborationSite:
       type: object
-      description: One canonical owned or shared site. It contains no owner or editor API keys.
-      required: [id, name, owner_username, access_role, active_version, public, public_path, url, etag, created_at, updated_at, analytics]
+      description: One canonical site the caller owns or whose team the caller is in. It contains no API keys.
+      required: [id, name, owner_username, access_role, active_version, public, access, public_path, url, etag, created_at, updated_at, analytics]
       properties:
         id:
           type: string
@@ -1700,13 +1879,29 @@ components:
           type: string
         access_role:
           type: string
-          enum: [owner, editor]
+          enum: [owner, member]
         active_version:
           type: integer
           minimum: 1
         public:
           type: boolean
-          description: Whether the canonical site participates in Showcase and public search.
+          description: True when the access level is `listed` or `network`.
+        access:
+          type: string
+          enum: [only_me, specific, company, listed, network]
+          description: Who can open the site.
+        network_request:
+          type: object
+          description: Present while a request to open the site to the network waits for an admin.
+          properties:
+            status:
+              type: string
+              enum: [pending]
+            reason:
+              type: string
+            requested_at:
+              type: string
+              format: date-time
         public_path:
           type: string
           example: https://alice-smith.simple-host.example.com/my-cool-site/
@@ -1743,24 +1938,100 @@ components:
           type: string
           format: date-time
 
-    SiteEditor:
+    SiteAccessRequest:
       type: object
-      required: [username, created_at]
+      required: [level]
       properties:
-        username:
+        level:
           type: string
+          enum: [only_me, specific, company, listed, network]
+        reason:
+          type: string
+          maxLength: 500
+          description: Required for `network`; the admin reads it.
+
+    SiteAccessResponse:
+      allOf:
+        - $ref: '#/components/schemas/CollaborationSite'
+        - type: object
+          properties:
+            note:
+              type: string
+
+    StateHistoryEntry:
+      type: object
+      required: [id, version, created_at, bytes]
+      properties:
+        id:
+          type: integer
+          format: int64
+        version:
+          type: integer
+          format: int64
+          description: The state version this entry was saved as.
+        written_by:
+          type: string
+          description: Username of the writer, when known.
         created_at:
           type: string
           format: date-time
+        bytes:
+          type: integer
+        state:
+          description: The state document; only on the single-entry route.
 
-    EditorCandidate:
+    AccessCounts:
       type: object
-      required: [username, already_editor]
+      required: [from, to, unique_viewers, days]
       properties:
-        username:
+        from:
           type: string
-        already_editor:
-          type: boolean
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        unique_viewers:
+          type: integer
+          format: int64
+        days:
+          type: array
+          items:
+            type: object
+            required: [day, views, unique_viewers]
+            properties:
+              day:
+                type: string
+                format: date
+              views:
+                type: integer
+                format: int64
+              unique_viewers:
+                type: integer
+                format: int64
+
+    NetworkAccessEntry:
+      type: object
+      required: [owner, site, access, status, url]
+      properties:
+        owner:
+          type: string
+        site:
+          type: string
+        access:
+          type: string
+          description: The site's current level.
+        status:
+          type: string
+          enum: [pending, approved]
+        requested_by:
+          type: string
+        reason:
+          type: string
+        requested_at:
+          type: string
+          format: date-time
+        url:
+          type: string
 
     SitePrecondition:
       type: object

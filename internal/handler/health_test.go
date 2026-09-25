@@ -200,3 +200,22 @@ func TestRequiredSchemaProbeValidatesMigration0012Shape(t *testing.T) {
 		}
 	}
 }
+
+// TestRequiredSchemaProbePassesOnMigratedDatabase runs the probe against a
+// fully migrated database: it must report ready, including migration 0033's
+// access columns and saved-data history table.
+func TestRequiredSchemaProbePassesOnMigratedDatabase(t *testing.T) {
+	database := connectorTestDB(t)
+	var ready bool
+	if err := database.QueryRow(requiredSchemaProbe).Scan(&ready); err != nil {
+		t.Fatal(err)
+	}
+	if !ready {
+		t.Fatal("schema probe reports not ready on a fully migrated database")
+	}
+	for _, want := range []string{"access_columns_ready.ready", "'site_state_history', 'state', 'jsonb', 'NO'", "('access', 'text'"} {
+		if !strings.Contains(requiredSchemaProbe, want) {
+			t.Errorf("schema probe missing %q", want)
+		}
+	}
+}

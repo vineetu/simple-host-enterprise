@@ -1,6 +1,6 @@
 ---
 name: simple-host-builder
-description: Plan what to build on Simple Host. Walks a user through Simple Host's capabilities — static hosting, shared JSON state with version-checked saves, uploaded files, and restricting a site to named viewers — and produces a concrete agent prompt for whichever capability they want to add. Use when a user is starting a new Simple Host site, when they ask "what can I add to my site," or when they describe a feature idea and need help mapping it to Simple Host's primitives.
+description: Plan what to build on Simple Host. Walks a user through Simple Host's capabilities — static hosting, shared JSON state with version-checked saves, uploaded files, and choosing who can open a site — and produces a concrete agent prompt for whichever capability they want to add. Use when a user is starting a new Simple Host site, when they ask "what can I add to my site," or when they describe a feature idea and need help mapping it to Simple Host's primitives.
 ---
 
 # Simple Host Builder
@@ -9,12 +9,12 @@ Use this skill when a user wants help deciding what to build on Simple Host, or 
 
 ## What Simple Host gives you
 
-Simple Host is a server at `{{BASE_URL}}`. A site belongs to a namespace owned by a person or a team and is served at `<owner-label>.<base>/<name>/`, or at its own host once restricted to named viewers. Every viewer signs in with their company account. Deployed pages can call the site API from the browser; there is no separate backend.
+Simple Host is a server at `{{BASE_URL}}`. A site belongs to a namespace owned by a person or a team and is served at `<owner-label>.<base>/<name>/`, or at its own host once shared with named viewers. Every viewer signs in with their company account, except on a site an admin has opened to the network. Deployed pages can call the site API from the browser; there is no separate backend.
 
 | Capability | Endpoint (from the page) | Who can use it |
 |---|---|---|
-| Static site hosting | the site's `url` | any signed-in colleague, or only named viewers if restricted |
-| Versioned state (default for stateful sites) | `GET/PUT /api/sites/<site>/state/versioned` | anyone who can open the site |
+| Static site hosting | the site's `url` | whoever its access level admits (only the owner or team until changed) |
+| Versioned state (default for stateful sites) | `GET/PUT /api/sites/<site>/state/versioned` | anyone who can open the site (the last 20 versions can be restored) |
 | Plain state (explicit last-write-wins only) | `GET/PUT /api/sites/<site>/state` | anyone who can open the site |
 | Uploaded files (images, PDFs, CSV...) | `POST/GET /api/sites/<site>/assets` | anyone who can open the site |
 
@@ -22,7 +22,7 @@ The package ships no AI model or proxy. A prototype that needs one calls whateve
 
 ## How to use this skill
 
-1. Ask the user what they're trying to build, in plain language. Don't push capabilities at them — let them describe the idea. If the idea would put confidential material, personal data, or customer data on the site, say plainly that only content the company allows to be shared internally, or that is already public, may be hosted here — any signed-in person in the company can view an unrestricted site — and help them scope it down or stop.
+1. Ask the user what they're trying to build, in plain language. Don't push capabilities at them — let them describe the idea. If the idea would put confidential material, personal data, or customer data on the site, say plainly that only content the company allows to be shared internally, or that is already public, may be hosted here — a site can be opened company-wide once it is shared — and help them scope it down or stop.
 2. Map their description to one or more capabilities below. If you're unsure which fits, list two and ask them which feels closer.
 3. For each capability they pick, give them: (a) a one-paragraph explanation of how it works, (b) the relevant fetch snippet, (c) the gotchas for that capability.
 4. If they're starting from scratch, finish with a "ready to deploy" handoff: tell them to use the `simple-host` skill (or the Simple Host connector's tools, if present), which handles sign-in, framework-aware build, packaging, and upload. For an existing site, read its live files first — a deploy replaces every file.
@@ -113,9 +113,19 @@ Gotchas: plain and versioned saves share the same blob, and plain saves still bu
 
 For a photo, PDF, or CSV a page wants to reference by URL, upload it with `POST /api/sites/<site>/assets` (multipart, field `file`, 25 MiB per file by default). It survives redeploys and rollbacks. See `simple-host/references/state-and-ai.md` for the contract.
 
-### 4. Restricting who can open a site
+### 4. Choosing who can open a site
 
-By default any signed-in colleague with the link can open a site. The owner can restrict it to named viewers (people or teams); the site then moves to its own address. Use this when a site should not be seen company-wide — but it is still not a place for confidential data.
+A new site opens only for its owner (or, for a team site, the team). The owner then picks a level:
+
+| Level | Who can open it |
+|---|---|
+| `only_me` | the owner, or the team's members |
+| `specific` | also named people or teams; the site moves to its own address |
+| `company` | anyone signed in at the company with the link |
+| `listed` | company, and shown in the showcase and search |
+| `network` | anyone who can reach the server, no sign-in; an admin must approve it |
+
+Suggest `network` only when the user explicitly wants people without a company sign-in to open the site. None of these makes it a place for confidential data. To let other people change a site, publish it under a team.
 
 ## Picking a capability mix
 
@@ -127,7 +137,7 @@ Use this as a guide when the user describes an idea:
 | "a tracker/list my whole team edits at once" | static + versioned state (conflict-safe saves) |
 | "I just want to host my landing page" | static only |
 | "a chat UI" or "a tool that thinks" | static + versioned state, calling an AI endpoint the platform team provides; ask what exists first |
-| "only my team should see it" | static + restricted to named viewers |
+| "only my team should see it" | static, published under the team (`only_me`), or `specific` with the team as viewer |
 
 If the user wants something Simple Host can't host (server-side execution, private per-user data, real-time multiplayer), say so explicitly. Don't try to bolt it on.
 

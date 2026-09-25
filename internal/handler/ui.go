@@ -29,7 +29,7 @@ const (
 	skillBundleURL       = "/skills.zip"
 	// skillReleaseType is hand-set, so it has to move with the version above
 	// it. 0.11.0 changes the access model: a new site is only-me,
-	// set_site_access replaces set_site_listing, and editor grants are gone,
+	// set_site_access replaces set_site_listing, and shared editing is teams only,
 	// which is a minor release rather than a patch. It is also the new
 	// minimum (notice_middleware.go): an older skill calls routes that no
 	// longer exist. An agent reads this to decide how loudly to mention the

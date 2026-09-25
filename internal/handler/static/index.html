@@ -921,7 +921,7 @@
         <h1 id="home-title">Build and share a website in about 20 minutes</h1>
         <p class="home-hero__intro">
           Describe what you want, let your coding agent build it, and get a link
-          you can share with teammates who can open, use, and edit it with you.
+          you can share with teammates who can open, use, and build it with you.
         </p>
         <div class="home-actions">
           <a class="home-button" href="#get-started">Get started</a>
@@ -1132,11 +1132,11 @@ Before changing anything, tell me conversationally in one or two sentences that 
             </p>
 
             <p class="site-home-url"><code id="siteHomeUrl">https://your-name.&lt;this server&gt;/</code></p>
-            <p class="field-help">Sites shared with you are on your <a class="home-text-link" href="/dashboard">dashboard</a>.</p>
+            <p class="field-help">Your sites and your teams' sites are on your <a class="home-text-link" href="/dashboard">dashboard</a>. A new site opens only for you (or your team) until you choose who else can see it.</p>
 
             <div class="step-share">
-              <p><strong>Share it to build together.</strong> Invite teammates as
-              editors and they work on the same site — one link, one version history,
+              <p><strong>Share it to build together.</strong> Publish under a team and
+              everyone in it works on the same site — one link, one version history,
               and you can roll back any change. That is the point of publishing here
               rather than sending a file around.</p>
               <a class="home-text-link" href="/capabilities.html">See everything you can do</a>
@@ -1215,16 +1215,16 @@ Before changing anything, tell me conversationally in one or two sentences that 
       <div class="home-container collaboration__inner">
         <div class="collaboration__copy">
           <p class="home-eyebrow">Made for shared work</p>
-          <h2 id="collaboration-title">One site, shared with editors</h2>
+          <h2 id="collaboration-title">One site, built by your team</h2>
           <p>
-            Invite trusted editors to the site you already published. Everyone
-            works on the same canonical site while the owner keeps control of
-            sharing, visibility, and deletion.
+            Publish under a team and every member works on the same site, while
+            you choose who can open it: only the team, named people, or the
+            whole company.
           </p>
         </div>
         <ol class="collaboration__flow">
-          <li><span>01</span><strong>The owner shares editing access.</strong></li>
-          <li><span>02</span><strong>Editors update the same owner URL.</strong></li>
+          <li><span>01</span><strong>Publish the site under your team.</strong></li>
+          <li><span>02</span><strong>Members update the same team URL.</strong></li>
           <li><span>03</span><strong>Every publish joins one version history.</strong></li>
         </ol>
       </div>
@@ -1248,10 +1248,11 @@ Before changing anything, tell me conversationally in one or two sentences that 
         <details>
           <summary>Are my sites public by default?</summary>
           <p>
-            No. A new site is <strong>unlisted</strong> — it does not appear on the
-            <a href="/showcase">Showcase</a> or in search until you choose to make
-            it public. Anyone in your company who signs in and has the direct link can
-            still view it, unless you restrict it to named viewers.
+            No. A new site opens <strong>only for you</strong> (or your team). You
+            then choose who can open it: named people or teams, anyone in your
+            company with the link, or also the <a href="/showcase">Showcase</a> and
+            search. Opening a site to people without a company sign-in needs an
+            admin's approval.
           </p>
         </details>
         <details>
@@ -1259,16 +1260,15 @@ Before changing anything, tell me conversationally in one or two sentences that 
           <p>
             Only information your company allows to be shared internally, plus
             anything that is already public. Do not host confidential material,
-            personal data, or customer data. Every site requires sign-in, and a
-            restricted site is visible only to the people on its viewer list, but
-            treat anything you publish as visible to everyone in your company.
+            personal data, or customer data. A site starts visible only to you, but
+            treat anything you publish as something your whole company could see.
           </p>
         </details>
         <details>
           <summary>Can someone else change or overwrite my site?</summary>
           <p>
-            No. Accounts come from your company sign-in, and only you, the members
-            of your team, or an editor you added can change a site. Every deploy is backed up
+            No. Accounts come from your company sign-in, and only you, or the members
+            of the team that owns it, can change a site. Every deploy is backed up
             to S3 with the last five versions retained, so any change is one revert
             away, and access logs are available to security on request.
           </p>
@@ -1277,9 +1277,10 @@ Before changing anything, tell me conversationally in one or two sentences that 
           <summary>Is the shared data on my site private?</summary>
           <p>
             Each site gets a JSON store — that is what makes shared demos and
-            trackers work. Everyone who can open the site is signed in and can read
-            and change it, so treat it as collaborative rather than protected, and
-            never store passwords, secrets, or personal data in it.
+            trackers work. Everyone who can open the site can read and change it, so
+            treat it as collaborative rather than protected, and never store
+            passwords, secrets, or personal data in it. The last 20 versions are
+            kept, so a bad change can be undone.
           </p>
         </details>
         <details>
@@ -1302,7 +1303,7 @@ Before changing anything, tell me conversationally in one or two sentences that 
           <summary>Can I publish more than one website?</summary>
           <p>
             Yes. Each site gets its own shareable URL, and your assistant can list,
-            update, inspect, or roll back the sites you own and the sites shared with you.
+            update, inspect, or roll back the sites you own and your teams' sites.
           </p>
         </details>
         <details>

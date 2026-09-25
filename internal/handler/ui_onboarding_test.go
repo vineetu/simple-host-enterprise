@@ -243,7 +243,7 @@ func TestHomepageOnboardingJourneyAndEmailPrivacy(t *testing.T) {
 	}
 
 	collaboration := onboardingSingleElementWithClass(t, document, "section", "collaboration")
-	assertOnboardingElementText(t, collaboration, "h2", "One site, shared with editors")
+	assertOnboardingElementText(t, collaboration, "h2", "One site, built by your team")
 
 	// Accounts come from the company's sign-in: the page asks for no email and
 	// the prompt never tells an agent to register one.
@@ -564,7 +564,7 @@ func TestCapabilitiesUsesPlainProductLanguage(t *testing.T) {
 		"Update it or go back",
 		"Work on one site together",
 		"Save shared information",
-		"Choose whether it appears in Showcase",
+		"Choose who can open it",
 		"Check activity",
 		"Good to know",
 	}

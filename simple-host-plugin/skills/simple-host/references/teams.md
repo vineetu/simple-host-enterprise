@@ -15,8 +15,8 @@ A team is **not** a person:
 - Never try to sign a team in or mint it an API key. A team has no sign-in of
   its own; every member acts on the team's sites with their own personal key.
   See [`account-recovery.md`](account-recovery.md).
-- A team can never be granted as a per-site editor, and never appears in editor
-  candidate results.
+- A team can be named as a viewer of a site (level `specific`), which lets its
+  members open that site but not change it.
 
 ## One role
 
@@ -25,15 +25,14 @@ member, and nothing takes a role argument.
 
 Any member may:
 
-- create, update, roll back, delete, and change the listing of **any** site in
-  the team's namespace;
-- manage that site's per-site editor grants;
+- create, update, roll back, and delete **any** site in the team's namespace;
+- set who can open it and manage its viewers, and restore its saved data;
 - add and remove people, including themselves;
 - delete the team, once it owns no sites.
 
-A per-site editor grant is a separate thing that still exists. An editor on a
-team-owned site may deploy, download, list versions, and roll back that one site,
-and nothing else. See [`collaboration.md`](collaboration.md) for the full matrix.
+Being in the team is the only way to change a team's sites. A new team site
+opens only for the team's members until its level changes; see
+[`collaboration.md`](collaboration.md).
 
 ## A team always keeps at least one member
 
@@ -121,10 +120,11 @@ returns, exactly as returned.
 
 ## Wording
 
-- "Give Bob access to the dashboard", on a team-owned site, is ambiguous. Ask
-  whether they mean every site under `<team>` (say how many) or only that one
-  site, then choose between adding a member and granting a per-site editor. On a
-  personal site it is an editor grant, as before.
+- "Give Bob access to the dashboard" is ambiguous. Ask whether Bob should be
+  able to change it or only open it. To change it, he must be in the team that
+  owns it: add him to that team (say how many sites that covers), or, for a
+  personal site, offer to publish it under a team he is in. To open it, add him
+  as a viewer.
 - "Move my site to the team" is not supported. The address would change. Offer to
   publish a new site under the team from local source, keep the old one, and
   never delete the old site in the same turn.
