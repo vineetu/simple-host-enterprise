@@ -25,7 +25,8 @@ type fakeS3 struct {
 	mu       sync.Mutex
 	bucket   string
 	objects  map[string]fakeObject
-	pageSize int // ListObjectsV2 page size; 0 means unlimited
+	pageSize int  // ListObjectsV2 page size; 0 means unlimited
+	denyGet  bool // GetObject answers AccessDenied, as after a policy removal
 }
 
 type fakeObject struct {
@@ -73,6 +74,9 @@ func (f *fakeS3) PutObject(_ context.Context, in *s3.PutObjectInput, _ ...func(*
 func (f *fakeS3) GetObject(_ context.Context, in *s3.GetObjectInput, _ ...func(*s3.Options)) (*s3.GetObjectOutput, error) {
 	if err := f.checkBucket(in.Bucket); err != nil {
 		return nil, err
+	}
+	if f.denyGet {
+		return nil, errors.New("api error AccessDenied: Access Denied")
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -343,6 +347,11 @@ func TestS3ObjectsPing(t *testing.T) {
 	}
 	if err := newS3Objects(fake, "other", "", "", "", nil).Ping(context.Background()); err == nil {
 		t.Fatal("Ping of a missing bucket succeeded")
+	}
+	// The bucket still answers HeadBucket but objects can no longer be read.
+	fake.denyGet = true
+	if err := newS3Objects(fake, fake.bucket, "p", "", "", nil).Ping(context.Background()); err == nil {
+		t.Fatal("Ping without object read access succeeded")
 	}
 }
 

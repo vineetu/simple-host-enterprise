@@ -256,9 +256,25 @@ func (o *S3Objects) Copy(ctx context.Context, from, to string) error {
 	return nil
 }
 
+// readyProbeKey is never written. Reading it answers NoSuchKey only to a
+// caller allowed to read (and list) the bucket; without those permissions S3
+// answers AccessDenied. HeadBucket alone can keep succeeding after the
+// credentials lose object access, as a real bucket-policy removal showed.
+const readyProbeKey = "readyz-probe"
+
 func (o *S3Objects) Ping(ctx context.Context) error {
-	_, err := o.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(o.bucket)})
-	return err
+	if _, err := o.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(o.bucket)}); err != nil {
+		return err
+	}
+	out, err := o.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(o.bucket), Key: o.key(readyProbeKey)})
+	if err == nil {
+		out.Body.Close()
+		return nil
+	}
+	if isNotFound(err) {
+		return nil
+	}
+	return fmt.Errorf("read probe object: %w", err)
 }
 
 func isNotFound(err error) bool {

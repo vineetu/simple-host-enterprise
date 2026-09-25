@@ -23,11 +23,17 @@ Each pod keeps a local cache of the versions it serves in an `emptyDir` at
 `CACHE_DIR`, emptied on start and bounded by `CACHE_MAX_BYTES` (versions
 being served are pinned, so the volume is sized at about 3x that). A pod
 holds nothing that is not in the bucket or the database, so the Deployment
-runs two replicas with rolling updates and a PodDisruptionBudget. `/readyz`
-checks the database and the bucket.
+runs two replicas, one per node when there are several, with rolling
+updates and a PodDisruptionBudget. `/readyz` checks the database and that
+the bucket can be read: it reads a key that is never written and expects
+"not found", so credentials that lost object access take the pod out of
+rotation (cached for 10 seconds, like the rest of the check).
 
-Each pod opens at most 20 database connections. Size Postgres
-`max_connections` for replicas x 20, plus the migrate and prune jobs.
+Each pod opens at most 20 database connections, and a rollout runs one
+extra pod. Size Postgres `max_connections` for (replicas + 1) x 20, plus a
+few for the migrate and prune jobs and your own sessions: at least 65 for
+the default two replicas. A small managed plan can be lower than that
+(UpCloud's 1 GB plan allows 50).
 
 ## Bucket requirements
 
@@ -46,7 +52,9 @@ Each pod opens at most 20 database connections. Size Postgres
   (`docs/cloud/aks.md` section 3).
 - **Versioning on, with a lifecycle rule.** Required. Expire noncurrent
   versions after a retention window (30 days is a reasonable start) and
-  abort incomplete multipart uploads after 7 days. On AWS:
+  abort incomplete multipart uploads after 7 days. With the AWS CLI (add
+  `--endpoint-url https://<endpoint>` for any other S3-compatible
+  provider):
 
 ```sh
 aws s3api put-bucket-versioning --bucket simple-host-backups --versioning-configuration Status=Enabled
@@ -56,10 +64,28 @@ aws s3api put-bucket-versioning --bucket simple-host-backups --versioning-config
 aws s3api put-bucket-lifecycle-configuration --bucket simple-host-backups --lifecycle-configuration '{"Rules":[{"ID":"simple-host","Status":"Enabled","Filter":{},"NoncurrentVersionExpiration":{"NoncurrentDays":30},"AbortIncompleteMultipartUpload":{"DaysAfterInitiation":7},"Expiration":{"ExpiredObjectDeleteMarker":true}}]}'
 ```
 
-Google Cloud Storage (object versioning plus lifecycle rules), OCI (object
-versioning plus lifecycle policy) and MinIO (`mc version enable`,
-`mc ilm rule add`) have the same controls. The local overlay's MinIO turns
-versioning on when it creates the bucket.
+Without the AWS CLI, any S3 client that can sign a request sends the same
+configuration as XML. With curl 7.75 or later, set the rule, then send
+versioning and the rule (`<endpoint>`, `<bucket>`, `<region>` and the key
+pair are the bucket's; the lifecycle call needs the `Content-MD5` header):
+
+```sh
+RULE='<LifecycleConfiguration><Rule><ID>simple-host</ID><Status>Enabled</Status><Filter/><NoncurrentVersionExpiration><NoncurrentDays>30</NoncurrentDays></NoncurrentVersionExpiration><AbortIncompleteMultipartUpload><DaysAfterInitiation>7</DaysAfterInitiation></AbortIncompleteMultipartUpload><Expiration><ExpiredObjectDeleteMarker>true</ExpiredObjectDeleteMarker></Expiration></Rule></LifecycleConfiguration>'
+```
+
+```sh
+curl -fsS -X PUT --aws-sigv4 "aws:amz:<region>:s3" --user "<key-id>:<secret>" --data-binary '<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>' "https://<endpoint>/<bucket>?versioning"
+```
+
+```sh
+curl -fsS -X PUT --aws-sigv4 "aws:amz:<region>:s3" --user "<key-id>:<secret>" -H "Content-MD5: $(printf %s "$RULE" | openssl dgst -md5 -binary | base64)" --data-binary "$RULE" "https://<endpoint>/<bucket>?lifecycle"
+```
+
+Read both back (the same commands without `-X PUT`, the header and the
+body) before you rely on them. Google Cloud Storage (object versioning plus
+lifecycle rules), OCI (object versioning plus lifecycle policy) and MinIO
+(`mc version enable`, `mc ilm rule add`) also have their own controls. The
+local overlay's MinIO turns versioning on when it creates the bucket.
 
 This is what replaces the old backup job. An object the server deletes or
 overwrites stays recoverable as a noncurrent version for the retention
@@ -87,28 +113,113 @@ under it unreadable.
 
 ## Migrating from a PVC install
 
-Earlier releases kept sites on a `simple-host-site-data` volume and copied
-them to the bucket. To move an existing install:
+Releases before v1.1.0 kept sites on a `simple-host-site-data` volume and
+copied them to the bucket. Upgrading from v1.0.x to v1.1.0 or later requires
+these steps; applying the new manifests alone starts pods that cannot find
+any site in the bucket. Replace `<digest>` with the new release's digest
+(`INSTALL.md` section 3).
 
-1. Back up the database.
+1. Back up the database. Either take your provider's on-demand backup or
+   snapshot and note its time (point-in-time recovery to a time before
+   step 5 also works), or dump it from inside the cluster with the owning
+   role. Start a pod that has the install's database settings:
+
+   ```sh
+   kubectl -n simple-host run simple-host-pgdump --restart=Never --image=postgres:16.11 --overrides='{"apiVersion":"v1","spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":65532,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"simple-host-pgdump","image":"postgres:16.11","command":["sleep","3600"],"env":[{"name":"PGSSLMODE","value":"verify-full"},{"name":"PGSSLROOTCERT","value":"/ca/ca.crt"}],"envFrom":[{"configMapRef":{"name":"simple-host-config"}},{"secretRef":{"name":"simple-host-secrets"}}],"volumeMounts":[{"name":"db-ca","mountPath":"/ca","readOnly":true}],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}],"volumes":[{"name":"db-ca","secret":{"secretName":"simple-host-db-ca"}}]}}'
+   ```
+
+   Wait for it, dump, check the file starts with `PGDMP`, and remove the pod:
+
+   ```sh
+   kubectl -n simple-host wait --for=condition=Ready pod/simple-host-pgdump --timeout=120s
+   ```
+
+   ```sh
+   kubectl -n simple-host exec simple-host-pgdump -- sh -c 'PGPASSWORD="$DB_PASSWORD" exec pg_dump -Fc -h "$DB_HOST" -p "${DB_PORT:-5432}" -U "$DB_USER" -d "$DB_NAME"' > simplehost-before-upgrade.dump
+   ```
+
+   ```sh
+   head -c5 simplehost-before-upgrade.dump; echo; kubectl -n simple-host delete pod simple-host-pgdump
+   ```
+
+   Keep the file somewhere private: it holds every account and state
+   document. `pg_restore --clean -d <database>` restores it.
 2. Stop the old workloads:
    `kubectl -n simple-host scale deploy/simple-host --replicas=0 && kubectl -n simple-host delete cronjob simple-host-backup-assets --ignore-not-found`
 3. Turn on bucket versioning and the lifecycle rule (above).
-4. Run the new release's `migrate` and `migrate-storage` in a one-off Job
-   that mounts the old volume read-only (below; set `image` to the new
-   release). `migrate-storage` uploads every site's retained versions and
-   live assets, re-downloads each to verify it, and exits non-zero if
-   anything failed or is missing. It is safe to re-run.
-5. Check the log ends with zero failures:
+4. Dry run. Apply the first Job below. It reads the old volume and the
+   database and changes neither: no migrations run, nothing is uploaded.
+   Its log must end with `0 failed`:
+   `kubectl -n simple-host logs job/simple-host-migrate-storage-dry-run`.
+   If it reports failures, fix them, or undo step 2 (scale back to the old
+   replica count and re-apply the old manifests) and stop here.
+5. Apply the second Job. **This is the step that migrates the database**:
+   its `migrate` init container applies the new release's schema
+   migrations, which the old release cannot run against afterwards (only
+   step 1's backup undoes them). Then `migrate-storage` uploads every
+   site's retained versions and live assets, re-downloads each to verify
+   it, and exits non-zero if anything failed or is missing. It is safe to
+   re-run.
+6. Check the log ends with zero failures:
    `kubectl -n simple-host logs job/simple-host-migrate-storage -c migrate-storage`
-6. Apply the new release's manifests.
-7. Verify: open a few sites, and run `make smoke BASE=...` if you use it.
-8. Only then delete the old volume
+7. Apply the new release's manifests.
+8. Verify: open a few sites, and run `make smoke BASE=...` if you use it.
+9. Only then delete the old volume
    (`kubectl -n simple-host delete pvc simple-host-site-data`) and the old
    backup objects. Those are `<prefix><owner>/<site>/v<N>-<timestamp>.tar.gz`
    and `<prefix><owner>/<site>/assets/<id>`: everything under the prefix
    except `<prefix>sites/` (`sites` is a reserved name, so no owner uses it).
-   They are no longer read.
+   They are no longer read. If the volume's reclaim policy is `Retain`
+   (the base used it, and some providers' storage classes keep the disk
+   anyway), also delete the released PersistentVolume and the disk in the
+   provider's console, or it keeps being billed.
+
+Step 4, the dry run:
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: simple-host-migrate-storage-dry-run
+  namespace: simple-host
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      serviceAccountName: simple-host
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: migrate-storage
+          image: ghcr.io/vineetu/simple-host-enterprise@sha256:<digest>
+          args: ["migrate-storage", "-from", "/mnt/data/sites", "-dry-run"]
+          envFrom:
+            - configMapRef: { name: simple-host-config }
+            - secretRef: { name: simple-host-secrets }
+          volumeMounts:
+            - { name: site-data, mountPath: /mnt/data, readOnly: true }
+            - { name: db-ca, mountPath: /etc/simple-host/db-ca, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: site-data
+          persistentVolumeClaim: { claimName: simple-host-site-data, readOnly: true }
+        - name: db-ca
+          secret: { secretName: simple-host-db-ca, optional: true }
+        - name: tmp
+          emptyDir: {}
+```
+
+Step 5, migrations and the real copy:
 
 ```yaml
 apiVersion: batch/v1
@@ -130,8 +241,9 @@ spec:
         fsGroup: 65532
         seccompProfile: { type: RuntimeDefault }
       initContainers:
+        # Applies the new release's database migrations.
         - name: migrate
-          image: ghcr.io/example/simple-host@sha256:NEW_RELEASE_DIGEST
+          image: ghcr.io/vineetu/simple-host-enterprise@sha256:<digest>
           args: ["migrate"]
           envFrom: &env
             - configMapRef: { name: simple-host-config }
@@ -147,7 +259,7 @@ spec:
             capabilities: { drop: ["ALL"] }
       containers:
         - name: migrate-storage
-          image: ghcr.io/example/simple-host@sha256:NEW_RELEASE_DIGEST
+          image: ghcr.io/vineetu/simple-host-enterprise@sha256:<digest>
           args: ["migrate-storage", "-from", "/mnt/data/sites"]
           envFrom: *env
           volumeMounts:
@@ -163,8 +275,6 @@ spec:
         - name: tmp
           emptyDir: {}
 ```
-
-Add `-dry-run` to the args to see what would be uploaded without writing.
 
 ## Restoring a version
 

@@ -1,8 +1,10 @@
 # UpCloud (UKS)
 
-Verified: yes, 2026-09-25, v1.0.0. UpCloud Kubernetes Service (Kubernetes 1.34,
-two workers), ingress-nginx behind the UKS load balancer, Managed PostgreSQL 16,
-Managed Object Storage; `make smoke` passed against it.
+Verified: v1.0.0 install and v1.1.0 upgrade, 2026-09-25. UpCloud Kubernetes Service
+(Kubernetes 1.34, two workers), ingress-nginx behind the UKS load balancer, Managed
+PostgreSQL 16 (1 GB plan), Managed Object Storage. After the upgrade (the
+`docs/storage.md` migration: 4 versions and 2 assets moved, 0 failed) `make smoke`
+passed 37 of 37, and 38 of 38 with a second person's key.
 
 Fills the sections in [README.md](README.md).
 
@@ -30,6 +32,10 @@ Fills the sections in [README.md](README.md).
   one without the other breaks every request.
 - The load balancer takes about four minutes to get its hostname after the Service
   exists.
+- **Pod addresses.** UKS runs Cilium in cluster-pool mode: pods get addresses from
+  `192.168.0.0/16`, not from the `10.244.x.0/24` a node's `.spec.podCIDR` shows. Set
+  `TRUSTED_PROXY_CIDRS=192.168.0.0/16`, or whatever range
+  `kubectl -n ingress-nginx get pod -o wide` shows.
 
 ## 2. DNS & wildcard certificate
 
@@ -64,6 +70,9 @@ Managed PostgreSQL 16. TLS is on.
   console or through the API.
 - Backups: check the plan's backup retention covers 7+ days. The verified run did not
   test a restore.
+- **Connections.** The 1 GB plan allows 50 connections. Two replicas plus the rollout's
+  extra pod can open 60 (`docs/storage.md`); the verified run stayed far below that,
+  but under load use a larger plan.
 
 ```
 DB_HOST=<the database's public hostname>
@@ -76,8 +85,9 @@ DB_SSL_ROOT_CERT=/etc/simple-host/db-ca/ca.crt
 
 Managed Object Storage. Create a user with an access key and a policy that can manage
 the bucket (the verified run used `ECSS3FullAccess`; narrow it to the one bucket if you
-can), then the bucket, with versioning on through any S3 client. `x-amz-server-side-encryption: AES256`
-is accepted.
+can), then the bucket, with versioning on and the lifecycle rule through any S3 client (the
+`curl` commands in `docs/storage.md` work; UpCloud accepts the same XML as AWS).
+`x-amz-server-side-encryption: AES256` is accepted.
 
 ```
 BACKUP_STORAGE_ENDPOINT=https://<your endpoint>.upcloudobjects.com
@@ -102,10 +112,11 @@ lines are not needed.
 There is no workload identity for Object Storage: put the user's access key pair in
 `BACKUP_STORAGE_ACCESS_KEY_ID` / `BACKUP_STORAGE_SECRET_ACCESS_KEY`.
 
-Upgrading from v1.0.0, which kept site data on a volume: move it into the bucket with
-`migrate-storage` (`docs/storage.md`), then delete the old volume by hand. Every UpCloud
-StorageClass has `reclaimPolicy: Retain`, so a volume outlives its PVC and cluster and
-keeps billing.
+Upgrading from v1.0.0, which kept site data on a volume: follow `docs/storage.md`,
+"Migrating from a PVC install", then delete the old volume by hand. Every UpCloud
+StorageClass has `reclaimPolicy: Retain`, so the disk outlives its PVC and the cluster
+and keeps billing until you delete the released PersistentVolume and the storage in
+the UpCloud console.
 
 ## 6. OIDC provider notes
 

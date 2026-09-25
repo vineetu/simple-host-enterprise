@@ -268,7 +268,7 @@ func runMigrateStorage(args []string) error {
 	for _, user := range users {
 		usernames[user.ID] = user.Username
 	}
-	sites, err := db.ListAllSites(ctx, database)
+	sites, err := listSitesForStorageMigration(ctx, database)
 	if err != nil {
 		return err
 	}
@@ -371,6 +371,27 @@ func dryRunSuffix(dryRun bool) string {
 
 // openDatabaseAndObjects connects the storage subcommands to the database
 // and the bucket, with the same translation the server uses.
+// listSitesForStorageMigration reads only columns that exist in the last PVC
+// release's schema (0028), so `migrate-storage -dry-run` can run before the
+// new release's migrations are applied. db.ListAllSites reads sites.access
+// (0033).
+func listSitesForStorageMigration(ctx context.Context, database *sql.DB) ([]db.Site, error) {
+	rows, err := database.QueryContext(ctx, `SELECT id, user_id, name FROM sites ORDER BY created_at ASC, name ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var sites []db.Site
+	for rows.Next() {
+		var site db.Site
+		if err := rows.Scan(&site.ID, &site.UserID, &site.Name); err != nil {
+			return nil, err
+		}
+		sites = append(sites, site)
+	}
+	return sites, rows.Err()
+}
+
 func openDatabaseAndObjects(cfg config.Config) (*sql.DB, *storage.S3Objects, error) {
 	database, err := sql.Open("postgres", cfg.DBDSN)
 	if err != nil {

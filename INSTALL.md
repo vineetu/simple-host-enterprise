@@ -75,6 +75,7 @@ Run these from the repository root. Each has a fix if it fails.
 |---|---|---|
 | Tools | `for t in kubectl kustomize openssl curl git python3; do command -v $t >/dev/null \|\| echo "missing: $t"; done` | Install the missing tool. `kustomize` must be the standalone binary: the `Makefile` calls `kustomize build`. |
 | Contexts | `kubectl config get-contexts` | Ask the human which context, if Step 0 did not settle it. Set `CTX` to it. |
+| Kubernetes version | `kubectl --context "$CTX" version` | Server 1.30 or later: the Deployment's `preStop` uses the native `sleep` action (on by default from 1.30). Older clusters refuse the pod; upgrade the cluster. |
 | Cluster reachable | `kubectl --context "$CTX" cluster-info` | Fix credentials first (`aws eks update-kubeconfig`, `gcloud container clusters get-credentials`, `az aks get-credentials`, `oci ce cluster create-kubeconfig`). A timeout rather than an auth error: some clouds (UpCloud, for one) start a managed cluster's API with an empty IP allow-list; add the address you run `kubectl` from. |
 | Permission to install | `kubectl --context "$CTX" auth can-i create namespace` and `kubectl --context "$CTX" auth can-i create clusterrole` | Namespace is required. ClusterRole is only needed if ingress-nginx or cert-manager must be installed; otherwise ask the platform team to install them. |
 | Cloud identity | `aws sts get-caller-identity`, `gcloud config list account`, `az account show`, or `oci iam region list` | Needed only if you are creating the database or bucket. Ask the human to sign the CLI in. |
@@ -176,7 +177,10 @@ curl -sI -H "Authorization: Bearer $(curl -s 'https://ghcr.io/token?scope=reposi
 
 Verify the signature before you pin a release digest. Release images from
 v1.1.0 on are signed keyless with cosign from the release workflow; this must
-print a verified result, not an error:
+print a verified result, not an error. No `cosign` on the machine: download
+the release binary for its OS and architecture from
+https://github.com/sigstore/cosign/releases (a single file; `chmod +x` it)
+or install it with the OS package manager.
 
 ```sh
 cosign verify ghcr.io/vineetu/simple-host-enterprise@sha256:<digest> --certificate-identity-regexp '^https://github.com/vineetu/simple-host-enterprise/\.github/workflows/release\.yml@refs/tags/v' --certificate-oidc-issuer https://token.actions.githubusercontent.com
@@ -214,7 +218,7 @@ lines (kustomize reads them as env files).
 | `OIDC_SCOPES` | Leave at `openid email profile` unless the provider notes say otherwise |
 | `ADMIN_EMAILS` | Step 0 answer, comma-separated |
 | `ALLOWED_EMAIL_DOMAINS` | Step 0 answer, comma-separated. Never leave empty on Google: empty means anyone with a Google account can sign in |
-| `TRUSTED_PROXY_CIDRS` | The ingress controller's pod address range (e.g. the cluster's pod CIDR), so rate limits and logs see each person's address instead of the ingress's |
+| `TRUSTED_PROXY_CIDRS` | The range the ingress controller's pods get their addresses from, so rate limits and logs see each person's address instead of the ingress's. Read the pod IPs with `kubectl --context "$CTX" -n <ingress-namespace> get pod -o wide` and use the pod network range they fall in (for example `192.168.0.0/16`). A node's `.spec.podCIDR` is not always that range: CNIs such as Cilium in cluster-pool mode assign pod IPs from their own pool |
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` | From section 2 |
 | `DB_SSLMODE`, `DB_SSL_ROOT_CERT` | Leave as `verify-full` and `/etc/simple-host/db-ca/ca.crt` |
 | `BACKUP_STORAGE_ENDPOINT`, `BACKUP_STORAGE_REGION`, `BACKUP_STORAGE_BUCKET`, `BACKUP_STORAGE_PREFIX` | From section 3 and section 4 (Bucket) of `docs/cloud/<cloud>.md` |
@@ -542,6 +546,10 @@ of `docs/configuration.md`.
 
 ## 11. After the install
 
+- **Upgrade from v1.0.x**: sites move from the volume to the bucket, so
+  follow `docs/storage.md`, "Migrating from a PVC install", instead of a
+  plain apply. It includes the database backup and the step that applies
+  the migrations.
 - **Upgrade**: `docs/install.md` section 10. Pick the release from
   `CHANGELOG.md`, resolve and verify its digest (section 3), update
   `images:` in the overlay, apply, watch the rollout. The startup log line

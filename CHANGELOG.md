@@ -4,6 +4,32 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## v1.1.1 — 2026-09-25
+
+Fixes from a real v1.0.0 → v1.1.0 upgrade on a managed cluster. No schema
+change (still 0033).
+
+### Operations
+- Rolling updates no longer drop requests: each pod waits 10 seconds after
+  it is told to stop (a `preStop` sleep) so the ingress stops sending it
+  traffic first. **Needs Kubernetes 1.30 or later.**
+- The two replicas run on different nodes whenever there are two or more
+  nodes, also after rollouts and node drains.
+- `/readyz` now fails when the bucket credentials can no longer read
+  objects, not only when the bucket is unreachable.
+
+### Upgrading from v1.0.x
+- The storage migration now has a dry run that changes nothing, and
+  `migrate-storage -dry-run` runs against the v1.0.x schema, before any
+  migration is applied. The v1.1.0 steps ran migrations during the dry run.
+- [docs/storage.md](docs/storage.md) gives the database backup commands,
+  says which step applies the migrations, and gives lifecycle-rule commands
+  for S3 providers other than AWS.
+- Database sizing counts the extra pod a rollout starts: plan
+  `max_connections` for (replicas + 1) × 20 plus the jobs.
+- `TRUSTED_PROXY_CIDRS`: take the range from the ingress controller's pod
+  addresses; a node's pod CIDR is not always it.
+
 ## v1.1.0 — 2026-09-25
 
 ### Storage

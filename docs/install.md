@@ -196,7 +196,9 @@ Choose `<base>` on a registrable domain of its own, such as
 `simple-host.corp.com`: hosted pages are written by anyone in the company,
 and on the main domain they would be same-site with its other apps, able to
 receive and plant cookies scoped to that domain. Set `TRUSTED_PROXY_CIDRS`
-to your ingress controller's pod range so rate limits and logs see each
+to the range your ingress controller's pods take their addresses from
+(`kubectl -n <ingress-namespace> get pod -o wide` shows them; a node's
+`.spec.podCIDR` is not always that range) so rate limits and logs see each
 person's address rather than the ingress's (`docs/configuration.md`).
 
 1. Pick the image. The recommended one is the published release,
@@ -403,10 +405,10 @@ API (`internal/handler/site_api.go`'s `PutState`/`PutStateVersioned`/
 `CreateAsset`/`DeleteAsset`) and, for `asset_delete`, also from the
 dashboard's base-host mirror (`internal/handler/assets_admin.go`'s
 `deleteCollaborationAsset`) — both call sites now share this guarantee.
-For both asset-delete call sites, the file on disk is deliberately kept
-outside that transaction: an orphaned or already-removed file from a
-partial failure is recoverable, while the database row and its audit row
-now commit or roll back together. Eleven actions remain best-effort,
+For both asset-delete call sites, the bucket object is not deleted inside
+that transaction: the transaction queues it for the sweep, which deletes it
+an hour later (`docs/storage.md`, Retention), so the database row, its
+audit row and the queued deletion commit or roll back together. Eleven actions remain best-effort,
 written through the older `Record` with no shared transaction: `sign_in`,
 `sign_out`, `session_revoke`, `key_mint`, `key_revoke`, `hand_off`, and the
 admin actions `admin_disable_user`, `admin_enable_user`,
@@ -528,8 +530,13 @@ verify its digest, update the overlay's `images:` entry (or your CI's
 equivalent), `kubectl apply` the rendered overlay, and watch the rollout.
 `kubectl -n simple-host exec deploy/simple-host -- /simple-host version`
 prints the running release, commit and schema
-(`simple-host v1.1.0 (commit <sha>, schema 0028)`); the server logs the
+(`simple-host v1.1.0 (commit <sha>, schema 0033)`); the server logs the
 same line at startup.
+
+**From v1.0.x**, sites move from the volume to the bucket: follow
+`docs/storage.md`, "Migrating from a PVC install", not a plain apply. Its
+step 1 backs up the database, step 4 is a dry run that changes nothing,
+and step 5 is the one that applies the migrations.
 
 The migrate init container applies each migration file and its
 `schema_migrations` row in one transaction, so a failed file leaves nothing
@@ -653,7 +660,8 @@ PodMonitor, pod annotations, or any in-cluster scraper.
 | `simplehost_build_info{version,commit,schema}` | The running release |
 
 Probes: `/healthz` is liveness and checks nothing else. `/readyz` checks
-that the database is reachable and the schema is current; its result is
+that the database is reachable, the schema is current, and the bucket can
+still be read with the configured credentials; its result is
 cached for 10 seconds, and a failure is logged as `readyz: not ready: ...`.
 
 No alerting stack ships with the package. What to watch:

@@ -25,15 +25,23 @@ spec:
     spec:
       serviceAccountName: simple-host
       automountServiceAccountToken: false
-      # Spread replicas across nodes when there are several; ScheduleAnyway
-      # so a single-node cluster still runs both.
+      # One replica per node when there are several. Counted per revision
+      # (pod-template-hash), so a surge pod never waits on the old pods and
+      # the new ones always end up on different nodes; a single-node cluster
+      # has one domain and still runs both. Cordoned and unreachable nodes
+      # are not counted (nodeTaintsPolicy: Honor), so a drain, or a lost node
+      # on a two-node cluster, puts the replacement on the remaining node.
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
-          whenUnsatisfiable: ScheduleAnyway
+          whenUnsatisfiable: DoNotSchedule
+          nodeTaintsPolicy: Honor
+          matchLabelKeys: ["pod-template-hash"]
           labelSelector:
             matchLabels:
               app: simple-host
+      # 10 s preStop sleep, then up to 30 s for in-flight requests.
+      terminationGracePeriodSeconds: 40
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -113,6 +121,14 @@ spec:
               mountPath: /etc/simple-host/db-ca
               readOnly: true
           securityContext: *containerSecurity
+          # Keep serving while the ingress controller and kube-proxy drop this
+          # pod from their endpoints; without it a rollout sends requests to
+          # a closed listener (connect timeouts at the ingress). The native
+          # sleep action needs no shell in the image; Kubernetes 1.30+.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 10
           startupProbe:
             httpGet: { path: /healthz, port: application }
             periodSeconds: 3
