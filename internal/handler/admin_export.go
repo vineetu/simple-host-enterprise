@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/vsriram/simple-host/internal/audit"
 	"github.com/vsriram/simple-host/internal/auth"
@@ -155,15 +156,27 @@ func writeAuditEventCSVRow(w *csv.Writer, e auditEventResponse) error {
 			detail = string(b)
 		}
 	}
-	return w.Write([]string{
+	return writeSafeCSVRow(w, []string{
 		strconv.FormatInt(e.ID, 10), e.At.Format("2006-01-02T15:04:05.000Z07:00"), e.RequestID, e.ActorID,
 		e.ActorKind, e.KeyID, e.Action, e.OwnerID, e.SiteID, e.TeamID, e.ViaSiteLabel, e.ViaSiteName,
 		strconv.FormatBool(e.ViaSiteObserved), e.IP, e.UserAgent, detail,
 	})
 }
 
+// writeSafeCSVRow neutralises spreadsheet formulas: a cell starting with
+// = + - @ tab or carriage return is prefixed with ' so a spreadsheet shows
+// it as text. User-Agent, paths and details are attacker-controlled.
+func writeSafeCSVRow(w *csv.Writer, cells []string) error {
+	for i, cell := range cells {
+		if cell != "" && strings.ContainsRune("=+-@\t\r", rune(cell[0])) {
+			cells[i] = "'" + cell
+		}
+	}
+	return w.Write(cells)
+}
+
 func writeAccessLogCSVRow(w *csv.Writer, e accessLogEntryResponse) error {
-	return w.Write([]string{
+	return writeSafeCSVRow(w, []string{
 		strconv.FormatInt(e.ID, 10), e.At.Format("2006-01-02T15:04:05.000Z07:00"), e.UserID, e.SessionID,
 		e.OwnerLabel, e.SiteName, e.Path, e.Method, strconv.Itoa(e.Status), strconv.FormatInt(e.Bytes, 10),
 		e.IP, e.UserAgent, e.ClientKind,

@@ -129,6 +129,11 @@ func cookieOriginCheck(hosts HostModel, publicBaseURL string) func(http.Handler)
 	}
 }
 
+// CookieOriginCheck exports cookieOriginCheck for cmd/server's wiring.
+func CookieOriginCheck(hosts HostModel, publicBaseURL string) func(http.Handler) http.Handler {
+	return cookieOriginCheck(hosts, publicBaseURL)
+}
+
 func parseRequestOrigin(raw string) (requestOrigin, bool) {
 	if raw == "" || raw == "null" {
 		return requestOrigin{}, false

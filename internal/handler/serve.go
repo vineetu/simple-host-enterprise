@@ -2,7 +2,9 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"html"
@@ -26,7 +28,7 @@ import (
 )
 
 const (
-	siteVisitCookieName        = "simple_host_visit"
+	siteVisitCookieName        = "__Host-simple_host_visit"
 	siteVisitDuration          = 30 * time.Minute
 	analyticsWriteLimit        = 500 * time.Millisecond
 	defaultAnalyticsDays       = 7
@@ -172,16 +174,12 @@ func (s *SiteFiles) serveSite(w http.ResponseWriter, r *http.Request, user, site
 					return
 				}
 				kind := classifyClient(r)
-				isNewVisit := !hasVisitCookie(r)
+				isNewVisit := !hasVisitCookie(r, siteName)
 				if recordSitePageview(r, database, user, siteName, isNewVisit, kind.isBot()) && isNewVisit && !kind.isBot() {
 					// Deliberately no visit cookie for a bot. It would not
 					// store one anyway, which is exactly why every bare
 					// fetch used to register as a brand new visitor.
-					// The cookie is scoped to the prefix actually served:
-					// one scoped to the long path would never come back on
-					// the short one, and every view there would be a new
-					// visit.
-					http.SetCookie(w, visitCookie(escapePathSegments(prefix)+"/", s.cookies))
+					http.SetCookie(w, visitCookie(siteName))
 				}
 				return
 			}
@@ -322,24 +320,31 @@ func shouldRecordDownload(r *http.Request, status int, header http.Header) bool 
 	return !strings.HasSuffix(mediaType, "+json") && !strings.HasSuffix(mediaType, "+xml")
 }
 
-func hasVisitCookie(r *http.Request) bool {
-	_, err := r.Cookie(siteVisitCookieName)
+func hasVisitCookie(r *http.Request, siteName string) bool {
+	_, err := r.Cookie(visitCookieName(siteName))
 	return err == nil
 }
 
-// visitCookie marks a browser as having visited the site mounted at path,
-// which is the encoded prefix the site is served under, with its trailing
-// slash ("/sites/alice/my-site/" or "/my-site/").
-func visitCookie(path string, cookies CookiePolicy) *http.Cookie {
+// visitCookieName is one cookie per site. A __Host- cookie must have Path
+// "/", so the site cannot be told apart by path on an owner host that
+// serves several; a short digest of its name goes in the cookie name
+// instead.
+func visitCookieName(siteName string) string {
+	sum := sha256.Sum256([]byte(siteName))
+	return siteVisitCookieName + "_" + hex.EncodeToString(sum[:6])
+}
+
+// visitCookie marks a browser as having visited siteName.
+func visitCookie(siteName string) *http.Cookie {
 	return &http.Cookie{
-		Name:     siteVisitCookieName,
+		Name:     visitCookieName(siteName),
 		Value:    "1",
-		Path:     path,
+		Path:     "/",
 		Expires:  time.Now().Add(siteVisitDuration),
 		MaxAge:   int(siteVisitDuration.Seconds()),
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   cookies.Secure,
+		Secure:   true,
 	}
 }
 

@@ -198,7 +198,7 @@ func run() (runErr error) {
 	log.Printf("simple-host skill version: %s", pluginVersion)
 
 	handler.RegisterHealthRoutes(mux, database)
-	publicSearchHandler.Register(mux, authMW)
+	publicSearchHandler.Register(mux, authMW, handler.CookieOriginCheck(hosts, cfg.PublicBaseURL))
 	handler.NewUserHandler(database, abuseLimits).Register(mux, authMW, skillVersionMW)
 	handler.NewSiteHandler(database, diskStorage, backup, cfg.PublicBaseURL, hosts, abuseLimits).WithAudit(auditRecorder).Register(mux, authMW, skillVersionMW)
 	handler.NewTeamHandler(database, diskStorage, abuseLimits).WithAudit(auditRecorder).Register(mux, authMW, skillVersionMW, hosts, cfg.PublicBaseURL)
