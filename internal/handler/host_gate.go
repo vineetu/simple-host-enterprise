@@ -199,6 +199,12 @@ func applyOwnerHostSecurity(w http.ResponseWriter, r *http.Request) bool {
 	// API, the hand-off), not hosted content alone: none of it belongs in
 	// a cache another viewer could be served from.
 	w.Header().Set("Cache-Control", "private, no-cache")
+	// No service workers on hosted hosts: one registered at a restricted
+	// site's root would intercept the navigation to /auth/session and read
+	// a hand-off code before this server ever sees (and spends) it.
+	if r.Header.Get("Service-Worker") != "" {
+		return false
+	}
 	site := r.Header.Get("Sec-Fetch-Site")
 	if site == "same-site" || site == "cross-site" {
 		return r.Header.Get("Sec-Fetch-Dest") == "document"
@@ -239,7 +245,7 @@ func (g *hostGate) serveOwnerHost(w http.ResponseWriter, r *http.Request, label 
 			http.NotFound(w, r)
 			return
 		}
-		g.serveSiteAPI(w, r, route, owner, siteFromPath, assetID, label)
+		g.serveSiteAPI(w, r, route, owner, siteFromPath, assetID, label, false)
 		return
 	}
 
@@ -354,7 +360,7 @@ func (g *hostGate) serveRestrictedSiteHost(w http.ResponseWriter, r *http.Reques
 			http.NotFound(w, r)
 			return
 		}
-		g.serveSiteAPI(w, r, route, owner, sitename, assetID, label)
+		g.serveSiteAPI(w, r, route, owner, sitename, assetID, label, true)
 		return
 	}
 
@@ -544,12 +550,21 @@ func parseAssetServePath(p string) (id, name string, ok bool) {
 // authMiddleware every other route uses), checks viewerAllowed (every
 // route) and writerAllowed (every route but a plain read), builds the
 // via_site claim, and calls the matching SiteAPIHandler method.
-func (g *hostGate) serveSiteAPI(w http.ResponseWriter, r *http.Request, kind siteAPIRouteKind, owner, siteName, assetID, label string) {
+//
+// onRestrictedHost says which host kind is answering: a restricted site's
+// API is served only on its own host and an unrestricted site's only on its
+// owner's host, the same rule hosted content follows, so the owner host's
+// shared origin never reaches a restricted site's state or assets.
+func (g *hostGate) serveSiteAPI(w http.ResponseWriter, r *http.Request, kind siteAPIRouteKind, owner, siteName, assetID, label string, onRestrictedHost bool) {
 	siteID, restricted, err := g.siteForServing(r, owner, siteName)
 	if err != nil {
 		if err != db.ErrSiteNotFound {
 			log.Printf("host gate: resolve site %s/%s for site API: %v", owner, siteName, err)
 		}
+		http.NotFound(w, r)
+		return
+	}
+	if restricted != onRestrictedHost {
 		http.NotFound(w, r)
 		return
 	}
@@ -563,7 +578,7 @@ func (g *hostGate) serveSiteAPI(w http.ResponseWriter, r *http.Request, kind sit
 		}
 	}
 
-	user, _, keyID, ok := g.authenticateSiteAPI(w, r)
+	user, _, keyID, ok := g.authenticateSiteAPI(w, r.WithContext(auth.WithExpectedSessionHost(r.Context(), label+"."+g.hosts.BaseHost())))
 	if !ok {
 		return
 	}

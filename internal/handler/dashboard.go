@@ -152,7 +152,7 @@ func (h *DashboardHandler) optionalUser(r *http.Request) *db.User {
 	if err != nil || c.Value == "" {
 		return nil
 	}
-	verified, err := auth.VerifySessionCookie(h.signingKeys, c.Value)
+	verified, err := auth.VerifyBaseSessionCookie(h.signingKeys, c.Value)
 	if err != nil {
 		return nil
 	}

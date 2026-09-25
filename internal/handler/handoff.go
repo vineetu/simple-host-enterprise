@@ -147,10 +147,21 @@ func (h *HandoffHandler) redeemHandoffSession(w http.ResponseWriter, r *http.Req
 		writeRateLimit(w, decision)
 		return
 	}
-	nonceCookie, err := r.Cookie(handoffNonceCookie)
-	if err != nil || nonceCookie.Value == "" {
-		writeAuthError(w, http.StatusBadRequest, "this sign-in link expired; please open the page again")
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		writeAuthError(w, http.StatusBadRequest, "this sign-in link is not valid")
 		return
+	}
+	// Any attempt spends the code, including one with no nonce cookie: a
+	// code that reached a browser which cannot redeem it (a colleague sent
+	// here by a page that started the hand-off with its own nonce) must not
+	// survive to be read off that browser's address bar and redeemed by
+	// whoever holds the matching nonce.
+	var nonceHash []byte
+	nonceCookie, cookieErr := r.Cookie(handoffNonceCookie)
+	if cookieErr == nil && nonceCookie.Value != "" {
+		sum := sha256.Sum256([]byte(nonceCookie.Value))
+		nonceHash = sum[:]
 	}
 	// Single use of the nonce cookie regardless of outcome, the same
 	// discipline the OAuth state cookie in auth.go follows.
@@ -158,14 +169,11 @@ func (h *HandoffHandler) redeemHandoffSession(w http.ResponseWriter, r *http.Req
 		Name: handoffNonceCookie, Value: "", Path: "/", HttpOnly: true, Secure: true,
 		SameSite: http.SameSiteLaxMode, MaxAge: -1,
 	})
-
-	code := r.URL.Query().Get("code")
-	if code == "" {
-		writeAuthError(w, http.StatusBadRequest, "this sign-in link is not valid")
+	sessionID, err := db.RedeemHandoffCode(r.Context(), h.database, code, requestHost, nonceHash)
+	if nonceHash == nil {
+		writeAuthError(w, http.StatusBadRequest, "this sign-in link expired; please open the page again")
 		return
 	}
-	nonceHash := sha256.Sum256([]byte(nonceCookie.Value))
-	sessionID, err := db.RedeemHandoffCode(r.Context(), h.database, code, requestHost, nonceHash[:])
 	if err != nil {
 		if !errors.Is(err, db.ErrHandoffCodeInvalid) {
 			log.Printf("handoff: redeem code: %v", err)
