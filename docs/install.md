@@ -357,6 +357,10 @@ actually corroborated (`via_site_observed`).
 
 ## 8. The audit trail and access log
 
+Commands in sections 8 and 9 name the cluster with `--context "$CTX"`: set
+`CTX` to your kubectl context first (`docker-desktop` for the local
+cluster).
+
 Every mutation writes an `audit_events` row.
 Sixteen actions write it inside the same database transaction as the
 change it records (`internal/audit`'s `RecordTx`), so a mutation in this
@@ -432,13 +436,13 @@ application role has no `DROP` privilege on either table at all, so retention ca
 run would drop without dropping anything:
 
 ```sh
-kubectl -n simple-host create job simple-host-prune-preview \
+kubectl --context "$CTX" -n simple-host create job simple-host-prune-preview \
   --from=cronjob/simple-host-prune --dry-run=client -o json \
   | python3 -c "import json,sys; j=json.load(sys.stdin); j['spec']['template']['spec']['containers'][0]['args']=['prune','-dry-run']; print(json.dumps(j))" \
-  | kubectl -n simple-host create -f -
-kubectl -n simple-host wait --for=condition=complete job/simple-host-prune-preview --timeout=60s
-kubectl -n simple-host logs job/simple-host-prune-preview
-kubectl -n simple-host delete job simple-host-prune-preview
+  | kubectl --context "$CTX" -n simple-host create -f -
+kubectl --context "$CTX" -n simple-host wait --for=condition=complete job/simple-host-prune-preview --timeout=60s
+kubectl --context "$CTX" -n simple-host logs job/simple-host-prune-preview
+kubectl --context "$CTX" -n simple-host delete job simple-host-prune-preview
 ```
 
 `kubectl create job --from=cronjob/... | kubectl patch` does not work here:
@@ -467,7 +471,7 @@ anyone who can read the bucket but not your Kubernetes Secrets.
 Restore a version into a (typically new) site, from inside a running pod:
 
 ```sh
-kubectl -n simple-host exec deploy/simple-host -- /simple-host restore -owner <owner> -site <site> -version <N> -target-owner <owner> -target-site <site>-restored -assets -set-current=true
+kubectl --context "$CTX" -n simple-host exec deploy/simple-host -- /simple-host restore -owner <owner> -site <site> -version <N> -target-owner <owner> -target-site <site>-restored -assets -set-current=true
 ```
 
 The image is distroless with no shell, so name the binary by its absolute
@@ -483,7 +487,7 @@ Assets are synced to the bucket on a schedule by the `backup-assets`
 CronJob (`deploy/base/backup-assets-cronjob.yaml`); run it by hand with:
 
 ```sh
-kubectl -n simple-host exec deploy/simple-host -- /simple-host backup-assets -dry-run
+kubectl --context "$CTX" -n simple-host exec deploy/simple-host -- /simple-host backup-assets -dry-run
 ```
 
 to see which sites it would process without uploading anything, or without

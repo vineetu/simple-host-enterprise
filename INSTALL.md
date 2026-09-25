@@ -35,7 +35,8 @@ Done means all of these hold:
 1. `curl -fsS https://<base>/readyz` returns `{"status":"ok"}` over a
    publicly trusted certificate (no `-k`, no custom CA).
 2. A person in `ADMIN_EMAILS` signs in at `https://<base>/auth/login`, and
-   `/admin` loads for them.
+   `https://<base>/api/me`, opened in the same browser, shows
+   `"is_admin": true`.
 3. `make smoke BASE=https://<base> KEY_FILE=...` (section 9) passes
    against the real install, and the browser check after it works.
 4. The `simple-host-backup-assets` and `simple-host-prune` CronJobs can pull
@@ -74,7 +75,7 @@ Run these from the repository root. Each has a fix if it fails.
 |---|---|---|
 | Tools | `for t in kubectl kustomize openssl curl git python3; do command -v $t >/dev/null \|\| echo "missing: $t"; done` | Install the missing tool. `kustomize` must be the standalone binary: the `Makefile` calls `kustomize build`. |
 | Contexts | `kubectl config get-contexts` | Ask the human which context, if Step 0 did not settle it. Set `CTX` to it. |
-| Cluster reachable | `kubectl --context "$CTX" cluster-info` | Fix credentials first (`aws eks update-kubeconfig`, `gcloud container clusters get-credentials`, `az aks get-credentials`, `oci ce cluster create-kubeconfig`). |
+| Cluster reachable | `kubectl --context "$CTX" cluster-info` | Fix credentials first (`aws eks update-kubeconfig`, `gcloud container clusters get-credentials`, `az aks get-credentials`, `oci ce cluster create-kubeconfig`). A timeout rather than an auth error: some clouds (UpCloud, for one) start a managed cluster's API with an empty IP allow-list; add the address you run `kubectl` from. |
 | Permission to install | `kubectl --context "$CTX" auth can-i create namespace` and `kubectl --context "$CTX" auth can-i create clusterrole` | Namespace is required. ClusterRole is only needed if ingress-nginx or cert-manager must be installed; otherwise ask the platform team to install them. |
 | Cloud identity | `aws sts get-caller-identity`, `gcloud config list account`, `az account show`, or `oci iam region list` | Needed only if you are creating the database or bucket. Ask the human to sign the CLI in. |
 | Ingress controller | `kubectl --context "$CTX" get ingressclass` | None: install the cloud's managed ingress (section 1, Cluster & ingress, of `docs/cloud/<cloud>.md`). ingress-nginx is retired upstream (best-effort maintenance ended March 2026, no further security fixes); `make install` still adds it when there is no IngressClass at all. Any existing class (ALB, GKE, Traefik, AGIC, …): `make install` uses it and installs nothing. Section 5 step 3 covers a cluster with several classes. |
@@ -108,7 +109,8 @@ What the application needs:
   least-privilege role the server connects as. A cloud's admin user has
   this. Use the `DB_PASSWORD` you generate in section 4 as this role's
   password, so the value never has to be typed or shown.
-- Reachable from the cluster's pods on port 5432.
+- Reachable from the cluster's pods on its port. Use the port the provider
+  gives you as `DB_PORT` (5432 on most clouds; UpCloud uses 11569).
 - TLS with a CA bundle you can download. Save it as
   `deploy/overlays/byo/db-ca.crt`. The server refuses anything but
   `sslmode=verify-full` with a root certificate.
@@ -119,7 +121,7 @@ Read section 3 (Postgres) of `docs/cloud/azure.md` before you try.
 Check reachability from inside the cluster (prints nothing secret):
 
 ```sh
-kubectl --context "$CTX" run pgcheck --rm -i --restart=Never --image=postgres:16.11 -- pg_isready -h <db-host> -p 5432
+kubectl --context "$CTX" run pgcheck --rm -i --restart=Never --image=postgres:16.11 -- pg_isready -h <db-host> -p <db-port>
 ```
 
 ## 3. Provision the bucket and pick the image
@@ -196,7 +198,7 @@ on the ServiceAccount, not the Deployment (`docs/install.md` section 10,
 ## 4. Write config.env and secrets.env
 
 ```sh
-cp -n deploy/overlays/byo/config.env.example deploy/overlays/byo/config.env && cp -n deploy/overlays/byo/secrets.env.example deploy/overlays/byo/secrets.env && chmod 600 deploy/overlays/byo/secrets.env
+d=deploy/overlays/byo; for f in config.env secrets.env; do [ -e "$d/$f" ] || cp "$d/$f.example" "$d/$f"; done; chmod 600 "$d/secrets.env"
 ```
 
 **config.env** holds no secrets; edit it directly. Every variable is
@@ -464,7 +466,8 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://install-check.<base>/healthz
 
 **HUMAN STEP D.** Ask an admin to:
 
-1. Sign in at `https://<base>/auth/login` and confirm `/admin` loads.
+1. Sign in at `https://<base>/auth/login`, then open `https://<base>/api/me`
+   in the same browser and confirm it shows `"is_admin": true`.
 2. On `/dashboard`, mint an API key named `install-check`.
 3. Save it for you with this hidden prompt (stored outside the repository,
    readable only by them):
@@ -489,8 +492,8 @@ of failures. Without `BASE`, `make smoke` is the local overlay's test; do
 not run that here.
 
 Then the browser check it prints at the end: the admin opens
-`https://<their label>.<base>/` and sees their own index after one redirect
-(the session hand-off, `docs/install.md` section 6). That proves the
+`https://<their label>.<base>/` and, after a few redirects, sees their own
+index (the session hand-off, `docs/install.md` section 6). That proves the
 wildcard certificate, DNS, and hand-off together.
 
 Clean up: have the admin revoke the `install-check` key on `/dashboard`,
