@@ -1127,11 +1127,12 @@ Before changing anything, tell me conversationally in one or two sentences that 
           <div class="step-content">
             <h3>Find it and share it</h3>
             <p class="step-lead">
-              When your agent finishes, it gives you a link. Every site you can
-              work on is listed on your dashboard:
+              When your agent finishes, it gives you a link. Every site you publish
+              is listed on your own address, where <code>your-name</code> is your username:
             </p>
 
-            <p class="site-home-url"><a id="siteHomeUrl" class="home-text-link" href="/dashboard" target="_blank" rel="noopener">Your dashboard</a></p>
+            <p class="site-home-url"><code id="siteHomeUrl">https://your-name.&lt;this server&gt;/</code></p>
+            <p class="field-help">Sites shared with you are on your <a class="home-text-link" href="/dashboard">dashboard</a>.</p>
 
             <div class="step-share">
               <p><strong>Share it to build together.</strong> Invite teammates as
@@ -1660,6 +1661,10 @@ Before changing anything, tell me conversationally in one or two sentences that 
         revealElement(step3Next);
       });
     }
+
+    // --- Step 4: where the sites live --------------------------------------
+    var siteHomeUrl = document.getElementById('siteHomeUrl');
+    if (siteHomeUrl) siteHomeUrl.textContent = window.location.protocol + '//your-name.' + window.location.host + '/';
 
     // --- Restore progress on load ------------------------------------------
     (function restoreProgress() {
