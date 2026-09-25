@@ -176,11 +176,11 @@ func (h *AdminHandler) Register(mux *http.ServeMux, authMiddleware, skillVersion
 	})
 
 	// Admin API endpoints — auth, admin authorization, then the client-version
-	// compatibility guard. Session cookie or X-API-Key both carry through
-	// authMiddleware.
+	// compatibility guard. A browser session only: an API key is for CI, and
+	// a leaked one must not carry an admin's powers with it.
 	adminAPI := func(next http.Handler) http.Handler {
 		return h.limitAdminClient(
-			authMiddleware(auth.RequireAdmin(skillVersionMiddleware(h.limitAdminIdentity(next)))),
+			authMiddleware(requireSessionAuth(auth.RequireAdmin(skillVersionMiddleware(h.limitAdminIdentity(next))))),
 		)
 	}
 	mux.Handle("POST /api/admin/users/{username}/disable", dashboardCheck(adminAPI(http.HandlerFunc(h.disableUser))))
@@ -654,6 +654,10 @@ func (h *AdminHandler) setUserDisabled(w http.ResponseWriter, r *http.Request, d
 		return
 	}
 	if err := db.SetUserDisabled(r.Context(), h.database, target.ID, disabled); err != nil {
+		if errors.Is(err, db.ErrLastAdmin) {
+			h.respondAdmin(w, r, http.StatusConflict, "cannot disable the last enabled admin")
+			return
+		}
 		if errors.Is(err, sql.ErrNoRows) {
 			h.respondAdmin(w, r, http.StatusNotFound, "user not found or is a team")
 			return

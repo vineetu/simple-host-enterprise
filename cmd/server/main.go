@@ -21,6 +21,7 @@ import (
 	"github.com/vsriram/simple-host/internal/audit"
 	"github.com/vsriram/simple-host/internal/auth"
 	"github.com/vsriram/simple-host/internal/config"
+	dbstore "github.com/vsriram/simple-host/internal/db"
 	"github.com/vsriram/simple-host/internal/handler"
 	"github.com/vsriram/simple-host/internal/mcp"
 	"github.com/vsriram/simple-host/internal/migrate"
@@ -155,6 +156,19 @@ func run() (runErr error) {
 	}, nil)
 	if err != nil {
 		return fmt.Errorf("discover OIDC provider: %w", err)
+	}
+	// ADMIN_EMAILS is re-applied at every start, so removing someone from
+	// it demotes them on the next deploy, not at their next sign-in. With
+	// OIDC_ADMIN_CLAIM also in use the claim can only be read at sign-in,
+	// so there the sign-in refresh (and SESSION_TTL) is the bound.
+	if cfg.OIDC.AdminClaim == "" {
+		changed, err := dbstore.SyncAdminEmails(context.Background(), database, cfg.OIDC.AdminEmails)
+		if err != nil {
+			return fmt.Errorf("apply ADMIN_EMAILS: %w", err)
+		}
+		if changed > 0 {
+			log.Printf("ADMIN_EMAILS: updated admin status for %d account(s)", changed)
+		}
 	}
 	oidcClaims := handler.OIDCClaimConfig{
 		Issuer:              cfg.OIDC.Issuer,
