@@ -186,7 +186,6 @@ func parseAddr(s string) (netip.Addr, bool) {
 	return netip.Addr{}, false
 }
 
-
 // statusRecorder captures what the handler wrote without changing how it
 // wrote it. Unwrap keeps http.ResponseController working, and Flush keeps the
 // streaming handlers streaming.

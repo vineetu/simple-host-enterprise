@@ -19,8 +19,8 @@ import (
 
 	"github.com/vsriram/simple-host/internal/audit"
 	"github.com/vsriram/simple-host/internal/auth"
-	"github.com/vsriram/simple-host/internal/reqlog"
 	dbstore "github.com/vsriram/simple-host/internal/db"
+	"github.com/vsriram/simple-host/internal/reqlog"
 	"github.com/vsriram/simple-host/internal/safepath"
 	"github.com/vsriram/simple-host/internal/storage"
 )
