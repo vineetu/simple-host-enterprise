@@ -65,6 +65,7 @@ func newAccessWorld(t *testing.T) *accessWorld {
 	NewSiteHandler(database, store, base, hosts, limits).WithAudit(recorder).Register(mux, authMW, skillMW)
 	NewAdminHandler(database, base, hosts, CookiePolicy{Secure: true}, keys, time.Hour, recorder, limits).Register(mux, authMW, skillMW)
 	NewAuditHandler(database, audit.NewReader(database), "", limits).Register(mux, authMW, skillMW)
+	NewTeamHandler(database, limits).WithAudit(recorder).Register(mux, authMW, skillMW, hosts, base)
 	files := NewSiteFiles(store, database, CookiePolicy{Secure: true}, keys, time.Hour)
 	siteAPI := NewSiteAPIHandler(database, store, storage.AssetLimits{MaxFileBytes: 1 << 20, MaxSiteBytes: 8 << 20, MaxSiteCount: 100}, recorder, hosts, limits)
 	handoff := NewHandoffHandler(database, keys, hosts, recorder, limits)

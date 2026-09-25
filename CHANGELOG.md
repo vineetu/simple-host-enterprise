@@ -26,6 +26,10 @@ release, commit and schema.
   "Only me".
 - Network access is requested by the owner and granted by an admin.
 - Per-site editors are removed; to work on a site together, use a team.
+- Any team member can leave. When the last active member leaves, the team
+  and its sites are deleted once the team's name is typed back; deleting a
+  team deletes its sites the same way. An admin can delete a team whose
+  members are all disabled.
 - Saved data keeps its last 20 versions, and the owner can restore one.
 - Owners see how many people visited their site; admins see who and when.
 

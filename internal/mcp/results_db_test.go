@@ -255,6 +255,16 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	call("remove_team_member", map[string]any{"team": "acme-team", "username": "bob"})
 	call("delete_team", map[string]any{"team": "acme-team"})
 
+	// Leaving: once with somebody left, once as the last member, which
+	// deletes the team; and removing yourself, which is leaving.
+	call("create_team", map[string]any{"name": "crew"})
+	call("add_team_member", map[string]any{"team": "crew", "usernames": []any{"bob"}})
+	call("leave_team", map[string]any{"team": "crew"})
+	call("create_team", map[string]any{"name": "crew-two"})
+	call("leave_team", map[string]any{"team": "crew-two", "confirm_name": "crew-two"})
+	call("create_team", map[string]any{"name": "crew-three"})
+	call("remove_team_member", map[string]any{"team": "crew-three", "username": "alice", "confirm_name": "crew-three"})
+
 	// Properties that a single-account fixture cannot produce: download
 	// counts need a real browser download, and admin/team kinds are never the
 	// signed-in account's.

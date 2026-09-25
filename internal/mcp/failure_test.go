@@ -32,8 +32,16 @@ func TestExplainFailureSteersByCodeThenFamily(t *testing.T) {
 			tool:    "remove_team_member",
 			status:  http.StatusConflict,
 			body:    `{"error":"a team keeps at least one member","code":"last_member"}`,
-			want:    "delete_team",
+			want:    "leave_team",
 			notWant: "get_site",
+		},
+		{
+			name:    "a delete that needs confirming asks the person, not the model",
+			tool:    "leave_team",
+			status:  http.StatusConflict,
+			body:    `{"error":"You are the last active member, so leaving deletes team acme and its 2 sites permanently.","code":"confirm_team_delete","site_count":2}`,
+			want:    "ask",
+			notWant: "etag",
 		},
 		{
 			name:    "a team 404 does not send the model to look for a site",

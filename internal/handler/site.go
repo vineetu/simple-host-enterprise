@@ -423,6 +423,10 @@ func (h *SiteHandler) createSiteForTarget(w http.ResponseWriter, r *http.Request
 	}
 
 	if err := db.UpdateSiteActiveVersion(r.Context(), tx, site.ID, versionNumber); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "site not found"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
@@ -552,6 +556,10 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := db.UpdateSiteActiveVersion(r.Context(), tx, site.ID, versionNumber); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "site not found"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
@@ -836,6 +844,10 @@ func (h *SiteHandler) rollbackSite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := db.UpdateSiteActiveVersion(r.Context(), tx, site.ID, req.Version); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "site not found"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}

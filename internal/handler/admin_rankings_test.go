@@ -461,10 +461,11 @@ func TestUserBlockHeaderKeepsPersonControls(t *testing.T) {
 func TestUserBlockHeaderMarksTeamAndDropsKeyControls(t *testing.T) {
 	var b strings.Builder
 	writeUserBlockHeader(&b, testHostModel(t), db.User{
-		Username:    "platform",
-		Kind:        "team",
-		MemberCount: 3,
-		CreatedAt:   time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC),
+		Username:          "platform",
+		Kind:              "team",
+		MemberCount:       3,
+		ActiveMemberCount: 3,
+		CreatedAt:         time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC),
 	}, 1, "platform docs", 0, 0)
 	out := b.String()
 	if !strings.Contains(out, `<span class="chip">team</span>`) {
@@ -484,6 +485,22 @@ func TestUserBlockHeaderMarksTeamAndDropsKeyControls(t *testing.T) {
 	}
 	if !strings.Contains(out, "1 site") {
 		t.Errorf("team lost its site count:\n%s", out)
+	}
+}
+
+// A team whose members are all disabled is the one team the admin may delete,
+// and the only one offered a control for it.
+func TestUserBlockHeaderOffersDeleteForTeamWithNoActiveMembers(t *testing.T) {
+	var b strings.Builder
+	writeUserBlockHeader(&b, HostModel{}, db.User{Username: "gone", Kind: "team", MemberCount: 2}, 3, "gone", 0, 0)
+	out := b.String()
+	if !strings.Contains(out, `action="/api/admin/teams/gone/delete"`) || !strings.Contains(out, "3 sites") {
+		t.Errorf("orphaned team is not offered for deletion:\n%s", out)
+	}
+	b.Reset()
+	writeUserBlockHeader(&b, HostModel{}, db.User{Username: "live", Kind: "team", MemberCount: 2, ActiveMemberCount: 1}, 3, "live", 0, 0)
+	if strings.Contains(b.String(), "/delete") {
+		t.Errorf("team with an active member is offered for deletion:\n%s", b.String())
 	}
 }
 

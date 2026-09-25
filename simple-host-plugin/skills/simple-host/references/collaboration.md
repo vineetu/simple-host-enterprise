@@ -262,8 +262,8 @@ Never delete merely because the public URL loads or the actor can edit. Confirm
 destructive intent with the human immediately before sending the request. The
 `delete_site` tool also takes `confirm_name`: the site's name typed again.
 
-Deleting a site does not delete the team that owned it. A team is deleted
-separately, and only once it owns no sites; see [`teams.md`](teams.md).
+Deleting a site does not delete the team that owned it. Deleting a team, or its
+last active member leaving, deletes every site it owns; see [`teams.md`](teams.md).
 
 ## Trust and state boundaries
 

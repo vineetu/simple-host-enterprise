@@ -1709,6 +1709,112 @@ paths:
                     type: string
                     example: unready
 
+  /api/teams:
+    get:
+      summary: List the caller's teams
+      tags: [Teams]
+      responses:
+        '200':
+          description: '`{"teams": [{"id", "name"}]}`'
+    post:
+      summary: Create a team
+      description: 'Body `{"name": "acme-team"}` — letters, numbers and hyphens. The caller becomes its first member. There is one role: every member may publish to, and delete, any of the team''s sites, add and remove members, leave, and delete the team.'
+      tags: [Teams]
+      responses:
+        '201':
+          description: '`{"id", "name"}`'
+        '409':
+          description: '`name_taken`, `name_conflict` or `team_limit`'
+
+  /api/teams/{team}/members:
+    parameters:
+      - $ref: '#/components/parameters/team'
+    get:
+      summary: List a team's members
+      tags: [Teams]
+      responses:
+        '200':
+          description: '`{"team", "members": [{"user_id", "username", "joined_at"}]}`'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      summary: Add people to a team
+      description: 'Body `{"usernames": [...]}`, at most 50.'
+      tags: [Teams]
+      responses:
+        '200':
+          description: The members after the change
+        '409':
+          description: '`member_not_found` or `member_limit`'
+
+  /api/teams/{team}/members/{username}:
+    delete:
+      summary: Remove a member
+      description: Removing yourself is the same as `POST /api/teams/{team}/leave`, including its `confirm_name`.
+      tags: [Teams]
+      parameters:
+        - $ref: '#/components/parameters/team'
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/confirmTeamName'
+      responses:
+        '200':
+          description: The remaining members, or `team_deleted` as for leave
+        '409':
+          $ref: '#/components/responses/ConfirmTeamDelete'
+
+  /api/teams/{team}/leave:
+    post:
+      summary: Leave a team
+      description: Takes the caller out of the team. When no other member whose account is not disabled would remain, the team and every site it owns are deleted instead (each site's files queued for retirement, audited as `site_delete` and `team_delete`), which needs `confirm_name`.
+      tags: [Teams]
+      parameters:
+        - $ref: '#/components/parameters/team'
+        - $ref: '#/components/parameters/confirmTeamName'
+      responses:
+        '200':
+          description: '`{"team", "members"}` with the remaining members, or `{"team", "members": [], "team_deleted": true, "sites_deleted": n}`'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/ConfirmTeamDelete'
+
+  /api/teams/{team}:
+    delete:
+      summary: Delete a team and its sites
+      description: Any member may. A team that owns sites needs `confirm_name`; its sites are deleted with it.
+      tags: [Teams]
+      parameters:
+        - $ref: '#/components/parameters/team'
+        - $ref: '#/components/parameters/confirmTeamName'
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/ConfirmTeamDelete'
+
+  /api/admin/teams/{team}/delete:
+    post:
+      summary: Delete a team none of whose members is active
+      description: Admin only, browser session only (never an API key). For a team whose members are all disabled; deletes it and its sites as a member's delete would. `409` while any member is active.
+      tags: [Admin]
+      parameters:
+        - $ref: '#/components/parameters/team'
+      responses:
+        '200':
+          description: Deleted
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The team still has an active member
+
 components:
   headers:
     LatestSkillVersion:
@@ -1800,6 +1906,21 @@ components:
       schema:
         type: string
       example: alice.smith
+    team:
+      name: team
+      in: path
+      required: true
+      description: The team's name.
+      schema:
+        type: string
+      example: acme-team
+    confirmTeamName:
+      name: confirm_name
+      in: query
+      required: false
+      description: The team's name typed back. Required when the call would delete the team's sites.
+      schema:
+        type: string
     owner:
       name: owner
       in: path
@@ -2399,6 +2520,20 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    ConfirmTeamDelete:
+      description: '`confirm_team_delete` — the call would delete the team and `site_count` sites; nothing was deleted. Repeat with `confirm_name` once the person agrees.'
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+              code:
+                type: string
+                enum: [confirm_team_delete]
+              site_count:
+                type: integer
     NotFound:
       description: Site, retained version, or membership was not found or is not accessible
       content:

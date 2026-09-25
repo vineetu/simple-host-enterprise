@@ -38,10 +38,10 @@ func TestShowcaseWithoutQueryPreservesPublicGallery(t *testing.T) {
 			switch {
 			case strings.Contains(query, "FROM users"):
 				return &showcaseTestRows{
-					columns: []string{"id", "username", "is_admin", "created_at", "kind", "member_count", "disabled_at"},
+					columns: []string{"id", "username", "is_admin", "created_at", "kind", "member_count", "disabled_at", "active_member_count"},
 					values: [][]driver.Value{
-						{"user-public", "alice", false, now, "person", int64(0), nil},
-						{"user-private", "bob", false, now, "person", int64(0), nil},
+						{"user-public", "alice", false, now, "person", int64(0), nil, int64(0)},
+						{"user-private", "bob", false, now, "person", int64(0), nil, int64(0)},
 					},
 				}, nil
 			case strings.Contains(query, "site_type"):
@@ -191,8 +191,8 @@ func TestShowcaseErrorsSetReferrerPolicy(t *testing.T) {
 			query: func(query string, _ []driver.NamedValue) (driver.Rows, error) {
 				if strings.Contains(query, "FROM users") {
 					return &showcaseTestRows{
-						columns: []string{"id", "username", "is_admin", "created_at", "kind", "member_count", "disabled_at"},
-						values:  [][]driver.Value{{"user-public", "alice", false, now, "person", int64(0), nil}},
+						columns: []string{"id", "username", "is_admin", "created_at", "kind", "member_count", "disabled_at", "active_member_count"},
+						values:  [][]driver.Value{{"user-public", "alice", false, now, "person", int64(0), nil, int64(0)}},
 					}, nil
 				}
 				return nil, errors.New("site list failed")
@@ -278,10 +278,10 @@ func showcaseGalleryTestScript() *showcaseTestDBScript {
 			switch {
 			case strings.Contains(query, "FROM users"):
 				return &showcaseTestRows{
-					columns: []string{"id", "username", "is_admin", "created_at", "kind", "member_count", "disabled_at"},
+					columns: []string{"id", "username", "is_admin", "created_at", "kind", "member_count", "disabled_at", "active_member_count"},
 					values: [][]driver.Value{
-						{"user-public", "alice", false, now, "person", int64(0), nil},
-						{"user-private", "bob", false, now, "person", int64(0), nil},
+						{"user-public", "alice", false, now, "person", int64(0), nil, int64(0)},
+						{"user-private", "bob", false, now, "person", int64(0), nil, int64(0)},
 					},
 				}, nil
 			case strings.Contains(query, "site_type"):

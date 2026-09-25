@@ -113,3 +113,9 @@ artifact.
     one. Saved data is writable by everyone who can open the site, so it needs an undo.
   - Owners see view counts and distinct viewers, not who (`ACCESS_LOG_VISIBILITY=counts`).
     Who viewed what is sensitive, so only admins see names.
+- **2026-09-25 — Teams work like Slack channels: one role, and a team closes when its last
+  active member leaves.** Anyone signed in can create a team; every member can add and remove
+  members, publish, leave, and delete the team. When the last member who can still sign in
+  leaves, the team and its sites are deleted, after the team's name is typed back; a team left
+  with only disabled accounts is deleted by an admin. No roles and no directory-group sync:
+  simple beats configurable here, and a fork that needs roles can add them.

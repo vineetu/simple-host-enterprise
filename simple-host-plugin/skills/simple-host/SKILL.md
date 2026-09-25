@@ -88,7 +88,9 @@ separately when relevant:
 `member` means the owner is a team and you are in it. A team is a namespace that
 owns sites exactly as a person does, but it is not a person: it has no API key,
 ever, and you always act with your own personal key. Before any team operation
-read [`references/teams.md`](references/teams.md) completely.
+read [`references/teams.md`](references/teams.md) completely. Deleting a team,
+or its last active member leaving, deletes every site it owns: say how many and
+get the person's agreement before sending `confirm_name`.
 
 A team-owned site remains one owner resource, one URL, one version
 history, and one stored copy. Never create an alias or copy under the acting

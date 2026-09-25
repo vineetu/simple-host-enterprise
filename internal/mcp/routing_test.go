@@ -85,7 +85,8 @@ var fixtures = []fixture{
 	{"find_team_members", []map[string]any{{"team": "acme-team", "query": "bob"}}},
 	{"add_team_member", []map[string]any{{"team": "acme-team", "usernames": []any{"bob"}}}},
 	{"remove_team_member", []map[string]any{{"team": "acme-team", "username": "bob"}}},
-	{"delete_team", []map[string]any{{"team": "acme-team"}}},
+	{"delete_team", []map[string]any{{"team": "acme-team"}, {"team": "acme-team", "confirm_name": "acme-team"}}},
+	{"leave_team", []map[string]any{{"team": "acme-team"}, {"team": "acme-team", "confirm_name": "acme-team"}}},
 }
 
 // Every tool must resolve to a route that exists. This is the test that fails

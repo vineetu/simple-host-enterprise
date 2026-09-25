@@ -354,6 +354,10 @@ func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if err := db.UpdateSiteActiveVersion(r.Context(), tx, access.Site.ID, versionNumber); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "site not found"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
@@ -458,6 +462,10 @@ func (h *SiteHandler) rollbackCollaborationSite(w http.ResponseWriter, r *http.R
 	}
 
 	if err := db.UpdateSiteActiveVersion(r.Context(), tx, access.Site.ID, request.Version); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "site not found"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}

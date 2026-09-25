@@ -305,9 +305,11 @@ func UpdateSiteStateCAS(ctx context.Context, db Querier, username, sitename stri
 // instead.
 const listAllUsersQuery = `
 	SELECT u.id, u.username, u.is_admin, u.created_at,
-	       u.kind, count(m.user_id), u.disabled_at
+	       u.kind, count(m.user_id), u.disabled_at,
+	       count(m.user_id) FILTER (WHERE mu.disabled_at IS NULL)
 	FROM users u
 	LEFT JOIN team_members m ON m.team_id = u.id
+	LEFT JOIN users mu ON mu.id = m.user_id
 	GROUP BY u.id
 	ORDER BY u.created_at ASC
 `
@@ -322,7 +324,7 @@ func ListAllUsers(ctx context.Context, db *sql.DB) ([]User, error) {
 	var users []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Username, &u.IsAdmin, &u.CreatedAt, &u.Kind, &u.MemberCount, &u.DisabledAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.IsAdmin, &u.CreatedAt, &u.Kind, &u.MemberCount, &u.DisabledAt, &u.ActiveMemberCount); err != nil {
 			return nil, err
 		}
 		users = append(users, u)
@@ -769,8 +771,18 @@ func UpdateSiteActiveVersion(ctx context.Context, db Querier, siteID string, ver
 		WHERE id = $1
 	`
 
-	_, err := db.ExecContext(ctx, query, siteID, version)
-	return err
+	result, err := db.ExecContext(ctx, query, siteID, version)
+	if err != nil {
+		return err
+	}
+	// A site deleted under a deploy (its team was deleted) must fail the
+	// deploy rather than answer success for a version nothing serves.
+	if rows, err := result.RowsAffected(); err != nil {
+		return err
+	} else if rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func DeleteVersion(ctx context.Context, q Querier, versionID string) error {

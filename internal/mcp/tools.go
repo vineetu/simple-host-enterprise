@@ -250,6 +250,19 @@ func teamRoute(args map[string]any, suffix string) (string, error) {
 	return path, nil
 }
 
+// withTeamConfirm appends the optional confirm_name, refusing locally one that
+// does not match the team so a typo never reaches a delete.
+func withTeamConfirm(args map[string]any, path string) (string, error) {
+	confirm, err := optionalString(args, "confirm_name")
+	if err != nil || confirm == "" {
+		return path, err
+	}
+	if confirm != args["team"] {
+		return "", fmt.Errorf("confirm_name %q does not match team %q; nothing was deleted", confirm, args["team"])
+	}
+	return path + "?confirm_name=" + url.QueryEscape(confirm), nil
+}
+
 // deploySiteSchema is built rather than declared so the conditional
 // requirement can be stated: intent is required exactly when owner is, which
 // a plain required list cannot say. The call func enforces it regardless —
@@ -795,7 +808,7 @@ func toolList() []Tool {
 			Name:  "create_team",
 			Title: "Create a team",
 			Description: "Create a team. A team is a namespace that owns sites exactly as a person does, but it is not a person: it has no API key, and its members act with their own. " +
-				"You become its first member. There is one role and no other: everybody in a team may publish, roll back, relist and delete any of the team's sites, add and remove members, and delete the team. " +
+				"You become its first member. There is one role and no other: everybody in a team may publish, roll back, relist and delete any of the team's sites, add and remove members, leave, and delete the team. " +
 				"Call this ONLY when the user asks for a team. Creating one is never a step on the way to publishing something, and never the answer to a deploy that failed.",
 			InputSchema: object(map[string]any{
 				"name": str("The team's name, e.g. `acme-team` — lowercase letters, numbers and hyphens, no dots. " +
@@ -899,10 +912,12 @@ func toolList() []Tool {
 			Name:  "remove_team_member",
 			Title: "Remove somebody from a team",
 			Description: "Remove one person from a team. They lose access to every site the team owns immediately, but versions they deployed stay live until somebody rolls them back. " +
-				"A team always keeps at least one member, so removing the last one is refused — winding a team up is delete_team, after its sites are gone.",
+				"To take the user themself out, call leave_team instead.",
 			InputSchema: object(map[string]any{
 				"team":     str(teamArgDesc),
 				"username": str("Exact username to remove, as shown by list_team_members."),
+				"confirm_name": str("Only when removing yourself would delete the team (you are its last active member): the team's name typed again, after the user agreed. " +
+					"Otherwise omit it."),
 			}, "team", "username"),
 			Annotations: writes(true, true),
 			family:      familyTeam,
@@ -919,16 +934,21 @@ func toolList() []Tool {
 				if err != nil {
 					return upstream{}, err
 				}
+				path, err = withTeamConfirm(args, path)
+				if err != nil {
+					return upstream{}, err
+				}
 				return upstream{Method: "DELETE", Path: path}, nil
 			},
 		},
 		{
 			Name:  "delete_team",
 			Title: "Delete a team",
-			Description: "Permanently delete a team. Only possible once the team owns no sites, so this is never a way to delete its sites — delete those first, each one confirmed with the user. " +
-				"The name is released once the team is gone and somebody else may register it, so this cannot be undone. Always confirm with the user before calling this.",
+			Description: "Permanently delete a team and every site it owns. This cannot be undone: the sites' addresses stop working, and the team's name is released for somebody else to register. " +
+				"Always confirm with the user first, saying how many sites go with it (list_sites). A team that owns sites needs confirm_name.",
 			InputSchema: object(map[string]any{
-				"team": str(teamArgDesc),
+				"team":         str(teamArgDesc),
+				"confirm_name": str("The team's name typed again, exactly as in `team`, after the user agreed. Required when the team owns any site; a mismatch refuses the delete."),
 			}, "team"),
 			Annotations: writes(true, true),
 			family:      familyTeam,
@@ -937,7 +957,35 @@ func toolList() []Tool {
 				if err != nil {
 					return upstream{}, err
 				}
+				path, err = withTeamConfirm(args, path)
+				if err != nil {
+					return upstream{}, err
+				}
 				return upstream{Method: "DELETE", Path: path}, nil
+			},
+		},
+		{
+			Name:  "leave_team",
+			Title: "Leave a team",
+			Description: "Take the user out of a team. They lose access to every site the team owns at once. " +
+				"If nobody who can still sign in would be left, leaving deletes the team and every site it owns: the first call without confirm_name is refused with how many sites that is. " +
+				"Tell the user that number and ask; only if they agree, call again with confirm_name. Call this only when the user asks to leave.",
+			InputSchema: object(map[string]any{
+				"team":         str(teamArgDesc),
+				"confirm_name": str("Only when leaving deletes the team: the team's name typed again, exactly as in `team`, after the user agreed. Otherwise omit it."),
+			}, "team"),
+			Annotations: writes(true, true),
+			family:      familyTeam,
+			call: func(args map[string]any) (upstream, error) {
+				path, err := teamRoute(args, "leave")
+				if err != nil {
+					return upstream{}, err
+				}
+				path, err = withTeamConfirm(args, path)
+				if err != nil {
+					return upstream{}, err
+				}
+				return upstream{Method: "POST", Path: path}, nil
 			},
 		},
 	}

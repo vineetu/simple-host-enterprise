@@ -351,18 +351,76 @@ func CountTeamSites(ctx context.Context, q Querier, teamID string) (int, error) 
 	return count, nil
 }
 
+const countOtherActiveTeamMembersQuery = `
+	SELECT count(*)::int
+	FROM team_members tm
+	INNER JOIN users member ON member.id = tm.user_id
+	WHERE tm.team_id = $1::uuid
+	  AND tm.user_id IS DISTINCT FROM NULLIF($2, '')::uuid
+	  AND member.disabled_at IS NULL
+`
+
+// CountOtherActiveTeamMembers counts the team's members other than userID
+// whose accounts are not disabled. A disabled account cannot sign in, so it
+// does not keep a team alive: when this is zero, userID leaving would leave
+// nobody who can act on the team. Pass "" for userID to count every active
+// member.
+func CountOtherActiveTeamMembers(ctx context.Context, q Querier, teamID, userID string) (int, error) {
+	var count int
+	if err := q.QueryRowContext(ctx, countOtherActiveTeamMembersQuery, teamID, userID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count active team members: %w", err)
+	}
+	return count, nil
+}
+
+const listTeamSitesQuery = `
+	SELECT id::text, name, active_version
+	FROM sites
+	WHERE user_id = $1::uuid
+	ORDER BY name
+`
+
+// TeamSite is the part of a team's site that deleting it needs.
+type TeamSite struct {
+	ID            string
+	Name          string
+	ActiveVersion int
+}
+
+// ListTeamSites returns every site the team owns, so the team's deletion can
+// retire each one. The caller holds LockTeam, which keeps the list complete
+// (a new site's insert waits on it), and takes each site's
+// LockSiteCollaboration itself; row-locking the sites here would take the
+// row before the advisory lock a deploy holds first, and deadlock with it.
+func ListTeamSites(ctx context.Context, tx *sql.Tx, teamID string) ([]TeamSite, error) {
+	rows, err := tx.QueryContext(ctx, listTeamSitesQuery, teamID)
+	if err != nil {
+		return nil, fmt.Errorf("list team sites: %w", err)
+	}
+	defer rows.Close()
+	var sites []TeamSite
+	for rows.Next() {
+		var site TeamSite
+		if err := rows.Scan(&site.ID, &site.Name, &site.ActiveVersion); err != nil {
+			return nil, fmt.Errorf("list team sites: %w", err)
+		}
+		sites = append(sites, site)
+	}
+	return sites, rows.Err()
+}
+
 const deleteTeamQuery = `
 	DELETE FROM users
 	WHERE id = $1::uuid
 	  AND kind = 'team'
 `
 
-// DeleteTeam removes an empty team namespace. Memberships and audit rows go
-// with it through ON DELETE CASCADE.
+// DeleteTeam removes a team namespace that owns no sites. Memberships and
+// audit rows go with it through ON DELETE CASCADE.
 //
-// It refuses with ErrTeamHasSites rather than cascading into sites: deleting a
-// namespace must never be a way to delete hosted content, and site files in the
-// bucket are not in this transaction. Returns sql.ErrNoRows when teamID is not a
+// It refuses with ErrTeamHasSites rather than cascading into sites: the site
+// files in the bucket are not in this transaction, so the caller deletes each
+// site first and queues its files for retirement (handler.deleteTeamAndSites). Returns sql.ErrNoRows when teamID is not a
 // team. The caller is expected to hold LockTeam in the same transaction so a
 // site cannot be created between the count and the delete.
 func DeleteTeam(ctx context.Context, q Querier, teamID string) error {

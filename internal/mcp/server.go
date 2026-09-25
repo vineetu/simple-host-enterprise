@@ -501,11 +501,12 @@ func codeHint(code string, tool Tool) string {
 	case "no_access":
 		return "Only the owner, or a member of the team that owns it, can do this."
 	case "last_member":
-		return "A team keeps at least one member, so the last one cannot be removed. If the user wants the team gone, delete its sites and then call delete_team; " +
-			"otherwise leave the membership as it is."
+		return "A team keeps at least one member. If the user wants to leave, call leave_team, which says what leaving would delete."
+	case "confirm_team_delete":
+		return "Nothing was deleted. This would delete the team and every site it owns — the message says how many. Tell the user that number in plain words and ask. " +
+			"Only if they agree, call the same tool again with confirm_name set to the team's name; never fill it in on your own."
 	case "team_has_sites":
-		return "The team still owns sites, and every one of them has to be deleted before the team can be. Call list_sites to see them and confirm each deletion with the user — " +
-			"deleting a team is never a way to get rid of its sites."
+		return "The team still owns sites. Tell the user how many would be deleted with it and ask; only if they agree, call delete_team again with confirm_name set to the team's name."
 	case "member_not_found":
 		return "One or more of those usernames is not a registered person on Simple Host. Call find_team_members to get exact usernames; do not guess or re-spell them."
 	case "member_limit":

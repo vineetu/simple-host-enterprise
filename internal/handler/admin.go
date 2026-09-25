@@ -155,6 +155,7 @@ func (h *AdminHandler) Register(mux *http.ServeMux, authMiddleware, skillVersion
 	}
 	mux.Handle("POST /api/admin/users/{username}/disable", dashboardCheck(adminAPI(http.HandlerFunc(h.disableUser))))
 	mux.Handle("POST /api/admin/users/{username}/enable", dashboardCheck(adminAPI(http.HandlerFunc(h.enableUser))))
+	mux.Handle("POST /api/admin/teams/{team}/delete", dashboardCheck(adminAPI(http.HandlerFunc(h.deleteOrphanTeam))))
 	mux.Handle("POST /api/admin/classify-sites", dashboardCheck(adminAPI(http.HandlerFunc(h.classifySites))))
 	mux.Handle("GET /api/admin/export", adminAPI(http.HandlerFunc(h.exportAuditOrAccess)))
 	h.registerAccessRequestRoutes(mux, adminAPI, dashboardCheck)
@@ -524,6 +525,16 @@ func writeUserBlockHeader(b *strings.Builder, hosts HostModel, u db.User, siteCo
 	if u.IsTeam() {
 		nameChips = fmt.Sprintf(` <span class="chip">team</span> <span class="chip chip-muted">%s</span>`,
 			html.EscapeString(pluralize(u.MemberCount, "1 member", fmt.Sprintf("%d members", u.MemberCount))))
+		// Only a team nobody can act on any more is the admin's to delete;
+		// any active member can leave or delete it themselves.
+		if u.ActiveMemberCount == 0 {
+			nameChips += ` <span class="chip chip-warn">no active members</span>`
+			actions += fmt.Sprintf(`<form method="POST" action="/api/admin/teams/%s/delete" onsubmit="return confirm('Delete team %s and its %s? Nobody in it can sign in any more. This cannot be undone.');"><button type="submit" class="btn-reset">Delete team</button></form>`,
+				html.EscapeString(u.Username),
+				html.EscapeString(u.Username),
+				pluralize(siteCount, "1 site", fmt.Sprintf("%d sites", siteCount)),
+			)
+		}
 	} else if u.DisabledAt != nil {
 		nameChips = ` <span class="chip chip-warn">disabled</span>`
 		actions += fmt.Sprintf(`<form method="POST" action="/api/admin/users/%s/enable" onsubmit="return confirm('Re-enable %s? They will be able to sign in again.');"><button type="submit" class="btn-reset">Enable</button></form>`,
@@ -654,6 +665,62 @@ func (h *AdminHandler) setUserDisabled(w http.ResponseWriter, r *http.Request, d
 		verb = "enabled"
 	}
 	h.respondAdmin(w, r, http.StatusOK, "user "+verb)
+}
+
+// deleteOrphanTeam deletes a team whose members are all disabled, with its
+// sites, through the same path a member's delete takes. A team that still
+// has an active member is refused: those people decide its fate.
+func (h *AdminHandler) deleteOrphanTeam(w http.ResponseWriter, r *http.Request) {
+	name := strings.ToLower(strings.TrimSpace(r.PathValue("team")))
+	team, err := db.GetTeamByName(r.Context(), h.database, name)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			h.respondAdmin(w, r, http.StatusNotFound, "team not found")
+			return
+		}
+		log.Printf("admin: resolve team %q: %v", name, err)
+		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	actorID := ""
+	if actor := auth.GetUser(r.Context()); actor != nil {
+		actorID = actor.ID
+	}
+	errActiveMembers := errors.New("team has active members")
+	err = func() error {
+		tx, err := h.database.BeginTx(r.Context(), nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		if err := db.LockTeam(r.Context(), tx, team.ID); err != nil {
+			return err
+		}
+		active, err := db.CountOtherActiveTeamMembers(r.Context(), tx, team.ID, "")
+		if err != nil {
+			return err
+		}
+		if active > 0 {
+			return errActiveMembers
+		}
+		if err := deleteTeamAndSites(r.Context(), tx, h.audit, actorID, team, "admin_no_active_members"); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}()
+	switch {
+	case errors.Is(err, errActiveMembers):
+		h.respondAdmin(w, r, http.StatusConflict, "the team still has an active member; its members can leave or delete it")
+		return
+	case errors.Is(err, sql.ErrNoRows):
+		h.respondAdmin(w, r, http.StatusNotFound, "team not found")
+		return
+	case err != nil:
+		log.Printf("admin: delete team %q: %v", name, err)
+		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	h.respondAdmin(w, r, http.StatusOK, "team deleted")
 }
 
 func (h *AdminHandler) respondAdmin(w http.ResponseWriter, r *http.Request, status int, msg string) {

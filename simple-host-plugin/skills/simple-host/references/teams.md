@@ -27,20 +27,29 @@ Any member may:
 
 - create, update, roll back, and delete **any** site in the team's namespace;
 - set who can open it and manage its viewers, and restore its saved data;
-- add and remove people, including themselves;
-- delete the team, once it owns no sites.
+- add and remove people, and leave;
+- delete the team, and with it every site it owns.
 
 Being in the team is the only way to change a team's sites. A new team site
 opens only for the team's members until its level changes; see
 [`collaboration.md`](collaboration.md).
 
-## A team always keeps at least one member
+## When the last active member leaves, the team closes
 
-The last member cannot leave. `DELETE` of the last membership answers `409` with
-`code: "last_member"`. The right move is to delete the team instead — or to add
-someone first, then leave.
+A team lasts while somebody who can sign in is in it. Members whose accounts an
+admin has disabled do not count. When the last active member leaves, the team
+**and every site it owns** are deleted.
 
-Never present leaving as a way to get rid of a team.
+Because that destroys sites, leaving (or removing yourself) as the last active
+member is refused until the team's name is typed back: the first call answers
+`409` with `code: "confirm_team_delete"` and `site_count`. Tell the person how
+many sites would be deleted, in those words, and ask. Only if they agree, repeat
+the call with `?confirm_name=<team>`. Never add `confirm_name` on your own, and
+never present leaving as a tidy way to get rid of a team's sites. If they would
+rather keep the sites, someone else has to be added first.
+
+A team whose members are all disabled is deleted by a company admin from the
+admin page.
 
 ## Lifecycle
 
@@ -86,12 +95,14 @@ GET /api/teams/<team>/members
 GET /api/teams/<team>/member-candidates?q=<text>
 POST /api/teams/<team>/members      {"usernames": ["person.one", "person.two"]}
 DELETE /api/teams/<team>/members/<username>
+POST /api/teams/<team>/leave
 ```
 
 Candidates are existing registered people who are not already members; the search
 never returns teams. Add in one bounded batch, at most 50. Removal takes any
-member, including yourself, and is refused with `last_member` when it would empty
-the team.
+other member. Removing yourself is the same as `leave`, which answers the
+remaining members, or `team_deleted: true` and `sites_deleted` when you were the
+last active member (see above).
 
 Removing someone ends their access to every site in the namespace. It does not
 undo content they deployed; offer rollback separately if that is what the user
@@ -103,10 +114,11 @@ means.
 DELETE /api/teams/<team>
 ```
 
-Any member may delete the team, and only when the team owns **zero** sites.
-Otherwise it answers `409` with `code: "team_has_sites"`. Delete the sites first,
-through the owner-qualified delete route, and confirm that destructive intent
-with the human each time. Deleting a team is not a way to clean up its sites.
+Any member may delete the team. Its sites are deleted with it, so a team that
+owns any answers `409` with `code: "confirm_team_delete"` and `site_count` until
+the call carries `?confirm_name=<team>`. Say how many sites go with it and get
+the person's agreement first. The name is released afterwards; this cannot be
+undone.
 
 ## Working on a team's sites
 

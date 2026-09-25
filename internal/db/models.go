@@ -21,6 +21,10 @@ type User struct {
 	// MemberCount is how many people are in a team, populated only by
 	// ListAllUsers. Zero for a person, and zero wherever it was not loaded.
 	MemberCount int
+	// ActiveMemberCount is MemberCount less disabled accounts, also only from
+	// ListAllUsers. A team at zero has nobody left who can act on it, which is
+	// when the admin page offers to delete it.
+	ActiveMemberCount int
 	// Email is the address the account signed up with or later claimed
 	// (migration 0017). Display and migration data: it is read to find an
 	// account at sign-in, and never grants access on its own. Empty means

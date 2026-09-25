@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -13,6 +15,7 @@ import (
 	"github.com/vsriram/simple-host/internal/auth"
 	db "github.com/vsriram/simple-host/internal/db"
 	"github.com/vsriram/simple-host/internal/safepath"
+	"github.com/vsriram/simple-host/internal/storage"
 )
 
 // TeamHandler owns the team namespace lifecycle: creating one, who is in it,
@@ -67,6 +70,7 @@ func (h *TeamHandler) Register(mux *http.ServeMux, authMiddleware, skillVersionM
 	mux.Handle("GET /api/teams/{team}/member-candidates", member(http.HandlerFunc(h.searchMemberCandidates)))
 	mux.Handle("POST /api/teams/{team}/members", browserWrite(member(http.HandlerFunc(h.addMembers))))
 	mux.Handle("DELETE /api/teams/{team}/members/{username}", browserWrite(member(http.HandlerFunc(h.removeMember))))
+	mux.Handle("POST /api/teams/{team}/leave", browserWrite(member(http.HandlerFunc(h.leaveTeam))))
 	mux.Handle("DELETE /api/teams/{team}", browserWrite(member(http.HandlerFunc(h.deleteTeam))))
 }
 
@@ -396,6 +400,10 @@ func (h *TeamHandler) removeMember(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
+	if subject.ID == user.ID {
+		h.leave(w, r, user, team)
+		return
+	}
 
 	err = h.inTeamTransaction(r, team.ID, func(tx *sql.Tx) error {
 		if err := db.RemoveTeamMember(r.Context(), tx, team.ID, subject.ID); err != nil {
@@ -413,12 +421,11 @@ func (h *TeamHandler) removeMember(w http.ResponseWriter, r *http.Request) {
 	})
 	switch {
 	case errors.Is(err, db.ErrLastTeamMember):
-		// Refusing rather than allowing the team to be emptied: an ownerless
-		// namespace still serves its sites but nobody can act on them, and
-		// recovering one needs a platform admin. Deleting is the deliberate
-		// way out, and it makes you remove the sites first.
+		// Unreachable from here — removing yourself goes through leave, and
+		// the caller stays — but RemoveTeamMember still refuses to empty a
+		// team, so the answer stays mapped.
 		writeJSON(w, http.StatusConflict, errorResponse{
-			Error: "a team keeps at least one member — delete the team instead",
+			Error: "a team keeps at least one member — leave or delete the team instead",
 			Code:  "last_member",
 		})
 		return
@@ -430,7 +437,7 @@ func (h *TeamHandler) removeMember(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	h.writeMembers(w, r, team)
+	h.writeMembers(w, r, team, "team_deleted", false)
 }
 
 func (h *TeamHandler) deleteTeam(w http.ResponseWriter, r *http.Request) {
@@ -448,27 +455,21 @@ func (h *TeamHandler) deleteTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var sites int
 	err := h.inTeamTransaction(r, team.ID, func(tx *sql.Tx) error {
-		if err := db.TeamAudit(r.Context(), tx, team.ID, user.ID, "delete", "", team.Username); err != nil {
+		var err error
+		if sites, err = db.CountTeamSites(r.Context(), tx, team.ID); err != nil {
 			return err
 		}
-		actorKind, keyID := auditActorKind(r.Context())
-		if err := h.audit.RecordTx(r.Context(), tx, audit.Event{
-			ActorID: user.ID, ActorKind: actorKind, KeyID: keyID,
-			Action: "team_delete", TeamID: team.ID,
-			RequestID: auditRequestID(r.Context()),
-			Detail:    team.Username,
-		}); err != nil {
-			return err
+		// A team with sites takes its name typed back: this deletes them.
+		if sites > 0 && !confirmedTeamName(r, team) {
+			return errTeamDeleteUnconfirmed
 		}
-		return db.DeleteTeam(r.Context(), tx, team.ID)
+		return deleteTeamAndSites(r.Context(), tx, h.audit, user.ID, team, "deleted")
 	})
 	switch {
-	case errors.Is(err, db.ErrTeamHasSites):
-		writeJSON(w, http.StatusConflict, errorResponse{
-			Error: "delete the team's sites first",
-			Code:  "team_has_sites",
-		})
+	case errors.Is(err, errTeamDeleteUnconfirmed):
+		writeTeamDeleteUnconfirmed(w, team, sites, "Deleting")
 		return
 	case err != nil:
 		log.Printf("delete team %q: %v", team.Username, err)
@@ -477,6 +478,164 @@ func (h *TeamHandler) deleteTeam(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *TeamHandler) leaveTeam(w http.ResponseWriter, r *http.Request) {
+	user := auth.GetUser(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
+		return
+	}
+	if decision := h.limits.allow(managementUserPolicy, user.ID); !decision.Allowed {
+		writeRateLimit(w, decision)
+		return
+	}
+	team, ok := h.requireMember(w, r, user)
+	if !ok {
+		return
+	}
+	h.leave(w, r, user, team)
+}
+
+// leave takes the caller out of the team. When nobody who can still sign in
+// would be left — disabled accounts do not count — the team and every site
+// it owns are deleted instead, which needs the team's name typed back as
+// confirm_name. Answers with the remaining members, or with team_deleted
+// and how many sites went with it.
+func (h *TeamHandler) leave(w http.ResponseWriter, r *http.Request, user *db.User, team db.Team) {
+	var sites int
+	deleted := false
+	err := h.inTeamTransaction(r, team.ID, func(tx *sql.Tx) error {
+		others, err := db.CountOtherActiveTeamMembers(r.Context(), tx, team.ID, user.ID)
+		if err != nil {
+			return err
+		}
+		if others == 0 {
+			if sites, err = db.CountTeamSites(r.Context(), tx, team.ID); err != nil {
+				return err
+			}
+			if !confirmedTeamName(r, team) {
+				return errTeamDeleteUnconfirmed
+			}
+			deleted = true
+			return deleteTeamAndSites(r.Context(), tx, h.audit, user.ID, team, "last_member_left")
+		}
+		if err := db.RemoveTeamMember(r.Context(), tx, team.ID, user.ID); err != nil {
+			return err
+		}
+		if err := db.TeamAudit(r.Context(), tx, team.ID, user.ID, "leave", user.ID, ""); err != nil {
+			return err
+		}
+		actorKind, keyID := auditActorKind(r.Context())
+		return h.audit.RecordTx(r.Context(), tx, audit.Event{
+			ActorID: user.ID, ActorKind: actorKind, KeyID: keyID,
+			Action: "member_remove", TeamID: team.ID, SubjectID: user.ID,
+			RequestID: auditRequestID(r.Context()),
+			Detail:    "left",
+		})
+	})
+	switch {
+	case errors.Is(err, errTeamDeleteUnconfirmed):
+		writeTeamDeleteUnconfirmed(w, team, sites, "You are the last active member, so leaving deletes")
+		return
+	case err != nil:
+		log.Printf("leave team %q: %v", team.Username, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	if deleted {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"team": team.Username, "members": []teamMemberResponse{},
+			"team_deleted": true, "sites_deleted": sites,
+		})
+		return
+	}
+	h.writeMembers(w, r, team, "team_deleted", false)
+}
+
+var errTeamDeleteUnconfirmed = errors.New("team delete not confirmed")
+
+// confirmedTeamName reports whether the request typed the team's name back
+// as ?confirm_name=, the guard on every path that deletes a team's sites.
+func confirmedTeamName(r *http.Request, team db.Team) bool {
+	return strings.ToLower(strings.TrimSpace(r.URL.Query().Get("confirm_name"))) == team.Username
+}
+
+// writeTeamDeleteUnconfirmed says how much would be destroyed, so the agent
+// can put that number to the person before asking again.
+func writeTeamDeleteUnconfirmed(w http.ResponseWriter, team db.Team, sites int, lead string) {
+	writeJSON(w, http.StatusConflict, struct {
+		errorResponse
+		SiteCount int `json:"site_count"`
+	}{
+		errorResponse: errorResponse{
+			Error: fmt.Sprintf("%s team %s and its %s permanently. Confirm with the person, then repeat with confirm_name=%s.",
+				lead, team.Username, pluralize(sites, "1 site", fmt.Sprintf("%d sites", sites)), team.Username),
+			Code: "confirm_team_delete",
+		},
+		SiteCount: sites,
+	})
+}
+
+// deleteTeamAndSites deletes a team and every site it owns in tx, which must
+// already hold LockTeam: while the lock is held no site can be created under
+// the team (the insert's foreign-key check waits on it). Each site goes the
+// way deleteSiteForTarget sends one — search entry dropped, files queued for
+// retirement after the grace period, a site_delete audit row — and then the
+// team itself, with a team_delete row carrying why.
+func deleteTeamAndSites(ctx context.Context, tx *sql.Tx, recorder audit.Recorder, actorID string, team db.Team, reason string) error {
+	sites, err := db.ListTeamSites(ctx, tx, team.ID)
+	if err != nil {
+		return err
+	}
+	actorKind, keyID := auditActorKind(ctx)
+	// Each site's own lock first, in name order, so a deploy or rollback in
+	// flight finishes (its new files land under the prefix retired below)
+	// or, arriving after, finds the site gone.
+	for _, site := range sites {
+		if err := db.LockSiteCollaboration(ctx, tx, team.ID, site.Name); err != nil {
+			return err
+		}
+	}
+	for _, site := range sites {
+		if err := db.EnqueueSiteSearch(ctx, tx, site.ID, db.SiteSearchDelete); err != nil {
+			return err
+		}
+		prefix, err := storage.SitePrefix(site.ID)
+		if err != nil {
+			return err
+		}
+		if err := db.RetireObjects(ctx, tx, prefix, storage.RetireGrace); err != nil {
+			return err
+		}
+		if err := db.DeleteSite(ctx, tx, team.ID, site.Name); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue // deleted by somebody else before our lock; its own delete queued it
+			}
+			return err
+		}
+		if err := recorder.RecordTx(ctx, tx, audit.Event{
+			ActorID: actorID, ActorKind: actorKind, KeyID: keyID,
+			Action: "site_delete", OwnerID: team.ID, SiteID: site.ID,
+			RequestID: auditRequestID(ctx),
+			Extra:     map[string]any{"active_version": site.ActiveVersion, "team_delete": reason},
+		}); err != nil {
+			return err
+		}
+	}
+	if err := db.TeamAudit(ctx, tx, team.ID, actorID, "delete", "", team.Username); err != nil {
+		return err
+	}
+	if err := recorder.RecordTx(ctx, tx, audit.Event{
+		ActorID: actorID, ActorKind: actorKind, KeyID: keyID,
+		Action: "team_delete", TeamID: team.ID,
+		RequestID: auditRequestID(ctx),
+		Detail:    team.Username,
+		Extra:     map[string]any{"reason": reason, "sites_deleted": len(sites)},
+	}); err != nil {
+		return err
+	}
+	return db.DeleteTeam(ctx, tx, team.ID)
 }
 
 // inTeamTransaction runs fn with the team's row locked for the rest of the
@@ -498,7 +657,10 @@ func (h *TeamHandler) inTeamTransaction(r *http.Request, teamID string, fn func(
 	return tx.Commit()
 }
 
-func (h *TeamHandler) writeMembers(w http.ResponseWriter, r *http.Request, team db.Team) {
+// writeMembers answers with the team's members. extra is key/value pairs added
+// to the body: removing somebody says the team was not deleted, which adding
+// has no reason to.
+func (h *TeamHandler) writeMembers(w http.ResponseWriter, r *http.Request, team db.Team, extra ...any) {
 	members, err := db.ListTeamMembers(r.Context(), h.database, team.ID)
 	if err != nil {
 		log.Printf("list members of %q: %v", team.Username, err)
@@ -513,7 +675,11 @@ func (h *TeamHandler) writeMembers(w http.ResponseWriter, r *http.Request, team 
 			JoinedAt: member.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"team": team.Username, "members": response})
+	body := map[string]any{"team": team.Username, "members": response}
+	for i := 0; i+1 < len(extra); i += 2 {
+		body[extra[i].(string)] = extra[i+1]
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 // limitManagementClient bounds the team routes per client the way the site

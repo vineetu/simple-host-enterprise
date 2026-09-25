@@ -150,6 +150,16 @@ func teamSchema() map[string]any {
 	}, "id", "name")
 }
 
+// leaveSchema is membersSchema for a change that may have deleted the team:
+// the last active member leaving takes the team and its sites with it.
+func leaveSchema() map[string]any {
+	schema := membersSchema()
+	properties := schema["properties"].(map[string]any)
+	properties["team_deleted"] = outBool("True when the team and its sites were deleted because nobody active was left.")
+	properties["sites_deleted"] = outInteger("How many sites were deleted with the team.")
+	return schema
+}
+
 func membersSchema() map[string]any {
 	return outObject(map[string]any{
 		"team": outString("The team's name."),
@@ -240,7 +250,8 @@ func outputSchemas() map[string]map[string]any {
 			}, "user_id", "username", "already_member")),
 		}, "candidates"),
 		"add_team_member":    membersSchema(),
-		"remove_team_member": membersSchema(),
+		"remove_team_member": leaveSchema(),
 		"delete_team":        doneSchema(),
+		"leave_team":         leaveSchema(),
 	}
 }
