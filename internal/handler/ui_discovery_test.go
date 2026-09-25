@@ -22,7 +22,7 @@ import (
 
 func TestAgentSkillsDiscoveryIndexAndArchives(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterUIRoutes(mux)
+	RegisterUIRoutes(mux, testSkillBaseURL)
 
 	indexResponse := serveUIRequest(t, mux, http.MethodGet, agentSkillsDiscoveryRoot+"index.json")
 	if indexResponse.Code != http.StatusOK {
@@ -102,7 +102,7 @@ func TestAgentSkillsDiscoveryIndexAndArchives(t *testing.T) {
 			t.Errorf("skill[%d].digest = %q, want exact served archive digest %q", i, entry.Digest, got)
 		}
 
-		secondArchive, err := buildAgentSkillArchive(wantName)
+		secondArchive, err := buildAgentSkillArchive(wantName, testSkillBaseURL)
 		if err != nil {
 			t.Fatalf("rebuild %s archive: %v", wantName, err)
 		}
@@ -115,7 +115,7 @@ func TestAgentSkillsDiscoveryIndexAndArchives(t *testing.T) {
 
 func TestAgentSkillsDiscoveryGETHEADParity(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterUIRoutes(mux)
+	RegisterUIRoutes(mux, testSkillBaseURL)
 
 	paths := []string{agentSkillsDiscoveryRoot + "index.json"}
 	for _, skillName := range agentSkillsDiscoveryAllowlist {
@@ -148,7 +148,7 @@ func TestAgentSkillsDiscoveryGETHEADParity(t *testing.T) {
 
 func TestAgentSkillsDiscoveryRejectsInvalidPathsAndMethods(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterUIRoutes(mux)
+	RegisterUIRoutes(mux, testSkillBaseURL)
 
 	for _, requestPath := range []string{
 		agentSkillsDiscoveryRoot + "unknown.zip",
@@ -172,7 +172,7 @@ func TestAgentSkillsDiscoveryRejectsInvalidPathsAndMethods(t *testing.T) {
 	}
 
 	for _, skillName := range []string{"", "unknown", "../simple-host", "simple-host/SKILL.md"} {
-		if _, err := buildAgentSkillArchive(skillName); err == nil {
+		if _, err := buildAgentSkillArchive(skillName, testSkillBaseURL); err == nil {
 			t.Errorf("buildAgentSkillArchive(%q) succeeded outside the fixed allowlist", skillName)
 		}
 	}
@@ -180,7 +180,7 @@ func TestAgentSkillsDiscoveryRejectsInvalidPathsAndMethods(t *testing.T) {
 
 func TestAgentSkillsDiscoveryPreservesLegacyRoutes(t *testing.T) {
 	mux := http.NewServeMux()
-	RegisterUIRoutes(mux)
+	RegisterUIRoutes(mux, testSkillBaseURL)
 
 	versionResponse := serveUIRequest(t, mux, http.MethodGet, "/skills/version")
 	if versionResponse.Code != http.StatusOK {
@@ -283,6 +283,9 @@ func assertDiscoveryArchive(t *testing.T, skillName string, archive []byte, vers
 		body, err := fs.ReadFile(skillFS, filePath)
 		if err != nil {
 			return err
+		}
+		if strings.HasSuffix(filePath, ".md") {
+			body = []byte(strings.ReplaceAll(string(body), "{{BASE_URL}}", testSkillBaseURL))
 		}
 		if strings.HasSuffix(filePath, "SKILL.md") {
 			body = []byte(strings.ReplaceAll(string(body), "{{VERSION}}", version))

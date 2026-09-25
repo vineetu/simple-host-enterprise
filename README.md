@@ -8,8 +8,8 @@ restricted to named viewers, in which case it moves to its own dedicated
 hostname and refuses everyone else with a 404. Every mutation and every
 visit is recorded to an audit trail and access log an owner or admin can
 read back or export. The same process serves the API, the sites, the
-dashboard, and an MCP endpoint so agents reach every operation through one
-tool surface.
+dashboard, and an MCP endpoint through which agents publish and manage
+sites, teams, sharing, and site state.
 
 This repository is the installable package: the server, its schema
 migrations, a container image, and Kubernetes manifests that run on any

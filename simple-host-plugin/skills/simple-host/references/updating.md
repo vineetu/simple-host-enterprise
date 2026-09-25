@@ -8,7 +8,7 @@ an API call returns `code: "skill_version_required"`.
 Fetch only:
 
 ```text
-https://simple-host.example.com/skills/version
+{{BASE_URL}}/skills/version
 ```
 
 Require numeric `major.minor.patch` versions, a 64-character hexadecimal
@@ -63,8 +63,8 @@ extract there and complete every check below before changing the active install:
   names. Compare duplicates case-insensitively on case-insensitive filesystems.
 - Every regular-file basename is non-dot and ends, case-insensitively, in `.md`,
   `.png`, `.jpg`, `.jpeg`, `.gif`, `.json`, `.txt`, or `.csv`.
-- `simple-host/SKILL.md` states the manifest version, and no `SKILL.md` contains
-  `{{VERSION}}`.
+- `simple-host/SKILL.md` states the manifest version and names this server's
+  origin, `{{BASE_URL}}`, and no `SKILL.md` contains `{{VERSION}}`.
 
 Never execute anything from the bundle.
 
@@ -96,5 +96,5 @@ chat and invoke the original task again. Never continue using the old workflow.
 ## If it fails
 
 Say plainly what failed, and confirm the previous installation is still in place.
-If the download or the checks keep failing, tell the user to ask in Slack
-#simple-host-support.
+If the download or the checks keep failing, tell the user to ask
+your platform team — the people who run this Simple Host.

@@ -4,17 +4,12 @@ Read this file completely before every upload. Validate the final static output
 directory, not the project root, unless the project is genuinely raw HTML with no
 build system.
 
-## Compose to build, quote to report
+## Relative paths in, quoted address out
 
-The base path checked below is `/sites/<owner_username>/<sitename>/`, composed by
-you from the namespace you resolved — `owner_username` being the resource owner,
-a person or a team. That is the correct build input, because the same site is
-also served at `<owner-label>.<base>/<sitename>/` and a long-path build works at
-both addresses while a short-path build 404s on the base host.
-
-The address you *report* is different: quote the `url` and `public_path` the API
-returned, exactly as returned, and never an address you assembled. Compose to
-build, quote to report. The two only look contradictory.
+Build with relative asset paths (`./`), as `frameworks.md` describes, so the
+site works on its owner's host and on its own host if it is later restricted.
+Report the `url` and `public_path` the API returned, exactly as returned, and
+never an address you assembled.
 
 ## Preflight: mechanical limits
 
@@ -56,7 +51,7 @@ build, quote to report. The two only look contradictory.
 - Keep deployed HTML, CSS, and JavaScript readable where the toolchain permits;
   do not add minification or obfuscation unless the user asks.
 
-## Verify subpath assets
+## Verify asset paths
 
 For a framework build, inspect the generated `index.html`:
 
@@ -69,9 +64,10 @@ grep -o 'href="[^"]*"' <build-dir>/index.html
 Select-String -Path (Join-Path '<build-dir>' 'index.html') -Pattern 'src="[^"]*"', 'href="[^"]*"' -AllMatches
 ```
 
-Every root-relative site-owned asset must begin with the canonical
-`/sites/<owner_username>/<sitename>/` base. Bare `/assets/`, `/_next/`, `/_app/`,
-or `/chunks/` paths mean the framework was built for the wrong base; rebuild it.
+Every site-owned asset should be relative (`./assets/...` or `assets/...`). A
+bare `/assets/`, `/_app/`, or `/chunks/` path means the framework was built for
+the wrong base; rebuild it. The exception is a framework from the "absolute
+base" table in `frameworks.md`, whose assets must begin with `/<sitename>/`.
 
 For raw HTML processed by `fix-paths-for-subpath-hosting`, inspect its own source
 files for remaining root-relative paths:
@@ -143,7 +139,7 @@ $Headers = @{
     'X-Skill-Version' = '<installed skill version>'
 }
 Invoke-WebRequest -UseBasicParsing -Method Post `
-    -Uri 'https://simple-host.example.com/api/collaboration/sites/<owner>/<sitename>' `
+    -Uri '{{BASE_URL}}/api/collaboration/sites/<owner>/<sitename>' `
     -Headers $Headers -ContentType 'application/zip' -InFile $Zip
 ```
 
@@ -157,9 +153,9 @@ collaboration route and retained `If-Match` described in `collaboration.md`.
 
 ## Visibility
 
-New sites default to unlisted. The canonical direct URL works either way. The
-owner or a member of the owning team may change discovery visibility; an editor
-may not:
+New sites default to unlisted: not in the company showcase, but open to any
+signed-in colleague with the link. The owner or a member of the owning team may
+change the listing; an editor may not:
 
 ```http
 POST /api/collaboration/sites/<owner>/<sitename>/visibility
@@ -170,8 +166,8 @@ Content-Type: application/json
 {"public":true}
 ```
 
-`public=true` makes the active HTML eligible for Showcase and public search after
-asynchronous indexing. `public=false` excludes it from new search immediately.
+`public=true` makes the active HTML eligible for the company showcase and search
+after asynchronous indexing. `public=false` excludes it from new search immediately.
 Search returns at most one best active page per site.
 
 ## Handle responses
@@ -195,23 +191,14 @@ the end of verification.
 ## Post-upload verification
 
 Open the `url` from the upload response, and report that exact value. Do not
-compose it. Today it has one of the two shapes below, and which one the server
-returns depends on the host the request went to:
-
-```text
-https://simple-host.example.com/sites/<owner_username>/<sitename>/
-https://<owner-label>.simple-host.example.com/<sitename>/
-```
-
-Both serve the same site, and a build compiled for the long path works at either.
+compose it.
 
 Confirm:
 
 1. The entrypoint returns success and renders expected content.
-2. JavaScript, CSS, fonts, images, chunks, and navigation load under the canonical
-   subpath, with no root-level asset 404s.
+2. JavaScript, CSS, fonts, images, chunks, and navigation load, with no asset
+   404s.
 3. The deployed site behavior matches the intended local build.
 
-If root asset paths 404, rebuild with the correct framework base. If source was
-uploaded, upload the build output. If casing differs, fix it and rebuild. If the
-site name changed after building, rebuild for the final canonical base path.
+If asset paths 404, rebuild with relative paths. If source was uploaded, upload
+the build output. If casing differs, fix it and rebuild.

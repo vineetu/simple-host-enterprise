@@ -26,7 +26,7 @@ set -u
 BASE="${BASE:?set BASE to the base hostname}"
 CLUSTER_CONTEXT="${CLUSTER_CONTEXT:-docker-desktop}"
 NAMESPACE="${NAMESPACE:-simple-host}"
-SKILL_VERSION="${SKILL_VERSION:-0.9.0}"
+SKILL_VERSION="${SKILL_VERSION:-0.10.0}"
 DEX_HOST="dex.simple-host.svc.cluster.local"
 DEX_PORT="5556"
 

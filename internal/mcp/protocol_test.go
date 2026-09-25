@@ -20,7 +20,7 @@ func echoUpstream() http.Handler {
 	})
 }
 
-func testServer() *Server { return NewServer(echoUpstream(), "simple-host", "0.9.0") }
+func testServer() *Server { return NewServer(echoUpstream(), "simple-host", "0.10.0") }
 
 // post sends one message with the headers a conforming client would send.
 func post(t *testing.T, s *Server, body string, headers map[string]string) *httptest.ResponseRecorder {
@@ -416,7 +416,7 @@ func TestStructuredContentIsAlwaysAnObject(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`[{"version_number":2},{"version_number":1}]`))
 	})
-	s := NewServer(arrayUpstream, "simple-host", "0.9.0")
+	s := NewServer(arrayUpstream, "simple-host", "0.10.0")
 	rec := post(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_site_versions","arguments":{"site":"d"},`+meta+`}}`,
 		modern("tools/call", "list_site_versions"))
 
