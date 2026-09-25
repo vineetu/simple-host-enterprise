@@ -184,6 +184,10 @@ background-image: url('../images/bg.png');
 
 ### 4. Service Workers
 
+Simple Host refuses to serve service-worker scripts, so a site that registers one
+should drop the registration instead of fixing its paths. The notes below apply
+only to ordinary web workers and to sites hosted elsewhere.
+
 Service workers are a special case because they use root-relative paths for caching and scope registration.
 
 **In the service worker file itself** (typically `sw.js` at depth 0), convert cached asset paths:

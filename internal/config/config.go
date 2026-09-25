@@ -359,7 +359,13 @@ func Load() (Config, error) {
 		MaxSiteCount: assetMaxSiteCount,
 	}
 
-	cfg.TrustedProxies, err = parseTrustedProxies(os.Getenv("TRUSTED_PROXY_CIDRS"))
+	trusted, set := os.LookupEnv("TRUSTED_PROXY_CIDRS")
+	if !set {
+		// Unset means the usual in-cluster case: the ingress controller sits
+		// on a private address. Set it (even to "") to override.
+		trusted = defaultTrustedProxies
+	}
+	cfg.TrustedProxies, err = parseTrustedProxies(trusted)
 	if err != nil {
 		return Config{}, fmt.Errorf("TRUSTED_PROXY_CIDRS: %w", err)
 	}
@@ -432,6 +438,10 @@ func Load() (Config, error) {
 
 // parseTrustedProxies reads a comma-separated list of CIDRs (a bare address
 // counts as a single-address prefix).
+// defaultTrustedProxies are the private and carrier-grade NAT ranges an
+// ingress controller or cloud load balancer reaches the pod from.
+const defaultTrustedProxies = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,fc00::/7"
+
 func parseTrustedProxies(raw string) ([]netip.Prefix, error) {
 	var out []netip.Prefix
 	for _, item := range strings.Split(raw, ",") {

@@ -257,6 +257,8 @@ configuration.
   publishing it.
 - Static files only: no PHP, Node/Python/Go server, SSR runtime, or uploaded code
   execution.
+- No service workers: the server refuses to serve a service-worker script, so
+  don't build offline/PWA caching. Ordinary web workers are fine.
 - Archive limits: 100 MiB compressed request, 500 MiB per regular file and in
   aggregate after extraction, at most 50,000 entries, 32 path components, 1,024
   bytes per path, and 255 bytes per component. Symlinks and special files fail.
