@@ -52,6 +52,7 @@ shell.
 | `SECURE_MODE` | No | `false` | Must parse as a bool. When `true`, requires `PUBLIC_BASE_URL` to be `https` and `HTTPS_REDIRECT_PORT` to differ from `PORT`. |
 | `PORT` | No | `8080` | none |
 | `HTTPS_REDIRECT_PORT` | No | `8081` | Must differ from `PORT` when `SECURE_MODE=true`. |
+| `METRICS_PORT` | No | `9090` | Port of the separate `/metrics` listener; not exposed by the Service or Ingress (`docs/install.md` section 12). |
 | `SITE_DIR` | No | `/mnt/data/sites` | none |
 | `RESERVED_LABELS` | No | none (empty) | Comma-separated; extends the built-in reserved-label set (`www`, `api`, `admin`, `sites`, `mcp`, `docs`, `auth`, `login`, `mail`, `cdn`, `status`, `app`, and the rest — design 7.1, `internal/handler/names.go`) with installation-specific hostnames that must never belong to an account or a site. Checked at account and site creation, and (Phase 2) any label containing `--` anywhere is refused outright, independent of this list, since that shape is reserved for a restricted site's own hostname (`<owner>--<site>.<base>`, design 5.2a). |
 
@@ -59,7 +60,7 @@ shell.
 
 | Variable | Required | Default | Refusal it triggers when set wrong |
 |---|---|---|---|
-| `OIDC_ISSUER` | Yes | none | Discovery and JWKS are fetched from this issuer at startup; sign-in fails if it is unreachable or its metadata does not match. |
+| `OIDC_ISSUER` | Yes | none | Discovery is fetched from this issuer at startup; if it is unreachable or its metadata does not match, the server exits and the pod crash-loops (it does not start and retry). |
 | `OIDC_CLIENT_ID` | Yes | none | none at startup; the provider refuses the authorization request if wrong. |
 | `OIDC_CLIENT_SECRET` | Yes | none | none at startup; token exchange fails if wrong. Belongs in a Secret, never in `config.env`. |
 | `OIDC_SCOPES` | No | `openid email profile` | Space-separated. |
@@ -94,6 +95,7 @@ Either `DB_DSN` (a complete URL) or the four parts below, not a mix.
 | `DB_SSLMODE` | No | `verify-full` | Anything other than `verify-full` is refused unless `DB_INSECURE_ALLOWED=true`. |
 | `DB_SSL_ROOT_CERT` | Required in practice with `sslmode=verify-full` | none | `verify-full` with no root certificate configured is refused unless `DB_INSECURE_ALLOWED=true`. Renamed from `DB_SSLROOTCERT` after Phase 0; see that phase's implementation record if you find the old name in an older note. |
 | `DB_INSECURE_ALLOWED` | No | `false` | Bypasses both TLS refusals above. For a local evaluation cluster only — never set on a real install. |
+| `DB_INCLUSTER_EVALUATION` | No | `false` | Set by `deploy/components/postgres-incluster`. The server logs a warning at every start: that database has no backup. Evaluation only. |
 | `DB_APP_PASSWORD` | Yes, whenever `migrate` runs | none | Read by `config.LoadAppRolePassword()`. The `migrate` subcommand sets this as the least-privilege application role's login password on every run, applied migrations or not, so a rotated value takes effect without a schema change. A role granted in a migration with no password to give it would otherwise sit unusable. |
 
 ## Assets (design.md 7.3)
@@ -173,6 +175,10 @@ here; do not set them.
 Neither overlay sets the Assets or Retention variables above; both are
 left at their code defaults unless an installation overrides them.
 
-`docs/cloud/aws.md`, `gke.md`, and `aks.md` show where the database, bucket,
-and certificate values for a specific cloud's managed services map onto
-this table.
+Editing `config.env` or `secrets.env` and re-applying does not restart the
+pods (the generated ConfigMap and Secret keep fixed names). Run
+`kubectl -n <namespace> rollout restart deploy/simple-host` afterwards.
+
+`docs/cloud/aws.md`, `gcp.md`, `azure.md`, and `oci.md` show where the
+database, bucket, and certificate values for a specific cloud's managed
+services map onto this table.

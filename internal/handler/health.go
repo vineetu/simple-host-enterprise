@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -702,23 +705,46 @@ func requireSchemaReady(ready bool) error {
 	return nil
 }
 
+// readinessCacheTTL bounds how often /readyz touches the database. The route
+// answers on every host (the host gate lets probes through), so without it
+// anyone on the internet could make the server run requiredSchemaProbe, a
+// catalog query, as fast as they can send requests.
+const readinessCacheTTL = 10 * time.Second
+
 func readinessHandler(
 	ping func(context.Context) error,
 	checkSchema func(context.Context) error,
 ) http.HandlerFunc {
+	var (
+		mu      sync.Mutex
+		checked time.Time
+		lastErr error
+	)
 	return func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-		defer cancel()
+		mu.Lock()
+		if checked.IsZero() || time.Since(checked) >= readinessCacheTTL {
+			// Detached from the caller: a client that hangs up must not
+			// cache a context-canceled failure for everyone else.
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Second)
+			err := ping(ctx)
+			if err != nil {
+				err = fmt.Errorf("database: %w", err)
+			} else if schemaErr := checkSchema(ctx); schemaErr != nil {
+				err = fmt.Errorf("schema: %w", schemaErr)
+			}
+			cancel()
+			if err != nil {
+				log.Printf("readyz: not ready: %v", err)
+			}
+			checked, lastErr = time.Now(), err
+		}
+		err := lastErr
+		mu.Unlock()
 
-		if err := ping(ctx); err != nil {
+		if err != nil {
 			writeJSON(w, http.StatusServiceUnavailable, healthResponse{Status: "unready"})
 			return
 		}
-		if err := checkSchema(ctx); err != nil {
-			writeJSON(w, http.StatusServiceUnavailable, healthResponse{Status: "unready"})
-			return
-		}
-
 		writeJSON(w, http.StatusOK, healthResponse{Status: "ok"})
 	}
 }

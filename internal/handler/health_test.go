@@ -52,6 +52,24 @@ func TestReadinessHandlerRequiresDatabaseAndSchema(t *testing.T) {
 	}
 }
 
+func TestReadinessHandlerCachesTheResult(t *testing.T) {
+	checks := 0
+	handler := readinessHandler(
+		func(context.Context) error { return nil },
+		func(context.Context) error { checks++; return nil },
+	)
+	for i := 0; i < 5; i++ {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", response.Code)
+		}
+	}
+	if checks != 1 {
+		t.Fatalf("schema probe ran %d times within the cache window, want 1", checks)
+	}
+}
+
 func TestReadinessHandlerRejectsFalseSchemaProbe(t *testing.T) {
 	handler := readinessHandler(
 		func(context.Context) error { return nil },

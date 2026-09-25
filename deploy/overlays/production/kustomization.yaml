@@ -23,8 +23,8 @@ secretGenerator:
     files: [ca.crt=db-ca.crt]
 
 images:
-  - name: simple-host
-    newName: ghcr.io/example/simple-host
+  - name: ghcr.io/vineetu/simple-host-enterprise
+    newName: ghcr.io/vineetu/simple-host-enterprise
     digest: sha256:REPLACE_WITH_THE_SCANNED_IMAGE_DIGEST
 
 patches:

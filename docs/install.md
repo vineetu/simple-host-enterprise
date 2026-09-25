@@ -205,7 +205,8 @@ supply.
    `sha256:8991d5e9fc8c33e69981c4fa25ca5b3f5964f4087ed10c1074d7016623939489`.
    Or push the image you built (`make image`, or your own CI build of the
    same `Dockerfile`) to a registry your cluster can pull from, scan it,
-   and resolve its immutable digest.
+   and resolve its immutable digest. Verify a release image's signature and
+   read its SBOM before pinning it (`INSTALL.md` section 3).
 2. Copy the example files and fill them in:
 
    ```sh
@@ -220,7 +221,8 @@ supply.
    database owner and application-role passwords, and (if your bucket does
    not use workload-identity credentials) an access key pair. Both files
    are gitignored once created; `docs/configuration.md` documents every
-   variable in both.
+   variable in both. Pods do not restart when these files change: after
+   re-applying an edit, run `kubectl -n simple-host rollout restart deploy/simple-host`.
 3. Place your managed database's CA bundle at
    `deploy/overlays/byo/db-ca.crt` — there is no `.example` for this file,
    since it is provider-specific and not a value you type in. The startup
@@ -237,9 +239,16 @@ supply.
    cluster has no IngressClass at all (`INGRESS=nginx` forces it,
    `INGRESS=none` never touches the controller), so an existing ALB, GKE,
    Traefik or AGIC controller is never joined by a second one.
+   ingress-nginx is retired upstream: best-effort maintenance ended in March
+   2026, with no further releases or security fixes. On a real cluster,
+   prefer the cloud's managed ingress (AWS Load Balancer Controller, GKE
+   Ingress or Gateway, the AKS application routing add-on, the OCI native
+   ingress controller); section 1 (Cluster & ingress) of
+   `docs/cloud/<your cloud>.md`.
 5. Edit `deploy/overlays/byo/kustomization.yaml`'s `images:` entry to point
    at the image and digest from step 1 (`newName` and `digest`), replacing
-   `sha256:REPLACE_WITH_THE_SCANNED_IMAGE_DIGEST`.
+   the base's placeholder `sha256:REPLACE_WITH_THE_RELEASE_DIGEST`, which
+   `make preflight` refuses.
 6. Point a wildcard DNS record at your ingress controller's address for
    both `<base>` and `*.<base>`.
 7. Apply:
@@ -463,11 +472,11 @@ anyone who can read the bucket but not your Kubernetes Secrets.
 Restore a version into a (typically new) site, from inside a running pod:
 
 ```sh
-kubectl -n simple-host exec deploy/simple-host -- \
-  simple-host restore -owner <owner> -site <site> -version <N> \
-  -target-owner <owner> -target-site <site>-restored \
-  -assets -set-current=true
+kubectl -n simple-host exec deploy/simple-host -- /simple-host restore -owner <owner> -site <site> -version <N> -target-owner <owner> -target-site <site>-restored -assets -set-current=true
 ```
+
+The image is distroless with no shell, so name the binary by its absolute
+path, `/simple-host`.
 
 `-assets` also restores that site's `assets/` directory from the bucket;
 omit `-target-owner`/`-target-site` to restore in place over the original
@@ -479,7 +488,7 @@ Assets are synced to the bucket on a schedule by the `backup-assets`
 CronJob (`deploy/base/backup-assets-cronjob.yaml`); run it by hand with:
 
 ```sh
-kubectl -n simple-host exec deploy/simple-host -- simple-host backup-assets -dry-run
+kubectl -n simple-host exec deploy/simple-host -- /simple-host backup-assets -dry-run
 ```
 
 to see which sites it would process without uploading anything, or without
@@ -495,31 +504,44 @@ S3-compatible stores generally; a managed bucket (S3, Cloud Storage, Azure
 Blob through a compatible front) needs no equivalent step.
 
 The state document itself — the per-site JSON store — lives only in
-Postgres, so its backup is your Postgres backup and PITR policy, not
-anything this package copies to the bucket. Set your managed Postgres's
-PITR retention deliberately; see `docs/cloud/` for the per-cloud knob.
+Postgres, along with accounts, keys and the audit trail. Nothing in this
+package backs up Postgres. A real install requires managed Postgres with
+point-in-time recovery (7 days' retention or more recommended); see section
+3 (Postgres) of `docs/cloud/<your cloud>.md` for the per-cloud setting.
+`deploy/components/postgres-incluster` is for evaluation only: `make
+preflight` refuses it in any overlay other than `deploy/overlays/local`
+(override with `ALLOW_INCLUSTER_POSTGRES=1`), and the server logs a warning
+at every start while it runs against it.
 
 ## 10. Upgrade
 
-A deploy is: build the image in CI, scan it, push it by digest, update the
-overlay's `images:` entry (or your CI's equivalent), `kubectl apply` the
-rendered overlay, and watch the rollout. Rollback is the previous digest —
-**only** under expand/contract migration discipline: a release may add
-columns and tables, and may stop reading a column, but drops it one
-release later, never in the same release it stops using it.
+A deploy is: pick the release (`CHANGELOG.md` lists them), resolve and
+verify its digest, update the overlay's `images:` entry (or your CI's
+equivalent), `kubectl apply` the rendered overlay, and watch the rollout.
+`kubectl -n simple-host exec deploy/simple-host -- /simple-host version`
+prints the running release, commit and schema
+(`simple-host v1.1.0 (commit <sha>, schema 0028)`); the server logs the
+same line at startup.
 
-The binary itself enforces the forward half of this: at startup, it refuses
-to run against a `schema_migrations` table that holds a version newer than
-the newest migration it embeds, failing at startup with the version
-mismatch named rather than failing confusingly at the first query that
-touches a column it does not expect. This means an old image can never be
-rolled back onto a schema a newer release has already contracted — if a
-a migration is one-way, its rollback path is "restore the previous schema
-from your Postgres PITR window," not "redeploy the old image."
+The migrate init container applies each migration file and its
+`schema_migrations` row in one transaction, so a failed file leaves nothing
+half-applied. It takes a Postgres advisory lock and waits up to `-lock-wait`
+(default 5m) for another migrator; each statement runs with
+`lock_timeout=15s` and `statement_timeout=10min`, so a migration that
+cannot get its locks fails and the init container retries, rather than
+blocking live traffic. `/simple-host migrate -status` shows what is pending.
 
-A migration that drops or rewrites a column is one-way. Read the files added
-since the version you are on, in `internal/migrate/sql/`, before planning a
-rollback — they are numbered and each one says what it does.
+**Rollback.** `kubectl -n simple-host rollout undo deploy/simple-host`, or set
+the previous digest in the overlay and re-apply. A migration file that
+begins with `-- simple-host: backward-compatible` is additive only (new
+tables, columns or indexes older code ignores). From v1.1.0 on, a server
+starts against a schema newer than it knows only if every newer migration
+carries that marker; otherwise it refuses with `schema version N is newer
+than this binary knows`. v1.0.0 has the strict check, so rolling back to
+v1.0.0 after any upgrade that added a migration is not possible. When a
+rollback is refused, either roll forward (fix and ship a new image), or
+restore the database with your managed PITR to a time before the upgrade,
+which loses every write since then.
 
 ### If you use a private registry
 
@@ -535,6 +557,12 @@ cluster, where the image is loaded into the node and never pulled at all.
 
 
 ## 11. Troubleshooting
+
+- **The pod exits at start and crash-loops with `discover OIDC provider`.**
+  The server fetches the issuer's discovery document at startup and exits
+  if it cannot; it does not start and retry. Check the issuer from inside
+  the cluster (`INSTALL.md` section 1), then fix the egress path or
+  `OIDC_ISSUER`.
 
 - **`mkcert -install` prompts for a password and the run is not
   interactive.** Expected — see the callout in section 2. Run it once by
@@ -601,18 +629,31 @@ cluster, where the image is loaded into the node and never pulled at all.
   `docs/security-review.md`'s Live verification section as a
   worked example.
 
-## Not yet covered here
+## 12. Monitoring
 
-- The full pen-test list (design section 12), which Phase 7 runs against
-  a live local overlay; `test/pentest` already covers Phases 1-4's items
-  in isolation (build tag `pentest`; see that package's own doc comment
-  for the environment variables it needs) but has not yet been run as one
-  paced CI suite.
-- ~~A cold, start-to-finish run of this guide on a genuinely fresh
-  cluster, by someone with no other context~~ — done in Phase 7: `make
-  local-down` then every command in sections 1-2 literally, on a stranger's
-  first run, reached a signed-in dashboard with no guide defect found; see
-  `docs/security-review.md section 3`. The one interactive step
-  (`mkcert -install`'s keychain password) has no non-interactive
-  workaround; this run used the section-2 callout's own alternative
-  (issue certificates without installing the root) rather than a guide fix.
+The server exposes Prometheus metrics at `GET /metrics` on its own
+listener, port 9090 (`METRICS_PORT`; container port `metrics`). The Service
+and the Ingress do not expose it: scrape the pods directly, with a
+PodMonitor, pod annotations, or any in-cluster scraper.
+
+| Metric | What it is |
+|---|---|
+| `simplehost_http_requests_total{code}` | Requests by class: `2xx`, `3xx`, `4xx`, `5xx` |
+| `simplehost_http_request_duration_seconds` | Request latency histogram |
+| `simplehost_db_connections_open`, `simplehost_db_connections_in_use` | Database pool |
+| `simplehost_db_wait_count_total`, `simplehost_db_wait_seconds_total` | Waits for a free connection |
+| `simplehost_build_info{version,commit,schema}` | The running release |
+
+Probes: `/healthz` is liveness and checks nothing else. `/readyz` checks
+that the database is reachable and the schema is current; its result is
+cached for 10 seconds, and a failure is logged as `readyz: not ready: ...`.
+
+No alerting stack ships with the package. What to watch:
+
+- Pods not Ready, restarts, `CrashLoopBackOff`.
+- Failed CronJob runs (`kube_job_status_failed`), the prune job included.
+- The 5xx rate from `simplehost_http_requests_total`.
+- Certificate expiry (`certmanager_certificate_expiration_timestamp_seconds`,
+  or your cloud's managed certificate).
+- `simplehost_db_connections_in_use` near the pool limit.
+- The managed database's storage and PITR status.

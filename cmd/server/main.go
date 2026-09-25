@@ -23,6 +23,7 @@ import (
 	"github.com/vsriram/simple-host/internal/config"
 	"github.com/vsriram/simple-host/internal/handler"
 	"github.com/vsriram/simple-host/internal/mcp"
+	"github.com/vsriram/simple-host/internal/metrics"
 	"github.com/vsriram/simple-host/internal/migrate"
 	"github.com/vsriram/simple-host/internal/oidc"
 	"github.com/vsriram/simple-host/internal/reqlog"
@@ -71,6 +72,7 @@ func main() {
 }
 
 func run() (runErr error) {
+	log.Print(versionString())
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -86,6 +88,9 @@ func run() (runErr error) {
 	if err := migrate.Check(context.Background(), database); err != nil {
 		database.Close()
 		return fmt.Errorf("schema check: %w", err)
+	}
+	if cfg.DBInClusterEvaluation {
+		log.Print("WARNING: the database is the in-cluster evaluation Postgres (deploy/components/postgres-incluster). Nothing backs it up and it has no failover; use a managed Postgres with point-in-time recovery for anything real.")
 	}
 	resources := applicationResources{
 		database:               database,
@@ -235,8 +240,22 @@ func run() (runErr error) {
 	// id and every request, including one the gate refuses, is on record.
 	requestLog := reqlog.Middleware(slog.New(slog.NewJSONHandler(os.Stdout, nil)), reqlog.ProbePaths)
 	hostGate := handler.NewHostGate(hosts, siteFiles, database, signingKeys, negativeSessionCache, handoffHandler, siteAPIHandler, authMW, cfg.PublicBaseURL)
-	applicationServer := newApplicationServer(":"+cfg.Port, requestLog(handler.SecurityHeaders(hostGate(mux), cfg.SecureMode, hosts)))
-	servers := []managedServer{manageHTTPServer("application", applicationServer)}
+	requestMetrics := metrics.New()
+	applicationServer := newApplicationServer(":"+cfg.Port, requestMetrics.Middleware(requestLog(handler.SecurityHeaders(hostGate(mux), cfg.SecureMode, hosts))))
+	schemaVersion := "unknown"
+	if latest, err := migrate.Latest(); err == nil {
+		schemaVersion = fmt.Sprintf("%04d", latest)
+	}
+	// Its own listener, answering /metrics and nothing else. The Service
+	// routes only the application port, so this is reachable in-cluster by
+	// a scraper that targets the pod, never through the Ingress. The redirect
+	// server's short timeouts suit it.
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("GET /metrics", requestMetrics.Handler(database, metrics.Build{Version: version, Commit: commit, Schema: schemaVersion}))
+	servers := []managedServer{
+		manageHTTPServer("application", applicationServer),
+		manageHTTPServer("metrics", newRedirectServer(":"+cfg.MetricsPort, metricsMux)),
+	}
 	if cfg.SecureMode {
 		redirectHandler, err := newHTTPSRedirectHandler(cfg.PublicBaseURL, hosts)
 		if err != nil {

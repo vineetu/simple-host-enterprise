@@ -16,4 +16,3 @@ deploy/overlays/production/config.env
 
 # Editor / OS noise
 .DS_Store
-deploy/overlays/azure/secrets.env

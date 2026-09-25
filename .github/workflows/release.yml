@@ -45,6 +45,9 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
+          # No floating tag: an install pins a digest, and a `latest` that moves
+          # under it is exactly what the digest exists to prevent.
+          flavor: latest=false
           tags: |
             type=ref,event=tag
             type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
@@ -60,6 +63,17 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           provenance: true
           sbom: true
+          build-args: |
+            VERSION=${{ github.ref_type == 'tag' && github.ref_name || inputs.tag || github.sha }}
+            COMMIT=${{ github.sha }}
+
+      # Keyless: the signature is bound to this workflow's GitHub OIDC
+      # identity, so `cosign verify` proves the image came from this
+      # repository's release workflow and not merely from someone with push
+      # access to the registry. INSTALL.md has the verify command.
+      - uses: sigstore/cosign-installer@v3
+      - name: Sign the image
+        run: cosign sign --yes ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
 
       # The digest is what the overlays pin. Printing it in the summary means
       # an installer copies it from the run rather than hunting in a registry.
@@ -71,7 +85,7 @@ jobs:
           echo '' >> $GITHUB_STEP_SUMMARY
           echo '```yaml' >> $GITHUB_STEP_SUMMARY
           echo 'images:' >> $GITHUB_STEP_SUMMARY
-          echo '  - name: simple-host' >> $GITHUB_STEP_SUMMARY
+          echo '  - name: ghcr.io/${{ github.repository }}' >> $GITHUB_STEP_SUMMARY
           echo '    newName: ghcr.io/${{ github.repository }}' >> $GITHUB_STEP_SUMMARY
           echo '    digest: ${{ steps.build.outputs.digest }}' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY

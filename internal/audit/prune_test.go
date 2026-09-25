@@ -77,7 +77,7 @@ func openPruneTestDB(t *testing.T) *sql.DB {
 	t.Cleanup(func() { database.Close() })
 
 	ctx := context.Background()
-	if _, err := migrate.Apply(ctx, database, nil); err != nil {
+	if _, err := migrate.Apply(ctx, database, 0, nil); err != nil {
 		t.Fatalf("apply migrations: %v", err)
 	}
 	return database

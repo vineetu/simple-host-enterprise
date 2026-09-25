@@ -10,6 +10,16 @@ kind: Component
 # Credentials come from the same simple-host-config and simple-host-secrets
 # the application reads (DB_USER, DB_NAME, DB_PASSWORD), so there is one
 # source of truth for them.
+
+# The server logs a warning at every start when this is set, and `make
+# preflight` refuses this component outside the local overlay: nothing backs
+# this database up.
+configMapGenerator:
+  - name: simple-host-config
+    behavior: merge
+    literals:
+      - DB_INCLUSTER_EVALUATION=true
+
 resources:
   - certificates.yaml
   - statefulset.yaml

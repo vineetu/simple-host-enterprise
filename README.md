@@ -51,7 +51,8 @@ accounts (`admin@example.com` / `person@example.com`) to sign in with; see
 
 ## Layout
 
-- `cmd/server` — the binary. `simple-host` serves; `simple-host migrate`
+- `cmd/server` — the binary. `simple-host` serves; `simple-host version`
+  prints the release, commit and schema; `simple-host migrate`
   applies the schema and is what the pod's init container runs;
   `simple-host restore` rebuilds a site version (and its assets) from the
   bucket; `simple-host backup-assets` is what its CronJob runs to sync
@@ -66,7 +67,7 @@ accounts (`admin@example.com` / `person@example.com`) to sign in with; see
   `reqlog` the request log, `mcp` the tool adapter.
 - `deploy/base` — the application's manifests, including the
   `backup-assets` and `prune` CronJobs. `deploy/components` add an
-  in-cluster Postgres, MinIO, or Dex. `deploy/overlays` are environments:
+  in-cluster Postgres (evaluation only), MinIO, or Dex. `deploy/overlays` are environments:
   `local` is complete, `byo` / `staging` / `production` are templates for
   managed services.
 - `simple-host-plugin/` — the skill bundle agents install.
@@ -114,7 +115,8 @@ make vuln      # govulncheck
 - `docs/security-review.md` — threat model, controls matrix, pen-test list.
 - `docs/site-isolation.md` — why sites under one owner share an origin, and the recorded path to per-page isolation if it is ever needed
 - `docs/cloud/` — per-cloud checklists for the platform pieces a real
-  install needs (AWS, GKE, AKS, Oracle Cloud).
+  install needs (AWS, GCP, Azure, Oracle Cloud).
+- `CHANGELOG.md` — the releases.
 
 ## Licence
 

@@ -8,16 +8,18 @@
 FROM --platform=$BUILDPLATFORM golang:1.25 AS build
 ARG TARGETOS
 ARG TARGETARCH
+ARG VERSION=dev
+ARG COMMIT=unknown
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
-    go build -trimpath -ldflags="-s -w" -o /out/simple-host ./cmd/server
+    go build -trimpath -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" -o /out/simple-host ./cmd/server
 
 FROM gcr.io/distroless/static:nonroot
 # ca-certificates ships in distroless; the database CA is mounted, not baked.
 COPY --from=build /out/simple-host /simple-host
 USER 65532:65532
-EXPOSE 8080 8081
+EXPOSE 8080 8081 9090
 ENTRYPOINT ["/simple-host"]

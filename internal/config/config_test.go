@@ -407,6 +407,17 @@ func TestLoadRejectsInvalidSecurityConfiguration(t *testing.T) {
 		}
 	})
 
+	t.Run("metrics port shares a listener", func(t *testing.T) {
+		for _, port := range []string{"8080", "8081"} {
+			completeEnv(t)
+			t.Setenv("METRICS_PORT", port)
+			_, err := Load()
+			if err == nil || !strings.Contains(err.Error(), "METRICS_PORT") {
+				t.Fatalf("METRICS_PORT=%s: Load() error = %v, want it refused", port, err)
+			}
+		}
+	})
+
 	t.Run("plain http bucket endpoint", func(t *testing.T) {
 		completeEnv(t)
 		t.Setenv("BACKUP_STORAGE_ENDPOINT", "http://minio.simple-host.svc:9000")

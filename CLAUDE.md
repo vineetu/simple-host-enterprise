@@ -43,9 +43,12 @@ exists, what deviated from the plan, and what is deliberately unfinished.
   TLS is weaker than the design requires, unless the local-evaluation
   override envs are set (`DB_INSECURE_ALLOWED`, `BACKUP_STORAGE_INSECURE_ALLOWED`).
 - `internal/migrate/sql/` is the schema, applied in file order by
-  `simple-host migrate`; the server refuses to start unless the database
-  holds exactly the versions the binary embeds. A release that drops a
-  column does so one release after the code stopped reading it. Migration
+  `simple-host migrate`; the server refuses to start against a schema newer
+  than it embeds unless every newer applied migration begins with
+  `-- simple-host: backward-compatible` (additive only: tables, columns or
+  indexes older code ignores), which is what makes a rollback possible. A
+  release that drops a column does so one release after the code stopped
+  reading it. Migration
   0020 creates `simplehost_app`, the least-privilege role the server
   connects as; `migrate` sets its password from `DB_APP_PASSWORD` every run.
 - `internal/handler/host_gate.go` decides per hostname what the router may

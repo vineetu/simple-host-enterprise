@@ -31,8 +31,12 @@ CERT_MANAGER_URL  := https://github.com/cert-manager/cert-manager/releases/downl
 
 .PHONY: build test test-db vuln image local local-tools local-third-party local-certs local-secrets local-image-load local-up local-down smoke pentest render
 
+# Stamped into the binary; `simple-host version` and the first log line show it.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT  ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+
 build:
-	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/simple-host ./cmd/server
+	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o bin/simple-host ./cmd/server
 
 test:
 	go test ./...
@@ -50,7 +54,7 @@ vuln:
 	govulncheck ./...
 
 image:
-	docker build -t simple-host:local .
+	docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) -t simple-host:local .
 
 render:
 	kustomize build $(LOCAL_OVERLAY) >/dev/null && echo "local overlay renders"
@@ -168,6 +172,9 @@ pentest:
 
 OVERLAY   ?= deploy/overlays/byo
 KUSTOMIZE ?= kustomize
+ALLOW_INCLUSTER_POSTGRES ?=
+# The namespace the chosen overlay installs into (staging: simple-host-stage).
+INSTALL_NAMESPACE = $(shell sed -n 's/^namespace: *//p' "$(OVERLAY)/kustomization.yaml" 2>/dev/null | head -1)
 # Pass --context only when there is one; an empty flag is a hard error.
 INSTALL_KUBECTL := kubectl $(if $(INSTALL_CONTEXT),--context $(INSTALL_CONTEXT))
 
@@ -231,6 +238,14 @@ preflight:
 	if grep -q "REPLACE_WITH" "$(OVERLAY)/kustomization.yaml" 2>/dev/null; then \
 	  echo "FAIL  $(OVERLAY)/kustomization.yaml still has a REPLACE_WITH placeholder."; \
 	  echo "      Published images and their digests are on the repository's releases page."; fail=1; fi; \
+	if $(KUSTOMIZE) build "$(OVERLAY)" 2>/dev/null | grep -q "image: .*REPLACE_WITH"; then \
+	  echo "FAIL  the rendered image is still the base's placeholder digest; set images: in $(OVERLAY)/kustomization.yaml"; fail=1; fi; \
+	if $(KUSTOMIZE) build "$(OVERLAY)" 2>/dev/null | grep -q "DB_INCLUSTER_EVALUATION"; then \
+	  if [ "$(OVERLAY)" = "$(LOCAL_OVERLAY)" ] || [ "$(ALLOW_INCLUSTER_POSTGRES)" = "1" ]; then \
+	    echo "WARN  in-cluster evaluation Postgres: nothing backs it up. Use a managed Postgres with point-in-time recovery for anything real."; \
+	  else \
+	    echo "FAIL  $(OVERLAY) includes components/postgres-incluster, which nothing backs up."; \
+	    echo "      Use a managed Postgres with point-in-time recovery, or set ALLOW_INCLUSTER_POSTGRES=1 for a throwaway install."; fail=1; fi; fi; \
 	for f in config.env ingress-patch.yaml; do \
 	  [ -f "$(OVERLAY)/$$f" ] || continue; \
 	  hits=$$(grep -nE '^[^#]*(REPLACE_WITH|REPLACE_ME|example\.com|example-idp)' "$(OVERLAY)/$$f" | cut -d: -f1 | tr '\n' ' '); \
@@ -251,10 +266,13 @@ preflight:
 	       echo "      ImagePullBackOff — backups and audit pruning silently never run.";; \
 	  esac; fi; \
 	class=$$($(KUSTOMIZE) build "$(OVERLAY)" 2>/dev/null | sed -n 's/^ *ingressClassName: *//p' | tr -d '"' | head -1); \
+	annotated=$$($(KUSTOMIZE) build "$(OVERLAY)" 2>/dev/null | sed -n 's/^ *kubernetes.io\/ingress.class: *//p' | tr -d '"' | head -1); \
 	if avail=$$($(INSTALL_KUBECTL) get ingressclass -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.annotations.ingressclass\.kubernetes\.io/is-default-class}{" "}{end}' 2>/dev/null); then \
 	  names=$$(printf '%s' "$$avail" | sed 's/=[^ ]*//g; s/ *$$//'); \
 	  default=$$(printf '%s' "$$avail" | tr ' ' '\n' | sed -n 's/=true$$//p' | head -1); \
-	  if [ -z "$$names" ]; then \
+	  if [ -z "$$class" ] && [ -n "$$annotated" ]; then \
+	    echo "==> ingress class: $$annotated (kubernetes.io/ingress.class annotation, e.g. GKE)"; \
+	  elif [ -z "$$names" ]; then \
 	    echo "NOTE  the cluster has no IngressClass yet; make install adds ingress-nginx (INGRESS=auto)"; \
 	  elif [ -n "$$class" ]; then \
 	    case " $$names " in *" $$class "*) echo "==> ingress class: $$class";; \
@@ -276,6 +294,8 @@ preflight:
 .PHONY: install
 install: prereqs preflight
 	$(KUSTOMIZE) build "$(OVERLAY)" | $(INSTALL_KUBECTL) apply -f -
-	$(INSTALL_KUBECTL) -n $(NAMESPACE) rollout status deploy/simple-host --timeout=300s
-	@echo "==> installed. Once an admin has signed in and minted an API key on /dashboard, verify with:"
+	$(INSTALL_KUBECTL) -n $(or $(INSTALL_NAMESPACE),$(NAMESPACE)) rollout status deploy/simple-host --timeout=300s
+	@echo "==> installed. Next (INSTALL.md sections 7-9): wait until 'kubectl -n $(or $(INSTALL_NAMESPACE),$(NAMESPACE)) get certificate' shows READY True"
+	@echo "    (or your cloud's managed certificate is active) and https://<your base host>/readyz answers;"
+	@echo "    then an admin signs in, mints an API key on /dashboard, and you verify with:"
 	@echo "    make smoke BASE=https://<your base host> KEY_FILE=<file holding the key>"

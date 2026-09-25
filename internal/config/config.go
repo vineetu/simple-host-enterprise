@@ -20,6 +20,7 @@ const (
 	defaultSiteDir      = "/mnt/data/sites"
 	defaultPort         = "8080"
 	defaultRedirectPort = "8081"
+	defaultMetricsPort  = "9090"
 	defaultDBPort       = "5432"
 	defaultDBSSLMode    = "verify-full"
 	defaultBackupPrefix = "backups/"
@@ -68,13 +69,19 @@ const (
 )
 
 type Config struct {
-	DBDSN         string
-	SiteDir       string
-	Port          string
-	RedirectPort  string
+	DBDSN        string
+	SiteDir      string
+	Port         string
+	RedirectPort string
+	// MetricsPort serves /metrics on its own listener, which the Service and
+	// Ingress never expose.
+	MetricsPort   string
 	PublicBaseURL string
-	OIDC          OIDCConfig
-	Session       SessionConfig
+	// DBInClusterEvaluation is set by deploy/components/postgres-incluster:
+	// a single unbacked-up Postgres fit only for evaluation.
+	DBInClusterEvaluation bool
+	OIDC                  OIDCConfig
+	Session               SessionConfig
 	// ReservedLabels extends the built-in set in names.go with
 	// installation-specific hostnames that must never belong to an account,
 	// on top of the built-in set (design.md 7.1).
@@ -260,12 +267,14 @@ func Load() (Config, error) {
 
 	var need missing
 	cfg := Config{
-		SiteDir:        getEnvOrDefault("SITE_DIR", defaultSiteDir),
-		Port:           getEnvOrDefault("PORT", defaultPort),
-		RedirectPort:   getEnvOrDefault("HTTPS_REDIRECT_PORT", defaultRedirectPort),
-		PublicBaseURL:  need.require("PUBLIC_BASE_URL"),
-		ReservedLabels: splitLowerTrimmed(os.Getenv("RESERVED_LABELS")),
-		SecureMode:     secureMode,
+		SiteDir:               getEnvOrDefault("SITE_DIR", defaultSiteDir),
+		Port:                  getEnvOrDefault("PORT", defaultPort),
+		RedirectPort:          getEnvOrDefault("HTTPS_REDIRECT_PORT", defaultRedirectPort),
+		MetricsPort:           getEnvOrDefault("METRICS_PORT", defaultMetricsPort),
+		DBInClusterEvaluation: os.Getenv("DB_INCLUSTER_EVALUATION") == "true",
+		PublicBaseURL:         need.require("PUBLIC_BASE_URL"),
+		ReservedLabels:        splitLowerTrimmed(os.Getenv("RESERVED_LABELS")),
+		SecureMode:            secureMode,
 		Backup: BackupConfig{
 			Endpoint:        need.require("BACKUP_STORAGE_ENDPOINT"),
 			Region:          getEnvOrDefault("BACKUP_STORAGE_REGION", defaultBackupRegion),
@@ -365,6 +374,9 @@ func Load() (Config, error) {
 	cfg.PublicBaseURL = publicBaseURL
 	if cfg.SecureMode && cfg.RedirectPort == cfg.Port {
 		return Config{}, errors.New("HTTPS_REDIRECT_PORT must differ from PORT in secure mode")
+	}
+	if cfg.MetricsPort == cfg.Port || (cfg.SecureMode && cfg.MetricsPort == cfg.RedirectPort) {
+		return Config{}, errors.New("METRICS_PORT must differ from PORT and HTTPS_REDIRECT_PORT")
 	}
 	if err := validateBackupEndpoint(cfg.Backup); err != nil {
 		return Config{}, fmt.Errorf("BACKUP_STORAGE_ENDPOINT: %w", err)

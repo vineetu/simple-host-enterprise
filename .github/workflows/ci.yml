@@ -28,8 +28,8 @@ jobs:
             name=$(basename "$o")
             [ -f "$o/kustomization.yaml" ] || continue
             # Overlays legitimately require operator-supplied files. One with
-            # no .example of its own (azure, staging, production) is the byo
-            # shape, so byo's stands in.
+            # no .example of its own (staging, production) is the byo shape,
+            # so byo's stands in.
             for f in config.env secrets.env; do
               [ -f "$o/$f" ] && continue
               if [ -f "$o/$f.example" ]; then cp "$o/$f.example" "$o/$f"; else cp "deploy/overlays/byo/$f.example" "$o/$f"; fi
