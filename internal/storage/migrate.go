@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 )
@@ -11,6 +12,7 @@ import (
 // The helpers below serve the operator subcommands (restore and the one-time
 // migrate-storage move off the old volume). They work on Objects directly,
 // with no cache, and every upload is read back and checked before it counts.
+// They never overwrite an object that is already there.
 
 // CopyVersion copies one stored version to another site and version number,
 // server side.
@@ -55,42 +57,61 @@ func uploadVerifiedVersion(ctx context.Context, objects Objects, siteID string, 
 	if err != nil {
 		return err
 	}
+	// An object already at the key is verified, never replaced: after
+	// cutover it is live data (a re-run must not overwrite it or pile up
+	// bucket versions), and before cutover it is this command's own earlier
+	// upload.
+	verify := func() error {
+		stored, err := objects.Get(ctx, key, maxVersionObjectBytes)
+		if err != nil {
+			return err
+		}
+		got, err := scanVersionArchive(bytes.NewReader(stored), nil)
+		if err != nil {
+			return fmt.Errorf("stored %s: %w", key, err)
+		}
+		if got != want {
+			return fmt.Errorf("stored %s has %d files / %d bytes, want %d / %d", key, got.count, got.bytes, want.count, want.bytes)
+		}
+		return nil
+	}
+	err = verify()
+	if !errors.Is(err, ErrObjectNotFound) {
+		return err
+	}
 	if err := objects.Put(ctx, key, archive, "application/gzip"); err != nil {
 		return err
 	}
-	stored, err := objects.Get(ctx, key, maxVersionObjectBytes)
-	if err != nil {
-		return fmt.Errorf("read back %s: %w", key, err)
-	}
-	got, err := scanVersionArchive(bytes.NewReader(stored), nil)
-	if err != nil {
-		return fmt.Errorf("read back %s: %w", key, err)
-	}
-	if got != want {
-		return fmt.Errorf("read back %s: %d files / %d bytes, want %d / %d", key, got.count, got.bytes, want.count, want.bytes)
-	}
-	return nil
+	return verify()
 }
 
 // UploadAsset uploads one asset's bytes under its existing id after checking
 // them against the SHA-256 its row recorded, then verifies the stored object.
 func UploadAsset(ctx context.Context, objects Objects, siteID, assetID, contentType string, body, wantSHA256 []byte) error {
-	key, err := assetKey(siteID, assetID)
+	key, err := AssetKey(siteID, assetID)
 	if err != nil {
 		return fmt.Errorf("asset %q: %w", assetID, err)
 	}
 	if sum := sha256.Sum256(body); !bytes.Equal(sum[:], wantSHA256) {
 		return fmt.Errorf("asset %s does not match its recorded sha256", assetID)
 	}
+	verify := func() error {
+		stored, err := objects.Get(ctx, key, int64(len(body)))
+		if err != nil {
+			return err
+		}
+		if sum := sha256.Sum256(stored); !bytes.Equal(sum[:], wantSHA256) {
+			return fmt.Errorf("stored %s does not match its recorded sha256", key)
+		}
+		return nil
+	}
+	// As for versions: an existing object is verified, never replaced.
+	err = verify()
+	if !errors.Is(err, ErrObjectNotFound) {
+		return err
+	}
 	if err := objects.Put(ctx, key, body, contentType); err != nil {
 		return err
 	}
-	stored, err := objects.Get(ctx, key, int64(len(body)))
-	if err != nil {
-		return fmt.Errorf("read back %s: %w", key, err)
-	}
-	if sum := sha256.Sum256(stored); !bytes.Equal(sum[:], wantSHA256) {
-		return fmt.Errorf("read back %s: sha256 mismatch", key)
-	}
-	return nil
+	return verify()
 }

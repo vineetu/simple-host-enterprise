@@ -43,7 +43,8 @@ func VersionKey(siteID string, version int) (string, error) {
 	return prefix + "v" + strconv.Itoa(version) + ".tar.gz", nil
 }
 
-func assetKey(siteID, assetID string) (string, error) {
+// AssetKey names one uploaded asset.
+func AssetKey(siteID, assetID string) (string, error) {
 	prefix, err := SitePrefix(siteID)
 	if err != nil {
 		return "", err

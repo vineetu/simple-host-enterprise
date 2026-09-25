@@ -558,10 +558,9 @@ func (h *SiteAPIHandler) ListAssets(w http.ResponseWriter, r *http.Request, call
 	writeJSON(w, http.StatusOK, listAssetsResponse{Assets: out})
 }
 
-// DeleteAsset answers DELETE .../assets/{id}. The object is removed first,
-// then the row is soft-deleted: a listed asset whose object is gone is a
-// broken link, while an object that outlives its row is storage nobody can
-// see or reclaim.
+// DeleteAsset answers DELETE .../assets/{id}. The row is soft-deleted and the
+// object queued for the sweep in one transaction with the audit row, so the
+// object goes if and only if the delete commits.
 func (h *SiteAPIHandler) DeleteAsset(w http.ResponseWriter, r *http.Request, call siteAPICall, id string) {
 	if decision := h.limits.allow(stateClientPolicy, remoteClientKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
@@ -579,15 +578,6 @@ func (h *SiteAPIHandler) DeleteAsset(w http.ResponseWriter, r *http.Request, cal
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	// The object delete stays outside the transaction, deliberately: the
-	// soft-delete and its audit_events row commit together (design 8.1), so
-	// a failed `RecordTx` leaves the row listing an asset whose object is
-	// already gone rather than a phantom audit-less deletion.
-	if err := h.store.DeleteAsset(r.Context(), call.SiteID, id); err != nil && !errors.Is(err, storage.ErrAssetNotFound) {
-		log.Printf("delete asset object %s/%s id=%s: %v", call.Owner, call.SiteName, id, err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
 	tx, err := h.database.BeginTx(r.Context(), nil)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
@@ -596,6 +586,11 @@ func (h *SiteAPIHandler) DeleteAsset(w http.ResponseWriter, r *http.Request, cal
 	defer tx.Rollback()
 	if err := db.SoftDeleteAsset(r.Context(), tx, call.SiteID, id); err != nil && !errors.Is(err, db.ErrAssetNotFound) {
 		log.Printf("soft-delete asset row %s/%s id=%s: %v", call.Owner, call.SiteName, id, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	if err := retireAssetObject(r.Context(), tx, call.SiteID, id); err != nil {
+		log.Printf("retire asset object %s/%s id=%s: %v", call.Owner, call.SiteName, id, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
@@ -612,6 +607,16 @@ func (h *SiteAPIHandler) DeleteAsset(w http.ResponseWriter, r *http.Request, cal
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// retireAssetObject queues an asset's object for deletion in tx, the same
+// way retired versions are (storage.RetireGrace).
+func retireAssetObject(ctx context.Context, tx *sql.Tx, siteID, id string) error {
+	key, err := storage.AssetKey(siteID, id)
+	if err != nil {
+		return err
+	}
+	return db.RetireObjects(ctx, tx, key, storage.RetireGrace)
+}
+
 // ServeAsset answers GET /{site}/_assets/{id}[/{name}] (or its restricted-
 // host root-served equivalent) — viewerAllowed only, never writerAllowed:
 // design.md 7.3 lists this as a read for anyone who may view the site.
@@ -625,12 +630,16 @@ func (h *SiteAPIHandler) ServeAsset(w http.ResponseWriter, r *http.Request, call
 		http.NotFound(w, r)
 		return
 	}
-	asset, err := h.store.OpenAsset(r.Context(), call.SiteID, row.ID, max(row.Size, h.assetLimits.MaxFileBytes))
+	openCtx, cancel := context.WithTimeout(r.Context(), siteOpenTimeout)
+	defer cancel()
+	asset, err := h.store.OpenAsset(openCtx, call.SiteID, row.ID, max(row.Size, h.assetLimits.MaxFileBytes))
 	if err != nil {
-		if !errors.Is(err, storage.ErrAssetNotFound) {
-			log.Printf("open asset %s/%s id=%s: %v", call.Owner, call.SiteName, row.ID, err)
+		if errors.Is(err, storage.ErrAssetNotFound) {
+			http.NotFound(w, r)
+			return
 		}
-		http.NotFound(w, r)
+		log.Printf("open asset %s/%s id=%s: %v", call.Owner, call.SiteName, row.ID, err)
+		http.Error(w, "asset temporarily unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	defer asset.Close()

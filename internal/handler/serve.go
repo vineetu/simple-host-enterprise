@@ -64,6 +64,10 @@ func renderShareDialog(builder *strings.Builder) {
 	builder.WriteString(`<dialog id="shareDialog" class="share-dialog" aria-labelledby="shareDialogTitle" aria-describedby="shareDialogNote"><div class="share-dialog-shell"><header class="dialog-header"><div><div class="dialog-kicker">Site access</div><h2 id="shareDialogTitle">Share site</h2><p class="dialog-subtitle" id="shareDialogSubtitle"></p></div><button type="button" class="dialog-close" data-dialog-close aria-label="Close share dialog">&times;</button></header><div class="dialog-body"><section class="share-block" aria-labelledby="currentEditorsTitle"><h3 id="currentEditorsTitle">Current editors</h3><p class="share-help">Editors can download, deploy, and roll back this site's static files with their own API key.</p><div id="editorList" class="editor-list" aria-live="polite"></div></section><section class="share-block" aria-labelledby="addEditorsTitle"><h3 id="addEditorsTitle">Add editors</h3><p class="share-help">Choose from registered Simple Host users. You can add several people at once.</p><label class="search-label" for="editorSearch">Search usernames</label><input id="editorSearch" class="editor-search" type="search" maxlength="100" autocomplete="off" placeholder="Start typing a username"><div id="candidateList" class="candidate-list" aria-label="Registered users" aria-live="polite"></div><div id="selectedEditors" class="selected-editors" aria-label="Selected editors"></div><div class="share-footer"><p class="share-note" id="shareDialogNote">Revoking access blocks future changes and downloads. It does not undo content an editor already deployed or erase files they downloaded.</p><button type="button" id="addEditorsButton" class="btn btn-primary add-editors" disabled>Add selected</button></div></section></div></div></dialog>`)
 }
 
+// siteOpenTimeout bounds how long one request waits for its site's version
+// to be fetched into the cache.
+const siteOpenTimeout = 20 * time.Second
+
 // SiteFiles serves a site's current version under a URL prefix: /{sitename}
 // on the owner's own host, or the root of a restricted site's own host. The
 // visit cookie, prefix stripping, and download-path trimming all follow the
@@ -128,14 +132,21 @@ func (s *SiteFiles) serveSite(w http.ResponseWriter, r *http.Request, user, site
 		return
 	}
 	// The database says which version is live; the cache serves its files.
-	root, err := s.store.OpenCurrent(r.Context(), user, siteName)
+	// A request waits a bounded time for a cold version; the shared fetch
+	// behind it carries on for whoever asks next.
+	openCtx, cancel := context.WithTimeout(r.Context(), siteOpenTimeout)
+	root, err := s.store.OpenCurrent(openCtx, user, siteName)
+	cancel()
 	if err != nil {
-		// A missing site is ordinary; anything else, including a live
-		// version whose object is missing from the bucket, is worth a line.
-		if err != fs.ErrNotExist {
-			log.Printf("open current %s/%s: %v", user, siteName, err)
+		// Only "no such site" is a 404. Anything else — the database or the
+		// bucket unreachable, a live version missing from the bucket — is
+		// the server's failure, not the visitor's.
+		if err == fs.ErrNotExist {
+			http.NotFound(w, r)
+			return
 		}
-		http.NotFound(w, r)
+		log.Printf("open current %s/%s: %v", user, siteName, err)
+		http.Error(w, "site temporarily unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	defer root.Close()

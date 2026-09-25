@@ -130,13 +130,13 @@ func runRestore(args []string) error {
 		return err
 	}
 	if _, err := storage.VersionKey(*fromSiteID, *version); err != nil {
-		return fmt.Errorf("restore: -from-site-id and -version: %w", err)
+		return fmt.Errorf("-from-site-id and -version: %w", err)
 	}
 	if err := safepath.ValidateSegment(*owner); err != nil {
-		return fmt.Errorf("restore: -owner: %w", err)
+		return fmt.Errorf("-owner: %w", err)
 	}
 	if err := safepath.ValidateSegment(*site); err != nil {
-		return fmt.Errorf("restore: -site: %w", err)
+		return fmt.Errorf("-site: %w", err)
 	}
 
 	cfg, err := config.Load()
@@ -157,7 +157,7 @@ func runRestore(args []string) error {
 	defer tx.Rollback()
 	user, err := db.GetUserByUsername(ctx, tx, *owner)
 	if err != nil {
-		return fmt.Errorf("restore: owner %q: %w", *owner, err)
+		return fmt.Errorf("owner %q: %w", *owner, err)
 	}
 	if err := db.LockSiteCollaboration(ctx, tx, user.ID, *site); err != nil {
 		return err
@@ -169,7 +169,7 @@ func runRestore(args []string) error {
 		created = true
 	}
 	if err != nil {
-		return fmt.Errorf("restore: target site: %w", err)
+		return fmt.Errorf("target site: %w", err)
 	}
 	maxVersion, err := db.GetMaxVersionNumber(ctx, tx, target.ID)
 	if err != nil {
@@ -178,9 +178,9 @@ func runRestore(args []string) error {
 	newVersion := maxVersion + 1
 	if err := storage.CopyVersion(ctx, objects, *fromSiteID, *version, target.ID, newVersion); err != nil {
 		if errors.Is(err, storage.ErrObjectNotFound) {
-			return fmt.Errorf("restore: %s v%d is not in the bucket; recover its noncurrent version with the bucket's versioning first: %w", *fromSiteID, *version, err)
+			return fmt.Errorf("%s v%d is not in the bucket; recover its noncurrent version with the bucket's versioning first: %w", *fromSiteID, *version, err)
 		}
-		return fmt.Errorf("restore: copy: %w", err)
+		return err
 	}
 	key, _ := storage.VersionKey(target.ID, newVersion)
 	row, err := db.CreateVersion(ctx, tx, target.ID, newVersion, key, nil)
@@ -198,8 +198,19 @@ func runRestore(args []string) error {
 			return err
 		}
 	}
+	// Recorded in the same transaction, like every other change to what a
+	// site serves; an operator command has no signed-in actor.
+	if err := audit.NewDBRecorder(database).RecordTx(ctx, tx, audit.Event{
+		ActorKind: "system", Action: "site_restore", OwnerID: user.ID, SiteID: target.ID,
+		Extra: map[string]any{
+			"from_site_id": *fromSiteID, "from_version": *version,
+			"version": newVersion, "live": *setCurrent || created, "created_site": created,
+		},
+	}); err != nil {
+		return fmt.Errorf("record audit: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("restore: commit: %w", err)
+		return fmt.Errorf("commit: %w", err)
 	}
 	log.Printf("restored %s v%d into %s/%s as v%d (site %s, live=%t)", *fromSiteID, *version, *owner, *site, newVersion, target.ID, *setCurrent || created)
 	return nil
@@ -219,11 +230,11 @@ func runMigrateStorage(args []string) error {
 		return err
 	}
 	if *from == "" {
-		return errors.New("migrate-storage: -from is required")
+		return errors.New("-from is required")
 	}
 	tree, err := os.OpenRoot(*from)
 	if err != nil {
-		return fmt.Errorf("migrate-storage: %w", err)
+		return err
 	}
 	defer tree.Close()
 
@@ -302,7 +313,7 @@ func runMigrateStorage(args []string) error {
 	}
 	log.Printf("migrate-storage: %d version(s), %d asset(s) %s, %d failed", versions, assets, map[bool]string{true: "found", false: "uploaded and verified"}[*dryRun], failed)
 	if failed > 0 {
-		return fmt.Errorf("migrate-storage: %d item(s) failed; fix and re-run", failed)
+		return fmt.Errorf("%d item(s) failed; fix and re-run", failed)
 	}
 	return nil
 }

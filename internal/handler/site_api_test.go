@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -55,6 +56,8 @@ func (r *siteAPITestRecorder) last() audit.Event {
 // phase's site_viewers_db_test.go, are what integration-test the SQL itself).
 type siteAPITestState struct {
 	mu sync.Mutex
+	// retired records keys queued in storage_retired.
+	retired []string
 	// assets is the live-row store CreateAsset/GetAsset/ListAssets/
 	// SoftDeleteAsset read and write, keyed by asset id.
 	assets map[string]siteAPITestAssetRow
@@ -196,6 +199,10 @@ func (c *siteAPITestConn) ExecContext(_ context.Context, query string, args []dr
 
 	switch {
 	case strings.Contains(normalized, "pg_advisory_xact_lock"):
+		return driver.RowsAffected(1), nil
+
+	case strings.Contains(normalized, "INSERT INTO storage_retired"):
+		s.retired = append(s.retired, args[0].Value.(string))
 		return driver.RowsAffected(1), nil
 
 	case strings.Contains(normalized, "UPDATE site_assets SET deleted_at = now()"):
@@ -425,7 +432,7 @@ func TestSiteAPICreateAssetRejectsMultipleFileParts(t *testing.T) {
 	}
 }
 
-func TestSiteAPIDeleteAssetRemovesFileAndRow(t *testing.T) {
+func TestSiteAPIDeleteAssetRetiresObjectWithRow(t *testing.T) {
 	store := newTestStore(t)
 	writeGateSite(t, store, "alice", "demo", "index")
 	state := &siteAPITestState{}
@@ -444,6 +451,19 @@ func TestSiteAPIDeleteAssetRemovesFileAndRow(t *testing.T) {
 	handler.DeleteAsset(deleteResponse, httptest.NewRequest(http.MethodDelete, "/api/sites/demo/assets/"+created.ID, nil), call, created.ID)
 	if deleteResponse.Code != http.StatusNoContent {
 		t.Fatalf("DeleteAsset status = %d, body %q", deleteResponse.Code, deleteResponse.Body.String())
+	}
+
+	// The object is queued in the delete's own transaction, not removed
+	// before it: a rolled-back delete leaves a working asset.
+	key, _ := storage.AssetKey(siteAPITestSiteID, created.ID)
+	state.mu.Lock()
+	retired := append([]string(nil), state.retired...)
+	state.mu.Unlock()
+	if len(retired) != 1 || retired[0] != key {
+		t.Fatalf("retired = %v, want [%s]", retired, key)
+	}
+	if keys := store.objects.Keys(); !slices.Contains(keys, key) {
+		t.Fatalf("object deleted before the sweep: %v", keys)
 	}
 
 	serveResponse := httptest.NewRecorder()

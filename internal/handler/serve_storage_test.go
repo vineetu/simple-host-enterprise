@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -58,11 +59,31 @@ func TestSiteFileHandlerFollowsTheIndex(t *testing.T) {
 	}
 }
 
-func TestSiteFileHandlerLiveVersionMissingFromBucketIs404(t *testing.T) {
+// Only a site that does not exist is a 404. A live version the bucket does
+// not have, a bucket that is down, or an index that cannot be read are the
+// server's failures and must not tell a visitor (or a cache) the page is gone.
+func TestSiteFileHandlerServerFailuresAre503(t *testing.T) {
 	store := newTestStore(t)
+	mux := newSiteFileTestMux(store)
+	if response := serveRequest(mux, "/nosuch/"); response.Code != http.StatusNotFound {
+		t.Fatalf("missing site status = %d, want 404", response.Code)
+	}
+
 	store.index.set("alice", "demo", serveTestSiteID, 3)
-	if response := serveRequest(newSiteFileTestMux(store), "/demo/"); response.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", response.Code)
+	if response := serveRequest(mux, "/demo/"); response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("missing object status = %d, want 503", response.Code)
+	}
+
+	store.publish(t, "alice", "other", testSiteID("alice", "other"), 1, map[string]string{"index.html": "x"})
+	store.objects.Fail = errors.New("bucket down")
+	if response := serveRequest(mux, "/other/"); response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("bucket down status = %d, want 503", response.Code)
+	}
+	store.objects.Fail = nil
+
+	store.index.fail("alice", "other")
+	if response := serveRequest(mux, "/other/"); response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("index failure status = %d, want 503", response.Code)
 	}
 }
 

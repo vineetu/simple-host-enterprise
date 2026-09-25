@@ -244,7 +244,7 @@ func (s *Store) CreateAsset(ctx context.Context, siteID, declaredContentType str
 	if err != nil {
 		return StoredAsset{}, err
 	}
-	key, err := assetKey(siteID, id)
+	key, err := AssetKey(siteID, id)
 	if err != nil {
 		return StoredAsset{}, err
 	}
@@ -282,7 +282,7 @@ func (l *AssetLease) Close() error {
 // already have found the live asset row: a deleted asset's object may still
 // be cached here.
 func (s *Store) OpenAsset(ctx context.Context, siteID, id string, maxBytes int64) (*AssetLease, error) {
-	key, err := assetKey(siteID, id)
+	key, err := AssetKey(siteID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +327,7 @@ func (s *Store) OpenAsset(ctx context.Context, siteID, id string, maxBytes int64
 // A copy still in some replica's cache is unreachable once the row is
 // soft-deleted, because serving looks the row up first.
 func (s *Store) DeleteAsset(ctx context.Context, siteID, id string) error {
-	key, err := assetKey(siteID, id)
+	key, err := AssetKey(siteID, id)
 	if err != nil {
 		return err
 	}

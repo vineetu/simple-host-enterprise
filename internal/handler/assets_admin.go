@@ -9,7 +9,6 @@ import (
 	"github.com/vsriram/simple-host/internal/audit"
 	"github.com/vsriram/simple-host/internal/auth"
 	db "github.com/vsriram/simple-host/internal/db"
-	"github.com/vsriram/simple-host/internal/storage"
 )
 
 // Asset administration from the dashboard (design.md 14's Phase 3 "an
@@ -89,14 +88,6 @@ func (h *SiteHandler) deleteCollaborationAsset(w http.ResponseWriter, r *http.Re
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	// The object delete stays outside the transaction, the same shape and
-	// reasoning as site_api.go's own DeleteAsset (design 8.1); the
-	// soft-delete and its audit_events row commit together.
-	if err := h.store.DeleteAsset(r.Context(), access.Site.ID, id); err != nil && !errors.Is(err, storage.ErrAssetNotFound) {
-		log.Printf("delete asset object for %s/%s id=%s: %v", ownerUsername, siteName, id, err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
 	actorID := ""
 	if user := auth.GetUser(r.Context()); user != nil {
 		actorID = user.ID
@@ -110,6 +101,13 @@ func (h *SiteHandler) deleteCollaborationAsset(w http.ResponseWriter, r *http.Re
 	defer tx.Rollback()
 	if err := db.SoftDeleteAsset(r.Context(), tx, access.Site.ID, id); err != nil && !errors.Is(err, db.ErrAssetNotFound) {
 		log.Printf("soft-delete asset row for %s/%s id=%s: %v", ownerUsername, siteName, id, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	// The object goes with the row: queued for the sweep in this same
+	// transaction, as site_api.go's DeleteAsset does.
+	if err := retireAssetObject(r.Context(), tx, access.Site.ID, id); err != nil {
+		log.Printf("retire asset object for %s/%s id=%s: %v", ownerUsername, siteName, id, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}

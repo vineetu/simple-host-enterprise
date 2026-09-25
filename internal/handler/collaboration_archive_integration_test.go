@@ -742,7 +742,7 @@ func TestDeleteCollaborationAssetRecordsAuditInOneTransaction(t *testing.T) {
 	loggedMux := reqlog.Middleware(slog.New(slog.NewTextHandler(io.Discard, nil)), nil)(mux)
 	response := httptest.NewRecorder()
 	loggedMux.ServeHTTP(response, collaborationArchiveRequest(
-		http.MethodDelete, "/api/collaboration/sites/owner/demo/assets/asset-1", "owner-key",
+		http.MethodDelete, "/api/collaboration/sites/owner/demo/assets/0a0a0a0a-0000-4000-8000-0000000000c1", "owner-key",
 	))
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("delete asset status = %d, want 204 (body %q)", response.Code, response.Body.String())
@@ -784,7 +784,7 @@ func TestDeleteCollaborationAssetRecordsAuditInOneTransaction(t *testing.T) {
 	// opens — records no second audit event.
 	secondResponse := httptest.NewRecorder()
 	mux.ServeHTTP(secondResponse, collaborationArchiveRequest(
-		http.MethodDelete, "/api/collaboration/sites/owner/demo/assets/asset-1", "owner-key",
+		http.MethodDelete, "/api/collaboration/sites/owner/demo/assets/0a0a0a0a-0000-4000-8000-0000000000c1", "owner-key",
 	))
 	if secondResponse.Code != http.StatusNotFound {
 		t.Fatalf("second delete status = %d, want 404 (body %q)", secondResponse.Code, secondResponse.Body.String())
@@ -807,7 +807,7 @@ func TestDeleteCollaborationAssetReportsFailureWhenAuditRecordingFails(t *testin
 
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, collaborationArchiveRequest(
-		http.MethodDelete, "/api/collaboration/sites/owner/demo/assets/asset-1", "owner-key",
+		http.MethodDelete, "/api/collaboration/sites/owner/demo/assets/0a0a0a0a-0000-4000-8000-0000000000c1", "owner-key",
 	))
 	if response.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500 when RecordTx fails (body %q)", response.Code, response.Body.String())

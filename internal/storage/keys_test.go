@@ -30,11 +30,11 @@ func TestKeysRejectNonCanonicalIDs(t *testing.T) {
 		if key, err := VersionKey(id, 1); err == nil {
 			t.Errorf("VersionKey(%q, 1) = %q, want error", id, key)
 		}
-		if key, err := assetKey(id, testSiteB); err == nil {
-			t.Errorf("assetKey(site %q) = %q, want error", id, key)
+		if key, err := AssetKey(id, testSiteB); err == nil {
+			t.Errorf("AssetKey(site %q) = %q, want error", id, key)
 		}
-		if key, err := assetKey(testSiteA, id); !errors.Is(err, ErrAssetNotFound) {
-			t.Errorf("assetKey(asset %q) = %q, %v, want ErrAssetNotFound", id, key, err)
+		if key, err := AssetKey(testSiteA, id); !errors.Is(err, ErrAssetNotFound) {
+			t.Errorf("AssetKey(asset %q) = %q, %v, want ErrAssetNotFound", id, key, err)
 		}
 	}
 	for _, version := range []int{0, -1, -1 << 31} {
@@ -53,7 +53,7 @@ func TestKeysAcceptCanonical(t *testing.T) {
 	if err != nil || key != "sites/"+testSiteA+"/v12.tar.gz" {
 		t.Fatalf("VersionKey = %q, %v", key, err)
 	}
-	key, err = assetKey(testSiteA, testSiteB)
+	key, err = AssetKey(testSiteA, testSiteB)
 	if err != nil || key != "sites/"+testSiteA+"/assets/"+testSiteB {
 		t.Fatalf("assetKey = %q, %v", key, err)
 	}
