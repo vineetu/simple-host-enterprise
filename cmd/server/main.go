@@ -263,7 +263,7 @@ func run() (runErr error) {
 	gated := hostGate(mux)
 	// The state tools reach the site API the way a page does: on the owner's
 	// own host, through the host gate and its access checks.
-	mcpServer.WithSiteAPI(gated, hosts.SiteHost)
+	mcpServer.WithSiteAPI(gated, hosts.SiteHostResolver(database))
 	requestMetrics := metrics.New()
 	applicationServer := newApplicationServer(":"+cfg.Port, requestMetrics.Middleware(requestLog(handler.SecurityHeaders(gated, cfg.SecureMode, hosts))))
 	schemaVersion := "unknown"

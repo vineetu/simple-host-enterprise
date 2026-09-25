@@ -57,6 +57,9 @@ type upstream struct {
 	// (state) answers only on an owner's own host, behind the host gate, so
 	// such a request is served there rather than into the bare router.
 	SiteHost string
+	// SiteName is the site on that host; a restricted site answers only on
+	// its own host, so the host depends on it.
+	SiteName string
 	// Transform turns a successful response body into the tool's result, for
 	// a route whose answer is not already the JSON a model wants (a zip).
 	// MaxBody bounds how much of that body is held; zero means unbounded.
@@ -1014,7 +1017,7 @@ func stateRoute(args map[string]any, method string, body []byte) (upstream, erro
 	if _, err := segment(owner, "owner"); err != nil {
 		return upstream{}, err
 	}
-	up := upstream{Method: method, Path: "/api/sites/" + siteSeg + "/state/versioned", SiteHost: owner}
+	up := upstream{Method: method, Path: "/api/sites/" + siteSeg + "/state/versioned", SiteHost: owner, SiteName: site}
 	if body != nil {
 		up.Body = body
 		up.ContentType = "application/json"

@@ -3,6 +3,7 @@ package mcp
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -234,7 +235,7 @@ func TestStateToolsUseTheOwnersHost(t *testing.T) {
 		t.Errorf("get_state with no site API = %v", res)
 	}
 	siteAPI := &countingUpstream{status: 200, body: []byte(`{"version":4,"state":{"a":1}}`)}
-	s.WithSiteAPI(siteAPI, func(owner string) string { return owner + ".hosting.test" })
+	s.WithSiteAPI(siteAPI, func(_ context.Context, owner, _ string) (string, error) { return owner + ".hosting.test", nil })
 	res := callTool(t, s, "update_state", map[string]any{"site": "d", "owner": "alice", "version": 3, "state": map[string]any{"a": 1}})
 	if res["isError"] != false || siteAPI.last.Host != "alice.hosting.test" || siteAPI.last.URL.Path != "/api/sites/d/state/versioned" || siteAPI.last.Method != "PUT" {
 		t.Errorf("update_state went to %s %s%s: %v", siteAPI.last.Method, siteAPI.last.Host, siteAPI.last.URL.Path, res)

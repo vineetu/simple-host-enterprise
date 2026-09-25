@@ -2,10 +2,12 @@ package mcp
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"sort"
@@ -39,7 +41,7 @@ type Server struct {
 	// API behind the host gate), and siteHost names that host. Both are nil
 	// until WithSiteAPI, and the state tools say so rather than guess.
 	siteAPI  http.Handler
-	siteHost func(owner string) string
+	siteHost func(ctx context.Context, owner, site string) (string, error)
 }
 
 func NewServer(upstream http.Handler, serverName, version string) *Server {
@@ -54,7 +56,7 @@ func NewServer(upstream http.Handler, serverName, version string) *Server {
 // WithSiteAPI lets the state tools reach the site API, which answers only on
 // an owner's own host: handler is the host-gated application and siteHost
 // maps an owner to that host.
-func (s *Server) WithSiteAPI(handler http.Handler, siteHost func(owner string) string) *Server {
+func (s *Server) WithSiteAPI(handler http.Handler, siteHost func(ctx context.Context, owner, site string) (string, error)) *Server {
 	s.siteAPI = handler
 	s.siteHost = siteHost
 	return s
@@ -617,7 +619,12 @@ func (s *Server) serveUpstream(r *http.Request, up upstream) (int, []byte, strin
 	proxied.RemoteAddr = r.RemoteAddr
 	proxied.Host = r.Host
 	if up.SiteHost != "" {
-		proxied.Host = s.siteHost(up.SiteHost)
+		host, err := s.siteHost(r.Context(), up.SiteHost, up.SiteName)
+		if err != nil {
+			log.Printf("mcp: site host for %s/%s: %v", up.SiteHost, up.SiteName, err)
+			return http.StatusInternalServerError, []byte("could not resolve the site's host"), "", false
+		}
+		proxied.Host = host
 	}
 
 	recorder := &capture{header: http.Header{}, status: http.StatusOK, limit: up.MaxBody}

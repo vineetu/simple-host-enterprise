@@ -1,11 +1,14 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
 	"net/url"
 	"strings"
+
+	"github.com/vsriram/simple-host/internal/db"
 )
 
 // The hostname model for per-owner subdomains. The server answers on
@@ -352,4 +355,24 @@ func (m HostModel) RedirectHost(raw string) string {
 // a label back to a user.
 func (m HostModel) OwnsLabel(label, username string) bool {
 	return ownerLabel(username) == label
+}
+
+// SiteHostResolver returns the host that serves a site's own API: the
+// restricted site's dedicated host when it is restricted, the owner's host
+// otherwise (including when the site does not exist, so the caller gets that
+// host's ordinary 404).
+func (m HostModel) SiteHostResolver(q db.Querier) func(ctx context.Context, owner, site string) (string, error) {
+	return func(ctx context.Context, owner, site string) (string, error) {
+		_, restricted, err := db.SiteForServing(ctx, q, owner, site)
+		if errors.Is(err, db.ErrSiteNotFound) {
+			return m.SiteHost(owner), nil
+		}
+		if err != nil {
+			return "", err
+		}
+		if restricted {
+			return m.RestrictedSiteHost(owner, site), nil
+		}
+		return m.SiteHost(owner), nil
+	}
 }

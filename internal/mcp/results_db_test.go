@@ -107,7 +107,7 @@ func realServer(t *testing.T, database *sql.DB) *Server {
 	handoff := handler.NewHandoffHandler(database, keys, hosts, recorder, limits)
 	negCache := auth.NewNegativeSessionCache(database, time.Hour)
 	gate := handler.NewHostGate(hosts, files, database, keys, negCache, handoff, siteAPI, authMW, base)
-	return NewServer(mux, "simple-host", version).WithSiteAPI(gate(mux), hosts.SiteHost)
+	return NewServer(mux, "simple-host", version).WithSiteAPI(gate(mux), hosts.SiteHostResolver(database))
 }
 
 func createPerson(t *testing.T, database *sql.DB, username string) string {
