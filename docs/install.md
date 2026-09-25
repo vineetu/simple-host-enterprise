@@ -200,8 +200,8 @@ to your ingress controller's pod range so rate limits and logs see each
 person's address rather than the ingress's (`docs/configuration.md`).
 
 1. Pick the image. The recommended one is the published release,
-   `ghcr.io/vineetu/simple-host-enterprise:v1.0.0`, pinned by its digest
-   `sha256:8991d5e9fc8c33e69981c4fa25ca5b3f5964f4087ed10c1074d7016623939489`.
+   `ghcr.io/vineetu/simple-host-enterprise:v1.1.0`, pinned by its digest
+   `sha256:ca10307f7cd8b10a90b2382596960fbfb84ddc6da60e61e32f0e98f5b200bbff`.
    Or push the image you built (`make image`, or your own CI build of the
    same `Dockerfile`) to a registry your cluster can pull from, scan it,
    and resolve its immutable digest. Verify a release image's signature and
