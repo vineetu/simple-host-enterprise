@@ -24,10 +24,15 @@ Each pod keeps a local cache of the versions it serves in an `emptyDir` at
 being served are pinned, so the volume is sized at about 3x that). A pod
 holds nothing that is not in the bucket or the database, so the Deployment
 runs two replicas, one per node when there are several, with rolling
-updates and a PodDisruptionBudget. `/readyz` checks the database and that
-the bucket can be read: it reads a key that is never written and expects
-"not found", so credentials that lost object access take the pod out of
-rotation (cached for 10 seconds, like the rest of the check).
+updates and a PodDisruptionBudget. `/readyz` fails only on the database
+and its schema. It also checks that the bucket can be read (it reads a key
+that is never written and expects "not found"), but a bucket fault does not
+take pods out of rotation: every pod shares the bucket, so it would take
+them all out at once. While the bucket is failing, pages already in a pod's
+cache keep serving; uncached pages answer 503 and publishing fails (500)
+until it is fixed. Each failed check is logged as `readyz: bucket: ...` and
+sets the `simplehost_bucket_ok` metric to 0: alert on it (checked at most
+every 10 seconds, like the rest of the probe).
 
 Each pod opens at most 20 database connections, and a rollout runs one
 extra pod. Size Postgres `max_connections` for (replicas + 1) x 20, plus a

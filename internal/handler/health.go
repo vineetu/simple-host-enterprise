@@ -618,28 +618,23 @@ const requiredSchemaProbe = `
 `
 
 // RegisterHealthRoutes mounts the probes. pingBucket is the site store's
-// bucket check: a replica that cannot reach the bucket cannot deploy or fill
-// its cache, so it takes itself out of rotation.
-func RegisterHealthRoutes(mux *http.ServeMux, db *sql.DB, pingBucket func(context.Context) error) {
+// bucket check and reportBucket receives its result for /metrics; either may
+// be nil. The bucket does not decide readiness: every replica shares one
+// bucket, so a bucket fault would take them all out of rotation at once and
+// stop even the pages each one already has cached. Only the database and its
+// schema make a replica unready.
+func RegisterHealthRoutes(mux *http.ServeMux, db *sql.DB, pingBucket func(context.Context) error, reportBucket func(ok bool)) {
 	mux.HandleFunc("GET /healthz", healthz)
-	mux.HandleFunc("GET /readyz", readyz(db, pingBucket))
+	mux.HandleFunc("GET /readyz", readyz(db, pingBucket, reportBucket))
 }
 
 func healthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, healthResponse{Status: "ok"})
 }
 
-func readyz(db *sql.DB, pingBucket func(context.Context) error) http.HandlerFunc {
+func readyz(db *sql.DB, pingBucket func(context.Context) error, reportBucket func(ok bool)) http.HandlerFunc {
 	return readinessHandler(
-		func(ctx context.Context) error {
-			if err := db.PingContext(ctx); err != nil {
-				return err
-			}
-			if pingBucket == nil {
-				return nil
-			}
-			return pingBucket(ctx)
-		},
+		db.PingContext,
 		func(ctx context.Context) error {
 			var schemaReady bool
 			if err := db.QueryRowContext(ctx, requiredSchemaProbe).Scan(&schemaReady); err != nil {
@@ -647,6 +642,8 @@ func readyz(db *sql.DB, pingBucket func(context.Context) error) http.HandlerFunc
 			}
 			return requireSchemaReady(schemaReady)
 		},
+		pingBucket,
+		reportBucket,
 	)
 }
 
@@ -663,14 +660,19 @@ func requireSchemaReady(ready bool) error {
 // catalog query, as fast as they can send requests.
 const readinessCacheTTL = 10 * time.Second
 
+// readinessHandler answers /readyz. ping and checkSchema are fatal;
+// pingBucket (optional) is only logged and passed to reportBucket.
 func readinessHandler(
 	ping func(context.Context) error,
 	checkSchema func(context.Context) error,
+	pingBucket func(context.Context) error,
+	reportBucket func(ok bool),
 ) http.HandlerFunc {
 	var (
-		mu      sync.Mutex
-		checked time.Time
-		lastErr error
+		mu       sync.Mutex
+		checked  time.Time
+		lastErr  error
+		bucketOK = true
 	)
 	return func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
@@ -678,16 +680,34 @@ func readinessHandler(
 			// Detached from the caller: a client that hangs up must not
 			// cache a context-canceled failure for everyone else.
 			ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 2*time.Second)
+			// The bucket is checked alongside the database, not after it,
+			// so the probe stays inside one timeout.
+			bucketDone := make(chan error, 1)
+			if pingBucket != nil {
+				go func() { bucketDone <- pingBucket(ctx) }()
+			}
 			err := ping(ctx)
 			if err != nil {
 				err = fmt.Errorf("database: %w", err)
 			} else if schemaErr := checkSchema(ctx); schemaErr != nil {
 				err = fmt.Errorf("schema: %w", schemaErr)
 			}
-			cancel()
 			if err != nil {
 				log.Printf("readyz: not ready: %v", err)
 			}
+			if pingBucket != nil {
+				bucketErr := <-bucketDone
+				if bucketErr != nil {
+					log.Printf("readyz: bucket: %v (replica stays ready; cached pages keep serving, uncached pages and publishing fail until the bucket is fixed)", bucketErr)
+				} else if !bucketOK {
+					log.Printf("readyz: bucket: reachable again")
+				}
+				bucketOK = bucketErr == nil
+				if reportBucket != nil {
+					reportBucket(bucketOK)
+				}
+			}
+			cancel()
 			checked, lastErr = time.Now(), err
 		}
 		err := lastErr

@@ -530,7 +530,7 @@ verify its digest, update the overlay's `images:` entry (or your CI's
 equivalent), `kubectl apply` the rendered overlay, and watch the rollout.
 `kubectl -n simple-host exec deploy/simple-host -- /simple-host version`
 prints the running release, commit and schema
-(`simple-host v1.1.0 (commit <sha>, schema 0033)`); the server logs the
+(`simple-host v1.1.2 (commit <sha>, schema 0033)`); the server logs the
 same line at startup.
 
 **From v1.0.x**, sites move from the volume to the bucket: follow
@@ -658,15 +658,24 @@ PodMonitor, pod annotations, or any in-cluster scraper.
 | `simplehost_db_connections_open`, `simplehost_db_connections_in_use` | Database pool |
 | `simplehost_db_wait_count_total`, `simplehost_db_wait_seconds_total` | Waits for a free connection |
 | `simplehost_build_info{version,commit,schema}` | The running release |
+| `simplehost_bucket_ok` | 1 when the last bucket check (made by `/readyz`) succeeded, 0 when it failed |
 
 Probes: `/healthz` is liveness and checks nothing else. `/readyz` checks
-that the database is reachable, the schema is current, and the bucket can
-still be read with the configured credentials; its result is
-cached for 10 seconds, and a failure is logged as `readyz: not ready: ...`.
+that the database is reachable and the schema is current; its result is
+cached for 10 seconds, and a failure is logged as
+`readyz: not ready: database: ...` (or `schema: ...`). It also checks that
+the bucket can still be read with the configured credentials, but a bucket
+fault leaves the pods Ready: every pod shares the bucket, so failing
+readiness would take them all out and stop even the cached pages. The
+failure is logged as `readyz: bucket: ...` and sets `simplehost_bucket_ok`
+to 0.
 
 No alerting stack ships with the package. What to watch:
 
 - Pods not Ready, restarts, `CrashLoopBackOff`.
+- `simplehost_bucket_ok` at 0, or `readyz: bucket:` in the logs. Pods stay
+  Ready and cached pages keep serving, but uncached pages answer 503 and
+  publishing fails until the bucket is fixed.
 - Failed CronJob runs (`kube_job_status_failed`), the prune job included.
 - The 5xx rate from `simplehost_http_requests_total`.
 - Certificate expiry (`certmanager_certificate_expiration_timestamp_seconds`,

@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/vsriram/simple-host/internal/metrics"
 )
 
 func TestReadinessHandlerRequiresDatabaseAndSchema(t *testing.T) {
@@ -31,6 +33,7 @@ func TestReadinessHandlerRequiresDatabaseAndSchema(t *testing.T) {
 					schemaChecks++
 					return test.schemaErr
 				},
+				nil, nil,
 			)
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/readyz", nil))
@@ -57,6 +60,7 @@ func TestReadinessHandlerCachesTheResult(t *testing.T) {
 	handler := readinessHandler(
 		func(context.Context) error { return nil },
 		func(context.Context) error { checks++; return nil },
+		nil, nil,
 	)
 	for i := 0; i < 5; i++ {
 		response := httptest.NewRecorder()
@@ -74,6 +78,7 @@ func TestReadinessHandlerRejectsFalseSchemaProbe(t *testing.T) {
 	handler := readinessHandler(
 		func(context.Context) error { return nil },
 		func(context.Context) error { return requireSchemaReady(false) },
+		nil, nil,
 	)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/readyz", nil))
@@ -218,4 +223,47 @@ func TestRequiredSchemaProbePassesOnMigratedDatabase(t *testing.T) {
 			t.Errorf("schema probe missing %q", want)
 		}
 	}
+}
+
+func TestReadinessHandlerStaysReadyWhenTheBucketFails(t *testing.T) {
+	registry := metrics.New()
+	handler := readinessHandler(
+		func(context.Context) error { return nil },
+		func(context.Context) error { return nil },
+		func(context.Context) error { return errors.New("access denied") },
+		registry.SetBucketOK,
+	)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: a bucket fault is shared by every replica", response.Code)
+	}
+	if got := scrapeMetrics(t, registry); !strings.Contains(got, "\nsimplehost_bucket_ok 0\n") {
+		t.Fatalf("metrics missing simplehost_bucket_ok 0:\n%s", got)
+	}
+}
+
+func TestReadinessHandlerFailsOnDatabaseAndReportsHealthyBucket(t *testing.T) {
+	registry := metrics.New()
+	handler := readinessHandler(
+		func(context.Context) error { return errors.New("down") },
+		func(context.Context) error { return nil },
+		func(context.Context) error { return nil },
+		registry.SetBucketOK,
+	)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", response.Code)
+	}
+	if got := scrapeMetrics(t, registry); !strings.Contains(got, "\nsimplehost_bucket_ok 1\n") {
+		t.Fatalf("metrics missing simplehost_bucket_ok 1:\n%s", got)
+	}
+}
+
+func scrapeMetrics(t *testing.T, registry *metrics.Registry) string {
+	t.Helper()
+	response := httptest.NewRecorder()
+	registry.Handler(nil, metrics.Build{}).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	return response.Body.String()
 }

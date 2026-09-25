@@ -189,7 +189,8 @@ func run() (runErr error) {
 	}
 	log.Printf("simple-host skill version: %s", pluginVersion)
 
-	handler.RegisterHealthRoutes(mux, database, siteStore.Ping)
+	requestMetrics := metrics.New()
+	handler.RegisterHealthRoutes(mux, database, siteStore.Ping, requestMetrics.SetBucketOK)
 	publicSearchHandler.Register(mux, authMW, handler.CookieOriginCheck(hosts, cfg.PublicBaseURL))
 	handler.NewUserHandler(database, abuseLimits).Register(mux, authMW, skillVersionMW)
 	handler.NewSiteHandler(database, siteStore, cfg.PublicBaseURL, hosts, abuseLimits).WithAudit(auditRecorder).Register(mux, authMW, skillVersionMW)
@@ -257,7 +258,6 @@ func run() (runErr error) {
 	// The state tools reach the site API the way a page does: on the owner's
 	// own host, through the host gate and its access checks.
 	mcpServer.WithSiteAPI(gated, hosts.SiteHostResolver(database))
-	requestMetrics := metrics.New()
 	applicationServer := newApplicationServer(":"+cfg.Port, requestMetrics.Middleware(requestLog(handler.SecurityHeaders(gated, cfg.SecureMode, hosts))))
 	schemaVersion := "unknown"
 	if latest, err := migrate.Latest(); err == nil {

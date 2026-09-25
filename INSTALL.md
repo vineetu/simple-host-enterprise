@@ -528,7 +528,7 @@ against `https://<base>`.
 | Migrate cannot connect | Network path from pods to the database (security group, authorised networks, private endpoint). Re-run the `pg_isready` check in section 2. |
 | `schema version N is newer than this binary knows` | The image is older than the database's schema and a newer migration is not marked backward-compatible. Roll forward, or restore with PITR; `docs/install.md` section 10. |
 | Pod crash-loops with `discover OIDC provider` | The issuer is unreachable from the pod, or `OIDC_ISSUER` is wrong. Run the in-cluster issuer check in section 1. |
-| `/readyz` returns 503 | Database or bucket not reachable, or schema not current. Read the `migrate` and `simple-host` container logs. |
+| `/readyz` returns 503 | Database not reachable, or schema not current. Read the `migrate` and `simple-host` container logs. A bucket fault does not fail `/readyz`: look for `readyz: bucket:` in the logs and `simplehost_bucket_ok 0` on `/metrics`. |
 | Sign-in: "the identity provider did not send an email address" | Provider does not put `email` in the ID token. Add the claim, or set `OIDC_EMAIL_CLAIM` (Entra: see HUMAN STEP A). |
 | Sign-in: "this account's email domain is not allowed" | `ALLOWED_EMAIL_DOMAINS` does not include the person's domain. |
 | Sign-in: "your email address is not verified" | The ID token has no `email_verified: true`. Entra: add the `xms_edov` optional claim (HUMAN STEP A). |

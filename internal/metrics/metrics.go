@@ -23,6 +23,8 @@ type Registry struct {
 	counts  []uint64  // cumulative per bucket, then +Inf
 	sum     float64
 	total   uint64
+	// bucket is the last readiness bucket check: 0 not yet run, 1 ok, 2 failing.
+	bucket int
 }
 
 func New() *Registry {
@@ -46,6 +48,17 @@ func (r *Registry) observe(status int, elapsed time.Duration) {
 		}
 	}
 	r.counts[len(buckets)]++
+}
+
+// SetBucketOK records the result of the latest bucket check made by /readyz.
+func (r *Registry) SetBucketOK(ok bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if ok {
+		r.bucket = 1
+	} else {
+		r.bucket = 2
+	}
 }
 
 // Middleware counts every request the wrapped handler answers.
@@ -82,6 +95,7 @@ func (r *Registry) Handler(db *sql.DB, build Build) http.Handler {
 		byClass := r.byClass
 		counts := append([]uint64(nil), r.counts...)
 		sum, total := r.sum, r.total
+		bucket := r.bucket
 		r.mu.Unlock()
 
 		fmt.Fprintln(w, "# HELP simplehost_http_requests_total HTTP requests answered, by status class.")
@@ -101,6 +115,16 @@ func (r *Registry) Handler(db *sql.DB, build Build) http.Handler {
 		fmt.Fprintf(w, "simplehost_http_request_duration_seconds_bucket{le=\"+Inf\"} %d\n", counts[len(buckets)])
 		fmt.Fprintf(w, "simplehost_http_request_duration_seconds_sum %g\n", sum)
 		fmt.Fprintf(w, "simplehost_http_request_duration_seconds_count %d\n", total)
+
+		if bucket != 0 {
+			fmt.Fprintln(w, "# HELP simplehost_bucket_ok Whether the last bucket check (made by /readyz) succeeded. A failing bucket does not make the replica unready.")
+			fmt.Fprintln(w, "# TYPE simplehost_bucket_ok gauge")
+			ok := 0
+			if bucket == 1 {
+				ok = 1
+			}
+			fmt.Fprintf(w, "simplehost_bucket_ok %d\n", ok)
+		}
 
 		if db == nil {
 			return

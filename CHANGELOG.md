@@ -4,6 +4,22 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## v1.1.2 — 2026-09-25
+
+No schema change (still 0033).
+
+### Operations
+- A bucket fault no longer takes pods out of rotation. v1.1.1 failed
+  `/readyz` when the bucket could not be read; every pod shares the bucket,
+  so one credential problem took the whole instance to 503, cached pages
+  included. Now `/readyz` fails only on the database and schema. While the
+  bucket is failing, cached pages keep serving; uncached pages answer 503
+  and publishing fails until it is fixed.
+- New metric `simplehost_bucket_ok` (1/0) and log line `readyz: bucket: ...`
+  for the bucket check: alert on them. Readiness failures are now labelled
+  by cause (`database:` or `schema:`); v1.1.1 labelled every one
+  `database:`.
+
 ## v1.1.1 — 2026-09-25
 
 Fixes from a real v1.0.0 → v1.1.0 upgrade on a managed cluster. No schema
