@@ -9,6 +9,7 @@ what must be true; each cloud file says how on that cloud.
 | Google Cloud (GKE) | [gcp.md](gcp.md) |
 | Azure (AKS) | [azure.md](azure.md) |
 | Oracle Cloud (OKE) | [oci.md](oci.md) |
+| UpCloud (UKS) | [upcloud.md](upcloud.md) |
 
 Values go in `deploy/overlays/byo/config.env` / `secrets.env`; the ingress block
 goes in `deploy/overlays/byo/ingress-patch.yaml`.
