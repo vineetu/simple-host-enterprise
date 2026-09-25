@@ -36,6 +36,9 @@ const oauthStateMaxAge = 10 * 60 // 10 minutes
 // internal/config, the same convention internal/storage's EnvelopeKey
 // documents for internal/config.EnvelopeKey.
 type OIDCClaimConfig struct {
+	// Issuer is OIDC_ISSUER, for the provider-specific rules in
+	// refuseIdentity.
+	Issuer              string
 	EmailClaim          string
 	UsernameClaim       string
 	AdminClaim          string
@@ -69,6 +72,60 @@ func (c OIDCClaimConfig) isAllowedDomain(email string) bool {
 		}
 	}
 	return false
+}
+
+// emailVerified reports whether the provider vouches for the address. The
+// email address both decides admin status (ADMIN_EMAILS) and can bind an
+// existing account (resolveUser), so an unverified one is never accepted:
+// email_verified must be present and true. Entra ID never sends
+// email_verified; its documented equivalent is the optional xms_edov claim
+// (the address's domain is verified by the tenant), accepted only from an
+// Entra issuer.
+func (c OIDCClaimConfig) emailVerified(claims oidc.Claims) bool {
+	if claims.EmailVerifiedSet {
+		return claims.EmailVerified
+	}
+	if isEntraIssuer(c.Issuer) {
+		switch v := claims.Raw["xms_edov"].(type) {
+		case bool:
+			return v
+		case string:
+			return v == "true" || v == "1"
+		}
+	}
+	return false
+}
+
+// refuseIdentity applies the sign-in rules on the ID token's identity
+// claims. It returns a short reason for the audit trail and the message to
+// show, or two empty strings when the sign-in may proceed.
+func (c OIDCClaimConfig) refuseIdentity(claims oidc.Claims, email string) (reason, message string) {
+	if !c.emailVerified(claims) {
+		return "email_not_verified", "your email address is not verified with the identity provider"
+	}
+	if !c.isAllowedDomain(email) {
+		return "domain_not_allowed", "this account's email domain is not allowed to sign in here"
+	}
+	// Google: a consumer account can carry any verified address, including
+	// one at the company's domain it does not control; only a Workspace
+	// account carries hd. With ALLOWED_EMAIL_DOMAINS set, hd is required and
+	// must be one of them.
+	if isGoogleIssuer(c.Issuer) && len(c.AllowedEmailDomains) > 0 && claims.HostedDomain == "" {
+		return "google_hd_missing", "this Google account is not part of an allowed Google Workspace domain"
+	}
+	if claims.HostedDomain != "" && !c.isAllowedDomain("x@"+claims.HostedDomain) {
+		return "google_hd_not_allowed", "this account's Google Workspace domain is not allowed to sign in here"
+	}
+	return "", ""
+}
+
+func isGoogleIssuer(issuer string) bool {
+	return strings.TrimRight(strings.ToLower(issuer), "/") == "https://accounts.google.com"
+}
+
+func isEntraIssuer(issuer string) bool {
+	u, err := url.Parse(strings.ToLower(issuer))
+	return err == nil && u.Host == "login.microsoftonline.com"
 }
 
 // AuthHandler serves sign-in, callback, sign-out and the sessions page on
@@ -236,6 +293,7 @@ func (h *AuthHandler) callback(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.provider.VerifyIDToken(r.Context(), tok.IDToken, state.Nonce)
 	if err != nil {
 		log.Printf("auth: verify id_token: %v", err)
+		h.signInFailed(r, "id_token_invalid", "")
 		writeAuthError(w, http.StatusForbidden, "sign-in could not be verified")
 		return
 	}
@@ -248,29 +306,13 @@ func (h *AuthHandler) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	email = strings.ToLower(strings.TrimSpace(email))
 	if email == "" {
+		h.signInFailed(r, "email_missing", "")
 		writeAuthError(w, http.StatusForbidden, "the identity provider did not send an email address")
 		return
 	}
-	// Require email_verified only when the provider sent the claim at all —
-	// design.md 6.1: some providers (Entra's common endpoint) omit it
-	// entirely, and treating "absent" the same as "false" would refuse every
-	// sign-in from those providers rather than the unverified ones.
-	if claims.EmailVerifiedSet && !claims.EmailVerified {
-		writeAuthError(w, http.StatusForbidden, "your email address is not verified with the identity provider")
-		return
-	}
-	if !h.claims.isAllowedDomain(email) {
-		writeAuthError(w, http.StatusForbidden, "this account's email domain is not allowed to sign in here")
-		return
-	}
-	// Defense in depth for Google specifically (design.md 6.5): when the
-	// provider sends an hd claim at all, it must agree with the allowed
-	// domains. Absence of hd is not itself refused here — Dex and most
-	// non-Google providers never send it, and requiring it universally would
-	// refuse every non-Google sign-in the moment ALLOWED_EMAIL_DOMAINS is
-	// set, including the local overlay's own Dex-backed test suite.
-	if claims.HostedDomain != "" && !h.claims.isAllowedDomain("x@"+claims.HostedDomain) {
-		writeAuthError(w, http.StatusForbidden, "this account's Google Workspace domain is not allowed to sign in here")
+	if reason, refusal := h.claims.refuseIdentity(claims, email); refusal != "" {
+		h.signInFailed(r, reason, email)
+		writeAuthError(w, http.StatusForbidden, refusal)
 		return
 	}
 
@@ -286,6 +328,7 @@ func (h *AuthHandler) callback(w http.ResponseWriter, r *http.Request) {
 	user, notice, err := h.resolveUser(r.Context(), claims.Subject, email, usernameHint, isAdmin)
 	if err != nil {
 		if errors.Is(err, db.ErrAccountDisabled) {
+			h.signInFailed(r, "account_disabled", email)
 			writeAuthError(w, http.StatusForbidden, "this account has been disabled")
 			return
 		}
@@ -331,6 +374,12 @@ func (h *AuthHandler) callback(w http.ResponseWriter, r *http.Request) {
 		target += sep + "notice=" + url.QueryEscape(notice)
 	}
 	http.Redirect(w, r, target, http.StatusFound)
+}
+
+// signInFailed records a refused sign-in that got as far as the identity
+// provider's answer. email is the address the token claimed, when known.
+func (h *AuthHandler) signInFailed(r *http.Request, reason, email string) {
+	h.audit.Record(r.Context(), audit.Event{Action: "sign_in_failed", Detail: email, Extra: map[string]any{"reason": reason}})
 }
 
 // resolveUser finds or creates the account this sign-in belongs to, per

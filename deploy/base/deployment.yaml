@@ -77,18 +77,17 @@ spec:
             - secretRef:
                 name: simple-host-secrets
           env:
-            # Overrides the DB_USER/DB_PASSWORD envFrom provides above: the
-            # server connects as the least-privilege application role
-            # (design 9.3), never as the owning role migrations use. An
-            # explicit env entry wins over envFrom for the same name, which
-            # is the whole mechanism this override relies on.
-            - name: DB_USER
+            # The server connects as the least-privilege application role
+            # (design 9.3): DB_APP_USER makes it use DB_APP_PASSWORD (or
+            # DB_APP_PASSWORD_FILE) from simple-host-secrets, whatever
+            # DB_USER/DB_PASSWORD(_FILE) say, and it refuses to start if the
+            # role it gets can alter audit_events. DB_PASSWORD is blanked so
+            # the owning role's password is not in this container's
+            # environment at all.
+            - name: DB_APP_USER
               value: simplehost_app
             - name: DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: simple-host-secrets
-                  key: DB_APP_PASSWORD
+              value: ""
           volumeMounts:
             - name: site-data
               mountPath: /mnt/data

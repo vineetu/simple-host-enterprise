@@ -83,6 +83,10 @@ func completeEnv(t *testing.T) {
 	t.Setenv("BACKUP_ENVELOPE_KEY", "")
 	t.Setenv("DB_INSECURE_ALLOWED", "")
 	t.Setenv("RESERVED_LABELS", "")
+	t.Setenv("DB_APP_USER", "")
+	t.Setenv("BACKUP_ENVELOPE_KEY_FILE", "")
+	t.Setenv("TRUSTED_PROXY_CIDRS", "")
+	t.Setenv("API_KEY_MAX_DAYS", "")
 }
 
 func TestLoadCompleteConfiguration(t *testing.T) {
@@ -720,5 +724,125 @@ func TestAnUnreadableSecretFileIsNotTreatedAsUnset(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "missing required configuration") {
 		t.Errorf("an unreadable mount was reported as a missing value: %v", err)
+	}
+}
+
+func TestLoadRefusesMultiTenantEntraIssuer(t *testing.T) {
+	for _, issuer := range []string{
+		"https://login.microsoftonline.com/common/v2.0",
+		"https://login.microsoftonline.com/organizations/v2.0",
+		"https://login.microsoftonline.com/consumers/v2.0",
+	} {
+		completeEnv(t)
+		t.Setenv("OIDC_ISSUER", issuer)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "OIDC_ISSUER") {
+			t.Errorf("Load accepted %s: %v", issuer, err)
+		}
+	}
+	completeEnv(t)
+	t.Setenv("OIDC_ISSUER", "https://login.microsoftonline.com/0f1e2d3c-0000-0000-0000-000000000000/v2.0")
+	if _, err := Load(); err != nil {
+		t.Fatalf("tenant-specific Entra issuer: %v", err)
+	}
+}
+
+func TestAnUnreadableEnvelopeKeyFileStopsStartup(t *testing.T) {
+	completeEnv(t)
+	t.Setenv("BACKUP_ENVELOPE_KEY_FILE", filepath.Join(t.TempDir(), "never-mounted"))
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "BACKUP_ENVELOPE_KEY_FILE") {
+		t.Fatalf("Load with an unreadable envelope key file: %v", err)
+	}
+}
+
+func partsEnv(t *testing.T) {
+	t.Helper()
+	completeEnv(t)
+	t.Setenv("DB_DSN", "")
+	t.Setenv("DB_HOST", "db.internal")
+	t.Setenv("DB_USER", "simplehost")
+	t.Setenv("DB_PASSWORD", "owner-secret")
+	t.Setenv("DB_NAME", "simplehost")
+	t.Setenv("DB_SSL_ROOT_CERT", "/etc/ca.crt")
+}
+
+func TestServerConnectsAsTheAppRole(t *testing.T) {
+	partsEnv(t)
+	t.Setenv("DB_APP_USER", "simplehost_app")
+	t.Setenv("DB_APP_PASSWORD", "")
+	// A password file for the owning role must not decide the server's
+	// credential (it used to win over the manifest's DB_PASSWORD override).
+	ownerFile := filepath.Join(t.TempDir(), "owner")
+	if err := os.WriteFile(ownerFile, []byte("owner-from-file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DB_PASSWORD_FILE", ownerFile)
+	appFile := filepath.Join(t.TempDir(), "app")
+	if err := os.WriteFile(appFile, []byte("app-from-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DB_APP_PASSWORD_FILE", appFile)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse(cfg.DBDSN)
+	if pw, _ := u.User.Password(); u.User.Username() != "simplehost_app" || pw != "app-from-file" {
+		t.Fatalf("server DSN user = %q, password from the wrong source", u.User.Username())
+	}
+
+	t.Setenv("DB_APP_PASSWORD_FILE", "")
+	t.Setenv("DB_PASSWORD_FILE", "")
+	t.Setenv("DB_APP_PASSWORD", "owner-secret")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "must differ") {
+		t.Fatalf("shared password accepted: %v", err)
+	}
+	if _, err := LoadAppRolePassword(); err == nil {
+		t.Fatal("LoadAppRolePassword accepted a password equal to DB_PASSWORD")
+	}
+
+	t.Setenv("DB_APP_PASSWORD", "app-secret")
+	t.Setenv("DB_DSN", "postgres://x@db.internal/simplehost?sslmode=verify-full&sslrootcert=%2Fetc%2Fca.crt")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "DB_APP_USER") {
+		t.Fatalf("DB_APP_USER with DB_DSN accepted: %v", err)
+	}
+}
+
+func TestDSNParseErrorDoesNotLeakThePassword(t *testing.T) {
+	completeEnv(t)
+	t.Setenv("DB_DSN", "postgres://user:hunter2%zz@db/x")
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load accepted an unparseable DSN")
+	}
+	if strings.Contains(err.Error(), "hunter2") {
+		t.Fatalf("error leaks the password: %v", err)
+	}
+}
+
+func TestTrustedProxiesAndAPIKeyMaxDays(t *testing.T) {
+	completeEnv(t)
+	t.Setenv("TRUSTED_PROXY_CIDRS", "10.0.0.0/8, 192.168.1.7 ,fd00::/8")
+	t.Setenv("API_KEY_MAX_DAYS", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.TrustedProxies) != 3 || cfg.TrustedProxies[1].String() != "192.168.1.7/32" {
+		t.Fatalf("TrustedProxies = %v", cfg.TrustedProxies)
+	}
+	if cfg.APIKeyMaxDays != 365 {
+		t.Fatalf("APIKeyMaxDays = %d", cfg.APIKeyMaxDays)
+	}
+	t.Setenv("TRUSTED_PROXY_CIDRS", "not-a-cidr")
+	if _, err := Load(); err == nil {
+		t.Fatal("bad TRUSTED_PROXY_CIDRS accepted")
+	}
+	t.Setenv("TRUSTED_PROXY_CIDRS", "")
+	for _, bad := range []string{"0", "366"} {
+		t.Setenv("API_KEY_MAX_DAYS", bad)
+		if _, err := Load(); err == nil {
+			t.Fatalf("API_KEY_MAX_DAYS=%s accepted", bad)
+		}
 	}
 }

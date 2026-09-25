@@ -91,6 +91,12 @@ func TestApplyAgainstPostgres(t *testing.T) {
 	if _, err := appDB.ExecContext(ctx, `TRUNCATE users`); err == nil {
 		t.Fatal("app role was able to TRUNCATE; least-privilege grant is too broad")
 	}
+	if err := CheckLeastPrivilege(ctx, appDB); err != nil {
+		t.Fatalf("CheckLeastPrivilege as the app role: %v", err)
+	}
+	if err := CheckLeastPrivilege(ctx, db); err == nil {
+		t.Fatal("CheckLeastPrivilege accepted the owning role")
+	}
 
 	again, err := Apply(ctx, db, nil)
 	if err != nil || len(again) != 0 {

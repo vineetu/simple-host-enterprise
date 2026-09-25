@@ -87,6 +87,10 @@ func run() (runErr error) {
 		database.Close()
 		return fmt.Errorf("schema check: %w", err)
 	}
+	if err := migrate.CheckLeastPrivilege(context.Background(), database); err != nil {
+		database.Close()
+		return err
+	}
 	resources := applicationResources{
 		database:               database,
 		workersShutdownTimeout: searchWorkerShutdownTimeout,
@@ -153,6 +157,7 @@ func run() (runErr error) {
 		return fmt.Errorf("discover OIDC provider: %w", err)
 	}
 	oidcClaims := handler.OIDCClaimConfig{
+		Issuer:              cfg.OIDC.Issuer,
 		EmailClaim:          cfg.OIDC.EmailClaim,
 		UsernameClaim:       cfg.OIDC.UsernameClaim,
 		AdminClaim:          cfg.OIDC.AdminClaim,
