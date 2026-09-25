@@ -127,18 +127,24 @@ section 3 of each `docs/cloud/*.md`:
 - Oracle: Object Storage's S3 Compatibility API with a Customer Secret Key.
   The endpoint contains the tenancy's object-storage namespace.
 
-**Image.** The release workflow (`.github/workflows/release.yml`) publishes
-a public, multi-arch image to `ghcr.io/vineetu/simple-host-enterprise`,
-tagged `sha-<full commit>` and, for releases, `v*`. Pin it by digest, never
-by tag. List the published tags:
+**Image.** Use the current release, `ghcr.io/vineetu/simple-host-enterprise:v1.0.0`
+(public, linux/amd64 and linux/arm64), pinned by its digest:
+
+```
+sha256:8991d5e9fc8c33e69981c4fa25ca5b3f5964f4087ed10c1074d7016623939489
+```
+
+That is what section 5 step 1 puts in the overlay. The release workflow
+(`.github/workflows/release.yml`) publishes every `v*` tag, and
+`sha-<full commit>` tags, the same way. Pin by digest, never by tag. To use
+a different build, list the published tags:
 
 ```sh
 curl -s -H "Authorization: Bearer $(curl -s 'https://ghcr.io/token?scope=repository:vineetu/simple-host-enterprise:pull' | python3 -c 'import json,sys;print(json.load(sys.stdin)["token"])')" https://ghcr.io/v2/vineetu/simple-host-enterprise/tags/list
 ```
 
-Use the tag for the commit you have checked out
-(`sha-$(git rev-parse HEAD)`) if it exists. If not, use the newest `v*`
-tag, or build and push your own from this commit (`make image`, then tag
+Prefer the newest `v*` tag. Otherwise use the tag for the commit you have
+checked out (`sha-$(git rev-parse HEAD)`) if it exists, or build and push your own from this commit (`make image`, then tag
 and push to a registry the cluster can pull from). The image's migrations
 must be at least as new as any database it has touched: the server refuses
 to start against a newer schema (`docs/install.md` section 10).
@@ -227,7 +233,7 @@ edits to them.
 
 1. `kustomization.yaml`, `images:` entry: set `newName` to
    `ghcr.io/vineetu/simple-host-enterprise` (or your mirror) and `digest`
-   to the digest from section 3.
+   to the digest from section 3 (for v1.0.0, `sha256:8991d5e9fc8c33e69981c4fa25ca5b3f5964f4087ed10c1074d7016623939489`).
 2. `ingress-patch.yaml`: replace every `simple-host.example.com` with
    `<base>` (both the TLS hosts and the two rules, including the
    `*.` wildcard). Set `cert-manager.io/cluster-issuer` to the DNS-01
