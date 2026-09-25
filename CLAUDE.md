@@ -8,10 +8,11 @@ Guidance for coding agents working in this repository.
 
 The installable package of Simple Host: a Go service that hosts static sites
 with a per-site JSON store, for the people of one organisation, on any
-Kubernetes cluster with Postgres and an S3-compatible bucket. It is built in
-phases from a plan kept outside this repository; each phase's record is in
-`docs/security-review.md` and `docs/configuration.md`. Read them before changing anything: they say what
-exists, what deviated from the plan, and what is deliberately unfinished.
+Kubernetes cluster with Postgres and an S3-compatible bucket. Read
+`docs/security-review.md` and `docs/configuration.md` before changing
+anything: they say what exists and what is deliberately unfinished. Code
+comments that cite "design.md" or "design N.N" refer to the original design
+plan, which is not part of this repository; the code is the authority.
 
 ## Rules
 
@@ -22,7 +23,7 @@ exists, what deviated from the plan, and what is deliberately unfinished.
   comments, not git history.
 - **No coding-agent or model-vendor references** in commit messages.
 - **Never commit credentials**, and never reintroduce anything `SCRUB.md`
-  removes. Run its proof after importing from the source instance.
+  removes. Run its proof after importing code from elsewhere.
 - **Edit, do not rewrite.** Simplify by editing what exists.
 - **The changelog is the user's call.** Do not edit
   `internal/handler/static/changelog.html` unprompted.

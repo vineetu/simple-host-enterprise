@@ -1,4 +1,4 @@
-# Syncs every site's assets directory to the backup bucket (design 9.1),
+# Syncs every site's assets directory to the backup bucket,
 # under the same server-side-encryption header and optional client-side
 # envelope a version backup uses. Runs `simple-host backup-assets`, which is
 # safe to run concurrently with itself or with a deploy: every file is
@@ -8,8 +8,7 @@
 # real asset volume can patch it to whatever cadence its recovery-point
 # objective needs.
 #
-# The read-only mount below is the site-data PVC design section 3 already
-# assumes is ReadWriteOnce, one node, one replica. On a single-node cluster
+# The read-only mount below is the site-data PVC, which is ReadWriteOnce, one node, one replica. On a single-node cluster
 # (the local overlay) that is automatically also this Job's node, so it
 # mounts cleanly alongside the application Deployment's read-write mount. On
 # a multi-node cluster, a second node attaching the same RWO volume can fail

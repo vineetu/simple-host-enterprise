@@ -1,7 +1,6 @@
-# Dex is the automated-test OIDC provider for the local overlay (design.md
-# 10.6): a static test admin and a static test non-admin, no external
-# identity provider needed. Google is the manual rehearsal provider
-# (design.md 6.5, 10.7); this component is never used outside `make local`
+# Dex is the automated-test OIDC provider for the local overlay: a static
+# test admin and a static test non-admin, no external identity provider
+# needed. Google is the manual rehearsal provider; this component is never used outside `make local`
 # and CI.
 #
 # The issuer is Dex's own in-cluster Service DNS name, deliberately not the

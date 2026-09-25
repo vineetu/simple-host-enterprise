@@ -94,8 +94,7 @@ local-certs:
 
 # secrets.env is generated once with random values and never committed.
 # DB_PASSWORD is the owning role migrations run as; DB_APP_PASSWORD is the
-# distinct least-privilege application role the server connects as (design
-# 9.3) — the two must never be the same value.
+# distinct least-privilege application role the server connects as — the two must never be the same value.
 local-secrets:
 	@test -f $(LOCAL_OVERLAY)/secrets.env || { \
 	  printf 'DB_PASSWORD=%s\nDB_APP_PASSWORD=%s\nBACKUP_STORAGE_ACCESS_KEY_ID=simplehost\nBACKUP_STORAGE_SECRET_ACCESS_KEY=%s\nMINIO_KMS_SECRET_KEY=local-sse-key:%s\nOIDC_CLIENT_SECRET=local-dex-client-secret-96808aacbcb9ec41\nSESSION_SIGNING_KEY=local1:%s\n' \
@@ -143,7 +142,8 @@ smoke:
 	    CLUSTER_CONTEXT="$(CLUSTER_CONTEXT)" NAMESPACE="$(NAMESPACE)" ./scripts/smoke.sh; \
 	fi
 
-# Phase 7's scripted pen-test list (design.md 12) against the local overlay.
+# The scripted pen-test suite (docs/security-review.md section 3) against the
+# local overlay.
 # Dex's issuer is the in-cluster Service DNS name (see
 # deploy/components/dex/configmap.yaml), so this starts the same port-forward
 # smoke does. `/auth/*` is rate-limited (Burst 20, refill 0.2/s -

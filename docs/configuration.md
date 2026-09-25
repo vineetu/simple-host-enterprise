@@ -1,11 +1,6 @@
 # Configuration reference
 
-DRAFT — reconcile after Phase 7.
-
-Generated from `internal/config/config.go` as of Phase 4, the last phase to
-add a variable there — including the audit sink's retention and visibility
-settings, which now load through `config.LoadAuditRetention()` alongside
-everything else rather than being read directly from the environment.
+Every variable `internal/config/config.go` reads.
 Everything under "Public address" through "Retention" is read by
 `config.Load()` (the server) or `config.LoadDatabase()` /
 `config.LoadAppRolePassword()` / `config.LoadAuditRetention()` (the
@@ -14,8 +9,6 @@ the same environment). Nothing that identifies a particular installation
 has a default: leave any of the required rows below unset and the process
 refuses to start, reporting every missing name at once in a single
 `missing required configuration: ...` error, not one restart per gap.
-
-Phases 0, 1, 2, 3, 4, and 5 are reflected here in full.
 
 
 ## Secrets: environment or file
@@ -57,7 +50,7 @@ shell.
 | `METRICS_PORT` | No | `9090` | Port of the separate `/metrics` listener; not exposed by the Service or Ingress (`docs/install.md` section 12). |
 | `SITE_DIR` | No | `/mnt/data/sites` | none |
 | `TRUSTED_PROXY_CIDRS` | No | private ranges: `10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,fc00::/7` | Comma-separated CIDRs (a bare address counts as one host) of the proxies in front of the server — typically the ingress controller's pod range. When a request's TCP peer is inside this set, the client address is taken from `X-Forwarded-For`, read right to left, as the first address that is not itself a trusted proxy; anything further left was written by the client and is ignored. The default covers an ingress controller or load balancer on a private address; set it explicitly (an empty value trusts nothing) if your proxies sit elsewhere, or if clients can reach the pod directly from a private network. That client address is the one used everywhere: rate limits, the request log, `access_log.ip`, `sessions.ip` and audit rows. A malformed entry is refused at startup. Rate limits on a route that has already signed the caller in are keyed by the person, not the address. |
-| `RESERVED_LABELS` | No | none (empty) | Comma-separated; extends the built-in reserved-label set (`www`, `api`, `admin`, `sites`, `mcp`, `docs`, `auth`, `login`, `mail`, `cdn`, `status`, `app`, and the rest — design 7.1, `internal/handler/names.go`) with installation-specific hostnames that must never belong to an account or a site. Checked at account and site creation, and (Phase 2) any label containing `--` anywhere is refused outright, independent of this list, since that shape is reserved for a restricted site's own hostname (`<owner>--<site>.<base>`, design 5.2a). |
+| `RESERVED_LABELS` | No | none (empty) | Comma-separated; extends the built-in reserved-label set (`www`, `api`, `admin`, `sites`, `mcp`, `docs`, `auth`, `login`, `mail`, `cdn`, `status`, `app`, and the rest — `internal/handler/names.go`) with installation-specific hostnames that must never belong to an account or a site. Checked at account and site creation, and any label containing `--` anywhere is refused outright, independent of this list, since that shape is reserved for a restricted site's own hostname (`<owner>--<site>.<base>`, design 5.2a). |
 
 ## Identity (OIDC)
 
@@ -72,7 +65,7 @@ shell.
 | `OIDC_ADMIN_CLAIM` | No | none | Must be set together with `OIDC_ADMIN_VALUE` — setting exactly one of the pair is refused at startup. |
 | `OIDC_ADMIN_VALUE` | No | none | See `OIDC_ADMIN_CLAIM`. |
 | `ADMIN_EMAILS` | No | none (empty) | Comma-separated, lowercased. A person is admin if their address is in this list, or `OIDC_ADMIN_CLAIM`/`OIDC_ADMIN_VALUE` matches (either source grants it), refreshed on every sign-in. When `OIDC_ADMIN_CLAIM` is not set, this list is also re-applied to every account at server start, so removing someone demotes them on the next deploy rather than at their next sign-in (with the claim in use, the claim can only be read at sign-in, so there the bound is `SESSION_TTL`). The portable admin path every reference install documents — Google does not put groups in the ID token. |
-| `ALLOWED_EMAIL_DOMAINS` | No | none (empty, meaning unrestricted) | Comma-separated, lowercased. Required in practice for Google: without it, anyone with a Google account can sign in. With `OIDC_ISSUER=https://accounts.google.com` and this list set, the ID token must also carry `hd` (a Google Workspace account) naming one of these domains — a consumer Google account can hold a verified address at your domain without your company controlling it. Also gates whether an existing row may be claimed by a new sign-in's (verified) email (design 6.1) — without this list, that claim path never runs. |
+| `ALLOWED_EMAIL_DOMAINS` | No | none (empty, meaning unrestricted) | Comma-separated, lowercased. Required in practice for Google: without it, anyone with a Google account can sign in. With `OIDC_ISSUER=https://accounts.google.com` and this list set, the ID token must also carry `hd` (a Google Workspace account) naming one of these domains — a consumer Google account can hold a verified address at your domain without your company controlling it. Also gates whether an existing row may be claimed by a new sign-in's (verified) email — without this list, that claim path never runs. |
 | `OIDC_HINT_DOMAIN` | No | the sole `ALLOWED_EMAIL_DOMAINS` entry, if there is exactly one | Sent as the provider's domain hint (Google: `hd`) on the authorization request. A hint narrows the account chooser; it never authorizes — the callback still checks the claim and the domain list independently. |
 | `OAUTH_REDIRECT_HOSTS` | No | `chatgpt.com,claude.ai,vscode.dev,localhost,cursor://anysphere.cursor-mcp` | Where an AI app connecting to `/mcp` over OAuth may be sent back after sign-in. Comma-separated: a hostname allows `https` redirects to it, `localhost` allows loopback redirects for apps on the person's own machine (Claude Code, Codex), `scheme://host` allows an app's own URL scheme, and `*` allows any `https` host. Apps register themselves; this list is what limits which ones can finish connecting. |
 
@@ -94,11 +87,11 @@ Either `DB_DSN` (a complete URL) or the four parts below, not a mix.
 | `DB_DSN` | One of this or the parts group | none | Must be a `postgres://` or `postgresql://` URL — a keyword/value DSN (`host=... sslmode=...`) is refused outright, not merely tolerated, because a crafted keyword/value string can otherwise smuggle a fake `sslmode=verify-full` past the TLS check while `lib/pq` itself connects with a real, different `sslmode` elsewhere in the same string. Re-parsed and re-serialized once at load time so the exact string the TLS check reads is byte-for-byte the string used to connect. |
 | `DB_HOST` | Yes, if no `DB_DSN` | none | — |
 | `DB_PORT` | No | `5432` | — |
-| `DB_USER` | Yes, if no `DB_DSN` (and, for the server, no `DB_APP_USER`) | none | This is the **owning** role the `migrate` and `prune` subcommands connect as (design 9.3). The server does not use it when `DB_APP_USER` is set, which the Deployment manifest does. |
+| `DB_USER` | Yes, if no `DB_DSN` (and, for the server, no `DB_APP_USER`) | none | This is the **owning** role the `migrate` and `prune` subcommands connect as. The server does not use it when `DB_APP_USER` is set, which the Deployment manifest does. |
 | `DB_PASSWORD` | Yes, if no `DB_DSN` (and, for the server, no `DB_APP_USER`) | none | Owning-role password; `DB_PASSWORD_FILE` is read instead when set. Must differ from `DB_APP_PASSWORD`: `migrate` and the server refuse to start when the two are equal. The manifest blanks it in the server container, so the owning password is not in the server's environment. |
 | `DB_NAME` | Yes, if no `DB_DSN` | none | — |
 | `DB_SSLMODE` | No | `verify-full` | Anything other than `verify-full` is refused unless `DB_INSECURE_ALLOWED=true`. |
-| `DB_SSL_ROOT_CERT` | Required in practice with `sslmode=verify-full` | none | `verify-full` with no root certificate configured is refused unless `DB_INSECURE_ALLOWED=true`. Renamed from `DB_SSLROOTCERT` after Phase 0; see that phase's implementation record if you find the old name in an older note. |
+| `DB_SSL_ROOT_CERT` | Required in practice with `sslmode=verify-full` | none | `verify-full` with no root certificate configured is refused unless `DB_INSECURE_ALLOWED=true`. Renamed from `DB_SSLROOTCERT`; the old name is not read. |
 | `DB_INSECURE_ALLOWED` | No | `false` | Bypasses both TLS refusals above. For a local evaluation cluster only — never set on a real install. |
 | `DB_INCLUSTER_EVALUATION` | No | `false` | Set by `deploy/components/postgres-incluster`. The server logs a warning at every start: that database has no backup. Evaluation only. |
 | `DB_APP_PASSWORD` | Yes, whenever `migrate` runs, and for the server with `DB_APP_USER` | none | `DB_APP_PASSWORD_FILE` is read instead when set. The `migrate` subcommand sets this as the least-privilege application role's login password on every run, applied migrations or not, so a rotated value takes effect without a schema change. A role granted in a migration with no password to give it would otherwise sit unusable. |
@@ -111,12 +104,11 @@ as its owner (a superuser included), or holds `UPDATE`, `DELETE` or
 A `DB_DSN` that fails to parse is reported without echoing the value, since
 it may contain a password.
 
-## Assets (design.md 7.3)
+## Assets
 
-Bounds on `POST /api/sites/{site}/assets`, added in Phase 3. None of the
+Bounds on `POST /api/sites/{site}/assets`. None of the
 three has a default that identifies an installation — these are plan/tier
-knobs, not secrets, so all three fall back to design 7.3's own reference
-numbers rather than refusing to start.
+knobs, not secrets, so all three fall back to the defaults below rather than refusing to start.
 
 | Variable | Required | Default | Refusal it triggers when set wrong |
 |---|---|---|---|
@@ -128,7 +120,7 @@ None of the shipped overlays (`local`, `byo`) set these; they are left at
 their code defaults unless an installation has a reason to raise or lower
 them.
 
-## Retention and visibility (audit sink, design.md 8.2)
+## Retention and visibility (audit sink)
 
 Loaded by `config.LoadAuditRetention()`, the same narrow-loader shape
 `LoadDatabase`/`LoadAppRolePassword` use: the `prune` subcommand
@@ -139,14 +131,14 @@ through `cfg.Audit`. `prune` runs from `deploy/base/cronjob-prune.yaml`, a
 monthly `CronJob` wired into `deploy/base/kustomization.yaml`'s
 `resources:` list, under the database's owning role — the least-privilege
 `simplehost_app` role has no `DELETE`/`DROP` on `audit_events`/
-`access_log` at all (design 9.3), so retention can only ever run as the
+`access_log` at all, so retention can only ever run as the
 owning role, never from the server's own connection pool.
 
 | Variable | Required | Default | Refusal it triggers when set wrong |
 |---|---|---|---|
 | `AUDIT_RETENTION_DAYS` | No | `400` | Must be a positive integer. |
 | `ACCESS_LOG_RETENTION_DAYS` | No | `90` | Must be a positive integer. |
-| `ACCESS_LOG_VISIBILITY` | No | `owner` | Must be `owner` or `admin`. `owner` (design 8.2's default) lets a site's owner and team members read `GET /api/access` for their own sites; `admin` refuses every non-admin caller of that route outright, regardless of ownership. Read by `handler.NewAuditHandler` (`cmd/server/main.go`) on every request; does not affect `GET /api/audit`, which is always scoped by caller identity rather than gated by this switch. |
+| `ACCESS_LOG_VISIBILITY` | No | `owner` | Must be `owner` or `admin`. `owner` (the default) lets a site's owner and team members read `GET /api/access` for their own sites; `admin` refuses every non-admin caller of that route outright, regardless of ownership. Read by `handler.NewAuditHandler` (`cmd/server/main.go`) on every request; does not affect `GET /api/audit`, which is always scoped by caller identity rather than gated by this switch. |
 
 ## Backup bucket (S3-compatible)
 
@@ -161,18 +153,18 @@ owning role, never from the server's own connection pool.
 | `BACKUP_STORAGE_INSECURE_ALLOWED` | No | `false` | Permits a plain-`http` `BACKUP_STORAGE_ENDPOINT`. For a local cluster where the bucket sits on the same node only; the local overlay's MinIO sets this. |
 | `BACKUP_SSE` | No | `AES256` | Must be `AES256` or `aws:kms`. `aws:kms` requires `BACKUP_SSE_KEY_ID`; `AES256` refuses it being set. Sent as `x-amz-server-side-encryption` on every backup `PutObject`. Self-hosted MinIO refuses any value here without its own `MINIO_KMS_SECRET_KEY` configured on the MinIO side — see `docs/install.md` section 9. |
 | `BACKUP_SSE_KEY_ID` | Required with `BACKUP_SSE=aws:kms` | none | See `BACKUP_SSE`. |
-| `BACKUP_ENVELOPE_KEY` | No | none (envelope disabled) | Optional client-side envelope encryption, on top of the SSE header above (design 9.1). One or two comma-separated `<id>:<base64 32-byte key>` entries, same shape and rotation procedure as `SESSION_SIGNING_KEY`: the first wraps every new backup object, every configured key is tried to unwrap an existing one. Set in a Secret; a bucket that is later fully compromised cannot read these objects without also having this key. |
+| `BACKUP_ENVELOPE_KEY` | No | none (envelope disabled) | Optional client-side envelope encryption, on top of the SSE header above. One or two comma-separated `<id>:<base64 32-byte key>` entries, same shape and rotation procedure as `SESSION_SIGNING_KEY`: the first wraps every new backup object, every configured key is tried to unwrap an existing one. Set in a Secret; a bucket that is later fully compromised cannot read these objects without also having this key. |
 
-## Removed since the source instance
+## Removed variables
 
-These existed in the original internal instance and have no equivalent
-here; do not set them.
+These existed in the code this package was derived from and have no
+equivalent here; do not set them.
 
 | Variable | Why it is gone |
 |---|---|
-| `ADMIN_API_KEY` | Removed in Phase 1. There is no synthetic admin principal; admin status follows `ADMIN_EMAILS`/`OIDC_ADMIN_CLAIM` on a real signed-in person. |
-| `AWS_SECRET_NAME` | The Secrets Manager config loader was removed in Phase 0; every secret is a Kubernetes Secret, materialized directly or through your External Secrets Operator integration. |
-| `SUBDOMAIN_CUTOVER`, `OWNER_HOST_MANAGEMENT` | The subdomain-only serving shape is the only shape (Phase 2); there is no legacy path or cutover flag to flip. |
+| `ADMIN_API_KEY` | Removed. There is no synthetic admin principal; admin status follows `ADMIN_EMAILS`/`OIDC_ADMIN_CLAIM` on a real signed-in person. |
+| `AWS_SECRET_NAME` | The Secrets Manager config loader was removed; every secret is a Kubernetes Secret, materialized directly or through your External Secrets Operator integration. |
+| `SUBDOMAIN_CUTOVER`, `OWNER_HOST_MANAGEMENT` | The subdomain-only serving shape is the only shape; there is no legacy path or cutover flag to flip. |
 
 ## Where these are set in the shipped overlays
 

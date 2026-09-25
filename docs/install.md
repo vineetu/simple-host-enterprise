@@ -1,22 +1,13 @@
 # Installing Simple Host
 
-Reconciled against Phase 7's cold, start-to-finish run (`docs/security-review.md section 3`):
-sections 1-2 (Docker Desktop) were followed literally by a stranger, from a
-`make local-down` teardown, with no guide defect found. Sections 3-9 (minikube,
-Google sign-in, a real cluster, and everything past first bring-up) are
-unchanged by that run and are not themselves re-verified here.
-
 This guide takes a platform team from nothing to a signed-in dashboard,
 first on a local cluster, then on a real one with your own Postgres and
 bucket. Every command below is a `make` target or a `kubectl`/`kustomize`
 invocation that exists in this repository today.
 
-As of this draft, Phases 0 (bootstrap and packaging), 1 (identity), 2
-(subdomain-only serving and restricted sites), 3 (the site-facing state and
-asset API), 4 (the action and access audit), and 5 (data protection) are
-built and live-verified against the local cluster. Only Phase 7 (the paced,
-end-to-end pen-test run) remains before this guide is fully reconciled; see
-`docs/security-review.md` for what that still needs.
+Sections 1-2 (Docker Desktop) have been followed start to finish from a
+clean teardown. `docs/cloud/` records which managed-cloud guides have been
+verified by a real install.
 
 ## 1. Before you start
 
@@ -155,7 +146,7 @@ Every other step, and `make smoke CLUSTER_CONTEXT=minikube`, is identical.
 Dex proves the sign-in code path in CI, but every real install — and the
 one manual rehearsal this package's own development runs before trusting a
 release — uses a real provider. Google is documented in full because it is
-the provider named in the design (10.7) and the one with the sharpest
+a common choice and the one with the sharpest
 edges (a redirect URI on `.localhost` or a raw IP is refused outright).
 Any OIDC provider works the same way with different console screens; see
 `docs/configuration.md` for the generic `OIDC_*` variables.
@@ -175,7 +166,7 @@ Any OIDC provider works the same way with different console screens; see
    `https://simple-host.localhost/auth/callback` is refused ("must end
    with a public top-level domain"), and so is a raw IP address. This is
    exactly why the local overlay's base host is
-   `simple-host.127-0-0-1.nip.io` and not `.localhost` — see design 10.6.
+   `simple-host.127-0-0-1.nip.io` and not `.localhost`.
 4. Copy the client ID and secret into `secrets.env` as `OIDC_CLIENT_ID` and
    `OIDC_CLIENT_SECRET`. Set `OIDC_ISSUER=https://accounts.google.com` in
    `config.env`. Leave `OIDC_SCOPES` at its default,
@@ -324,7 +315,7 @@ fold into a valid DNS label has no working restricted address yet either
 
 ## 7. Reading and writing a site's own state and assets
 
-Built and verified (Phase 3). A page's own JavaScript calls
+A page's own JavaScript calls
 `GET`/`PUT /api/sites/{site}/state` (last-write-wins) or
 `GET`/`PUT /api/sites/{site}/state/versioned` (compare-and-set; the
 default for a new stateful site) on its own host, authenticated by the
@@ -366,7 +357,7 @@ actually corroborated (`via_site_observed`).
 
 ## 8. The audit trail and access log
 
-Built and verified (Phase 4). Every mutation writes an `audit_events` row.
+Every mutation writes an `audit_events` row.
 Sixteen actions write it inside the same database transaction as the
 change it records (`internal/audit`'s `RecordTx`), so a mutation in this
 group without its audit row cannot commit: `site_create`, `site_update`,
@@ -437,8 +428,7 @@ partitions and then drops any whose partition is fully past its retention
 window — `AUDIT_RETENTION_DAYS` (default 400) and
 `ACCESS_LOG_RETENTION_DAYS` (default 90), both in `docs/configuration.md`.
 It runs under the database's owning credential, not `simplehost_app`: the
-application role has no `DROP` privilege on either table at all (design
-9.3), so retention can only ever run as the owning role. Preview what a
+application role has no `DROP` privilege on either table at all, so retention can only ever run as the owning role. Preview what a
 run would drop without dropping anything:
 
 ```sh
@@ -463,15 +453,12 @@ those columns (the action, timestamp, and `via_site_label`/`via_site_name`
 carry most of the practical signal); and `admin_disable_user`/
 `admin_enable_user` still audit with a plain, non-transactional write
 (`db.SetUserDisabled` opens its own internal transaction with no way for
-the caller to share it), unlike every other action above. Two actions design
-8.1 names — `admin_transfer_sites` and `site_write_mode` — have no route
-anywhere in this repository to audit yet: neither a site-transfer feature
-nor a per-site write-mode setting has been built by any phase, so there is
-nothing to wire until one exists.
+the caller to share it), unlike every other action above. There is no site-transfer feature and
+no per-site write-mode setting, so neither has an audit action.
 
 ## 9. Backup and restore
 
-Built and verified (Phase 5). Every uploaded version is already copied to
+Every uploaded version is already copied to
 your configured bucket with a server-side-encryption header
 (`BACKUP_SSE`, default `AES256`); set `BACKUP_ENVELOPE_KEY` for an
 additional client-side envelope that makes the objects unreadable to

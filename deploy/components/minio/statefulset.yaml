@@ -38,7 +38,7 @@ spec:
                   name: simple-host-secrets
                   key: BACKUP_STORAGE_SECRET_ACCESS_KEY
             # MinIO refuses a PutObject that carries
-            # x-amz-server-side-encryption (design 9.1's SSE header) with
+            # x-amz-server-side-encryption (the BACKUP_SSE header) with
             # "KMS not configured" unless a KMS backend is set up, even for
             # plain AES256. This single-key backend is MinIO's own built-in
             # auto-encryption path, sufficient for a bucket the application

@@ -41,7 +41,7 @@ patches:
               - key: ca.crt
                 path: ca.crt
   # simple-host-prune also connects to Postgres directly (as the owning
-  # role, design 9.3) with sslmode=verify-full, so its own db-ca volume
+  # role) with sslmode=verify-full, so its own db-ca volume
   # (deploy/base/cronjob-prune.yaml, index 0 of its pod template's volumes)
   # needs the same fix, or its first query fails with "open
   # /etc/simple-host/db-ca/ca.crt: no such file or directory" the moment it

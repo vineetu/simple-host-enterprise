@@ -15,8 +15,7 @@ const (
 )
 
 // CookiePolicy is trusted deployment configuration. It must not be inferred
-// from request headers because the application listener is behind a layer-4
-// load balancer and those headers are client controlled.
+// from request headers such as X-Forwarded-Proto: the client can set them.
 type CookiePolicy struct {
 	Secure bool
 }

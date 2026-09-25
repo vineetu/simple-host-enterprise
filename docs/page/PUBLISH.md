@@ -1,7 +1,5 @@
 # Publishing the `/enterprise` page
 
-DRAFT — reconcile after Phase 4 and 7.
-
 This page is not part of the package and is not a route the server serves.
 It is a static site, published like any other Simple Host site, under your
 own account on the existing playground instance. This file is commands
