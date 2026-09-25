@@ -200,6 +200,14 @@ This is `deploy/overlays/byo` — no database or bucket objects are deployed;
 the overlay carries only the application, pointed at coordinates you
 supply.
 
+Choose `<base>` on a registrable domain of its own, such as
+`corp-sites.com`, never a subdomain of the company's main domain such as
+`simple-host.corp.com`: hosted pages are written by anyone in the company,
+and on the main domain they would be same-site with its other apps, able to
+receive and plant cookies scoped to that domain. Set `TRUSTED_PROXY_CIDRS`
+to your ingress controller's pod range so rate limits and logs see each
+person's address rather than the ingress's (`docs/configuration.md`).
+
 1. Pick the image. The recommended one is the published release,
    `ghcr.io/vineetu/simple-host-enterprise:v1.0.0`, pinned by its digest
    `sha256:8991d5e9fc8c33e69981c4fa25ca5b3f5964f4087ed10c1074d7016623939489`.

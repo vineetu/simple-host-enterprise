@@ -25,6 +25,8 @@ Every secret below can be given directly, or through a file: set
 trailing newline trimmed. The file wins when both are set. A `_FILE` that
 cannot be read stops startup with its own error rather than being reported as
 a missing value — a broken mount and an unset variable need different fixes.
+That includes `BACKUP_ENVELOPE_KEY_FILE`: an unreadable envelope key stops
+startup rather than silently leaving backups without their envelope.
 
 Applies to `OIDC_CLIENT_SECRET`, `SESSION_SIGNING_KEY`, `DB_PASSWORD`,
 `DB_APP_PASSWORD`, `BACKUP_STORAGE_ACCESS_KEY_ID`,
@@ -53,22 +55,23 @@ shell.
 | `PORT` | No | `8080` | none |
 | `HTTPS_REDIRECT_PORT` | No | `8081` | Must differ from `PORT` when `SECURE_MODE=true`. |
 | `SITE_DIR` | No | `/mnt/data/sites` | none |
+| `TRUSTED_PROXY_CIDRS` | No | none (the TCP peer is the client) | Comma-separated CIDRs (a bare address counts as one host) of the proxies in front of the server — typically the ingress controller's pod range. When a request's TCP peer is inside this set, the client address is taken from `X-Forwarded-For`, read right to left, as the first address that is not itself a trusted proxy; anything further left was written by the client and is ignored. Without it, every request behind an ingress appears to come from the ingress, so the per-address rate limits are shared by the whole company. That client address is the one used everywhere: rate limits, the request log, `access_log.ip`, `sessions.ip` and audit rows. A malformed entry is refused at startup. Rate limits on a route that has already signed the caller in are keyed by the person, not the address. |
 | `RESERVED_LABELS` | No | none (empty) | Comma-separated; extends the built-in reserved-label set (`www`, `api`, `admin`, `sites`, `mcp`, `docs`, `auth`, `login`, `mail`, `cdn`, `status`, `app`, and the rest — design 7.1, `internal/handler/names.go`) with installation-specific hostnames that must never belong to an account or a site. Checked at account and site creation, and (Phase 2) any label containing `--` anywhere is refused outright, independent of this list, since that shape is reserved for a restricted site's own hostname (`<owner>--<site>.<base>`, design 5.2a). |
 
 ## Identity (OIDC)
 
 | Variable | Required | Default | Refusal it triggers when set wrong |
 |---|---|---|---|
-| `OIDC_ISSUER` | Yes | none | Discovery and JWKS are fetched from this issuer at startup; sign-in fails if it is unreachable or its metadata does not match. |
+| `OIDC_ISSUER` | Yes | none | Discovery and JWKS are fetched from this issuer at startup (15-second timeout); sign-in fails if it is unreachable or its metadata does not match. Entra ID's multi-tenant endpoints (`/common`, `/organizations`, `/consumers`) are refused at startup: use the tenant's own issuer, `https://login.microsoftonline.com/<tenant id>/v2.0`. |
 | `OIDC_CLIENT_ID` | Yes | none | none at startup; the provider refuses the authorization request if wrong. |
 | `OIDC_CLIENT_SECRET` | Yes | none | none at startup; token exchange fails if wrong. Belongs in a Secret, never in `config.env`. |
 | `OIDC_SCOPES` | No | `openid email profile` | Space-separated. |
-| `OIDC_EMAIL_CLAIM` | No | `email` | Overrides the ID token claim read as the person's address, for a provider that does not use `email`. |
+| `OIDC_EMAIL_CLAIM` | No | `email` | Overrides the ID token claim read as the person's address, for a provider that does not use `email`. Whatever the claim, sign-in requires the provider to vouch for the address: `email_verified` must be present and `true`, or it is refused (`sign_in_failed`, reason `email_not_verified`). Entra ID never sends `email_verified`; there, add the optional claim `xms_edov` to the app registration's ID token (Token configuration → Add optional claim), which Entra sets when the address's domain is verified by the tenant — it is accepted only from an Entra issuer. |
 | `OIDC_USERNAME_CLAIM` | No | none (derives from the email's local part) | When set, this claim's value is used to derive the account's username instead. |
 | `OIDC_ADMIN_CLAIM` | No | none | Must be set together with `OIDC_ADMIN_VALUE` — setting exactly one of the pair is refused at startup. |
 | `OIDC_ADMIN_VALUE` | No | none | See `OIDC_ADMIN_CLAIM`. |
-| `ADMIN_EMAILS` | No | none (empty) | Comma-separated, lowercased. A person is admin if their address is in this list, or `OIDC_ADMIN_CLAIM`/`OIDC_ADMIN_VALUE` matches (either source grants it), refreshed on every sign-in. The portable admin path every reference install documents — neither Google nor Entra's common endpoint puts groups in the ID token. |
-| `ALLOWED_EMAIL_DOMAINS` | No | none (empty, meaning unrestricted) | Comma-separated, lowercased. Required in practice for a multi-tenant provider (Google, Entra's common endpoint): without it, anyone with an account at that provider can sign in. Also gates whether an existing row may be claimed by a new sign-in's email (design 6.1) — without this list, that claim path never runs. |
+| `ADMIN_EMAILS` | No | none (empty) | Comma-separated, lowercased. A person is admin if their address is in this list, or `OIDC_ADMIN_CLAIM`/`OIDC_ADMIN_VALUE` matches (either source grants it), refreshed on every sign-in. When `OIDC_ADMIN_CLAIM` is not set, this list is also re-applied to every account at server start, so removing someone demotes them on the next deploy rather than at their next sign-in (with the claim in use, the claim can only be read at sign-in, so there the bound is `SESSION_TTL`). The portable admin path every reference install documents — Google does not put groups in the ID token. |
+| `ALLOWED_EMAIL_DOMAINS` | No | none (empty, meaning unrestricted) | Comma-separated, lowercased. Required in practice for Google: without it, anyone with a Google account can sign in. With `OIDC_ISSUER=https://accounts.google.com` and this list set, the ID token must also carry `hd` (a Google Workspace account) naming one of these domains — a consumer Google account can hold a verified address at your domain without your company controlling it. Also gates whether an existing row may be claimed by a new sign-in's (verified) email (design 6.1) — without this list, that claim path never runs. |
 | `OIDC_HINT_DOMAIN` | No | the sole `ALLOWED_EMAIL_DOMAINS` entry, if there is exactly one | Sent as the provider's domain hint (Google: `hd`) on the authorization request. A hint narrows the account chooser; it never authorizes — the callback still checks the claim and the domain list independently. |
 
 ## Sessions
@@ -78,6 +81,7 @@ shell.
 | `SESSION_SIGNING_KEY` | Yes | none | One or two comma-separated `<id>:<base64 32-byte key>` entries. More than two, a duplicate id, a non-base64 value, or a decoded length other than 32 bytes is refused. The `__Host-` session cookie has no insecure fallback, so this is required even on a rehearsal install. Rotation: add the new key second, deploy, swap the order so it signs, deploy, remove the old key after `SESSION_TTL` has fully elapsed. |
 | `SESSION_TTL` | No | `12h` | Must parse as a positive Go duration. |
 | `SESSION_IDLE` | No | `1h` | Must parse as a positive Go duration. |
+| `API_KEY_MAX_DAYS` | No | `365` | The longest lifetime an API key may be minted with; must be 1 to 365. API keys are for CI and other automation (people and their agents sign in through OIDC): a new key lives 90 days unless the mint request names `expires_in_days` (or the maximum, if it is below 90), an expired key is refused like a revoked one, and every new key starts with `shk_` so secret scanners can find it. |
 
 ## Database
 
@@ -88,13 +92,21 @@ Either `DB_DSN` (a complete URL) or the four parts below, not a mix.
 | `DB_DSN` | One of this or the parts group | none | Must be a `postgres://` or `postgresql://` URL — a keyword/value DSN (`host=... sslmode=...`) is refused outright, not merely tolerated, because a crafted keyword/value string can otherwise smuggle a fake `sslmode=verify-full` past the TLS check while `lib/pq` itself connects with a real, different `sslmode` elsewhere in the same string. Re-parsed and re-serialized once at load time so the exact string the TLS check reads is byte-for-byte the string used to connect. |
 | `DB_HOST` | Yes, if no `DB_DSN` | none | — |
 | `DB_PORT` | No | `5432` | — |
-| `DB_USER` | Yes, if no `DB_DSN` | none | This is the **owning** role the `migrate` subcommand and its init container connect as (design 9.3); the server itself is given `simplehost_app` and `DB_APP_PASSWORD` as an explicit override in the Deployment manifest, which wins over whatever `DB_USER`/`DB_PASSWORD` this section supplies. |
-| `DB_PASSWORD` | Yes, if no `DB_DSN` | none | Owning-role password. Must differ from `DB_APP_PASSWORD` — the design requires the two roles never share a password, though this is not currently machine-checked. |
+| `DB_USER` | Yes, if no `DB_DSN` (and, for the server, no `DB_APP_USER`) | none | This is the **owning** role the `migrate` and `prune` subcommands connect as (design 9.3). The server does not use it when `DB_APP_USER` is set, which the Deployment manifest does. |
+| `DB_PASSWORD` | Yes, if no `DB_DSN` (and, for the server, no `DB_APP_USER`) | none | Owning-role password; `DB_PASSWORD_FILE` is read instead when set. Must differ from `DB_APP_PASSWORD`: `migrate` and the server refuse to start when the two are equal. The manifest blanks it in the server container, so the owning password is not in the server's environment. |
 | `DB_NAME` | Yes, if no `DB_DSN` | none | — |
 | `DB_SSLMODE` | No | `verify-full` | Anything other than `verify-full` is refused unless `DB_INSECURE_ALLOWED=true`. |
 | `DB_SSL_ROOT_CERT` | Required in practice with `sslmode=verify-full` | none | `verify-full` with no root certificate configured is refused unless `DB_INSECURE_ALLOWED=true`. Renamed from `DB_SSLROOTCERT` after Phase 0; see that phase's implementation record if you find the old name in an older note. |
 | `DB_INSECURE_ALLOWED` | No | `false` | Bypasses both TLS refusals above. For a local evaluation cluster only — never set on a real install. |
-| `DB_APP_PASSWORD` | Yes, whenever `migrate` runs | none | Read by `config.LoadAppRolePassword()`. The `migrate` subcommand sets this as the least-privilege application role's login password on every run, applied migrations or not, so a rotated value takes effect without a schema change. A role granted in a migration with no password to give it would otherwise sit unusable. |
+| `DB_APP_PASSWORD` | Yes, whenever `migrate` runs, and for the server with `DB_APP_USER` | none | `DB_APP_PASSWORD_FILE` is read instead when set. The `migrate` subcommand sets this as the least-privilege application role's login password on every run, applied migrations or not, so a rotated value takes effect without a schema change. A role granted in a migration with no password to give it would otherwise sit unusable. |
+| `DB_APP_USER` | No (set to `simplehost_app` by the Deployment manifest) | none | The role the **server** connects as. When set, the server builds its connection from `DB_HOST`/`DB_PORT`/`DB_NAME`, this user and `DB_APP_PASSWORD[_FILE]`, whatever `DB_USER`/`DB_PASSWORD[_FILE]` say. Refused together with `DB_DSN` (put the application role in the DSN itself). |
+
+Whichever way the server's connection is configured, it checks the role it
+got at startup and refuses to run if that role owns `audit_events`, can act
+as its owner (a superuser included), or holds `UPDATE`, `DELETE` or
+`TRUNCATE` on it — the owning role is for `migrate` and `prune` only.
+A `DB_DSN` that fails to parse is reported without echoing the value, since
+it may contain a password.
 
 ## Assets (design.md 7.3)
 
