@@ -153,7 +153,7 @@ func (h *SiteAPIHandler) siteURL(call siteAPICall) string {
 // this only after confirming it); this method's own job is the query and
 // the response shape.
 func (h *SiteAPIHandler) GetState(w http.ResponseWriter, r *http.Request, call siteAPICall) {
-	if decision := h.limits.allow(stateReadClientPolicy, remoteClientKey(r)); !decision.Allowed {
+	if decision := h.limits.allow(stateReadClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -176,7 +176,7 @@ func (h *SiteAPIHandler) GetState(w http.ResponseWriter, r *http.Request, call s
 
 // PutState answers PUT .../state.
 func (h *SiteAPIHandler) PutState(w http.ResponseWriter, r *http.Request, call siteAPICall) {
-	if decision := h.limits.allow(stateClientPolicy, remoteClientKey(r)); !decision.Allowed {
+	if decision := h.limits.allow(stateClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -234,7 +234,7 @@ func (h *SiteAPIHandler) PutState(w http.ResponseWriter, r *http.Request, call s
 
 // GetStateVersioned answers GET .../state/versioned.
 func (h *SiteAPIHandler) GetStateVersioned(w http.ResponseWriter, r *http.Request, call siteAPICall) {
-	if decision := h.limits.allow(stateReadClientPolicy, remoteClientKey(r)); !decision.Allowed {
+	if decision := h.limits.allow(stateReadClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -257,7 +257,7 @@ func (h *SiteAPIHandler) GetStateVersioned(w http.ResponseWriter, r *http.Reques
 
 // PutStateVersioned answers PUT .../state/versioned.
 func (h *SiteAPIHandler) PutStateVersioned(w http.ResponseWriter, r *http.Request, call siteAPICall) {
-	if decision := h.limits.allow(stateClientPolicy, remoteClientKey(r)); !decision.Allowed {
+	if decision := h.limits.allow(stateClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -397,7 +397,7 @@ type listAssetsResponse struct {
 // succeeds is db.CreateAsset called with the same id, matching
 // docs/security-review.md's documented call order.
 func (h *SiteAPIHandler) CreateAsset(w http.ResponseWriter, r *http.Request, call siteAPICall) {
-	if decision := h.limits.allow(stateClientPolicy, remoteClientKey(r)); !decision.Allowed {
+	if decision := h.limits.allow(stateClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -517,7 +517,7 @@ func (h *SiteAPIHandler) CreateAsset(w http.ResponseWriter, r *http.Request, cal
 
 // ListAssets answers GET .../assets.
 func (h *SiteAPIHandler) ListAssets(w http.ResponseWriter, r *http.Request, call siteAPICall) {
-	if decision := h.limits.allow(stateReadClientPolicy, remoteClientKey(r)); !decision.Allowed {
+	if decision := h.limits.allow(stateReadClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -550,7 +550,7 @@ func (h *SiteAPIHandler) ListAssets(w http.ResponseWriter, r *http.Request, call
 // gives the reasoning: freeing disk space before the audit-trail row
 // disappears from listings is the safer order on a partial failure.
 func (h *SiteAPIHandler) DeleteAsset(w http.ResponseWriter, r *http.Request, call siteAPICall, id string) {
-	if decision := h.limits.allow(stateClientPolicy, remoteClientKey(r)); !decision.Allowed {
+	if decision := h.limits.allow(stateClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -610,7 +610,7 @@ func (h *SiteAPIHandler) DeleteAsset(w http.ResponseWriter, r *http.Request, cal
 // host root-served equivalent) — viewerAllowed only, never writerAllowed:
 // design.md 7.3 lists this as a read for anyone who may view the site.
 func (h *SiteAPIHandler) ServeAsset(w http.ResponseWriter, r *http.Request, call siteAPICall, id string) {
-	if decision := h.limits.allow(stateReadClientPolicy, remoteClientKey(r)); !decision.Allowed {
+	if decision := h.limits.allow(stateReadClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}

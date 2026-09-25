@@ -20,6 +20,7 @@ type APIKey struct {
 	CreatedAt  time.Time
 	LastUsedAt *time.Time
 	RevokedAt  *time.Time
+	ExpiresAt  time.Time
 }
 
 // HashAPIKey returns the SHA-256 of a plaintext key, the form stored in
@@ -48,20 +49,20 @@ func KeyPrefix(hash []byte) string {
 // CreateAPIKey inserts a new key row. keyHash/prefix come from HashAPIKey /
 // KeyPrefix on the freshly generated plaintext, which the caller returns to
 // its client once and never persists.
-func CreateAPIKey(ctx context.Context, q Querier, userID, name string, keyHash []byte, prefix string) (APIKey, error) {
+func CreateAPIKey(ctx context.Context, q Querier, userID, name string, keyHash []byte, prefix string, expiresAt time.Time) (APIKey, error) {
 	const query = `
-		INSERT INTO api_keys (user_id, name, key_hash, prefix)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, user_id, name, prefix, created_at, last_used_at, revoked_at
+		INSERT INTO api_keys (user_id, name, key_hash, prefix, expires_at)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, user_id, name, prefix, created_at, last_used_at, revoked_at, expires_at
 	`
 	var k APIKey
-	err := q.QueryRowContext(ctx, query, userID, name, keyHash, prefix).Scan(
-		&k.ID, &k.UserID, &k.Name, &k.Prefix, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt,
+	err := q.QueryRowContext(ctx, query, userID, name, keyHash, prefix, expiresAt).Scan(
+		&k.ID, &k.UserID, &k.Name, &k.Prefix, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt, &k.ExpiresAt,
 	)
 	return k, err
 }
 
-// GetUserByAPIKeyHash looks up the (unrevoked) key by its hash and returns
+// GetUserByAPIKeyHash looks up the (unrevoked, unexpired) key by its hash and returns
 // the owning user. This is the X-API-Key hot path: one indexed lookup on
 // key_hash's unique constraint, one join to users.
 func GetUserByAPIKeyHash(ctx context.Context, db *sql.DB, keyHash []byte) (User, string, error) {
@@ -70,7 +71,7 @@ func GetUserByAPIKeyHash(ctx context.Context, db *sql.DB, keyHash []byte) (User,
 		       k.id
 		FROM api_keys k
 		JOIN users u ON u.id = k.user_id
-		WHERE k.key_hash = $1 AND k.revoked_at IS NULL
+		WHERE k.key_hash = $1 AND k.revoked_at IS NULL AND k.expires_at > now()
 	`
 	var user User
 	var disabledAt *time.Time
@@ -109,7 +110,7 @@ func TouchAPIKey(ctx context.Context, db *sql.DB, keyID string) error {
 // can see what they turned off.
 func ListAPIKeysForUser(ctx context.Context, db *sql.DB, userID string) ([]APIKey, error) {
 	const query = `
-		SELECT id, user_id, name, prefix, created_at, last_used_at, revoked_at
+		SELECT id, user_id, name, prefix, created_at, last_used_at, revoked_at, expires_at
 		FROM api_keys
 		WHERE user_id = $1
 		ORDER BY created_at DESC
@@ -122,7 +123,7 @@ func ListAPIKeysForUser(ctx context.Context, db *sql.DB, userID string) ([]APIKe
 	var out []APIKey
 	for rows.Next() {
 		var k APIKey
-		if err := rows.Scan(&k.ID, &k.UserID, &k.Name, &k.Prefix, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt); err != nil {
+		if err := rows.Scan(&k.ID, &k.UserID, &k.Name, &k.Prefix, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt, &k.ExpiresAt); err != nil {
 			return nil, err
 		}
 		out = append(out, k)

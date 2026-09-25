@@ -3,6 +3,7 @@ package handler
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -24,13 +25,24 @@ type KeysHandler struct {
 	hosts      HostModel
 	publicBase string
 	limits     *AbuseLimits
+	maxDays    int
+}
+
+// defaultAPIKeyDays is a new key's lifetime when the request names none.
+const defaultAPIKeyDays = 90
+
+// WithMaxKeyDays sets the longest lifetime a key may be minted with
+// (API_KEY_MAX_DAYS); 365 when never called.
+func (h *KeysHandler) WithMaxKeyDays(days int) *KeysHandler {
+	h.maxDays = days
+	return h
 }
 
 func NewKeysHandler(database *sql.DB, recorder audit.Recorder, hosts HostModel, publicBaseURL string, limits ...*AbuseLimits) *KeysHandler {
 	if recorder == nil {
 		recorder = audit.NoOp{}
 	}
-	return &KeysHandler{database: database, audit: recorder, hosts: hosts, publicBase: publicBaseURL, limits: chooseAbuseLimits(limits)}
+	return &KeysHandler{database: database, audit: recorder, hosts: hosts, publicBase: publicBaseURL, limits: chooseAbuseLimits(limits), maxDays: 365}
 }
 
 func (h *KeysHandler) Register(mux *http.ServeMux, authMiddleware func(http.Handler) http.Handler) {
@@ -48,6 +60,9 @@ func (h *KeysHandler) Register(mux *http.ServeMux, authMiddleware func(http.Hand
 
 type mintKeyRequest struct {
 	Name string `json:"name"`
+	// ExpiresInDays is the key's lifetime; 0 means the default (90 days, or
+	// the maximum if that is lower).
+	ExpiresInDays int `json:"expires_in_days"`
 }
 
 type apiKeyResponse struct {
@@ -57,6 +72,7 @@ type apiKeyResponse struct {
 	CreatedAt  string  `json:"created_at"`
 	LastUsedAt *string `json:"last_used_at,omitempty"`
 	RevokedAt  *string `json:"revoked_at,omitempty"`
+	ExpiresAt  string  `json:"expires_at"`
 	// APIKey carries the plaintext, present only in the mint response. It is
 	// never stored and never returned again by any other route.
 	APIKey string `json:"api_key,omitempty"`
@@ -84,6 +100,14 @@ func (h *KeysHandler) mint(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "name must be 200 characters or fewer"})
 		return
 	}
+	days := req.ExpiresInDays
+	if days == 0 {
+		days = min(defaultAPIKeyDays, h.maxDays)
+	}
+	if days < 1 || days > h.maxDays {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: fmt.Sprintf("expires_in_days must be between 1 and %d", h.maxDays)})
+		return
+	}
 
 	plaintext, err := auth.GenerateAPIKey()
 	if err != nil {
@@ -92,7 +116,7 @@ func (h *KeysHandler) mint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hash := db.HashAPIKey(plaintext)
-	key, err := db.CreateAPIKey(r.Context(), h.database, user.ID, req.Name, hash, db.KeyPrefix(hash))
+	key, err := db.CreateAPIKey(r.Context(), h.database, user.ID, req.Name, hash, db.KeyPrefix(hash), time.Now().AddDate(0, 0, days))
 	if err != nil {
 		if isUniqueViolation(err) {
 			// A hash collision on 256 random bits is not a real-world event;
@@ -110,6 +134,7 @@ func (h *KeysHandler) mint(w http.ResponseWriter, r *http.Request) {
 		Name:      key.Name,
 		Prefix:    key.Prefix,
 		CreatedAt: key.CreatedAt.Format(time.RFC3339),
+		ExpiresAt: key.ExpiresAt.Format(time.RFC3339),
 		APIKey:    plaintext,
 	})
 }
@@ -128,7 +153,7 @@ func (h *KeysHandler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]apiKeyResponse, 0, len(keys))
 	for _, k := range keys {
-		item := apiKeyResponse{ID: k.ID, Name: k.Name, Prefix: k.Prefix, CreatedAt: k.CreatedAt.Format(time.RFC3339)}
+		item := apiKeyResponse{ID: k.ID, Name: k.Name, Prefix: k.Prefix, CreatedAt: k.CreatedAt.Format(time.RFC3339), ExpiresAt: k.ExpiresAt.Format(time.RFC3339)}
 		if k.LastUsedAt != nil {
 			s := k.LastUsedAt.Format(time.RFC3339)
 			item.LastUsedAt = &s

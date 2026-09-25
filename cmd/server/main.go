@@ -21,6 +21,7 @@ import (
 	"github.com/vsriram/simple-host/internal/audit"
 	"github.com/vsriram/simple-host/internal/auth"
 	"github.com/vsriram/simple-host/internal/config"
+	dbstore "github.com/vsriram/simple-host/internal/db"
 	"github.com/vsriram/simple-host/internal/handler"
 	"github.com/vsriram/simple-host/internal/mcp"
 	"github.com/vsriram/simple-host/internal/metrics"
@@ -89,6 +90,10 @@ func run() (runErr error) {
 		database.Close()
 		return fmt.Errorf("schema check: %w", err)
 	}
+	if err := migrate.CheckLeastPrivilege(context.Background(), database); err != nil {
+		database.Close()
+		return err
+	}
 	if cfg.DBInClusterEvaluation {
 		log.Print("WARNING: the database is the in-cluster evaluation Postgres (deploy/components/postgres-incluster). Nothing backs it up and it has no failover; use a managed Postgres with point-in-time recovery for anything real.")
 	}
@@ -121,6 +126,7 @@ func run() (runErr error) {
 		return fmt.Errorf("create backup client: %w", err)
 	}
 
+	reqlog.SetTrustedProxies(cfg.TrustedProxies)
 	mux := http.NewServeMux()
 	hosts, err := handler.NewHostModel(cfg.PublicBaseURL)
 	if err != nil {
@@ -157,7 +163,21 @@ func run() (runErr error) {
 	if err != nil {
 		return fmt.Errorf("discover OIDC provider: %w", err)
 	}
+	// ADMIN_EMAILS is re-applied at every start, so removing someone from
+	// it demotes them on the next deploy, not at their next sign-in. With
+	// OIDC_ADMIN_CLAIM also in use the claim can only be read at sign-in,
+	// so there the sign-in refresh (and SESSION_TTL) is the bound.
+	if cfg.OIDC.AdminClaim == "" {
+		changed, err := dbstore.SyncAdminEmails(context.Background(), database, cfg.OIDC.AdminEmails)
+		if err != nil {
+			return fmt.Errorf("apply ADMIN_EMAILS: %w", err)
+		}
+		if changed > 0 {
+			log.Printf("ADMIN_EMAILS: updated admin status for %d account(s)", changed)
+		}
+	}
 	oidcClaims := handler.OIDCClaimConfig{
+		Issuer:              cfg.OIDC.Issuer,
 		EmailClaim:          cfg.OIDC.EmailClaim,
 		UsernameClaim:       cfg.OIDC.UsernameClaim,
 		AdminClaim:          cfg.OIDC.AdminClaim,
@@ -183,7 +203,7 @@ func run() (runErr error) {
 	log.Printf("simple-host skill version: %s", pluginVersion)
 
 	handler.RegisterHealthRoutes(mux, database)
-	publicSearchHandler.Register(mux, authMW)
+	publicSearchHandler.Register(mux, authMW, handler.CookieOriginCheck(hosts, cfg.PublicBaseURL))
 	handler.NewUserHandler(database, abuseLimits).Register(mux, authMW, skillVersionMW)
 	handler.NewSiteHandler(database, diskStorage, backup, cfg.PublicBaseURL, hosts, abuseLimits).WithAudit(auditRecorder).Register(mux, authMW, skillVersionMW)
 	handler.NewTeamHandler(database, diskStorage, abuseLimits).WithAudit(auditRecorder).Register(mux, authMW, skillVersionMW, hosts, cfg.PublicBaseURL)
@@ -196,7 +216,7 @@ func run() (runErr error) {
 	handler.NewAuditHandler(database, auditReader, cfg.Audit.AccessLogVisibility, abuseLimits).Register(mux, authMW, skillVersionMW)
 	handler.NewShowcaseHandler(database, hosts, signingKeys, cfg.Session.Idle).Register(mux)
 	handler.NewAuthHandler(database, oidcProvider, oidcClaims, signingKeys, cfg.Session.TTL, cfg.Session.Idle, auditRecorder, hosts, cfg.PublicBaseURL, abuseLimits).Register(mux, authMW)
-	handler.NewKeysHandler(database, auditRecorder, hosts, cfg.PublicBaseURL, abuseLimits).Register(mux, authMW)
+	handler.NewKeysHandler(database, auditRecorder, hosts, cfg.PublicBaseURL, abuseLimits).WithMaxKeyDays(int(cfg.APIKeyMaxDays)).Register(mux, authMW)
 	handler.NewDashboardHandler(database, signingKeys, cfg.Session.Idle).Register(mux, authMW)
 	handoffHandler := handler.NewHandoffHandler(database, signingKeys, hosts, auditRecorder, abuseLimits)
 	handoffHandler.Register(mux, authMW)

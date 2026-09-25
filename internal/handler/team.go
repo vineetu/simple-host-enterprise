@@ -539,7 +539,7 @@ func (h *TeamHandler) writeMembers(w http.ResponseWriter, r *http.Request, team 
 // routes are bounded, so a loop in an agent cannot walk the member endpoints.
 func (h *TeamHandler) limitManagementClient(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if decision := h.limits.allow(managementClientPolicy, remoteClientKey(r)); !decision.Allowed {
+		if decision := h.limits.allow(managementClientPolicy, clientLimitKey(r)); !decision.Allowed {
 			writeRateLimit(w, decision)
 			return
 		}

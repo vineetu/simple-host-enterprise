@@ -49,8 +49,13 @@ Ask these in one message. Do not ask anything else up front.
    Google Cloud (GKE), Azure (AKS), Oracle Cloud (OKE), or other. Which
    kubectl context, if there is more than one.
 2. **Base domain.** The hostname the dashboard lives at, e.g.
-   `sites.example.com`. Every person gets `<name>.<base>`, so the company
-   must control DNS for `<base>` and `*.<base>`.
+   `corp-sites.com`. Every person gets `<name>.<base>`, so the company
+   must control DNS for `<base>` and `*.<base>`. It must be a separate
+   registrable domain from the company's other apps (`corp-sites.com`, not
+   `simple-host.corp.com`): hosted pages are written by anyone in the
+   company, and under the company's main domain they would be same-site
+   with its other apps, able to receive and plant cookies scoped to that
+   domain.
 3. **Identity provider.** Okta, Microsoft Entra ID, Google Workspace, or
    another OIDC provider.
 4. **Admin emails.** The addresses that get admin rights.
@@ -205,7 +210,8 @@ lines (kustomize reads them as env files).
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID` | From HUMAN STEP A |
 | `OIDC_SCOPES` | Leave at `openid email profile` unless the provider notes say otherwise |
 | `ADMIN_EMAILS` | Step 0 answer, comma-separated |
-| `ALLOWED_EMAIL_DOMAINS` | Step 0 answer, comma-separated. Never leave empty on a multi-tenant provider (Google, Entra): empty means anyone with an account there can sign in |
+| `ALLOWED_EMAIL_DOMAINS` | Step 0 answer, comma-separated. Never leave empty on Google: empty means anyone with a Google account can sign in |
+| `TRUSTED_PROXY_CIDRS` | The ingress controller's pod address range (e.g. the cluster's pod CIDR), so rate limits and logs see each person's address instead of the ingress's |
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` | From section 2 |
 | `DB_SSLMODE`, `DB_SSL_ROOT_CERT` | Leave as `verify-full` and `/etc/simple-host/db-ca/ca.crt` |
 | `BACKUP_STORAGE_ENDPOINT`, `BACKUP_STORAGE_REGION`, `BACKUP_STORAGE_BUCKET`, `BACKUP_STORAGE_PREFIX` | From section 3 and section 4 (Bucket) of `docs/cloud/<cloud>.md` |
@@ -350,12 +356,14 @@ Provider notes:
   tenant ("Accounts in this organizational directory only"); a multi-tenant
   app would admit accounts from other tenants. Redirect URI: platform "Web". Certificates & secrets → New client
   secret; copy the **Value**, not the Secret ID, and note its expiry.
-  Issuer: `https://login.microsoftonline.com/<tenant-id>/v2.0`, never
-  `common` or `organizations`. Entra only
+  Issuer: `https://login.microsoftonline.com/<tenant-id>/v2.0` (the
+  `/common` and `/organizations` endpoints are refused at startup). Entra only
   puts `email` in the ID token when the user has a mail address: add the
   `email` optional claim under Token configuration, or set
   `OIDC_EMAIL_CLAIM=preferred_username` if sign-in names are email
-  addresses. Optional admin by app role: set `OIDC_ADMIN_CLAIM=roles` and
+  addresses. Also add the `xms_edov` optional claim there: Entra sends no
+  `email_verified`, and without `xms_edov` every sign-in is refused as
+  unverified. Optional admin by app role: set `OIDC_ADMIN_CLAIM=roles` and
   `OIDC_ADMIN_VALUE=<role value>`.
 - **Google Workspace.** Follow `docs/install.md` section 4 with the real
   base URL. In short: OAuth consent screen **Internal**; Credentials →
@@ -530,9 +538,11 @@ against `https://<base>`.
 | `/readyz` returns 503 | Database not reachable, or schema not current. Read the `migrate` and `simple-host` container logs. |
 | Sign-in: "the identity provider did not send an email address" | Provider does not put `email` in the ID token. Add the claim, or set `OIDC_EMAIL_CLAIM` (Entra: see HUMAN STEP A). |
 | Sign-in: "this account's email domain is not allowed" | `ALLOWED_EMAIL_DOMAINS` does not include the person's domain. |
+| Sign-in: "your email address is not verified" | The ID token has no `email_verified: true`. Entra: add the `xms_edov` optional claim (HUMAN STEP A). |
+| Server refuses to start: "can alter or delete audit_events" | The server is connected as the owning role. Keep the manifest's `DB_APP_USER=simplehost_app`, and do not point `DB_DSN` at the owning role. |
 | Sign-in fails at the callback with a redirect-URI error | The registered redirect URI is not exactly `https://<base>/auth/callback`. |
 | Sign-in fails at token exchange | Wrong client secret, or the provider does not accept `client_secret_post` (Okta: HUMAN STEP A). Re-enter with section 4's hidden prompt, re-apply, then `kubectl --context "$CTX" -n simple-host rollout restart deploy/simple-host`. |
-| Signed-in admin does not see `/admin` | Their address is not in `ADMIN_EMAILS` (compared lowercased), or the admin claim does not match. Takes effect at the next sign-in. |
+| Signed-in admin does not see `/admin` | Their address is not in `ADMIN_EMAILS` (compared lowercased), or the admin claim does not match. Takes effect at the next sign-in; removal from `ADMIN_EMAILS` also takes effect at the next server restart. |
 | Upload of a site fails with 413 | The ingress body-size limit. Section 5 step 3. |
 | Certificate never becomes ready | DNS-01 solver credential or zone. `kubectl describe` the `certificate`, `order`, and `challenge`. |
 | `backup-assets` job cannot attach its volume | Multi-node cluster with a ReadWriteOnce site-data volume. Section 9, last check. |

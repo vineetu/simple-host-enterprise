@@ -361,3 +361,28 @@ func isUndefinedTable(err error) bool {
 	}
 	return strings.Contains(err.Error(), "42P01") || strings.Contains(err.Error(), "does not exist")
 }
+
+// CheckLeastPrivilege refuses a server connection whose role could rewrite
+// the audit trail: one that owns audit_events (or can act as its owner, a
+// superuser included) or holds UPDATE, DELETE or TRUNCATE on it. The server
+// is meant to connect as AppRoleName (design 9.3); this catches every way a
+// deployment could end up connecting as the owning role instead — a DB_DSN
+// naming it, a password-file override that won, a hand-edited manifest.
+func CheckLeastPrivilege(ctx context.Context, db *sql.DB) error {
+	const query = `
+		SELECT current_user,
+		       has_table_privilege('audit_events', 'UPDATE')
+		    OR has_table_privilege('audit_events', 'DELETE')
+		    OR has_table_privilege('audit_events', 'TRUNCATE')
+		    OR pg_has_role((SELECT relowner FROM pg_class WHERE oid = 'audit_events'::regclass), 'MEMBER')
+	`
+	var role string
+	var tooStrong bool
+	if err := db.QueryRowContext(ctx, query).Scan(&role, &tooStrong); err != nil {
+		return fmt.Errorf("check database role privileges: %w", err)
+	}
+	if tooStrong {
+		return fmt.Errorf("the server is connected as database role %q, which can alter or delete audit_events; connect as %s (set DB_APP_USER and DB_APP_PASSWORD) — the owning role is for migrate and prune only", role, AppRoleName)
+	}
+	return nil
+}

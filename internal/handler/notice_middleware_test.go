@@ -493,13 +493,15 @@ func TestAdminAPIRouteAppliesGuardAfterAdminAuthentication(t *testing.T) {
 		wantHeader   bool
 		wantLocation string
 	}{
-		{name: "valid admin key requires skill version", apiKey: adminKey, wantStatus: http.StatusBadRequest, wantHeader: true},
+		// An admin's API key never reaches an admin route: those need a
+		// browser session.
+		{name: "valid admin key is refused", apiKey: adminKey, wantStatus: http.StatusForbidden},
 		{name: "invalid header overrides admin cookie", apiKey: "invalid", client: "control-ui", withCookie: true, wantStatus: http.StatusUnauthorized},
 		// Refused, and sent back to the dashboard rather than shown a raw JSON
 		// body. The security property is that the handler never runs; 303 vs
 		// 403 is only how the admin is told.
 		{name: "cookie-only admin browser requires origin", withCookie: true, wantStatus: http.StatusSeeOther, wantLocation: "/admin?action_error=blocked"},
-		{name: "declared direct API reaches handler", apiKey: adminKey, client: "api", wantStatus: http.StatusNotFound, wantHeader: true},
+		{name: "declared direct API with a key is refused too", apiKey: adminKey, client: "api", wantStatus: http.StatusForbidden},
 	}
 
 	for _, tt := range tests {

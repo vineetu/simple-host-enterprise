@@ -2,7 +2,9 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"log"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vsriram/simple-host/internal/audit"
 	"github.com/vsriram/simple-host/internal/auth"
 	db "github.com/vsriram/simple-host/internal/db"
 	"github.com/vsriram/simple-host/internal/storage"
@@ -133,7 +136,7 @@ func fakeAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 		verified, err := auth.VerifySessionCookie(testSigningKeys, cookie.Value)
-		if err != nil {
+		if err != nil || !strings.EqualFold(verified.Host, auth.ExpectedSessionHost(r.Context())) {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
 			return
 		}
@@ -343,6 +346,84 @@ func TestHostGateRestrictedSiteLeavesOwnerHost(t *testing.T) {
 	response := gateAuthedRequest(t, handler, http.MethodGet, "alice.foo.example", "/private/")
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("restricted site on owner host: status = %d, want 404", response.Code)
+	}
+}
+
+// The site-facing API follows the same rule as hosted content: a restricted
+// site's state and assets are never answered on its owner's shared host,
+// and an unrestricted site's are never answered on a restricted-site host.
+func TestHostGateSiteAPIRestrictedOnlyOnItsOwnHost(t *testing.T) {
+	store, _ := newServeTestStorage(t)
+	writeGateSite(t, store, "alice", "private", "private-index")
+	for _, test := range []struct {
+		name       string
+		restricted bool
+		host, path string
+		want       int
+	}{
+		{"restricted site on owner host", true, "alice.foo.example", "/api/sites/private/state", http.StatusNotFound},
+		{"restricted site assets on owner host", true, "alice.foo.example", "/api/sites/private/assets", http.StatusNotFound},
+		{"restricted site on its own host", true, "alice--private.foo.example", "/api/site/state", http.StatusOK},
+		{"unrestricted site on a restricted host", false, "alice--private.foo.example", "/api/site/state", http.StatusNotFound},
+		{"unrestricted site on owner host", false, "alice.foo.example", "/api/sites/private/state", http.StatusOK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			gate := testHostGate(t, store, testHostModel(t))
+			gate.siteForServing = func(r *http.Request, owner, site string) (string, bool, error) {
+				return "site-1", test.restricted, nil
+			}
+			response := gateAuthedRequest(t, gate.wrap(newHostGateTestMux()), http.MethodGet, test.host, test.path)
+			if response.Code != test.want {
+				t.Fatalf("status = %d, want %d", response.Code, test.want)
+			}
+		})
+	}
+}
+
+// A session cookie minted for one host (by the hand-off) authenticates the
+// site-facing API only on that host: not on another owner's host, and a
+// base-host cookie (no host binding) not on any owner host.
+func TestHostGateSiteAPISessionBoundToHost(t *testing.T) {
+	store, _ := newServeTestStorage(t)
+	writeGateSite(t, store, "alice", "my-site", "alice-index")
+	gate := testHostGate(t, store, testHostModel(t))
+	fake := &fakeSiteAPI{}
+	gate.siteAPI = fake
+	handler := gate.wrap(newHostGateTestMux())
+
+	for _, test := range []struct {
+		name       string
+		cookieHost string
+		want       int
+	}{
+		{"own host", "alice.foo.example", http.StatusOK},
+		{"another owner's host", "mallory.foo.example", http.StatusUnauthorized},
+		{"base host cookie", "", http.StatusUnauthorized},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fake.calls = nil
+			var value string
+			var err error
+			if test.cookieHost == "" {
+				value, err = auth.SignSession(testSigningKeys, "session-1", "user-1", time.Now().Add(time.Hour))
+			} else {
+				value, err = auth.SignHostSession(testSigningKeys, "session-1", "user-1", test.cookieHost, time.Now().Add(time.Hour))
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := httptest.NewRequest(http.MethodGet, "/api/sites/my-site/state", nil)
+			request.Host = "alice.foo.example"
+			request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: value})
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.want {
+				t.Fatalf("status = %d, want %d", response.Code, test.want)
+			}
+			if test.want != http.StatusOK && len(fake.calls) != 0 {
+				t.Fatalf("site API reached with a cookie for %q", test.cookieHost)
+			}
+		})
 	}
 }
 
@@ -1046,4 +1127,33 @@ func TestHostGateAssetServeRoute(t *testing.T) {
 			t.Fatalf("status = %d, calls = %+v", response.Code, fake.calls)
 		}
 	})
+}
+
+type recordingRecorder struct{ events []audit.Event }
+
+func (r *recordingRecorder) Record(_ context.Context, e audit.Event) { r.events = append(r.events, e) }
+func (r *recordingRecorder) RecordTx(ctx context.Context, _ *sql.Tx, e audit.Event) error {
+	r.Record(ctx, e)
+	return nil
+}
+
+func TestHostGateRecordsAccessDenied(t *testing.T) {
+	store, _ := newServeTestStorage(t)
+	writeGateSite(t, store, "alice", "my-site", "alice-index")
+	gate := testHostGate(t, store, testHostModel(t))
+	recorder := &recordingRecorder{}
+	gate.audit = recorder
+	gate.viewerAllowed = func(r *http.Request, siteID, userID string) (bool, error) { return false, nil }
+	handler := gate.wrap(newHostGateTestMux())
+
+	gateAuthedRequest(t, handler, http.MethodGet, "alice.foo.example", "/my-site/")
+	gateAuthedRequest(t, handler, http.MethodGet, "alice.foo.example", "/api/sites/my-site/state")
+	if len(recorder.events) != 2 {
+		t.Fatalf("recorded %d events, want 2", len(recorder.events))
+	}
+	for _, e := range recorder.events {
+		if e.Action != "access_denied" || e.ActorID != hostGateTestUserID || e.Extra["reason"] != "not_a_viewer" {
+			t.Fatalf("event = %+v", e)
+		}
+	}
 }
