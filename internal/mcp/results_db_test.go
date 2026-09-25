@@ -118,7 +118,7 @@ func createPerson(t *testing.T, database *sql.DB, username string) string {
 		t.Fatalf("create %s: %v", username, err)
 	}
 	key := "key-" + username + "-" + strings.Repeat("0", 40)
-	if _, err := db.CreateAPIKey(ctx, database, user.ID, "test", db.HashAPIKey(key), key[:8]); err != nil {
+	if _, err := db.CreateAPIKey(ctx, database, user.ID, "test", db.HashAPIKey(key), key[:8], time.Now().Add(24*time.Hour)); err != nil {
 		t.Fatalf("create key for %s: %v", username, err)
 	}
 	return key
