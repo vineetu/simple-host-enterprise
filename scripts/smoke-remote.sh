@@ -139,7 +139,7 @@ finish() {
   echo
   if [ -n "$owner_host" ] && [ "$fails" -eq 0 ]; then
     echo "Browser check, by hand: $owner as themselves opens https://$owner_host/"
-    echo "and sees their own index after one redirect (the session hand-off)."
+    echo "and, after a few redirects (the session hand-off), sees their own index."
     echo
   fi
   echo "passed $pass, failed $fails"
@@ -178,11 +178,19 @@ case "$owner_host" in
   *) bad "publish returned no address under $BASE (url: '$site_url')"; finish ;;
 esac
 
-expect 2xx "update to version 2" "$BASE" "/api/collaboration/sites/$owner/$site" -X PUT "${K[@]}" \
+# Update and rollback require If-Match with the site's current ETag.
+expect 200 "read the site" "$BASE" "/api/collaboration/sites/$owner/$site" "${K[@]}"
+etag="$(json 'd["etag"]')"
+expect 428 "an update without If-Match is refused" "$BASE" "/api/collaboration/sites/$owner/$site" -X PUT "${K[@]}" \
   -H "Content-Type: application/gzip" --data-binary @"$work/v2.tar.gz"
+expect 2xx "update to version 2" "$BASE" "/api/collaboration/sites/$owner/$site" -X PUT "${K[@]}" \
+  -H "If-Match: $etag" -H "Content-Type: application/gzip" --data-binary @"$work/v2.tar.gz"
+expect 200 "read the site after the update" "$BASE" "/api/collaboration/sites/$owner/$site" "${K[@]}"
+active="$(json 'd["active_version"]')"; etag="$(json 'd["etag"]')"
+if [ "$active" = 2 ]; then ok "active version is 2 after the update"; else bad "active version is '$active' after the update (want 2)"; fi
 expect 2xx "roll back to version 1" "$BASE" "/api/collaboration/sites/$owner/$site/rollback" -X POST "${K[@]}" \
-  -H "Content-Type: application/json" -d '{"version":1}'
-expect 200 "read the site back" "$BASE" "/api/collaboration/sites/$owner/$site" "${K[@]}"
+  -H "If-Match: $etag" -H "Content-Type: application/json" -d '{"version":1}'
+expect 200 "read the site after the rollback" "$BASE" "/api/collaboration/sites/$owner/$site" "${K[@]}"
 active="$(json 'd["active_version"]')"
 if [ "$active" = 1 ]; then ok "active version is 1 after the rollback"; else bad "active version is '$active' after the rollback (want 1)"; fi
 
