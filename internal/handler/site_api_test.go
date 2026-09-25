@@ -225,6 +225,10 @@ func (c *siteAPITestConn) ExecContext(_ context.Context, query string, args []dr
 		}
 		return driver.RowsAffected(1), nil
 
+	case strings.Contains(normalized, "site_state_history"):
+		// db.RecordStateHistory's insert and prune, in the same transaction.
+		return driver.RowsAffected(1), nil
+
 	default:
 		return nil, errors.New("siteAPITestConn: unexpected exec " + normalized)
 	}

@@ -26,7 +26,7 @@ set -u
 BASE="${BASE:?set BASE to the base hostname}"
 CLUSTER_CONTEXT="${CLUSTER_CONTEXT:-docker-desktop}"
 NAMESPACE="${NAMESPACE:-simple-host}"
-SKILL_VERSION="${SKILL_VERSION:-0.10.0}"
+SKILL_VERSION="${SKILL_VERSION:-0.11.0}"
 DEX_HOST="dex.simple-host.svc.cluster.local"
 DEX_PORT="5556"
 
@@ -481,10 +481,10 @@ if [ -n "$person_username" ]; then
     curl -sS -b "$person_owner_jar" -o /dev/null "https://$person_owner_host/$person_site/"
     sleep 3
     person_own_access_body="$(curl -sS -b "$person_jar" -H "X-Simple-Host-Client: control-ui" "https://$BASE/api/access?owner=$person_username&site=$person_site")"
-    check "GET /api/access as a real non-admin owner sees their own view" \
-      bash -c "printf '%s' '$person_own_access_body' | grep -q '\"site_name\":\"$person_site\"'"
-    check "GET /api/access owner scope carries no ip" \
-      bash -c "! printf '%s' '$person_own_access_body' | grep -q '\"ip\":'"
+    check "GET /api/access as a real non-admin owner sees counts of their own views" \
+      bash -c "printf '%s' '$person_own_access_body' | grep -q '\"unique_viewers\":1'"
+    check "GET /api/access owner scope carries no identities (ACCESS_LOG_VISIBILITY=counts)" \
+      bash -c "! printf '%s' '$person_own_access_body' | grep -q '\"ip\":\\|\"user_id\":'"
   else
     echo "  (skipped the owner-scope-has-no-ip check: could not publish a site for the non-admin test account, status $person_create_status)"
   fi

@@ -28,10 +28,12 @@ const (
 	skillBundleName      = "simple-host-skills"
 	skillBundleURL       = "/skills.zip"
 	// skillReleaseType is hand-set, so it has to move with the version above
-	// it. 0.10.0 changes the build contract (relative asset paths), the state
-	// routes the builder teaches, and adds connector tools, which is a minor
-	// release rather than a patch. An agent reads this to decide how loudly to
-	// mention the update.
+	// it. 0.11.0 changes the access model: a new site is only-me,
+	// set_site_access replaces set_site_listing, and editor grants are gone,
+	// which is a minor release rather than a patch. It is also the new
+	// minimum (notice_middleware.go): an older skill calls routes that no
+	// longer exist. An agent reads this to decide how loudly to mention the
+	// update.
 	skillReleaseType     = "minor"
 	skillReleaseNotesURL = "/changelog.html"
 

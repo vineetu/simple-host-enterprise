@@ -63,10 +63,6 @@ func redirectWithTrailingSlash(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, target, http.StatusMovedPermanently)
 }
 
-func renderShareDialog(builder *strings.Builder) {
-	builder.WriteString(`<dialog id="shareDialog" class="share-dialog" aria-labelledby="shareDialogTitle" aria-describedby="shareDialogNote"><div class="share-dialog-shell"><header class="dialog-header"><div><div class="dialog-kicker">Site access</div><h2 id="shareDialogTitle">Share site</h2><p class="dialog-subtitle" id="shareDialogSubtitle"></p></div><button type="button" class="dialog-close" data-dialog-close aria-label="Close share dialog">&times;</button></header><div class="dialog-body"><section class="share-block" aria-labelledby="currentEditorsTitle"><h3 id="currentEditorsTitle">Current editors</h3><p class="share-help">Editors can download, deploy, and roll back this site's static files with their own API key.</p><div id="editorList" class="editor-list" aria-live="polite"></div></section><section class="share-block" aria-labelledby="addEditorsTitle"><h3 id="addEditorsTitle">Add editors</h3><p class="share-help">Choose from registered Simple Host users. You can add several people at once.</p><label class="search-label" for="editorSearch">Search usernames</label><input id="editorSearch" class="editor-search" type="search" maxlength="100" autocomplete="off" placeholder="Start typing a username"><div id="candidateList" class="candidate-list" aria-label="Registered users" aria-live="polite"></div><div id="selectedEditors" class="selected-editors" aria-label="Selected editors"></div><div class="share-footer"><p class="share-note" id="shareDialogNote">Revoking access blocks future changes and downloads. It does not undo content an editor already deployed or erase files they downloaded.</p><button type="button" id="addEditorsButton" class="btn btn-primary add-editors" disabled>Add selected</button></div></section></div></div></dialog>`)
-}
-
 // siteOpenTimeout bounds how long one request waits for its site's version
 // to be fetched into the cache.
 const siteOpenTimeout = 20 * time.Second
@@ -93,7 +89,7 @@ type SiteFiles struct {
 	sessionIdle time.Duration
 	// access batches access_log inserts (design.md 8.2) for every hosted-
 	// content response serveSite produces, including the owner's and
-	// editors' own — the isSelfTraffic exclusion above applies only to the
+	// team members' own — the isSelfTraffic exclusion above applies only to the
 	// analytics counters, never to this log. Defaults to nil, in which case
 	// Enqueue is skipped entirely (audit.(*AccessWriter).Enqueue is also
 	// nil-safe, but skipping avoids building an AccessEvent nobody reads
@@ -127,7 +123,7 @@ func (s *SiteFiles) WithAccessWriter(access *audit.AccessWriter) *SiteFiles {
 // with prefix followed by "/". userID and sessionID are the host session the
 // gate already authenticated the request against (design.md 8.1's
 // requireHostSession) — recorded on the access_log row this method writes
-// for every response, including the owner's and editors' own. Every mounted
+// for every response, including the owner's and team members' own. Every mounted
 // route requires a host session before reaching here.
 func (s *SiteFiles) serveSite(w http.ResponseWriter, r *http.Request, user, siteName, prefix, userID, sessionID string) {
 	if !safepath.IsSegment(user) || !safepath.IsSegment(siteName) {
@@ -164,7 +160,7 @@ func (s *SiteFiles) serveSite(w http.ResponseWriter, r *http.Request, user, site
 		status:         http.StatusOK,
 		beforeWriteHeader: func(status int, header http.Header) {
 			if shouldRecordPageview(r, status, header) {
-				// The owner and their editors checking their own work are
+				// The owner and their team checking their own work are
 				// not an audience. Skip the visit cookie too, so their
 				// browser is not marked as having visited.
 				if isSelfTraffic(r, database, s.signingKeys, s.sessionIdle, user, siteName) {
@@ -204,7 +200,7 @@ func (s *SiteFiles) serveSite(w http.ResponseWriter, r *http.Request, user, site
 	fileServer.ServeHTTP(recorder, r)
 
 	// Every hosted-content response is logged here, including the owner's
-	// and editors' own (design.md 8.2): the isSelfTraffic exclusion above
+	// and team members' own (design.md 8.2): the isSelfTraffic exclusion above
 	// applies only to the pageview/download analytics counters, never to
 	// this log. Enqueue is best-effort and non-blocking (audit.AccessWriter's
 	// own contract); a nil s.access (no writer configured, or a test using

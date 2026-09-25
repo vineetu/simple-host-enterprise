@@ -51,12 +51,14 @@ func TestShowcaseWithoutQueryPreservesPublicGallery(t *testing.T) {
 						{"site-public", "docs"},
 					},
 				}, nil
+			case strings.Contains(query, "access = 'specific'"):
+				return &showcaseTestRows{columns: []string{"id"}}, nil
 			case strings.Contains(query, "FROM sites"):
 				return &showcaseTestRows{
-					columns: []string{"id", "user_id", "name", "active_version", "public", "uses_state", "uses_versioned_state", "created_at", "updated_at"},
+					columns: []string{"id", "user_id", "name", "active_version", "public", "uses_state", "uses_versioned_state", "created_at", "updated_at", "access"},
 					values: [][]driver.Value{
-						{"site-public", "user-public", "portfolio", int64(3), true, false, false, now, now},
-						{"site-private", "user-private", "secret", int64(4), false, false, false, now, now},
+						{"site-public", "user-public", "portfolio", int64(3), true, false, false, now, now, "listed"},
+						{"site-private", "user-private", "secret", int64(4), false, false, false, now, now, "company"},
 					},
 				}, nil
 			case strings.Contains(query, "FROM site_daily_analytics"):
@@ -289,12 +291,14 @@ func showcaseGalleryTestScript() *showcaseTestDBScript {
 						{"site-public", "docs"},
 					},
 				}, nil
+			case strings.Contains(query, "access = 'specific'"):
+				return &showcaseTestRows{columns: []string{"id"}}, nil
 			case strings.Contains(query, "FROM sites"):
 				return &showcaseTestRows{
-					columns: []string{"id", "user_id", "name", "active_version", "public", "uses_state", "uses_versioned_state", "created_at", "updated_at"},
+					columns: []string{"id", "user_id", "name", "active_version", "public", "uses_state", "uses_versioned_state", "created_at", "updated_at", "access"},
 					values: [][]driver.Value{
-						{"site-public", "user-public", "portfolio", int64(3), true, false, false, now, now},
-						{"site-private", "user-private", "secret", int64(4), false, false, false, now, now},
+						{"site-public", "user-public", "portfolio", int64(3), true, false, false, now, now, "listed"},
+						{"site-private", "user-private", "secret", int64(4), false, false, false, now, now, "company"},
 					},
 				}, nil
 			case strings.Contains(query, "FROM site_daily_analytics"):

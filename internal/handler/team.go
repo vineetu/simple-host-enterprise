@@ -277,7 +277,7 @@ func (h *TeamHandler) searchMemberCandidates(w http.ResponseWriter, r *http.Requ
 	}
 	search := strings.TrimSpace(r.URL.Query().Get("q"))
 	if search == "" {
-		writeJSON(w, http.StatusOK, map[string]any{"candidates": []db.EditorCandidate{}})
+		writeJSON(w, http.StatusOK, map[string]any{"candidates": []db.UserCandidate{}})
 		return
 	}
 	limit := 20
@@ -297,7 +297,7 @@ func (h *TeamHandler) searchMemberCandidates(w http.ResponseWriter, r *http.Requ
 		response = append(response, map[string]any{
 			"user_id":        candidate.UserID,
 			"username":       candidate.Username,
-			"already_member": candidate.AlreadyEditor,
+			"already_member": candidate.AlreadyMember,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"candidates": response})

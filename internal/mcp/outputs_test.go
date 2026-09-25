@@ -153,7 +153,7 @@ func TestErrorResultsCarryNoStructuredContent(t *testing.T) {
 
 func TestBodylessSuccessIsDone(t *testing.T) {
 	s := NewServer(&countingUpstream{status: 204}, "simple-host", "0.10.0")
-	res := callTool(t, s, "revoke_site_editor", map[string]any{"site": "d", "owner": "a", "username": "bob"})
+	res := callTool(t, s, "revoke_site_viewer", map[string]any{"site": "d", "owner": "a", "username": "bob"})
 	structured, _ := res["structuredContent"].(map[string]any)
 	if structured["done"] != true {
 		t.Errorf("structuredContent = %v, want {done: true}", res["structuredContent"])

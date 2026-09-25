@@ -3,136 +3,234 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 )
 
-// setStateWriteMode is a test-only helper: no production route sets
-// sites.state_write_mode in this phase (design.md 7.3 defines the rule
-// writerAllowed reads, not an endpoint to change it — see
-// docs/security-review.md's Remains), so the column is
-// exercised directly here rather than through a Go setter that does not
-// exist yet.
-func setStateWriteMode(t *testing.T, database *sql.DB, siteID, mode string) {
+func mustSetAccess(t *testing.T, database *sql.DB, siteID, level string) string {
 	t.Helper()
-	if _, err := database.Exec(`UPDATE sites SET state_write_mode = $1 WHERE id = $2::uuid`, mode, siteID); err != nil {
-		t.Fatalf("set state_write_mode: %v", err)
+	tx, err := database.Begin()
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer tx.Rollback()
+	previous, err := SetSiteAccess(context.Background(), tx, siteID, level)
+	if err != nil {
+		t.Fatalf("SetSiteAccess(%s): %v", level, err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	return previous
 }
 
-// TestWriterAllowedAnyoneModeDefersToViewerAllowed covers design.md 7.3's
-// default ("today's behaviour, minus anonymous"): an unrestricted site
-// admits any signed-in writer, and a restricted one narrows to its viewer
-// list exactly the way ViewerAllowed already does for reads.
-func TestWriterAllowedAnyoneModeDefersToViewerAllowed(t *testing.T) {
+func inTx(t *testing.T, database *sql.DB, fn func(tx *sql.Tx) error) error {
+	t.Helper()
+	tx, err := database.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// TestAccessLevelMatrix is who can open a site at each level: the owner, a
+// member of the owning team, a named viewer, and any other signed-in person.
+// Writing saved data follows opening exactly.
+func TestAccessLevelMatrix(t *testing.T) {
 	database := assetsTestDB(t)
 	ctx := context.Background()
 	ownerID, siteID := mustCreateUserAndSite(t, database, "alice", "demo")
-	strangerID, _ := mustCreateUserAndSite(t, database, "stranger", "unrelated")
+	viewerID, _ := mustCreateUserAndSite(t, database, "vera", "v")
+	otherID, _ := mustCreateUserAndSite(t, database, "olly", "o")
+	memberID, _ := mustCreateUserAndSite(t, database, "mo", "m")
 
-	// state_write_mode defaults to 'anyone' (migration 0024); confirm the
-	// default rather than assuming it.
-	allowed, err := WriterAllowed(ctx, database, siteID, strangerID)
-	if err != nil {
-		t.Fatalf("WriterAllowed (unrestricted, default mode): %v", err)
+	var team User
+	if err := inTx(t, database, func(tx *sql.Tx) error {
+		var err error
+		team, err = CreateTeam(ctx, tx, "crew", memberID)
+		return err
+	}); err != nil {
+		t.Fatalf("CreateTeam: %v", err)
 	}
-	if !allowed {
-		t.Fatal("unrestricted site with the default write mode refused a signed-in stranger")
+	teamSite, err := CreateSite(ctx, database, team.ID, "board")
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	// Restrict the site to its owner only; the stranger can no longer view,
-	// so writerAllowed's 'anyone' branch (== viewerAllowed) refuses them too.
-	tx, err := database.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin tx: %v", err)
+	var access string
+	if err := database.QueryRow(`SELECT access FROM sites WHERE id = $1`, siteID).Scan(&access); err != nil || access != AccessOnlyMe {
+		t.Fatalf("new site access = %q (%v), want only_me", access, err)
 	}
-	if _, err := GrantSiteViewers(ctx, tx, ownerID, "demo", siteID, &ownerID, []string{"alice"}); err != nil {
+
+	if err := inTx(t, database, func(tx *sql.Tx) error {
+		_, err := GrantSiteViewers(ctx, tx, ownerID, "demo", siteID, &ownerID, []string{"vera"})
+		return err
+	}); err != nil {
 		t.Fatalf("GrantSiteViewers: %v", err)
 	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
+	if err := database.QueryRow(`SELECT access FROM sites WHERE id = $1`, siteID).Scan(&access); err != nil || access != AccessSpecific {
+		t.Fatalf("access after a viewer grant = %q (%v), want specific", access, err)
 	}
 
-	allowed, err = WriterAllowed(ctx, database, siteID, strangerID)
-	if err != nil {
-		t.Fatalf("WriterAllowed (restricted, default mode): %v", err)
+	type who struct {
+		name string
+		id   string
 	}
-	if allowed {
-		t.Fatal("restricted site admitted a non-viewer writer under the default write mode")
+	people := []who{{"owner", ownerID}, {"viewer", viewerID}, {"other", otherID}}
+	want := map[string]map[string]bool{
+		AccessOnlyMe:   {"owner": true, "viewer": false, "other": false},
+		AccessSpecific: {"owner": true, "viewer": true, "other": false},
+		AccessCompany:  {"owner": true, "viewer": true, "other": true},
+		AccessListed:   {"owner": true, "viewer": true, "other": true},
 	}
-	allowed, err = WriterAllowed(ctx, database, siteID, ownerID)
-	if err != nil {
-		t.Fatalf("WriterAllowed (restricted, owner): %v", err)
+	for _, level := range []string{AccessOnlyMe, AccessSpecific, AccessCompany, AccessListed} {
+		mustSetAccess(t, database, siteID, level)
+		for _, p := range people {
+			view, err := ViewerAllowed(ctx, database, siteID, p.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			write, err := WriterAllowed(ctx, database, siteID, p.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if view != want[level][p.name] || write != view {
+				t.Errorf("%s/%s: view=%v write=%v, want %v", level, p.name, view, write, want[level][p.name])
+			}
+		}
+		restricted, err := IsSiteRestricted(ctx, database, siteID)
+		if err != nil || restricted != (level == AccessSpecific) {
+			t.Errorf("%s: restricted=%v (%v)", level, restricted, err)
+		}
+		var public bool
+		_ = database.QueryRow(`SELECT public FROM sites WHERE id = $1`, siteID).Scan(&public)
+		if public != (level == AccessListed) {
+			t.Errorf("%s: public=%v", level, public)
+		}
 	}
-	if !allowed {
-		t.Fatal("restricted site refused its own owner as a writer")
+
+	// A team site at only_me: its members open it, nobody else does.
+	for id, ok := range map[string]bool{memberID: true, ownerID: false} {
+		view, err := ViewerAllowed(ctx, database, teamSite.ID, id)
+		if err != nil || view != ok {
+			t.Errorf("team site only_me: view(%s)=%v (%v), want %v", id, view, err, ok)
+		}
+	}
+	if view, err := ViewerAllowed(ctx, database, "00000000-0000-4000-8000-000000000000", ownerID); err != nil || view {
+		t.Errorf("unknown site: view=%v (%v), want false", view, err)
 	}
 }
 
-// TestWriterAllowedEditorsModeNarrowsToOwnerTeamOrEditor covers the
-// 'editors' branch: an unrestricted site (so anyone can view it) still
-// refuses a plain signed-in stranger the write, admitting only the owner, a
-// member of the owner's team, or an editor.
-func TestWriterAllowedEditorsModeNarrowsToOwnerTeamOrEditor(t *testing.T) {
+// TestNetworkAccessRequestFlow: a request leaves the level alone until an
+// admin approves; decline clears it; the owner lowering the level revokes an
+// approval.
+func TestNetworkAccessRequestFlow(t *testing.T) {
 	database := assetsTestDB(t)
 	ctx := context.Background()
 	ownerID, siteID := mustCreateUserAndSite(t, database, "alice", "demo")
-	strangerID, _ := mustCreateUserAndSite(t, database, "stranger", "unrelated")
-	editorUser, err := CreateOIDCUser(ctx, database, "editor", "sub-editor", "editor@example.com", false)
-	if err != nil {
-		t.Fatalf("CreateOIDCUser(editor): %v", err)
+	mustSetAccess(t, database, siteID, AccessCompany)
+
+	tx, _ := database.Begin()
+	if _, err := SetSiteAccess(ctx, tx, siteID, AccessNetwork); err == nil {
+		t.Fatal("SetSiteAccess accepted network without approval")
+	}
+	tx.Rollback()
+
+	if err := inTx(t, database, func(tx *sql.Tx) error { return DeclineNetworkAccess(ctx, tx, siteID) }); !errors.Is(err, ErrNoPendingRequest) {
+		t.Fatalf("decline with nothing pending = %v", err)
+	}
+	if err := inTx(t, database, func(tx *sql.Tx) error { return RequestNetworkAccess(ctx, tx, siteID, ownerID, "event page") }); err != nil {
+		t.Fatal(err)
+	}
+	if open, _ := NetworkOpen(ctx, database, siteID); open {
+		t.Fatal("a pending request opened the site")
+	}
+	entries, err := ListNetworkAccess(ctx, database)
+	if err != nil || len(entries) != 1 || entries[0].Reason != "event page" || entries[0].RequestedBy != "alice" || entries[0].Access != AccessCompany {
+		t.Fatalf("pending list = %+v (%v)", entries, err)
+	}
+	if err := inTx(t, database, func(tx *sql.Tx) error { return DeclineNetworkAccess(ctx, tx, siteID) }); err != nil {
+		t.Fatal(err)
+	}
+	if entries, _ := ListNetworkAccess(ctx, database); len(entries) != 0 {
+		t.Fatalf("declined request still listed: %+v", entries)
 	}
 
-	setStateWriteMode(t, database, siteID, "editors")
-
-	// The site is unrestricted, so the stranger can still view it — but not
-	// write to it under 'editors' mode.
-	viewable, err := ViewerAllowed(ctx, database, siteID, strangerID)
-	if err != nil {
-		t.Fatalf("ViewerAllowed (unrestricted): %v", err)
+	if err := inTx(t, database, func(tx *sql.Tx) error { return RequestNetworkAccess(ctx, tx, siteID, ownerID, "again") }); err != nil {
+		t.Fatal(err)
 	}
-	if !viewable {
-		t.Fatal("expected the unrestricted site to remain viewable by a stranger")
+	if err := inTx(t, database, func(tx *sql.Tx) error { _, err := ApproveNetworkAccess(ctx, tx, siteID); return err }); err != nil {
+		t.Fatal(err)
 	}
-	writable, err := WriterAllowed(ctx, database, siteID, strangerID)
-	if err != nil {
-		t.Fatalf("WriterAllowed (stranger, editors mode): %v", err)
+	if open, _ := NetworkOpen(ctx, database, siteID); !open {
+		t.Fatal("approval did not open the site")
 	}
-	if writable {
-		t.Fatal("'editors' mode let a non-owner, non-editor stranger write")
+	if err := inTx(t, database, func(tx *sql.Tx) error { return RequestNetworkAccess(ctx, tx, siteID, ownerID, "x") }); !errors.Is(err, ErrAlreadyNetwork) {
+		t.Fatalf("request on a network site = %v", err)
 	}
-
-	writable, err = WriterAllowed(ctx, database, siteID, ownerID)
-	if err != nil {
-		t.Fatalf("WriterAllowed (owner, editors mode): %v", err)
+	if previous := mustSetAccess(t, database, siteID, AccessListed); previous != AccessNetwork {
+		t.Fatalf("previous = %q", previous)
 	}
-	if !writable {
-		t.Fatal("'editors' mode refused the site's own owner")
+	if open, _ := NetworkOpen(ctx, database, siteID); open {
+		t.Fatal("lowering the level did not revoke network access")
 	}
-
-	tx, err := database.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin tx: %v", err)
-	}
-	if _, err := GrantSiteEditors(ctx, tx, ownerID, "demo", siteID, &ownerID, []string{"editor"}); err != nil {
-		t.Fatalf("GrantSiteEditors: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-	writable, err = WriterAllowed(ctx, database, siteID, editorUser.ID)
-	if err != nil {
-		t.Fatalf("WriterAllowed (editor, editors mode): %v", err)
-	}
-	if !writable {
-		t.Fatal("'editors' mode refused a granted editor")
+	if err := inTx(t, database, func(tx *sql.Tx) error { _, err := ApproveNetworkAccess(ctx, tx, siteID); return err }); !errors.Is(err, ErrNoPendingRequest) {
+		t.Fatalf("approve after lowering = %v, want ErrNoPendingRequest", err)
 	}
 }
 
-func TestWriterAllowedUnknownSiteReturnsErrSiteNotFound(t *testing.T) {
+// TestStateHistoryKeepsTwentyAndRestores writes 25 states, checks only the
+// newest 20 remain, and restores an older one as a new write.
+func TestStateHistoryKeepsTwentyAndRestores(t *testing.T) {
 	database := assetsTestDB(t)
-	_, err := WriterAllowed(context.Background(), database, "00000000-0000-4000-8000-000000000000", "00000000-0000-4000-8000-000000000001")
-	if !errors.Is(err, ErrSiteNotFound) {
-		t.Fatalf("WriterAllowed(unknown site) error = %v, want ErrSiteNotFound", err)
+	ctx := context.Background()
+	ownerID, siteID := mustCreateUserAndSite(t, database, "alice", "demo")
+	for i := 1; i <= 25; i++ {
+		if err := inTx(t, database, func(tx *sql.Tx) error {
+			if err := UpdateSiteState(ctx, tx, "alice", "demo", json.RawMessage(fmt.Sprintf(`{"n":%d}`, i))); err != nil {
+				return err
+			}
+			return RecordStateHistory(ctx, tx, siteID, ownerID)
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, err := ListStateHistory(ctx, database, siteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != MaxStateHistory || entries[0].StateVersion != 25 || entries[19].StateVersion != 6 || entries[0].WrittenBy != "alice" {
+		t.Fatalf("history = %d entries, newest v%d, oldest v%d", len(entries), entries[0].StateVersion, entries[len(entries)-1].StateVersion)
+	}
+	oldest := entries[19]
+	var version int64
+	if err := inTx(t, database, func(tx *sql.Tx) error {
+		var err error
+		version, err = RestoreStateHistory(ctx, tx, siteID, oldest.ID, ownerID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	state, current, _, err := GetSiteStateVersioned(ctx, database, "alice", "demo")
+	if err != nil || current != 26 || version != 26 || string(state) != `{"n": 6}` {
+		t.Fatalf("after restore: state=%s version=%d/%d (%v)", state, current, version, err)
+	}
+	entries, _ = ListStateHistory(ctx, database, siteID)
+	if len(entries) != MaxStateHistory || entries[0].StateVersion != 26 {
+		t.Fatalf("restore not recorded in history: %+v", entries[0])
+	}
+
+	_, otherSite := mustCreateUserAndSite(t, database, "bob", "other")
+	if err := inTx(t, database, func(tx *sql.Tx) error {
+		_, err := RestoreStateHistory(ctx, tx, otherSite, entries[0].ID, ownerID)
+		return err
+	}); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("restoring another site's entry = %v, want ErrNoRows", err)
 	}
 }

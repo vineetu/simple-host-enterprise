@@ -24,8 +24,6 @@ type rankMetric string
 const (
 	metricViews   rankMetric = "views"
 	metricSize    rankMetric = "size"
-	metricShared  rankMetric = "shared"
-	metricEditing rankMetric = "editing"
 	metricUpdated rankMetric = "updated"
 )
 
@@ -35,8 +33,6 @@ var userMetrics = []struct {
 }{
 	{metricViews, "Views"},
 	{metricSize, "Storage"},
-	{metricShared, "Shared out"},
-	{metricEditing, "Editing"},
 }
 
 var siteMetrics = []struct {
@@ -46,7 +42,6 @@ var siteMetrics = []struct {
 	{metricViews, "Views"},
 	{metricUpdated, "Updated"},
 	{metricSize, "Storage"},
-	{metricShared, "Editors"},
 }
 
 func parseRankMetric(raw string, allowed []struct {
@@ -69,8 +64,6 @@ type userRank struct {
 	views      int64
 	totalBytes uint64
 	liveBytes  uint64
-	sharedOut  int // editors this user has granted across the sites they own
-	editing    int // sites owned by somebody else that this user can edit
 }
 
 // siteRank is one row of the per-site ranking.
@@ -80,7 +73,6 @@ type siteRank struct {
 	views      int64
 	totalBytes uint64
 	liveBytes  uint64
-	editors    int
 	updatedAt  time.Time
 }
 
@@ -91,14 +83,6 @@ func sortUserRanks(rows []userRank, metric rankMetric) {
 		case metricSize:
 			if a.totalBytes != b.totalBytes {
 				return a.totalBytes > b.totalBytes
-			}
-		case metricShared:
-			if a.sharedOut != b.sharedOut {
-				return a.sharedOut > b.sharedOut
-			}
-		case metricEditing:
-			if a.editing != b.editing {
-				return a.editing > b.editing
 			}
 		default:
 			if a.views != b.views {
@@ -119,10 +103,6 @@ func sortSiteRanks(rows []siteRank, metric rankMetric) {
 		case metricSize:
 			if a.totalBytes != b.totalBytes {
 				return a.totalBytes > b.totalBytes
-			}
-		case metricShared:
-			if a.editors != b.editors {
-				return a.editors > b.editors
 			}
 		case metricUpdated:
 			if !a.updatedAt.Equal(b.updatedAt) {
@@ -198,18 +178,6 @@ func userMetricCell(row userRank, metric rankMetric) rankCell {
 			value: formatBytes(row.totalBytes),
 			sub:   fmt.Sprintf("%s live · %s", formatBytes(row.liveBytes), sites),
 		}
-	case metricShared:
-		return rankCell{
-			value: fmt.Sprintf("%d", row.sharedOut),
-			unit:  pluralize(row.sharedOut, "editor", "editors"),
-			sub:   "across " + sites,
-		}
-	case metricEditing:
-		return rankCell{
-			value: fmt.Sprintf("%d", row.editing),
-			unit:  pluralize(row.editing, "site", "sites"),
-			sub:   fmt.Sprintf("owns %s", sites),
-		}
 	default:
 		return rankCell{value: formatCount(row.views), unit: "views", sub: sites}
 	}
@@ -221,12 +189,6 @@ func siteMetricCell(row siteRank, metric rankMetric) rankCell {
 		return rankCell{
 			value: formatBytes(row.totalBytes),
 			sub:   fmt.Sprintf("%s · %s live", row.owner, formatBytes(row.liveBytes)),
-		}
-	case metricShared:
-		return rankCell{
-			value: fmt.Sprintf("%d", row.editors),
-			unit:  pluralize(row.editors, "editor", "editors"),
-			sub:   row.owner,
 		}
 	case metricUpdated:
 		return rankCell{valueHTML: localTimeHTML(row.updatedAt, "datetime"), sub: row.owner}

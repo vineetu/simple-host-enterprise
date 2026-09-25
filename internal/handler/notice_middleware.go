@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	MinimumSupportedSkillVersion = "0.8.0"
+	MinimumSupportedSkillVersion = "0.11.0"
 	skillUpdateURL               = "/install.html"
 
 	headerSkillVersion        = "X-Skill-Version"

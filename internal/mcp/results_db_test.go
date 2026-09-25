@@ -191,14 +191,20 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	call("rollback_site", map[string]any{"site": "demo", "version": 1})
 	etag = call("get_site", map[string]any{"site": "demo", "owner": "alice"})["etag"].(string)
 	call("rollback_site", map[string]any{"site": "demo", "owner": "alice", "version": 2, "etag": etag})
-	call("set_site_listing", map[string]any{"site": "demo", "listed": true})
-	call("set_site_listing", map[string]any{"site": "demo", "owner": "alice", "listed": false})
+	if got := call("get_site", map[string]any{"site": "demo", "owner": "alice"}); got["access"] != "only_me" {
+		t.Errorf("new site access = %v, want only_me", got["access"])
+	}
+	call("set_site_access", map[string]any{"site": "demo", "level": "listed"})
+	if got := call("set_site_access", map[string]any{"site": "demo", "owner": "alice", "level": "network", "reason": "event page"}); got["access"] != "listed" || got["network_request"] == nil {
+		t.Errorf("network request = %v, want still listed with a pending request", got)
+	}
+	if got := call("get_site", map[string]any{"site": "demo", "owner": "alice"}); got["network_request"] == nil {
+		t.Errorf("get_site does not show the pending request: %v", got)
+	}
+	call("list_sites", map[string]any{})
+	call("set_site_access", map[string]any{"site": "demo", "owner": "alice", "level": "company"})
 
-	call("find_users", map[string]any{"site": "demo", "owner": "alice", "query": "bo"})
-	call("find_users", map[string]any{"site": "demo", "owner": "alice", "query": "a", "for": "viewer"})
-	call("grant_site_editor", map[string]any{"site": "demo", "owner": "alice", "usernames": []any{"bob"}})
-	call("list_site_editors", map[string]any{"site": "demo", "owner": "alice"})
-	call("revoke_site_editor", map[string]any{"site": "demo", "owner": "alice", "username": "bob"})
+	call("find_users", map[string]any{"site": "demo", "owner": "alice", "query": "a"})
 	call("grant_site_viewer", map[string]any{"site": "demo", "owner": "alice", "usernames": []any{"acme-team"}})
 	call("list_site_viewers", map[string]any{"site": "demo", "owner": "alice"})
 
@@ -230,6 +236,16 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	stale := decode(t, post(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":`+strings.TrimSuffix(string(params), "}")+`,`+meta+`}}`, headers))["result"].(map[string]any)
 	if staleText := stale["content"].([]any)[0].(map[string]any)["text"].(string); stale["isError"] != true || stale["structuredContent"] != nil || !strings.Contains(staleText, "Ann") || !strings.Contains(staleText, "reapply") {
 		t.Errorf("stale update_state = %v", stale)
+	}
+	history := call("list_state_versions", map[string]any{"site": "demo", "owner": "alice"})
+	items, _ := history["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("list_state_versions = %v, want the one save", history)
+	}
+	id := items[0].(map[string]any)["id"]
+	call("list_state_versions", map[string]any{"site": "demo", "owner": "alice", "id": id})
+	if got := call("restore_state_version", map[string]any{"site": "demo", "owner": "alice", "id": id}); got["version"] != float64(2) {
+		t.Errorf("restore_state_version = %v, want version 2", got)
 	}
 	call("revoke_site_viewer", map[string]any{"site": "demo", "owner": "alice", "username": "acme-team"})
 

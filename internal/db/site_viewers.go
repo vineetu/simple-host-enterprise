@@ -10,9 +10,7 @@ import (
 	"github.com/lib/pq"
 )
 
-// MaxSiteViewers mirrors MaxSiteEditors: a bounded batch per request, not a
-// hard cap on how many people or teams may ever be listed, but a sane limit
-// on one grant call.
+// MaxSiteViewers bounds a site's viewer list.
 const MaxSiteViewers = 50
 
 // SiteViewer describes one entry on a site's viewer list, person or team.
@@ -31,7 +29,6 @@ type ViewerCandidate struct {
 	Username      string
 	Kind          string
 	AlreadyViewer bool
-	AlreadyEditor bool
 }
 
 var ErrViewerLimit = errors.New("site viewer limit reached")
@@ -39,19 +36,18 @@ var ErrViewerLimit = errors.New("site viewer limit reached")
 var ErrSiteNotFound = errors.New("site not found")
 
 const siteForServingQuery = `
-	SELECT s.id::text, EXISTS (SELECT 1 FROM site_viewers sv WHERE sv.site_id = s.id)
+	SELECT s.id::text, s.access = 'specific'
 	FROM sites s
 	JOIN users u ON u.id = s.user_id
 	WHERE u.username = $1 AND s.name = $2
 `
 
-// SiteForServing resolves a site's canonical id and restriction status by
-// its owner's username and its own name — the pairing the host gate has in
-// hand once it has resolved a hostname label to an owner and a site
-// directory to a name, both from disk (design.md 5.2a, 7.2). It never
-// consults the disk itself: the disk-based resolution stays authoritative
-// for "does this site exist at all" (host_gate.resolveOwner), and this is
-// only reached once that has already succeeded.
+// SiteForServing resolves a site's canonical id and whether it is served on
+// its own host by its owner's username and its own name — the pairing the
+// host gate has in hand once it has resolved a hostname label to an owner
+// and a site directory to a name. restricted is true exactly when the
+// site's access level is AccessSpecific (named viewers), the one level
+// served at "<owner>--<site>.<base>".
 func SiteForServing(ctx context.Context, q Querier, ownerUsername, siteName string) (siteID string, restricted bool, err error) {
 	err = q.QueryRowContext(ctx, siteForServingQuery, ownerUsername, siteName).Scan(&siteID, &restricted)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -60,107 +56,77 @@ func SiteForServing(ctx context.Context, q Querier, ownerUsername, siteName stri
 	return siteID, restricted, err
 }
 
-const isSiteRestrictedQuery = `SELECT EXISTS (SELECT 1 FROM site_viewers WHERE site_id = $1::uuid)`
+const isSiteRestrictedQuery = `SELECT access = 'specific' FROM sites WHERE id = $1::uuid`
 
-// IsSiteRestricted reports whether a site has any viewer rows at all. This is
-// the single predicate that decides both viewerAllowed's "no rows -> true"
-// branch and which hostname the site is addressed at (handler.HostModel):
-// the two can never disagree because both read this same table.
+// IsSiteRestricted reports whether a site is at the named-viewers level, the
+// single predicate that decides which hostname the site is addressed at
+// (handler.HostModel). A site that no longer exists reports false.
 func IsSiteRestricted(ctx context.Context, q Querier, siteID string) (bool, error) {
 	var restricted bool
 	err := q.QueryRowContext(ctx, isSiteRestrictedQuery, siteID).Scan(&restricted)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
 	return restricted, err
 }
 
 const viewerAllowedQuery = `
 	SELECT
-		EXISTS (SELECT 1 FROM site_viewers WHERE site_id = $1::uuid) AS restricted,
-		EXISTS (SELECT 1 FROM sites s WHERE s.id = $1::uuid AND s.user_id = $2::uuid) AS is_owner,
+		s.access,
+		s.user_id = $2::uuid OR EXISTS (
+			SELECT 1 FROM team_members tm WHERE tm.team_id = s.user_id AND tm.user_id = $2::uuid
+		) AS is_owner_or_member,
 		EXISTS (
-			SELECT 1 FROM sites s
-			JOIN team_members tm ON tm.team_id = s.user_id AND tm.user_id = $2::uuid
-			WHERE s.id = $1::uuid
-		) AS is_owner_team_member,
-		EXISTS (
-			SELECT 1 FROM site_collaborators sc
-			WHERE sc.site_id = $1::uuid AND sc.user_id = $2::uuid AND sc.role = 'editor'
-		) AS is_editor,
-		EXISTS (
-			SELECT 1 FROM site_viewers sv WHERE sv.site_id = $1::uuid AND sv.principal_id = $2::uuid
-		) AS is_direct_viewer,
-		EXISTS (
+			SELECT 1 FROM site_viewers sv WHERE sv.site_id = s.id AND sv.principal_id = $2::uuid
+		) OR EXISTS (
 			SELECT 1 FROM site_viewers sv
 			JOIN team_members tm ON tm.team_id = sv.principal_id AND tm.user_id = $2::uuid
-			WHERE sv.site_id = $1::uuid
-		) AS is_team_viewer
-`
-
-// ViewerAllowed implements design.md 7.2's viewerAllowed(session.user, site)
-// rule: a site with no site_viewers rows is open to any signed-in person; a
-// restricted site additionally admits its owner, a member of the owner's
-// team, an editor, a listed viewer, or a member of a listed team.
-func ViewerAllowed(ctx context.Context, q Querier, siteID, userID string) (bool, error) {
-	var restricted, isOwner, isOwnerTeamMember, isEditor, isDirectViewer, isTeamViewer bool
-	err := q.QueryRowContext(ctx, viewerAllowedQuery, siteID, userID).Scan(
-		&restricted, &isOwner, &isOwnerTeamMember, &isEditor, &isDirectViewer, &isTeamViewer,
-	)
-	if err != nil {
-		return false, err
-	}
-	if !restricted {
-		return true, nil
-	}
-	return isOwner || isOwnerTeamMember || isEditor || isDirectViewer || isTeamViewer, nil
-}
-
-const writerAllowedQuery = `
-	SELECT
-		s.state_write_mode,
-		EXISTS (SELECT 1 FROM sites s2 WHERE s2.id = $1::uuid AND s2.user_id = $2::uuid) AS is_owner,
-		EXISTS (
-			SELECT 1 FROM sites s2
-			JOIN team_members tm ON tm.team_id = s2.user_id AND tm.user_id = $2::uuid
-			WHERE s2.id = $1::uuid
-		) AS is_owner_team_member,
-		EXISTS (
-			SELECT 1 FROM site_collaborators sc
-			WHERE sc.site_id = $1::uuid AND sc.user_id = $2::uuid AND sc.role = 'editor'
-		) AS is_editor
+			WHERE sv.site_id = s.id
+		) AS is_viewer
 	FROM sites s
 	WHERE s.id = $1::uuid
 `
 
-// WriterAllowed implements design.md 7.3's writerAllowed(session.user, site)
-// rule: state_write_mode "anyone" (the default) defers entirely to
-// viewerAllowed — the same signed-in-or-listed rule that already governs
-// reads; state_write_mode "editors" additionally narrows writes to the
-// owner, a member of the owner's team, or an editor, regardless of who may
-// view. ErrSiteNotFound covers a siteID that names no row, matching
-// ViewerAllowed's caller contract (the site-facing API resolves siteID from
-// SiteForServing first, so this is reached only for a site already known to
-// exist, but a deleted-between-requests race still needs an answer).
-func WriterAllowed(ctx context.Context, q Querier, siteID, userID string) (bool, error) {
-	var mode string
-	var isOwner, isOwnerTeamMember, isEditor bool
-	err := q.QueryRowContext(ctx, writerAllowedQuery, siteID, userID).Scan(&mode, &isOwner, &isOwnerTeamMember, &isEditor)
+// ViewerAllowed decides whether a signed-in person may open a site, by its
+// access level: only_me admits the owner (for a team site, its members);
+// specific adds the named viewers, people or members of a named team; every
+// wider level admits any signed-in person. A site that no longer exists
+// admits nobody. Anonymous visitors never reach this: see NetworkOpen.
+func ViewerAllowed(ctx context.Context, q Querier, siteID, userID string) (bool, error) {
+	var access string
+	var isOwnerOrMember, isViewer bool
+	err := q.QueryRowContext(ctx, viewerAllowedQuery, siteID, userID).Scan(&access, &isOwnerOrMember, &isViewer)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, ErrSiteNotFound
+		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	if mode == "editors" {
-		return isOwner || isOwnerTeamMember || isEditor, nil
+	switch access {
+	case AccessOnlyMe:
+		return isOwnerOrMember, nil
+	case AccessSpecific:
+		return isOwnerOrMember || isViewer, nil
+	case AccessCompany, AccessListed, AccessNetwork:
+		return true, nil
 	}
+	return false, nil
+}
+
+// WriterAllowed is who may write a site's saved data and upload or delete
+// its assets as a signed-in person: whoever may open it. Saved data follows
+// opening; anonymous visitors to a network site are refused before this is
+// ever asked.
+func WriterAllowed(ctx context.Context, q Querier, siteID, userID string) (bool, error) {
 	return ViewerAllowed(ctx, q, siteID, userID)
 }
 
-const listRestrictedSiteIDsQuery = `SELECT DISTINCT site_id::text FROM site_viewers`
+const listRestrictedSiteIDsQuery = `SELECT id::text FROM sites WHERE access = 'specific'`
 
-// ListRestrictedSiteIDs returns the set of every site id that currently has
-// at least one viewer row, for callers that render or link many sites at
-// once (the admin dashboard, the showcase, the collaboration list) and would
-// otherwise pay one IsSiteRestricted query per row.
+// ListRestrictedSiteIDs returns the set of every site id at the named-viewers
+// level, for callers that render or link many sites at once (the admin
+// dashboard, the showcase, the owner index) and would otherwise pay one
+// IsSiteRestricted query per row.
 func ListRestrictedSiteIDs(ctx context.Context, q Querier) (map[string]bool, error) {
 	rows, err := q.QueryContext(ctx, listRestrictedSiteIDsQuery)
 	if err != nil {
@@ -215,8 +181,7 @@ const searchViewerCandidatesQuery = `
 		u.id::text,
 		u.username,
 		u.kind,
-		EXISTS (SELECT 1 FROM site_viewers sv WHERE sv.site_id = $1::uuid AND sv.principal_id = u.id),
-		EXISTS (SELECT 1 FROM site_collaborators sc WHERE sc.site_id = $1::uuid AND sc.user_id = u.id AND sc.role = 'editor')
+		EXISTS (SELECT 1 FROM site_viewers sv WHERE sv.site_id = $1::uuid AND sv.principal_id = u.id)
 	FROM users u
 	INNER JOIN sites s ON s.id = $1::uuid
 	WHERE u.id <> s.user_id
@@ -225,9 +190,8 @@ const searchViewerCandidatesQuery = `
 	LIMIT $3
 `
 
-// SearchViewerCandidates mirrors SearchEditorCandidates but over every
-// principal (person or team), since design.md 5.1's site_viewers table
-// admits both.
+// SearchViewerCandidates is a case-insensitive literal substring match over
+// every principal (person or team), since site_viewers admits both.
 func SearchViewerCandidates(ctx context.Context, q Querier, siteID, search string, limit int) ([]ViewerCandidate, error) {
 	if limit < 1 || limit > 20 {
 		limit = 20
@@ -241,7 +205,7 @@ func SearchViewerCandidates(ctx context.Context, q Querier, siteID, search strin
 	var candidates []ViewerCandidate
 	for rows.Next() {
 		var c ViewerCandidate
-		if err := rows.Scan(&c.PrincipalID, &c.Username, &c.Kind, &c.AlreadyViewer, &c.AlreadyEditor); err != nil {
+		if err := rows.Scan(&c.PrincipalID, &c.Username, &c.Kind, &c.AlreadyViewer); err != nil {
 			return nil, err
 		}
 		candidates = append(candidates, c)
@@ -265,10 +229,9 @@ const resolveRequestedViewersQuery = `
 
 // GrantSiteViewers resolves a bounded username batch and adds them to a
 // site's viewer list, restricting the site the moment the first row lands.
-// tx must already hold whatever lock the caller uses to serialize collab
-// changes for this site; it reuses LockSiteCollaboration for that, the same
-// advisory lock GrantSiteEditors takes, since both mutate access to the same
-// site and must not interleave.
+// Granting also moves the site to the named-viewers level (AccessSpecific):
+// a viewer list means nothing at any other level. It takes the same
+// LockSiteCollaboration advisory lock deploys and access changes take.
 func GrantSiteViewers(ctx context.Context, tx *sql.Tx, ownerID, siteName, siteID string, addedByID *string, usernames []string) ([]SiteViewer, error) {
 	if tx == nil {
 		return nil, fmt.Errorf("grant site viewers: nil transaction")
@@ -280,7 +243,7 @@ func GrantSiteViewers(ctx context.Context, tx *sql.Tx, ownerID, siteName, siteID
 		return nil, err
 	}
 
-	normalized, err := normalizeEditorUsernames(usernames)
+	normalized, err := normalizeUsernames(usernames)
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +274,7 @@ func GrantSiteViewers(ctx context.Context, tx *sql.Tx, ownerID, siteName, siteID
 	}
 	for _, u := range normalized {
 		if !seen[u] {
-			return nil, ErrEditorNotFound
+			return nil, ErrUserNotFound
 		}
 	}
 
@@ -337,6 +300,9 @@ func GrantSiteViewers(ctx context.Context, tx *sql.Tx, ownerID, siteName, siteID
 		if _, err := tx.ExecContext(ctx, grantSiteViewersQuery, siteID, pq.Array(ids), addedByID); err != nil {
 			return nil, err
 		}
+	}
+	if _, err := setSiteAccess(ctx, tx, siteID, AccessSpecific); err != nil {
+		return nil, err
 	}
 	return ListSiteViewers(ctx, tx, siteID)
 }

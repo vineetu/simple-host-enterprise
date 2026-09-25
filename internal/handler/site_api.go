@@ -219,6 +219,11 @@ func (h *SiteAPIHandler) PutState(w http.ResponseWriter, r *http.Request, call s
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
+	if err := db.RecordStateHistory(r.Context(), tx, call.SiteID, call.ActorUserID); err != nil {
+		log.Printf("record state history %s/%s: %v", call.Owner, call.SiteName, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
 	if err := h.audit.RecordTx(r.Context(), tx, h.auditEvent(r.Context(), tx, call, "state_write", map[string]any{"versioned": false})); err != nil {
 		log.Printf("record audit for state_write %s/%s: %v", call.Owner, call.SiteName, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
@@ -315,6 +320,11 @@ func (h *SiteAPIHandler) PutStateVersioned(w http.ResponseWriter, r *http.Reques
 			writeJSON(w, http.StatusNotFound, errorResponse{Error: "site not found"})
 			return
 		}
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	if err := db.RecordStateHistory(r.Context(), tx, call.SiteID, call.ActorUserID); err != nil {
+		log.Printf("record state history %s/%s: %v", call.Owner, call.SiteName, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}

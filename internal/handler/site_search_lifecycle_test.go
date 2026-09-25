@@ -114,10 +114,10 @@ func TestSiteSearchEnqueueTransactionalPlacementAndFailureGuards(t *testing.T) {
 		})
 	}
 
-	visibility := findSiteHandlerFunction(t, parsed, "setSiteVisibility")
+	visibility := findSiteHandlerFunction(t, mustParseAccess(t), "setSiteAccessForTarget")
 	ast.Inspect(visibility.Body, func(node ast.Node) bool {
 		if call, ok := node.(*ast.CallExpr); ok && calledFunctionName(call) == "EnqueueSiteSearch" {
-			t.Fatal("visibility update unexpectedly enqueues site search")
+			t.Fatal("access update unexpectedly enqueues site search")
 		}
 		return true
 	})
@@ -206,10 +206,10 @@ func TestNamespaceRoutesDelegateToTheSharedPrimitives(t *testing.T) {
 	}{
 		{site, "createSite", "createSiteForTarget"},
 		{site, "deleteSite", "deleteSiteForTarget"},
-		{site, "setSiteVisibility", "setSiteVisibilityForTarget"},
+		{mustParseAccess(t), "setSiteAccess", "setSiteAccessForTarget"},
 		{collaboration, "createCollaborationSite", "createSiteForTarget"},
 		{collaboration, "deleteCollaborationSite", "deleteSiteForTarget"},
-		{collaboration, "setCollaborationSiteVisibility", "setSiteVisibilityForTarget"},
+		{collaboration, "setCollaborationSiteAccess", "setSiteAccessForTarget"},
 	} {
 		t.Run(test.function, func(t *testing.T) {
 			function := findSiteHandlerFunction(t, test.file, test.function)
@@ -238,4 +238,13 @@ func mustRead(t *testing.T, name string) []byte {
 		t.Fatal(err)
 	}
 	return source
+}
+
+func mustParseAccess(t *testing.T) *ast.File {
+	t.Helper()
+	parsed, err := parser.ParseFile(token.NewFileSet(), "access.go", mustRead(t, "access.go"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed
 }

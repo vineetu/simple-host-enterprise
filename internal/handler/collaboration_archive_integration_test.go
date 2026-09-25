@@ -25,15 +25,15 @@ import (
 
 const (
 	archiveTestOwnerID  = "11111111-1111-4111-8111-111111111111"
-	archiveTestEditorID = "22222222-2222-4222-8222-222222222222"
+	archiveTestMemberID = "22222222-2222-4222-8222-222222222222"
 	archiveTestSiteID   = "33333333-3333-4333-8333-333333333333"
 )
 
 type collaborationArchiveDBState struct {
 	mu                          sync.Mutex
-	editorAllowed               bool
-	denyEditorAfterFirstResolve bool
-	editorResolveCount          int
+	memberAllowed               bool
+	denyMemberAfterFirstResolve bool
+	memberResolveCount          int
 	activeVersion               int
 	versions                    []int
 	// assetExists/assetDeleted back the site_assets query/exec cases below,
@@ -56,15 +56,15 @@ func (s *collaborationArchiveDBState) query(query string, args []driver.NamedVal
 		switch {
 		case bytesEqual(hash, db.HashAPIKey("owner-key")):
 			values = [][]driver.Value{{archiveTestOwnerID, "owner", false, createdAt, "person", "owner@example.test", nil, "owner-key-id"}}
-		case bytesEqual(hash, db.HashAPIKey("editor-key")):
-			values = [][]driver.Value{{archiveTestEditorID, "editor", false, createdAt, "person", "editor@example.test", nil, "editor-key-id"}}
+		case bytesEqual(hash, db.HashAPIKey("member-key")):
+			values = [][]driver.Value{{archiveTestMemberID, "member", false, createdAt, "person", "member@example.test", nil, "member-key-id"}}
 		}
 		return &collaborationArchiveRows{
 			columns: []string{"id", "username", "is_admin", "created_at", "kind", "email", "disabled_at", "key_id"},
 			values:  values,
 		}, nil
 
-	case strings.Contains(normalized, "FROM sites s") && strings.Contains(normalized, "LEFT JOIN site_collaborators sc"):
+	case strings.Contains(normalized, "FROM sites s") && strings.Contains(normalized, "LEFT JOIN team_members tm"):
 		actorID := namedString(args, 0)
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -73,23 +73,23 @@ func (s *collaborationArchiveDBState) query(query string, args []driver.NamedVal
 			activeVersion = 1
 		}
 		role := "owner"
-		if actorID == archiveTestEditorID {
-			if !s.editorAllowed {
-				return emptyCollaborationArchiveRows(12), nil
+		if actorID == archiveTestMemberID {
+			if !s.memberAllowed {
+				return emptyCollaborationArchiveRows(15), nil
 			}
-			role = "editor"
-			s.editorResolveCount++
-			if s.denyEditorAfterFirstResolve && s.editorResolveCount == 1 {
-				s.editorAllowed = false
+			role = "member"
+			s.memberResolveCount++
+			if s.denyMemberAfterFirstResolve && s.memberResolveCount == 1 {
+				s.memberAllowed = false
 			}
 		} else if actorID != archiveTestOwnerID {
-			return emptyCollaborationArchiveRows(12), nil
+			return emptyCollaborationArchiveRows(15), nil
 		}
 		return &collaborationArchiveRows{
-			columns: numberedColumns(12),
+			columns: numberedColumns(15),
 			values: [][]driver.Value{{
 				archiveTestSiteID, archiveTestOwnerID, "demo", int64(activeVersion), true, false, false,
-				createdAt, createdAt, "owner", actorID, role,
+				createdAt, createdAt, "owner", actorID, role, "company", nil, "",
 			}},
 		}, nil
 
@@ -104,7 +104,7 @@ func (s *collaborationArchiveDBState) query(query string, args []driver.NamedVal
 		for _, version := range versions {
 			values = append(values, []driver.Value{
 				"version-" + strconv.Itoa(version), archiveTestSiteID, int64(version), "", "active",
-				archiveTestEditorID, "editor", createdAt,
+				archiveTestMemberID, "member", createdAt,
 			})
 		}
 		return &collaborationArchiveRows{
@@ -126,27 +126,11 @@ func (s *collaborationArchiveDBState) query(query string, args []driver.NamedVal
 			}},
 		}, nil
 
-	case strings.Contains(normalized, "SELECT count(*) FROM site_collaborators"):
-		s.mu.Lock()
-		count := int64(0)
-		if s.editorAllowed {
-			count = 1
-		}
-		s.mu.Unlock()
-		return &collaborationArchiveRows{columns: []string{"count"}, values: [][]driver.Value{{count}}}, nil
+	case strings.Contains(normalized, "SELECT access = 'specific' FROM sites"):
+		return &collaborationArchiveRows{columns: []string{"restricted"}, values: [][]driver.Value{{false}}}, nil
 
 	case strings.Contains(normalized, "SELECT 1 FROM sites") && strings.Contains(normalized, "WHERE id = $1::uuid"):
 		return &collaborationArchiveRows{columns: []string{"one"}, values: [][]driver.Value{{int64(1)}}}, nil
-
-	case strings.Contains(normalized, "FROM site_collaborators sc") && strings.Contains(normalized, "INNER JOIN users u"):
-		s.mu.Lock()
-		allowed := s.editorAllowed
-		s.mu.Unlock()
-		values := [][]driver.Value(nil)
-		if allowed {
-			values = [][]driver.Value{{archiveTestEditorID, "editor", archiveTestOwnerID, createdAt}}
-		}
-		return &collaborationArchiveRows{columns: numberedColumns(4), values: values}, nil
 
 	case strings.Contains(normalized, "FROM site_assets") && strings.Contains(normalized, "WHERE id = $1 AND site_id = $2"):
 		// Backs db.GetAsset, called by assets_admin.go's
@@ -199,15 +183,6 @@ func (s *collaborationArchiveDBState) exec(query string, args []driver.NamedValu
 		s.versions = kept
 		s.mu.Unlock()
 		return driver.RowsAffected(1), nil
-	case strings.Contains(normalized, "DELETE FROM site_collaborators AS collaborator"):
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if !s.editorAllowed {
-			return driver.RowsAffected(0), nil
-		}
-		s.editorAllowed = false
-		return driver.RowsAffected(1), nil
-
 	case strings.Contains(normalized, "UPDATE site_assets SET deleted_at = now()"):
 		// Backs db.SoftDeleteAsset, called inside the transaction
 		// assets_admin.go's deleteCollaborationAsset now shares with its
@@ -239,10 +214,10 @@ func namedInt(args []driver.NamedValue, index int) int {
 	}
 }
 
-func (s *collaborationArchiveDBState) editorResolves() int {
+func (s *collaborationArchiveDBState) memberResolves() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.editorResolveCount
+	return s.memberResolveCount
 }
 
 func namedString(args []driver.NamedValue, index int) string {
@@ -516,7 +491,7 @@ func (w *expiringArchiveResponseWriter) deadlineSnapshot() []time.Time {
 }
 
 func TestCollaborationArchiveLinearizesBeforeRevokeButLaterDownloadsAreDenied(t *testing.T) {
-	state := &collaborationArchiveDBState{editorAllowed: true}
+	state := &collaborationArchiveDBState{memberAllowed: true}
 	_, mux, _, _ := newCollaborationArchiveHarness(t, state)
 	writer := newBlockingArchiveResponseWriter()
 	archiveDone := make(chan struct{})
@@ -524,7 +499,7 @@ func TestCollaborationArchiveLinearizesBeforeRevokeButLaterDownloadsAreDenied(t 
 		mux.ServeHTTP(writer, collaborationArchiveRequest(
 			http.MethodGet,
 			"/api/collaboration/sites/owner/demo/versions/1/archive",
-			"editor-key",
+			"member-key",
 		))
 		close(archiveDone)
 	}()
@@ -539,30 +514,16 @@ func TestCollaborationArchiveLinearizesBeforeRevokeButLaterDownloadsAreDenied(t 
 		t.Fatalf("archive status = %d, want 200", status)
 	}
 
-	revokeDone := make(chan *httptest.ResponseRecorder, 1)
-	go func() {
-		response := httptest.NewRecorder()
-		mux.ServeHTTP(response, collaborationArchiveRequest(
-			http.MethodDelete,
-			"/api/collaboration/sites/owner/demo/editors/editor",
-			"owner-key",
-		))
-		revokeDone <- response
-	}()
-	select {
-	case response := <-revokeDone:
-		if response.Code != http.StatusNoContent {
-			t.Fatalf("revoke status = %d, want 204; body=%s", response.Code, response.Body.String())
-		}
-	case <-time.After(time.Second):
-		t.Fatal("revoke remained blocked by an admitted archive stream")
-	}
+	// The member leaves the owning team while the admitted stream is open.
+	state.mu.Lock()
+	state.memberAllowed = false
+	state.mu.Unlock()
 
 	denied := httptest.NewRecorder()
 	mux.ServeHTTP(denied, collaborationArchiveRequest(
 		http.MethodGet,
 		"/api/collaboration/sites/owner/demo/versions/1/archive",
-		"editor-key",
+		"member-key",
 	))
 	if denied.Code != http.StatusNotFound {
 		t.Fatalf("post-revoke archive status = %d, want 404; body=%s", denied.Code, denied.Body.String())
@@ -589,26 +550,26 @@ func TestCollaborationArchiveLinearizesBeforeRevokeButLaterDownloadsAreDenied(t 
 
 func TestCollaborationArchiveRechecksRevocationBeforeLeasingFiles(t *testing.T) {
 	state := &collaborationArchiveDBState{
-		editorAllowed:               true,
-		denyEditorAfterFirstResolve: true,
+		memberAllowed:               true,
+		denyMemberAfterFirstResolve: true,
 	}
 	_, mux, _, _ := newCollaborationArchiveHarness(t, state)
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, collaborationArchiveRequest(
 		http.MethodGet,
 		"/api/collaboration/sites/owner/demo/versions/1/archive",
-		"editor-key",
+		"member-key",
 	))
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("archive status = %d, want 404; body=%s", response.Code, response.Body.String())
 	}
-	if got := state.editorResolves(); got != 1 {
-		t.Fatalf("successful editor resolves = %d, want 1 before the locked recheck denied access", got)
+	if got := state.memberResolves(); got != 1 {
+		t.Fatalf("successful member resolves = %d, want 1 before the locked recheck denied access", got)
 	}
 }
 
 func TestCollaborationArchiveWriteDeadlineReleasesLeaseAndSlot(t *testing.T) {
-	state := &collaborationArchiveDBState{editorAllowed: true}
+	state := &collaborationArchiveDBState{memberAllowed: true}
 	handler, mux, _, limits := newCollaborationArchiveHarness(t, state)
 	writer := newExpiringArchiveResponseWriter()
 	handlerDone := make(chan struct{})
@@ -616,7 +577,7 @@ func TestCollaborationArchiveWriteDeadlineReleasesLeaseAndSlot(t *testing.T) {
 		mux.ServeHTTP(writer, collaborationArchiveRequest(
 			http.MethodGet,
 			"/api/collaboration/sites/owner/demo/versions/1/archive",
-			"editor-key",
+			"member-key",
 		))
 		close(handlerDone)
 	}()
@@ -668,7 +629,7 @@ func TestCollaborationArchiveWriteDeadlineReleasesLeaseAndSlot(t *testing.T) {
 func TestRollbackRoutesSwitchTheLiveVersion(t *testing.T) {
 	tests := []struct {
 		name          string
-		editorAllowed bool
+		memberAllowed bool
 		target        string
 		apiKey        string
 		ifMatch       string
@@ -680,9 +641,9 @@ func TestRollbackRoutesSwitchTheLiveVersion(t *testing.T) {
 		},
 		{
 			name:          "collaboration route",
-			editorAllowed: true,
+			memberAllowed: true,
 			target:        "/api/collaboration/sites/owner/demo/rollback",
-			apiKey:        "editor-key",
+			apiKey:        "member-key",
 			ifMatch:       formatSiteETag(archiveTestSiteID, 2),
 		},
 	}
@@ -690,7 +651,7 @@ func TestRollbackRoutesSwitchTheLiveVersion(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			state := &collaborationArchiveDBState{
-				editorAllowed: test.editorAllowed,
+				memberAllowed: test.memberAllowed,
 				activeVersion: 2,
 				versions:      []int{2, 1},
 			}

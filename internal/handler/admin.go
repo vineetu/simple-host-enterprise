@@ -157,6 +157,7 @@ func (h *AdminHandler) Register(mux *http.ServeMux, authMiddleware, skillVersion
 	mux.Handle("POST /api/admin/users/{username}/enable", dashboardCheck(adminAPI(http.HandlerFunc(h.enableUser))))
 	mux.Handle("POST /api/admin/classify-sites", dashboardCheck(adminAPI(http.HandlerFunc(h.classifySites))))
 	mux.Handle("GET /api/admin/export", adminAPI(http.HandlerFunc(h.exportAuditOrAccess)))
+	h.registerAccessRequestRoutes(mux, adminAPI, dashboardCheck)
 }
 
 // requireAdmin is auth.RequireAdmin plus an access_denied audit row when a
@@ -241,16 +242,6 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	// Ranking inputs. Each is optional: a failure degrades one metric's numbers
 	// to zero rather than taking the whole dashboard down.
-	collaboratorsBySiteID, err := db.ListSiteCollaboratorCounts(r.Context(), h.database)
-	if err != nil {
-		log.Printf("admin collaborator counts: %v", err)
-		collaboratorsBySiteID = map[string]int{}
-	}
-	editingByUserID, err := db.ListEditorGrantCountsByUser(r.Context(), h.database)
-	if err != nil {
-		log.Printf("admin editor grants: %v", err)
-		editingByUserID = map[string]int{}
-	}
 	usageBySiteID := measureSiteStorage(r.Context(), h.store)
 
 	sitesByUser := make(map[string][]db.Site, len(users))
@@ -290,7 +281,6 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 		rank := userRank{
 			username:  u.Username,
 			siteCount: len(sitesByUser[u.ID]),
-			editing:   editingByUserID[u.ID],
 		}
 		for _, s := range sitesByUser[u.ID] {
 			st.viewsRange += analyticsBySiteID[s.ID].Last7Pageviews
@@ -302,7 +292,6 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 			rank.views += analyticsBySiteID[s.ID].Last7Pageviews
 			rank.totalBytes += usage.totalBytes
 			rank.liveBytes += usage.liveBytes
-			rank.sharedOut += collaboratorsBySiteID[s.ID]
 
 			siteRanks = append(siteRanks, siteRank{
 				name:       s.Name,
@@ -310,7 +299,6 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 				views:      analyticsBySiteID[s.ID].Last7Pageviews,
 				totalBytes: usage.totalBytes,
 				liveBytes:  usage.liveBytes,
-				editors:    collaboratorsBySiteID[s.ID],
 				updatedAt:  s.UpdatedAt,
 			})
 		}
@@ -394,6 +382,8 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 		"users": string(usersMetric),
 		"sites": string(sitesMetric),
 	})
+
+	h.renderAccessRequests(r, &b)
 
 	if len(users) == 0 {
 		b.WriteString(`<div class="empty">No users yet.</div>`)
@@ -571,9 +561,9 @@ func writeUserBlockHeader(b *strings.Builder, hosts HostModel, u db.User, siteCo
 // leaves the owner off — the heading above it already says who that is — while
 // the flat list shows it, and carries the haystack the filter box searches.
 func writeSiteRow(b *strings.Builder, hosts HostModel, site db.Site, owner string, summary db.SiteAnalyticsSummary, analyticsDays int, showOwner, restricted bool) {
-	visibility := `<span class="chip chip-muted">unlisted</span>`
-	if site.Public {
-		visibility = `<span class="chip">public</span>`
+	visibility := fmt.Sprintf(`<span class="chip chip-muted">%s</span>`, html.EscapeString(accessLevelLabel(site.Access)))
+	if site.Access == db.AccessListed || site.Access == db.AccessNetwork {
+		visibility = fmt.Sprintf(`<span class="chip">%s</span>`, html.EscapeString(accessLevelLabel(site.Access)))
 	}
 	attrs := ""
 	ownerLine := ""

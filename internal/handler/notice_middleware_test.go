@@ -119,7 +119,7 @@ func (w *flushTrackingWriter) Flush() {
 }
 
 func TestSkillVersionMiddlewarePreservesStreamingInterfaces(t *testing.T) {
-	middleware, err := SkillVersionMiddleware("0.8.1", MinimumSupportedSkillVersion)
+	middleware, err := SkillVersionMiddleware("0.8.1", "0.8.0")
 	if err != nil {
 		t.Fatalf("SkillVersionMiddleware: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestSkillVersionMiddlewareRejectsInvalidConfiguration(t *testing.T) {
 }
 
 func TestSkillVersionRouteScopeAndAuthenticationOrdering(t *testing.T) {
-	skillMiddleware, err := SkillVersionMiddleware("0.8.1", MinimumSupportedSkillVersion)
+	skillMiddleware, err := SkillVersionMiddleware("0.8.1", "0.8.0")
 	if err != nil {
 		t.Fatalf("SkillVersionMiddleware: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestSkillVersionRouteScopeAndAuthenticationOrdering(t *testing.T) {
 		{name: "legacy update is guarded", method: http.MethodPut, path: "/api/sites/demo", apiKey: "valid-key", wantStatus: http.StatusBadRequest, wantCode: "skill_version_required", wantHeader: true},
 		{name: "delete is guarded", method: http.MethodDelete, path: "/api/sites/demo", apiKey: "valid-key", wantStatus: http.StatusBadRequest, wantCode: "skill_version_required", wantHeader: true},
 		{name: "legacy rollback is guarded", method: http.MethodPost, path: "/api/sites/demo/rollback", apiKey: "valid-key", wantStatus: http.StatusBadRequest, wantCode: "skill_version_required", wantHeader: true},
-		{name: "visibility is guarded", method: http.MethodPost, path: "/api/sites/demo/visibility", apiKey: "valid-key", wantStatus: http.StatusBadRequest, wantCode: "skill_version_required", wantHeader: true},
+		{name: "access is guarded", method: http.MethodPost, path: "/api/sites/demo/access", apiKey: "valid-key", wantStatus: http.StatusBadRequest, wantCode: "skill_version_required", wantHeader: true},
 		{name: "legacy versions are guarded", method: http.MethodGet, path: "/api/sites/demo/versions", apiKey: "valid-key", wantStatus: http.StatusBadRequest, wantCode: "skill_version_required", wantHeader: true},
 		{name: "canonical listing is also guarded", method: http.MethodGet, path: "/api/collaboration/sites", apiKey: "valid-key", wantStatus: http.StatusBadRequest, wantCode: "skill_version_required", wantHeader: true},
 		{name: "canonical metadata is guarded", method: http.MethodGet, path: "/api/collaboration/sites/alice/demo", apiKey: "valid-key", wantStatus: http.StatusBadRequest, wantCode: "skill_version_required", wantHeader: true},
@@ -220,10 +220,9 @@ func TestSkillVersionRouteScopeAndAuthenticationOrdering(t *testing.T) {
 		{name: "canonical rollback is guarded", method: http.MethodPost, path: "/api/collaboration/sites/alice/demo/rollback", apiKey: "valid-key", wantStatus: http.StatusBadRequest, wantCode: "skill_version_required", wantHeader: true},
 		{name: "canonical versions are guarded", method: http.MethodGet, path: "/api/collaboration/sites/alice/demo/versions", apiKey: "valid-key", wantStatus: http.StatusBadRequest, wantCode: "skill_version_required", wantHeader: true},
 		{name: "archive is guarded without entering handler", method: http.MethodGet, path: "/api/collaboration/sites/alice/demo/versions/1/archive", apiKey: "valid-key", wantStatus: http.StatusBadRequest, wantCode: "skill_version_required", wantHeader: true},
-		{name: "editor list is guarded", method: http.MethodGet, path: "/api/collaboration/sites/alice/demo/editors", apiKey: "valid-key", wantStatus: http.StatusBadRequest, wantCode: "skill_version_required", wantHeader: true},
-		{name: "editor grant is guarded", method: http.MethodPost, path: "/api/collaboration/sites/alice/demo/editors", apiKey: "valid-key", wantStatus: http.StatusBadRequest, wantCode: "skill_version_required", wantHeader: true},
-		{name: "editor revoke is guarded", method: http.MethodDelete, path: "/api/collaboration/sites/alice/demo/editors/bob", apiKey: "valid-key", wantStatus: http.StatusBadRequest, wantCode: "skill_version_required", wantHeader: true},
-		{name: "editor candidates are guarded", method: http.MethodGet, path: "/api/collaboration/sites/alice/demo/editor-candidates", apiKey: "valid-key", wantStatus: http.StatusBadRequest, wantCode: "skill_version_required", wantHeader: true},
+		{name: "state history is guarded", method: http.MethodGet, path: "/api/collaboration/sites/alice/demo/state-versions", apiKey: "valid-key", wantStatus: http.StatusBadRequest, wantCode: "skill_version_required", wantHeader: true},
+		{name: "state restore is guarded", method: http.MethodPost, path: "/api/collaboration/sites/alice/demo/state-versions/1/restore", apiKey: "valid-key", wantStatus: http.StatusBadRequest, wantCode: "skill_version_required", wantHeader: true},
+		{name: "team site access is guarded", method: http.MethodPost, path: "/api/collaboration/sites/alice/demo/access", apiKey: "valid-key", wantStatus: http.StatusBadRequest, wantCode: "skill_version_required", wantHeader: true},
 		{name: "supported archive reaches authorization", method: http.MethodGet, path: "/api/collaboration/sites/alice/demo/versions/1/archive", apiKey: "valid-key", version: "0.8.1", wantStatus: http.StatusUnauthorized, wantHeader: true},
 		// Registration (POST /api/auth) and reset intake (POST
 		// /api/reset-requests) are gone: identity is OIDC sign-in now
@@ -403,7 +402,7 @@ func TestRealAuthenticationPrecedesSkillVersionClassification(t *testing.T) {
 	database := sql.OpenDB(adminAuthConnector{})
 	t.Cleanup(func() { _ = database.Close() })
 
-	skillMiddleware, err := SkillVersionMiddleware("0.8.1", MinimumSupportedSkillVersion)
+	skillMiddleware, err := SkillVersionMiddleware("0.8.1", "0.8.0")
 	if err != nil {
 		t.Fatalf("SkillVersionMiddleware: %v", err)
 	}
@@ -467,7 +466,7 @@ func TestAdminAPIRouteAppliesGuardAfterAdminAuthentication(t *testing.T) {
 	database := sql.OpenDB(adminAuthConnector{})
 	t.Cleanup(func() { _ = database.Close() })
 
-	skillMiddleware, err := SkillVersionMiddleware("0.8.1", MinimumSupportedSkillVersion)
+	skillMiddleware, err := SkillVersionMiddleware("0.8.1", "0.8.0")
 	if err != nil {
 		t.Fatalf("SkillVersionMiddleware: %v", err)
 	}

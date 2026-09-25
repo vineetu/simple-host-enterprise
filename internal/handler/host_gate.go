@@ -70,6 +70,10 @@ type hostGate struct {
 	// writerAllowed is db.WriterAllowed by default (design.md 7.3's
 	// writerAllowed rule), factored the same way as the two fields above.
 	writerAllowed func(r *http.Request, siteID, userID string) (bool, error)
+	// networkOpen is db.NetworkOpen by default: whether an admin has
+	// approved the site for anonymous visitors. Asked only when a request
+	// carries no valid host session; nil means no site is.
+	networkOpen func(r *http.Request, siteID string) (bool, error)
 	// siteAPI serves the site-facing API (state and assets, design.md 7.3)
 	// once this gate has resolved which site, authenticated the caller, and
 	// checked viewerAllowed/writerAllowed.
@@ -133,6 +137,9 @@ func NewHostGate(hosts HostModel, files *SiteFiles, database *sql.DB, signingKey
 		},
 		writerAllowed: func(r *http.Request, siteID, userID string) (bool, error) {
 			return db.WriterAllowed(r.Context(), database, siteID, userID)
+		},
+		networkOpen: func(r *http.Request, siteID string) (bool, error) {
+			return db.NetworkOpen(r.Context(), database, siteID)
 		},
 		touchHostSession: func(sessionID string) {
 			if err := db.TouchSession(context.Background(), database, sessionID); err != nil {
@@ -311,11 +318,11 @@ func (g *hostGate) serveOwnerHost(w http.ResponseWriter, r *http.Request, label 
 		redirectWithTrailingSlash(w, r)
 		return
 	}
-	userID, sessionID, ok := g.requireHostSession(w, r, requestHost)
+	userID, sessionID, anonymous, ok := g.requireHostSessionOrNetwork(w, r, requestHost, siteID)
 	if !ok {
 		return
 	}
-	if !g.checkViewerAllowed(w, r, siteID, userID) {
+	if !anonymous && !g.checkViewerAllowed(w, r, siteID, userID) {
 		return
 	}
 	// GET /{site}/_assets/{id}[/{name}] (design.md 7.3): a top-level
@@ -432,12 +439,8 @@ func (g *hostGate) serveRestrictedSiteHost(w http.ResponseWriter, r *http.Reques
 // 401, so it fails fast rather than following a redirect chain built for a
 // browser.
 func (g *hostGate) requireHostSession(w http.ResponseWriter, r *http.Request, requestHost string) (userID, sessionID string, ok bool) {
-	c, err := r.Cookie(auth.SessionCookieName)
-	if err == nil && c.Value != "" {
-		if uid, sid, valid := auth.VerifyHostedSession(g.signingKeys, g.negCache, c.Value, requestHost); valid {
-			g.touchHostSession(sid)
-			return uid, sid, true
-		}
+	if uid, sid, valid := g.validHostSession(r, requestHost); valid {
+		return uid, sid, true
 	}
 	if wantsNavigation(r) {
 		g.handoff.beginHandoff(w, r, requestHost)
@@ -445,6 +448,45 @@ func (g *hostGate) requireHostSession(w http.ResponseWriter, r *http.Request, re
 	}
 	writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
 	return "", "", false
+}
+
+// validHostSession verifies the request's host session cookie, if any, and
+// touches it when valid.
+func (g *hostGate) validHostSession(r *http.Request, requestHost string) (userID, sessionID string, ok bool) {
+	c, err := r.Cookie(auth.SessionCookieName)
+	if err != nil || c.Value == "" {
+		return "", "", false
+	}
+	uid, sid, valid := auth.VerifyHostedSession(g.signingKeys, g.negCache, c.Value, requestHost)
+	if !valid {
+		return "", "", false
+	}
+	g.touchHostSession(sid)
+	return uid, sid, true
+}
+
+// requireHostSessionOrNetwork is requireHostSession, except that a request
+// with no valid host session to a site an admin has opened to the network is
+// let through as anonymous (anonymous true, no user). A signed-in person who
+// wants their own rights on such a site adds ?signin to the address, which
+// takes the usual hand-off.
+func (g *hostGate) requireHostSessionOrNetwork(w http.ResponseWriter, r *http.Request, requestHost, siteID string) (userID, sessionID string, anonymous, ok bool) {
+	if uid, sid, valid := g.validHostSession(r, requestHost); valid {
+		return uid, sid, false, true
+	}
+	if _, signin := r.URL.Query()["signin"]; !signin && g.networkOpen != nil {
+		open, err := g.networkOpen(r, siteID)
+		if err != nil {
+			log.Printf("host gate: network access check for site %s: %v", siteID, err)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return "", "", false, false
+		}
+		if open {
+			return "", "", true, true
+		}
+	}
+	uid, sid, ok := g.requireHostSession(w, r, requestHost)
+	return uid, sid, false, ok
 }
 
 // viewerAllowed applies design.md 7.2's rule and writes a 404 (never 403: a
@@ -599,6 +641,31 @@ func (g *hostGate) serveSiteAPI(w http.ResponseWriter, r *http.Request, kind sit
 	if !safeMethod {
 		if ok := g.checkSiteAPIOrigin(w, r); !ok {
 			return
+		}
+	}
+
+	// An anonymous read of a network-open site's saved data: no key or
+	// token, no valid host session, a GET of state. Writes, asset routes and anything
+	// carrying a credential take the normal path below, so an anonymous
+	// visitor can read what the page reads and change nothing.
+	_, hasBearer := auth.BearerToken(r)
+	if safeMethod && (kind == siteAPIState || kind == siteAPIStateVersioned) && r.Header.Get("X-API-Key") == "" && !hasBearer && g.networkOpen != nil {
+		if _, _, valid := g.validHostSession(r, label+"."+g.hosts.BaseHost()); !valid {
+			open, err := g.networkOpen(r, siteID)
+			if err != nil {
+				log.Printf("host gate: network access check for site %s: %v", siteID, err)
+				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+				return
+			}
+			if open {
+				call := siteAPICall{Owner: owner, SiteName: siteName, SiteID: siteID, Restricted: restricted, ActorKind: "anonymous"}
+				if kind == siteAPIState {
+					g.siteAPI.GetState(w, r, call)
+				} else {
+					g.siteAPI.GetStateVersioned(w, r, call)
+				}
+				return
+			}
 		}
 	}
 

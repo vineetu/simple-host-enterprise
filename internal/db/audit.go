@@ -441,3 +441,49 @@ func ListAccessLog(ctx context.Context, database *sql.DB, filter AccessLogFilter
 	}
 	return page, nil
 }
+
+// AccessDayCount is one day of a site's visits, as an owner sees them when
+// ACCESS_LOG_VISIBILITY is "counts": how many, and how many distinct
+// signed-in people, never who.
+type AccessDayCount struct {
+	Day           time.Time
+	Views         int64
+	UniqueViewers int64
+}
+
+// AccessCounts is ListAccessCounts' answer: per-day counts, newest first,
+// and the distinct signed-in viewers over the whole window.
+type AccessCounts struct {
+	Days          []AccessDayCount
+	UniqueViewers int64
+}
+
+// ListAccessCounts aggregates access_log for one owner label (and
+// optionally one site) between from and to (UTC days).
+func ListAccessCounts(ctx context.Context, q Querier, owner, site string, from, to time.Time) (AccessCounts, error) {
+	var out AccessCounts
+	rows, err := q.QueryContext(ctx, `
+		SELECT date_trunc('day', at AT TIME ZONE 'UTC'), count(*), count(DISTINCT user_id)
+		FROM access_log
+		WHERE owner_label = $1 AND ($2 = '' OR site_name = $2) AND at >= $3 AND at <= $4
+		GROUP BY 1 ORDER BY 1 DESC`, owner, site, from, to)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var d AccessDayCount
+		if err := rows.Scan(&d.Day, &d.Views, &d.UniqueViewers); err != nil {
+			return out, err
+		}
+		out.Days = append(out.Days, d)
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	err = q.QueryRowContext(ctx, `
+		SELECT count(DISTINCT user_id) FROM access_log
+		WHERE owner_label = $1 AND ($2 = '' OR site_name = $2) AND at >= $3 AND at <= $4`,
+		owner, site, from, to).Scan(&out.UniqueViewers)
+	return out, err
+}

@@ -69,7 +69,7 @@ const (
 	// Audit/access-log retention defaults (design.md 8.2).
 	defaultAuditRetentionDays     = 400
 	defaultAccessLogRetentionDays = 90
-	defaultAccessLogVisibility    = "owner"
+	defaultAccessLogVisibility    = "counts"
 
 	// maxAPIKeyDays caps API_KEY_MAX_DAYS: an API key is for CI and never
 	// lives longer than a year.
@@ -136,9 +136,10 @@ type AuditConfig struct {
 	// prune` drops their partition (design.md 8.2).
 	RetentionDays          int64
 	AccessLogRetentionDays int64
-	// AccessLogVisibility is "owner" (the default: an owner and their team
-	// see who visited their own sites) or "admin" (only an admin may read
-	// access_log at all). design.md 8.2, requirements open question 3.
+	// AccessLogVisibility is "counts" (the default: an owner and their team
+	// see views per day and how many distinct people viewed, never who),
+	// "owner" (they also see each visit and who made it; IP and user agent
+	// stay admin-only), or "admin" (only an admin reads access_log at all).
 	AccessLogVisibility string
 }
 
@@ -609,8 +610,8 @@ func LoadAuditRetention() (AuditConfig, error) {
 		return AuditConfig{}, err
 	}
 	accessLogVisibility := getEnvOrDefault("ACCESS_LOG_VISIBILITY", defaultAccessLogVisibility)
-	if accessLogVisibility != "owner" && accessLogVisibility != "admin" {
-		return AuditConfig{}, fmt.Errorf("ACCESS_LOG_VISIBILITY must be %q or %q, got %q", "owner", "admin", accessLogVisibility)
+	if accessLogVisibility != "counts" && accessLogVisibility != "owner" && accessLogVisibility != "admin" {
+		return AuditConfig{}, fmt.Errorf("ACCESS_LOG_VISIBILITY must be %q, %q or %q, got %q", "counts", "owner", "admin", accessLogVisibility)
 	}
 	return AuditConfig{
 		RetentionDays:          auditRetentionDays,

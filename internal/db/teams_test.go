@@ -66,8 +66,7 @@ func TestAddTeamMembersResolvesPeopleOnly(t *testing.T) {
 }
 
 // The namespace question is asked about a site that does not exist yet, so a
-// join on sites could only answer it wrongly. In particular an editor grant on
-// some other site in the namespace must not leak in.
+// join on sites could only answer it wrongly.
 func TestResolveNamespaceAccessDoesNotConsultSites(t *testing.T) {
 	lowered := strings.ToLower(resolveNamespaceAccessQuery)
 	for _, forbidden := range []string{"sites", "site_collaborators", "'editor'"} {
@@ -89,10 +88,7 @@ func TestResolveNamespaceAccessDoesNotConsultSites(t *testing.T) {
 	}
 }
 
-func TestNamespaceAccessRejectsEditor(t *testing.T) {
-	if grantsNamespaceAccess(CollaborationRoleEditor) {
-		t.Fatal("an editor grant is per-site and must not answer a namespace question")
-	}
+func TestNamespaceAccessRoles(t *testing.T) {
 	if !grantsNamespaceAccess(CollaborationRoleOwner) || !grantsNamespaceAccess(CollaborationRoleMember) {
 		t.Fatal("owner and member must both grant namespace access")
 	}

@@ -20,8 +20,8 @@ func TestParseRankMetricFallsBackToViews(t *testing.T) {
 	}{
 		{"size", metricSize},
 		{"downloads", metricViews}, // removed metric: falls back rather than 404s
-		{"shared", metricShared},
-		{"editing", metricEditing},
+		{"shared", metricViews},    // removed with editor grants
+		{"editing", metricViews},   // removed with editor grants
 		{"views", metricViews},
 		{"", metricViews},
 		{"Size", metricViews},    // case-sensitive on purpose
@@ -35,19 +35,19 @@ func TestParseRankMetricFallsBackToViews(t *testing.T) {
 	}
 }
 
-// "editing" is a user metric only; asking for it on the sites card must not
+// "updated" is a site metric only; asking for it on the users card must not
 // produce a column that card cannot render.
 func TestParseRankMetricIsScopedToItsCard(t *testing.T) {
-	if got := parseRankMetric("editing", siteMetrics); got != metricViews {
-		t.Errorf("parseRankMetric(editing, siteMetrics) = %q, want views", got)
+	if got := parseRankMetric("updated", userMetrics); got != metricViews {
+		t.Errorf("parseRankMetric(updated, userMetrics) = %q, want views", got)
 	}
-	if got := parseRankMetric("editing", userMetrics); got != metricEditing {
-		t.Errorf("parseRankMetric(editing, userMetrics) = %q, want editing", got)
+	if got := parseRankMetric("updated", siteMetrics); got != metricUpdated {
+		t.Errorf("parseRankMetric(updated, siteMetrics) = %q, want updated", got)
 	}
 }
 
 func TestRankingURLPreservesTheOtherCard(t *testing.T) {
-	raw := rankingURL(42, metricSize, metricShared)
+	raw := rankingURL(42, metricSize, metricUpdated)
 	parsed, err := url.Parse(raw)
 	if err != nil {
 		t.Fatalf("rankingURL produced an unparseable URL %q: %v", raw, err)
@@ -59,16 +59,16 @@ func TestRankingURLPreservesTheOtherCard(t *testing.T) {
 	if q.Get("users") != "size" {
 		t.Errorf("users = %q, want size", q.Get("users"))
 	}
-	if q.Get("sites") != "shared" {
-		t.Errorf("sites = %q, want shared", q.Get("sites"))
+	if q.Get("sites") != "updated" {
+		t.Errorf("sites = %q, want updated", q.Get("sites"))
 	}
 }
 
 func TestSortUserRanksByEachMetric(t *testing.T) {
 	rows := []userRank{
-		{username: "carol", views: 10, totalBytes: 900, sharedOut: 0, editing: 5},
-		{username: "alice", views: 30, totalBytes: 100, sharedOut: 4, editing: 0},
-		{username: "bob", views: 20, totalBytes: 500, sharedOut: 2, editing: 2},
+		{username: "carol", views: 10, totalBytes: 900},
+		{username: "alice", views: 30, totalBytes: 100},
+		{username: "bob", views: 20, totalBytes: 500},
 	}
 
 	for _, tc := range []struct {
@@ -77,8 +77,6 @@ func TestSortUserRanksByEachMetric(t *testing.T) {
 	}{
 		{metricViews, "alice,bob,carol"},
 		{metricSize, "carol,bob,alice"},
-		{metricShared, "alice,bob,carol"},
-		{metricEditing, "carol,bob,alice"},
 	} {
 		got := append([]userRank(nil), rows...)
 		sortUserRanks(got, tc.metric)
@@ -110,9 +108,9 @@ func TestSortUserRanksBreaksTiesDeterministically(t *testing.T) {
 
 func TestSortSiteRanksByEachMetric(t *testing.T) {
 	rows := []siteRank{
-		{name: "gamma", owner: "u", views: 1, totalBytes: 30, editors: 0},
-		{name: "alpha", owner: "u", views: 3, totalBytes: 10, editors: 2},
-		{name: "beta", owner: "u", views: 2, totalBytes: 20, editors: 1},
+		{name: "gamma", owner: "u", views: 1, totalBytes: 30},
+		{name: "alpha", owner: "u", views: 3, totalBytes: 10},
+		{name: "beta", owner: "u", views: 2, totalBytes: 20},
 	}
 	for _, tc := range []struct {
 		metric rankMetric
@@ -120,7 +118,6 @@ func TestSortSiteRanksByEachMetric(t *testing.T) {
 	}{
 		{metricViews, "alpha,beta,gamma"},
 		{metricSize, "gamma,beta,alpha"},
-		{metricShared, "alpha,beta,gamma"},
 	} {
 		got := append([]siteRank(nil), rows...)
 		sortSiteRanks(got, tc.metric)
@@ -242,7 +239,7 @@ func TestRenderRankingCardsEscapeUntrustedNames(t *testing.T) {
 func TestRenderRankingCardsHandleEmptyData(t *testing.T) {
 	var b strings.Builder
 	renderUserRankingCard(&b, HostModel{}, nil, metricSize, metricViews, 7)
-	renderSiteRankingCard(&b, HostModel{}, nil, metricShared, metricViews, 7)
+	renderSiteRankingCard(&b, HostModel{}, nil, metricUpdated, metricViews, 7)
 
 	out := b.String()
 	if !strings.Contains(out, "No users yet.") || !strings.Contains(out, "No sites yet.") {

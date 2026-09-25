@@ -183,9 +183,9 @@ func (h *SiteHandler) Register(mux *http.ServeMux, authMiddleware, skillVersionM
 	ownerUpload := func(next http.Handler) http.Handler {
 		return ownerMutation(h.limitUploadConcurrency(next))
 	}
-	// Collaboration management stays owner-qualified so shared sites never
-	// acquire aliases in an editor's namespace. The version middleware is
-	// streaming-safe, so archive downloads use the same guard without buffering.
+	// Owner-qualified routes name the namespace explicitly. The version
+	// middleware is streaming-safe, so archive downloads use the same guard
+	// without buffering.
 	collaborationArchive := func(next http.Handler) http.Handler {
 		return h.limitManagementClient(authMiddleware(skillVersionMiddleware(auth.RequireRealUser(next))))
 	}
@@ -203,7 +203,7 @@ func (h *SiteHandler) Register(mux *http.ServeMux, authMiddleware, skillVersionM
 	mux.Handle("PUT /api/sites/{sitename}", browserWrite(ownerUpload(http.HandlerFunc(h.updateSite))))
 	mux.Handle("DELETE /api/sites/{sitename}", browserWrite(ownerMutation(http.HandlerFunc(h.deleteSite))))
 	mux.Handle("POST /api/sites/{sitename}/rollback", browserWrite(ownerMutation(http.HandlerFunc(h.rollbackSite))))
-	mux.Handle("POST /api/sites/{sitename}/visibility", browserWrite(ownerMutation(http.HandlerFunc(h.setSiteVisibility))))
+	mux.Handle("POST /api/sites/{sitename}/access", browserWrite(ownerMutation(http.HandlerFunc(h.setSiteAccess))))
 	mux.Handle("GET /api/sites/{sitename}/versions", owner(http.HandlerFunc(h.listVersions)))
 	mux.Handle("GET /api/sites", h.limitManagementClient(authMiddleware(skillVersionMiddleware(http.HandlerFunc(h.listSites)))))
 	mux.Handle("GET /api/collaboration/sites", ownerMutation(http.HandlerFunc(h.listCollaborationSites)))
@@ -212,18 +212,14 @@ func (h *SiteHandler) Register(mux *http.ServeMux, authMiddleware, skillVersionM
 	mux.Handle("POST /api/collaboration/sites/{owner}/{sitename}/rollback", browserWrite(ownerMutation(http.HandlerFunc(h.rollbackCollaborationSite))))
 	mux.Handle("GET /api/collaboration/sites/{owner}/{sitename}/versions", ownerMutation(http.HandlerFunc(h.listCollaborationVersions)))
 	mux.Handle("GET /api/collaboration/sites/{owner}/{sitename}/versions/{version}/archive", collaborationArchive(http.HandlerFunc(h.downloadCollaborationVersion)))
-	mux.Handle("GET /api/collaboration/sites/{owner}/{sitename}/editors", ownerMutation(http.HandlerFunc(h.listSiteEditors)))
-	mux.Handle("POST /api/collaboration/sites/{owner}/{sitename}/editors", browserWrite(ownerMutation(http.HandlerFunc(h.grantSiteEditors))))
-	mux.Handle("DELETE /api/collaboration/sites/{owner}/{sitename}/editors/{username}", browserWrite(ownerMutation(http.HandlerFunc(h.revokeSiteEditor))))
-	mux.Handle("GET /api/collaboration/sites/{owner}/{sitename}/editor-candidates", ownerMutation(http.HandlerFunc(h.searchEditorCandidates)))
 	h.registerViewerRoutes(mux, ownerMutation, browserWrite)
 	h.registerAssetAdminRoutes(mux, ownerMutation, browserWrite)
-	// Namespace-scoped writes: create, delete and listing in a namespace the
-	// caller owns or belongs to. An editor grant does not reach these — see
-	// requireOwnerOrMember.
+	h.registerStateHistoryRoutes(mux, ownerMutation, browserWrite)
+	// Namespace-scoped writes: create, delete and access level in a namespace
+	// the caller owns or belongs to — see requireOwnerOrMember.
 	mux.Handle("POST /api/collaboration/sites/{owner}/{sitename}", browserWrite(ownerUpload(http.HandlerFunc(h.createCollaborationSite))))
 	mux.Handle("DELETE /api/collaboration/sites/{owner}/{sitename}", browserWrite(ownerMutation(http.HandlerFunc(h.deleteCollaborationSite))))
-	mux.Handle("POST /api/collaboration/sites/{owner}/{sitename}/visibility", browserWrite(ownerMutation(http.HandlerFunc(h.setCollaborationSiteVisibility))))
+	mux.Handle("POST /api/collaboration/sites/{owner}/{sitename}/access", browserWrite(ownerMutation(http.HandlerFunc(h.setCollaborationSiteAccess))))
 }
 
 func (h *SiteHandler) limitUploadConcurrency(next http.Handler) http.Handler {
@@ -246,10 +242,6 @@ func (h *SiteHandler) limitManagementClient(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-type visibilityRequest struct {
-	Public bool `json:"public"`
 }
 
 func validatedSiteName(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -323,89 +315,6 @@ func selfTarget(user *db.User) mutationTarget {
 		OwnerID:       user.ID,
 		OwnerUsername: user.Username,
 	}
-}
-
-// setSiteVisibility toggles a site's public flag. Owner-scoped by the
-// caller's own real user ID (design.md 6.2: there is no synthetic admin
-// principal any more), so an admin acting here toggles only their own
-// sites, never another owner's — the admin path for someone else's site is
-// to ask the owner, or act through /admin's own controls.
-func (h *SiteHandler) setSiteVisibility(w http.ResponseWriter, r *http.Request) {
-	user := auth.GetUser(r.Context())
-	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
-		return
-	}
-	h.setSiteVisibilityForTarget(w, r, selfTarget(user))
-}
-
-// setSiteVisibilityForTarget changes listing in the namespace named by target.
-// See createSiteForTarget and mutationTarget.
-func (h *SiteHandler) setSiteVisibilityForTarget(w http.ResponseWriter, r *http.Request, target mutationTarget) {
-
-	siteName, ok := validatedSiteName(w, r)
-	if !ok {
-		return
-	}
-	if !validateStoredUsername(w, target.OwnerUsername) {
-		return
-	}
-	if decision := h.limits.allow(managementUserPolicy, target.ActorID); !decision.Allowed {
-		writeRateLimit(w, decision)
-		return
-	}
-
-	var req visibilityRequest
-	if !decodeSmallJSON(w, r, &req) {
-		return
-	}
-	unlock := h.mutations.lock(target.OwnerID, siteName)
-	defer unlock()
-
-	tx, err := h.database.BeginTx(r.Context(), nil)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	defer tx.Rollback()
-	if err := db.LockSiteCollaboration(r.Context(), tx, target.OwnerID, siteName); err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	site, err := db.UpdateSitePublic(r.Context(), tx, target.OwnerID, siteName, req.Public)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, errorResponse{Error: "site not found"})
-			return
-		}
-		log.Printf("set visibility %q for user %s: %v", siteName, target.OwnerID, err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	actorKind, keyID := auditActorKind(r.Context())
-	if err := h.audit.RecordTx(r.Context(), tx, audit.Event{
-		ActorID: target.ActorID, ActorKind: actorKind, KeyID: keyID,
-		Action: "site_visibility", OwnerID: target.OwnerID, SiteID: site.ID,
-		RequestID: auditRequestID(r.Context()),
-		Extra:     map[string]any{"public": site.Public},
-	}); err != nil {
-		log.Printf("record audit for site_visibility %s/%s: %v", target.OwnerUsername, siteName, err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	if err := tx.Commit(); err != nil {
-		log.Printf("commit visibility %q for user %s: %v", siteName, target.OwnerID, err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-
-	url := h.siteURL(r.Context(), target.OwnerUsername, siteName, site.ID)
-	note := "Site is now unlisted."
-	if site.Public {
-		note = fmt.Sprintf("Site is now public on /showcase. View at %s", url)
-	}
-	setSiteETag(w, site)
-	writeJSON(w, http.StatusOK, toSiteResponse(site, url, note, db.SiteAnalyticsSummary{}, nil))
 }
 
 // writeRawJSON writes a state document byte-for-byte: deployed pages' own
@@ -553,7 +462,7 @@ func (h *SiteHandler) createSiteForTarget(w http.ResponseWriter, r *http.Request
 	site.ActiveVersion = versionNumber
 	url := h.siteURL(r.Context(), target.OwnerUsername, siteName, site.ID)
 	setSiteETag(w, site)
-	writeJSON(w, http.StatusCreated, toSiteResponse(site, url, fmt.Sprintf("Site is available at %s", url), db.SiteAnalyticsSummary{}, nil))
+	writeJSON(w, http.StatusCreated, toSiteResponse(site, url, fmt.Sprintf("Site is available at %s. Only you (for a team site, the team's members) can open it until its access level is changed.", url), db.SiteAnalyticsSummary{}, nil))
 }
 
 func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
@@ -604,12 +513,9 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	previousVersion := site.ActiveVersion
-	collaborators, err := db.CountSiteCollaborators(r.Context(), tx, site.ID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	if !requireSitePrecondition(w, r, site, collaborators > 0) {
+	// Only its owner deploys a site in their own namespace, so If-Match is
+	// optional here; the owner-qualified routes (team sites) require it.
+	if !requireSitePrecondition(w, r, site, false) {
 		return
 	}
 
@@ -912,12 +818,9 @@ func (h *SiteHandler) rollbackSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	previousVersion := site.ActiveVersion
-	collaborators, err := db.CountSiteCollaborators(r.Context(), tx, site.ID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	if !requireSitePrecondition(w, r, site, collaborators > 0) {
+	// Only its owner deploys a site in their own namespace, so If-Match is
+	// optional here; the owner-qualified routes (team sites) require it.
+	if !requireSitePrecondition(w, r, site, false) {
 		return
 	}
 

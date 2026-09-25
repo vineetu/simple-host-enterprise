@@ -32,6 +32,10 @@ type collaborationSiteResponse struct {
 	AccessRole    db.CollaborationRole `json:"access_role"`
 	ActiveVersion int                  `json:"active_version"`
 	Public        bool                 `json:"public"`
+	// Access is the site's access level (db.Access*); NetworkRequest is set
+	// while a request to open it to the network waits for an admin.
+	Access         string                  `json:"access"`
+	NetworkRequest *networkRequestResponse `json:"network_request,omitempty"`
 	// PublicPath is the address the site should be handed out under. It was
 	// the relative long path on the base host; after the subdomain cutover
 	// it is the absolute short address on the owner's host. Clients use it
@@ -44,25 +48,17 @@ type collaborationSiteResponse struct {
 	Analytics  analytics `json:"analytics"`
 }
 
+type networkRequestResponse struct {
+	Status      string    `json:"status"`
+	Reason      string    `json:"reason"`
+	RequestedAt time.Time `json:"requested_at"`
+}
+
 type collaborationVersionResponse struct {
 	VersionNumber int       `json:"version_number"`
 	Status        string    `json:"status"`
 	UploadedBy    *string   `json:"uploaded_by,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
-}
-
-type siteEditorResponse struct {
-	Username  string    `json:"username"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-type editorCandidateResponse struct {
-	Username      string `json:"username"`
-	AlreadyEditor bool   `json:"already_editor"`
-}
-
-type grantEditorsRequest struct {
-	Usernames []string `json:"usernames"`
 }
 
 type collaborationPreconditionResponse struct {
@@ -141,19 +137,14 @@ func (h *SiteHandler) resolveCollaborationAccess(w http.ResponseWriter, r *http.
 	return access, true
 }
 
-// requireOwnerRole gates the editor-management routes. It admits the site's
-// owner and any member of the team that owns it: a team has one role, so a
-// member is trusted with the team's sites exactly as an owner is trusted with
-// their own. An editor grant never manages other editors.
-//
-// All four editor gates must move together — listSiteEditors,
-// searchEditorCandidates, the grant/revoke preliminary check (all three
-// through here) and the in-transaction recheck in mutateSiteEditors. Widening
-// only the ones that write leaves the share dialog half-open: a member could
-// grant an editor and then get a 403 listing or searching them.
+// requireOwnerRole gates the viewer, asset and saved-data history routes. It
+// admits the site's owner and any member of the team that owns it: a team
+// has one role, so a member is trusted with the team's sites exactly as an
+// owner is trusted with their own. ResolveSiteAccess admits nobody else
+// today; this stays as the explicit gate.
 func requireOwnerRole(w http.ResponseWriter, access db.SiteAccess) bool {
 	if access.Role != db.CollaborationRoleOwner && access.Role != db.CollaborationRoleMember {
-		writeJSON(w, http.StatusForbidden, errorResponse{Error: "only the site owner or a member of the owning team can manage editors"})
+		writeJSON(w, http.StatusForbidden, errorResponse{Error: "only the site owner or a member of the owning team can do that"})
 		return false
 	}
 	return true
@@ -165,20 +156,26 @@ func requireOwnerRole(w http.ResponseWriter, access db.SiteAccess) bool {
 // under its owner's host.
 func (h *SiteHandler) collaborationSiteResponse(r *http.Request, site db.Site, ownerUsername string, role db.CollaborationRole, summary db.SiteAnalyticsSummary, downloads map[string]db.FileDownloadStat) collaborationSiteResponse {
 	base := toSiteResponse(site, h.siteURL(r.Context(), ownerUsername, site.Name, site.ID), "", summary, downloads)
+	var pending *networkRequestResponse
+	if site.NetworkRequestedAt != nil {
+		pending = &networkRequestResponse{Status: "pending", Reason: site.NetworkRequestReason, RequestedAt: *site.NetworkRequestedAt}
+	}
 	return collaborationSiteResponse{
-		ID:            site.ID,
-		Name:          site.Name,
-		OwnerUsername: ownerUsername,
-		OwnerID:       site.UserID,
-		AccessRole:    role,
-		ActiveVersion: site.ActiveVersion,
-		Public:        site.Public,
-		PublicPath:    base.URL,
-		URL:           base.URL,
-		ETag:          formatSiteETag(site.ID, site.ActiveVersion),
-		CreatedAt:     site.CreatedAt,
-		UpdatedAt:     site.UpdatedAt,
-		Analytics:     base.Analytics,
+		ID:             site.ID,
+		Name:           site.Name,
+		OwnerUsername:  ownerUsername,
+		OwnerID:        site.UserID,
+		AccessRole:     role,
+		ActiveVersion:  site.ActiveVersion,
+		Public:         site.Public,
+		Access:         site.Access,
+		NetworkRequest: pending,
+		PublicPath:     base.URL,
+		URL:            base.URL,
+		ETag:           formatSiteETag(site.ID, site.ActiveVersion),
+		CreatedAt:      site.CreatedAt,
+		UpdatedAt:      site.UpdatedAt,
+		Analytics:      base.Analytics,
 	}
 }
 
@@ -498,201 +495,6 @@ func (h *SiteHandler) rollbackCollaborationSite(w http.ResponseWriter, r *http.R
 	))
 }
 
-func (h *SiteHandler) listSiteEditors(w http.ResponseWriter, r *http.Request) {
-	ownerUsername, siteName, ok := validatedCollaborationPath(w, r)
-	if !ok {
-		return
-	}
-	access, ok := h.resolveCollaborationAccess(w, r, ownerUsername, siteName)
-	if !ok || !requireOwnerRole(w, access) {
-		return
-	}
-	editors, err := db.ListSiteEditors(r.Context(), h.database, access.Site.ID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	response := make([]siteEditorResponse, 0, len(editors))
-	for _, editor := range editors {
-		response = append(response, siteEditorResponse{Username: editor.Username, CreatedAt: editor.CreatedAt})
-	}
-	writeJSON(w, http.StatusOK, response)
-}
-
-func (h *SiteHandler) searchEditorCandidates(w http.ResponseWriter, r *http.Request) {
-	ownerUsername, siteName, ok := validatedCollaborationPath(w, r)
-	if !ok {
-		return
-	}
-	access, ok := h.resolveCollaborationAccess(w, r, ownerUsername, siteName)
-	if !ok || !requireOwnerRole(w, access) {
-		return
-	}
-	limit := 20
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 1 || parsed > 20 {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "limit must be between 1 and 20"})
-			return
-		}
-		limit = parsed
-	}
-	query := strings.TrimSpace(r.URL.Query().Get("q"))
-	if len(query) > 100 {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "search query is too long"})
-		return
-	}
-	candidates, err := db.SearchEditorCandidates(r.Context(), h.database, access.Site.ID, query, limit)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	response := make([]editorCandidateResponse, 0, len(candidates))
-	for _, candidate := range candidates {
-		response = append(response, editorCandidateResponse{
-			Username: candidate.Username, AlreadyEditor: candidate.AlreadyEditor,
-		})
-	}
-	writeJSON(w, http.StatusOK, response)
-}
-
-func (h *SiteHandler) grantSiteEditors(w http.ResponseWriter, r *http.Request) {
-	h.mutateSiteEditors(w, r, true)
-}
-
-func (h *SiteHandler) revokeSiteEditor(w http.ResponseWriter, r *http.Request) {
-	h.mutateSiteEditors(w, r, false)
-}
-
-func (h *SiteHandler) mutateSiteEditors(w http.ResponseWriter, r *http.Request, grant bool) {
-	ownerUsername, siteName, ok := validatedCollaborationPath(w, r)
-	if !ok {
-		return
-	}
-	user := auth.GetUser(r.Context())
-	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
-		return
-	}
-	if decision := h.limits.allow(managementUserPolicy, user.ID); !decision.Allowed {
-		writeRateLimit(w, decision)
-		return
-	}
-	preliminary, ok := h.resolveCollaborationAccess(w, r, ownerUsername, siteName)
-	if !ok || !requireOwnerRole(w, preliminary) {
-		return
-	}
-
-	var usernames []string
-	if grant {
-		var request grantEditorsRequest
-		if !decodeSmallJSON(w, r, &request) {
-			return
-		}
-		if len(request.Usernames) == 0 {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "at least one username is required"})
-			return
-		}
-		if len(request.Usernames) > db.MaxSiteEditors {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "too many usernames"})
-			return
-		}
-		usernames = request.Usernames
-	} else {
-		username := strings.ToLower(strings.TrimSpace(r.PathValue("username")))
-		if safepath.ValidateSegment(username) != nil {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid editor username"})
-			return
-		}
-		usernames = []string{username}
-	}
-
-	unlock := h.mutations.lock(preliminary.OwnerID, siteName)
-	defer unlock()
-	tx, err := h.database.BeginTx(r.Context(), nil)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	defer tx.Rollback()
-	if err := db.LockSiteCollaboration(r.Context(), tx, preliminary.OwnerID, siteName); err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	// The fourth editor gate. It must admit exactly what requireOwnerRole
-	// admits, or the preliminary check and this one disagree and a member
-	// gets a 404 after passing the door.
-	locked, err := db.ResolveSiteAccess(r.Context(), tx, user.ID, ownerUsername, siteName)
-	if err != nil || locked.Site.ID != preliminary.Site.ID ||
-		(locked.Role != db.CollaborationRoleOwner && locked.Role != db.CollaborationRoleMember) {
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			log.Printf("recheck editor-management access for %s/%s: %v", ownerUsername, siteName, err)
-		}
-		writeJSON(w, http.StatusNotFound, errorResponse{Error: "site not found"})
-		return
-	}
-
-	var editors []db.SiteEditor
-	if grant {
-		editors, err = db.GrantSiteEditors(r.Context(), tx, locked.OwnerID, siteName, locked.Site.ID, &user.ID, usernames)
-	} else {
-		var removed bool
-		removed, err = db.RevokeSiteEditor(r.Context(), tx, locked.OwnerID, siteName, locked.Site.ID, usernames[0])
-		if err == nil && !removed {
-			writeJSON(w, http.StatusNotFound, errorResponse{Error: "editor not found"})
-			return
-		}
-		if err == nil {
-			editors, err = db.ListSiteEditors(r.Context(), tx, locked.Site.ID)
-		}
-	}
-	if err != nil {
-		switch {
-		case errors.Is(err, db.ErrEditorNotFound):
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "one or more usernames do not exist"})
-		case errors.Is(err, db.ErrOwnerCannotBeEditor):
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "the owner cannot be added as an editor"})
-		case errors.Is(err, db.ErrEditorLimit):
-			writeJSON(w, http.StatusConflict, errorResponse{Error: "a site can have at most 50 editors"})
-		case errors.Is(err, sql.ErrNoRows):
-			writeJSON(w, http.StatusNotFound, errorResponse{Error: "site not found"})
-		default:
-			log.Printf("mutate editors for %s/%s: %v", ownerUsername, siteName, err)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		}
-		return
-	}
-	action := "editor_revoke"
-	if grant {
-		action = "editor_grant"
-	}
-	actorKind, keyID := auditActorKind(r.Context())
-	if err := h.audit.RecordTx(r.Context(), tx, audit.Event{
-		ActorID: user.ID, ActorKind: actorKind, KeyID: keyID,
-		Action: action, OwnerID: locked.OwnerID, SiteID: locked.Site.ID,
-		RequestID: auditRequestID(r.Context()),
-		Extra:     map[string]any{"usernames": usernames},
-	}); err != nil {
-		log.Printf("record audit for %s %s/%s: %v", action, ownerUsername, siteName, err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	if err := tx.Commit(); err != nil {
-		log.Printf("commit editor mutation for %s/%s: %v", ownerUsername, siteName, err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	if !grant {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	response := make([]siteEditorResponse, 0, len(editors))
-	for _, editor := range editors {
-		response = append(response, siteEditorResponse{Username: editor.Username, CreatedAt: editor.CreatedAt})
-	}
-	writeJSON(w, http.StatusOK, response)
-}
-
 func (h *SiteHandler) downloadCollaborationVersion(w http.ResponseWriter, r *http.Request) {
 	ownerUsername, siteName, ok := validatedCollaborationPath(w, r)
 	if !ok {
@@ -892,10 +694,7 @@ func (r *contextReader) Read(buffer []byte) (int, error) {
 }
 
 // requireOwnerOrMember gates the owner-qualified routes that act on a
-// namespace rather than on one shared site: create, delete, and listing.
-// An editor grant is per-site and says nothing about the namespace, so an
-// editor may update the site they were given and nothing else — they cannot
-// create a sibling, delete it, or change whether it is listed.
+// namespace: create, delete, and access level.
 func requireOwnerOrMember(w http.ResponseWriter, role db.CollaborationRole) bool {
 	if role != db.CollaborationRoleOwner && role != db.CollaborationRoleMember {
 		writeJSON(w, http.StatusForbidden, errorResponse{
@@ -957,18 +756,18 @@ func (h *SiteHandler) deleteCollaborationSite(w http.ResponseWriter, r *http.Req
 	h.deleteSiteForTarget(w, r, target)
 }
 
-// setCollaborationSiteVisibility changes whether a team's site is listed.
-func (h *SiteHandler) setCollaborationSiteVisibility(w http.ResponseWriter, r *http.Request) {
+// setCollaborationSiteAccess changes a named namespace's site's access level.
+func (h *SiteHandler) setCollaborationSiteAccess(w http.ResponseWriter, r *http.Request) {
 	target, ok := h.namespaceTarget(w, r)
 	if !ok {
 		return
 	}
-	h.setSiteVisibilityForTarget(w, r, target)
+	h.setSiteAccessForTarget(w, r, target)
 }
 
 // namespaceTarget resolves an owner-qualified path to the namespace the
-// mutation lands in, having checked the caller may act on the whole namespace
-// rather than on one shared site. The site must already exist, so this goes
+// mutation lands in, having checked the caller may act on the whole
+// namespace. The site must already exist, so this goes
 // through ResolveSiteAccess rather than ResolveNamespaceAccess.
 func (h *SiteHandler) namespaceTarget(w http.ResponseWriter, r *http.Request) (mutationTarget, bool) {
 	user := auth.GetUser(r.Context())

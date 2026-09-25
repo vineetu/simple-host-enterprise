@@ -56,17 +56,13 @@ var fixtures = []fixture{
 		{"site": "demo", "version": float64(2)},
 		{"site": "demo", "version": float64(2), "owner": "alice"},
 	}},
-	{"set_site_listing", []map[string]any{
-		{"site": "demo", "listed": true},
-		{"site": "demo", "listed": true, "owner": "alice"},
+	{"set_site_access", []map[string]any{
+		{"site": "demo", "level": "listed"},
+		{"site": "demo", "level": "network", "reason": "public event page", "owner": "alice"},
 	}},
-	{"list_site_editors", []map[string]any{{"owner": "alice", "site": "demo"}}},
 	{"find_users", []map[string]any{
 		{"owner": "alice", "site": "demo", "query": "bob"},
-		{"owner": "alice", "site": "demo", "query": "bob", "for": "viewer"},
 	}},
-	{"grant_site_editor", []map[string]any{{"owner": "alice", "site": "demo", "usernames": []any{"bob"}}}},
-	{"revoke_site_editor", []map[string]any{{"owner": "alice", "site": "demo", "username": "bob"}}},
 	{"list_site_viewers", []map[string]any{{"owner": "alice", "site": "demo"}}},
 	{"grant_site_viewer", []map[string]any{{"owner": "alice", "site": "demo", "usernames": []any{"bob"}}}},
 	{"revoke_site_viewer", []map[string]any{{"owner": "alice", "site": "demo", "username": "bob"}}},
@@ -74,6 +70,11 @@ var fixtures = []fixture{
 	{"read_site_file", []map[string]any{{"owner": "alice", "site": "demo", "version": float64(2), "path": "index.html"}}},
 	{"get_state", []map[string]any{{"owner": "alice", "site": "demo"}}},
 	{"update_state", []map[string]any{{"owner": "alice", "site": "demo", "version": float64(0), "state": map[string]any{"n": 1}}}},
+	{"list_state_versions", []map[string]any{
+		{"owner": "alice", "site": "demo"},
+		{"owner": "alice", "site": "demo", "id": float64(3)},
+	}},
+	{"restore_state_version", []map[string]any{{"owner": "alice", "site": "demo", "id": float64(3)}}},
 	{"delete_site", []map[string]any{
 		{"site": "demo", "confirm_name": "demo"},
 		{"site": "demo", "owner": "alice", "confirm_name": "demo"},

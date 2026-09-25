@@ -24,6 +24,10 @@ type healthResponse struct {
 // this SQL by hand against production before the binary goes out. Migrations
 // 0013 to 0018 are still unprobed, which is a known gap and a separate change.
 //
+// site_collaborators (0012) is no longer probed: migration 0033 drops it
+// with per-site editor grants; versions.uploaded_by from the same migration
+// still is.
+//
 // expected_team_triggers no longer lists users_teams_have_no_key: migration
 // 0025 drops that trigger (and the users.api_key column it guarded) outright,
 // one-way, per design.md 9.3/10.2. Probing for a trigger a later migration in
@@ -46,18 +50,10 @@ const requiredSchemaProbe = `
 	),
 	expected_collaboration_columns (table_name, column_name, udt_name, is_nullable, column_default) AS (
 		VALUES
-			('site_collaborators', 'site_id', 'uuid', 'NO', NULL),
-			('site_collaborators', 'user_id', 'uuid', 'NO', NULL),
-			('site_collaborators', 'role', 'text', 'NO', '''editor''::text'),
-			('site_collaborators', 'added_by', 'uuid', 'YES', NULL),
-			('site_collaborators', 'created_at', 'timestamptz', 'NO', 'now()'),
 			('versions', 'uploaded_by', 'uuid', 'YES', NULL)
 	),
 	expected_collaboration_foreign_keys (table_name, key_columns, target_table, target_columns, delete_action) AS (
 		VALUES
-			('site_collaborators', ARRAY['site_id']::text[], 'sites', ARRAY['id']::text[], 'c'),
-			('site_collaborators', ARRAY['user_id']::text[], 'users', ARRAY['id']::text[], 'c'),
-			('site_collaborators', ARRAY['added_by']::text[], 'users', ARRAY['id']::text[], 'n'),
 			('versions', ARRAY['uploaded_by']::text[], 'users', ARRAY['id']::text[], 'n')
 	),
 	expected_search_columns (table_name, column_name, udt_name, is_nullable) AS (
@@ -214,64 +210,6 @@ const requiredSchemaProbe = `
 			AND actual.is_nullable = expected.is_nullable
 			AND actual.column_default IS NOT DISTINCT FROM expected.column_default
 	),
-	collaboration_primary_key_ready AS (
-		SELECT EXISTS (
-			SELECT 1
-			FROM pg_catalog.pg_constraint AS constraint_catalog
-			JOIN pg_catalog.pg_class AS table_catalog
-				ON table_catalog.oid = constraint_catalog.conrelid
-			JOIN pg_catalog.pg_namespace AS table_namespace
-				ON table_namespace.oid = table_catalog.relnamespace
-			WHERE constraint_catalog.contype = 'p'
-				AND table_namespace.nspname = 'public'
-				AND table_catalog.relname = 'site_collaborators'
-				AND (
-					SELECT pg_catalog.array_agg(
-						attribute_catalog.attname::text
-						ORDER BY key_column.ordinality
-					)
-					FROM unnest(constraint_catalog.conkey) WITH ORDINALITY AS key_column (attnum, ordinality)
-					JOIN pg_catalog.pg_attribute AS attribute_catalog
-						ON attribute_catalog.attrelid = constraint_catalog.conrelid
-						AND attribute_catalog.attnum = key_column.attnum
-				) = ARRAY['site_id', 'user_id']::text[]
-		) AS ready
-	),
-	collaboration_reverse_index_ready AS (
-		SELECT EXISTS (
-			SELECT 1
-			FROM pg_catalog.pg_index AS index_catalog
-			JOIN pg_catalog.pg_class AS table_catalog
-				ON table_catalog.oid = index_catalog.indrelid
-			JOIN pg_catalog.pg_namespace AS table_namespace
-				ON table_namespace.oid = table_catalog.relnamespace
-			JOIN pg_catalog.pg_class AS index_relation
-				ON index_relation.oid = index_catalog.indexrelid
-			JOIN pg_catalog.pg_am AS access_method
-				ON access_method.oid = index_relation.relam
-			WHERE table_namespace.nspname = 'public'
-				AND table_catalog.relname = 'site_collaborators'
-				AND access_method.amname = 'btree'
-				AND index_catalog.indisvalid
-				AND index_catalog.indisready
-				AND NOT index_catalog.indisunique
-				AND NOT index_catalog.indisprimary
-				AND index_catalog.indpred IS NULL
-				AND index_catalog.indnatts = 2
-				AND index_catalog.indnkeyatts = 2
-				AND (
-					SELECT pg_catalog.array_agg(
-						attribute_catalog.attname::text
-						ORDER BY key_column.ordinality
-					)
-					FROM unnest(index_catalog.indkey) WITH ORDINALITY AS key_column (attnum, ordinality)
-					JOIN pg_catalog.pg_attribute AS attribute_catalog
-						ON attribute_catalog.attrelid = index_catalog.indrelid
-						AND attribute_catalog.attnum = key_column.attnum
-					WHERE key_column.ordinality <= index_catalog.indnkeyatts
-				) = ARRAY['user_id', 'site_id']::text[]
-		) AS ready
-	),
 	collaboration_foreign_keys_ready AS (
 		SELECT count(*) = (SELECT count(*) FROM expected_collaboration_foreign_keys) AS ready
 		FROM expected_collaboration_foreign_keys AS expected
@@ -308,24 +246,6 @@ const requiredSchemaProbe = `
 						AND attribute_catalog.attnum = key_column.attnum
 				) = expected.target_columns
 		)
-	),
-	collaboration_role_check_ready AS (
-		SELECT EXISTS (
-			SELECT 1
-			FROM pg_catalog.pg_constraint AS constraint_catalog
-			JOIN pg_catalog.pg_class AS table_catalog
-				ON table_catalog.oid = constraint_catalog.conrelid
-			JOIN pg_catalog.pg_namespace AS table_namespace
-				ON table_namespace.oid = table_catalog.relnamespace
-			WHERE constraint_catalog.contype = 'c'
-				AND constraint_catalog.convalidated
-				AND table_namespace.nspname = 'public'
-				AND table_catalog.relname = 'site_collaborators'
-				AND pg_catalog.regexp_replace(
-					pg_catalog.pg_get_expr(constraint_catalog.conbin, constraint_catalog.conrelid),
-					'[[:space:]()]', '', 'g'
-				) = 'role=''editor''::text'
-		) AS ready
 	),
 	search_columns_ready AS (
 		SELECT count(*) = (SELECT count(*) FROM expected_search_columns) AS ready
@@ -635,10 +555,7 @@ const requiredSchemaProbe = `
 		AND download_columns_ready.ready
 		AND download_index_ready.ready
 		AND collaboration_columns_ready.ready
-		AND collaboration_primary_key_ready.ready
-		AND collaboration_reverse_index_ready.ready
 		AND collaboration_foreign_keys_ready.ready
-		AND collaboration_role_check_ready.ready
 		AND search_columns_ready.ready
 		AND search_vector_ready.ready
 		AND search_vector_index_ready.ready
@@ -657,10 +574,7 @@ const requiredSchemaProbe = `
 		download_columns_ready,
 		download_index_ready,
 		collaboration_columns_ready,
-		collaboration_primary_key_ready,
-		collaboration_reverse_index_ready,
 		collaboration_foreign_keys_ready,
-		collaboration_role_check_ready,
 		search_columns_ready,
 		search_vector_ready,
 		search_vector_index_ready,

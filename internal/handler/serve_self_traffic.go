@@ -17,8 +17,8 @@ import (
 // timeout we fail open and count the view.
 const selfTrafficLookupLimit = 750 * time.Millisecond
 
-// isSelfTraffic reports whether this request is the site's own owner or one of
-// its editors browsing their own site, in which case analytics should skip it.
+// isSelfTraffic reports whether this request is the site's own owner or a
+// member of the team that owns it, in which case analytics should skip it.
 //
 // Hosted sites currently share an origin with the account UI, so a signed-in
 // user's session cookie is sent on /sites/... requests too. That is the only
@@ -30,7 +30,7 @@ const selfTrafficLookupLimit = 750 * time.Millisecond
 //   - Cookie whose username matches the owner segment already in the URL costs
 //     one lookup and skips, with no site query at all.
 //   - Cookie belonging to somebody else costs one further query to see whether
-//     they are an editor.
+//     they are in the owning team.
 //
 // Anything unidentifiable counts. An owner in a private window, on a phone, or
 // signed out is indistinguishable from a stranger and will still be recorded;

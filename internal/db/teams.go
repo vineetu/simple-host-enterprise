@@ -12,7 +12,7 @@ import (
 	"github.com/lib/pq"
 )
 
-// MaxTeamMembers bounds one team the way MaxSiteEditors bounds one site: a
+// MaxTeamMembers bounds one team: a
 // membership list is read on every authenticated request against the team's
 // namespace, and an unbounded one is an unbounded join.
 const MaxTeamMembers = 50
@@ -48,9 +48,7 @@ type NamespaceAccess struct {
 	Role          CollaborationRole
 }
 
-// grantsNamespaceAccess is deliberately narrower than grantsSiteAccess. An
-// editor grant is per-site and says nothing about the namespace, so 'editor'
-// must never satisfy a namespace question even though it is a real role.
+// grantsNamespaceAccess admits the roles that may act on a whole namespace.
 func grantsNamespaceAccess(role CollaborationRole) bool {
 	switch role {
 	case CollaborationRoleOwner, CollaborationRoleMember:
@@ -72,7 +70,7 @@ const addTeamCreatorQuery = `
 
 // CreateTeam inserts the namespace, its first member, and the audit row.
 //
-// Requiring *sql.Tx follows GrantSiteEditors: a team row without a membership
+// Requiring *sql.Tx: a team row without a membership
 // row is a namespace nobody can reach and nobody can delete, so the two
 // inserts must not be separable by a caller. A team holds no credential of
 // its own; people act on it with their own keys or sessions.
@@ -410,10 +408,8 @@ const resolveNamespaceAccessQuery = `
 // ownerUsername. Unknown, unowned, and unjoined namespaces all return
 // sql.ErrNoRows.
 //
-// It deliberately does not join sites. The question is asked about a site that
-// does not exist yet, and an editor grant on some other site in the namespace
-// is access to that site only — it must not become permission to add a new
-// one. That is why the role here can only be owner or member; see
+// It deliberately does not join sites: the question is asked about a site
+// that does not exist yet. The role here can only be owner or member; see
 // grantsNamespaceAccess.
 func ResolveNamespaceAccess(ctx context.Context, q Querier, actorID, ownerUsername string) (NamespaceAccess, error) {
 	var access NamespaceAccess
@@ -538,14 +534,9 @@ const searchTeamMemberCandidatesQuery = `
 // case-insensitive literal substring — never a SQL pattern, so a name
 // containing % or _ searches for itself.
 //
-// The site-scoped SearchEditorCandidates cannot answer this: it joins sites to
-// exclude the owner, and a team that has not published anything yet has no
-// site to scope the search to. Teams are excluded by kind, so a team can never
-// be offered as a member of another team.
-//
-// AlreadyEditor carries "already a member" here, reusing EditorCandidate so the
-// browser picker that renders editor candidates renders these unchanged.
-func SearchTeamMemberCandidates(ctx context.Context, q Querier, teamID, search string, limit int) ([]EditorCandidate, error) {
+// Teams are excluded by kind, so a team can never be offered as a member of
+// another team.
+func SearchTeamMemberCandidates(ctx context.Context, q Querier, teamID, search string, limit int) ([]UserCandidate, error) {
 	if limit < 1 || limit > 20 {
 		limit = 20
 	}
@@ -555,10 +546,10 @@ func SearchTeamMemberCandidates(ctx context.Context, q Querier, teamID, search s
 	}
 	defer rows.Close()
 
-	var candidates []EditorCandidate
+	var candidates []UserCandidate
 	for rows.Next() {
-		var candidate EditorCandidate
-		if err := rows.Scan(&candidate.UserID, &candidate.Username, &candidate.AlreadyEditor); err != nil {
+		var candidate UserCandidate
+		if err := rows.Scan(&candidate.UserID, &candidate.Username, &candidate.AlreadyMember); err != nil {
 			return nil, fmt.Errorf("scan team member candidate: %w", err)
 		}
 		candidates = append(candidates, candidate)

@@ -174,40 +174,26 @@ func TestRequiredSchemaProbeValidatesMigration0011Shape(t *testing.T) {
 func TestRequiredSchemaProbeValidatesMigration0012Shape(t *testing.T) {
 	for _, required := range []string{
 		"expected_collaboration_columns",
-		"('site_collaborators', 'site_id', 'uuid', 'NO', NULL)",
-		"('site_collaborators', 'user_id', 'uuid', 'NO', NULL)",
-		"('site_collaborators', 'role', 'text', 'NO', '''editor''::text')",
-		"('site_collaborators', 'added_by', 'uuid', 'YES', NULL)",
-		"('site_collaborators', 'created_at', 'timestamptz', 'NO', 'now()')",
 		"('versions', 'uploaded_by', 'uuid', 'YES', NULL)",
 		"actual.column_default IS NOT DISTINCT FROM expected.column_default",
-		"collaboration_primary_key_ready",
-		"ARRAY['site_id', 'user_id']::text[]",
-		"collaboration_reverse_index_ready",
-		"ARRAY['user_id', 'site_id']::text[]",
-		"AND NOT index_catalog.indisunique",
-		"index_catalog.indnatts = 2",
 		"expected_collaboration_foreign_keys",
 		"constraint_catalog.convalidated",
-		"ARRAY['added_by']::text[]",
 		"ARRAY['uploaded_by']::text[]",
 		"constraint_catalog.confdeltype = expected.delete_action::\"char\"",
-		"collaboration_role_check_ready",
-		"pg_catalog.pg_get_expr(constraint_catalog.conbin, constraint_catalog.conrelid)",
-		"'[[:space:]()]', '', 'g'",
-		"= 'role=''editor''::text'",
 	} {
 		if !strings.Contains(requiredSchemaProbe, required) {
 			t.Errorf("schema probe does not reference migration 0012 shape %q", required)
 		}
 	}
+	// Migration 0033 drops site_collaborators; probing for it would leave
+	// every newer binary unready.
+	if strings.Contains(requiredSchemaProbe, "site_collaborators") {
+		t.Error("schema probe still requires site_collaborators")
+	}
 
 	for _, requiredReadyCheck := range []string{
 		"collaboration_columns_ready.ready",
-		"collaboration_primary_key_ready.ready",
-		"collaboration_reverse_index_ready.ready",
 		"collaboration_foreign_keys_ready.ready",
-		"collaboration_role_check_ready.ready",
 	} {
 		if !strings.Contains(requiredSchemaProbe, requiredReadyCheck) {
 			t.Errorf("schema probe does not combine %q", requiredReadyCheck)

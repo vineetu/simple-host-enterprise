@@ -14,12 +14,12 @@ import (
 	"github.com/vsriram/simple-host/internal/safepath"
 )
 
-// Viewer management mirrors editor management exactly (collaboration.go):
-// same owner-role gate, same in-transaction recheck, same bounded-batch
-// grant shape. The two are kept in separate files because they answer
-// different questions — an editor may deploy; a viewer list decides who may
-// look, and its very first row is also what moves the site's own address to
-// "<owner>--<site>.<base>" (design.md 5.2a, handler.HostModel).
+// Viewer management: the named viewers of a site at the "specific" access
+// level. Granting a viewer also moves the site to that level, which serves
+// it at "<owner>--<site>.<base>" (handler.HostModel). Removing the last
+// viewer leaves the level alone, so the site narrows to its owner rather
+// than silently widening. Owner-role gate, in-transaction recheck,
+// bounded-batch grant.
 
 type siteViewerResponse struct {
 	Username string `json:"username"`
@@ -36,8 +36,7 @@ type grantViewersRequest struct {
 	Usernames []string `json:"usernames"`
 }
 
-// registerViewerRoutes is called from (*SiteHandler).Register alongside the
-// editor routes it mirrors.
+// registerViewerRoutes is called from (*SiteHandler).Register.
 func (h *SiteHandler) registerViewerRoutes(mux *http.ServeMux, ownerMutation func(http.Handler) http.Handler, browserWrite func(http.Handler) http.Handler) {
 	mux.Handle("GET /api/collaboration/sites/{owner}/{sitename}/viewers", ownerMutation(http.HandlerFunc(h.listSiteViewers)))
 	mux.Handle("POST /api/collaboration/sites/{owner}/{sitename}/viewers", browserWrite(ownerMutation(http.HandlerFunc(h.grantSiteViewers))))
@@ -190,7 +189,7 @@ func (h *SiteHandler) mutateSiteViewers(w http.ResponseWriter, r *http.Request, 
 	}
 	if err != nil {
 		switch {
-		case errors.Is(err, db.ErrEditorNotFound):
+		case errors.Is(err, db.ErrUserNotFound):
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "one or more usernames do not exist"})
 		case errors.Is(err, db.ErrViewerLimit):
 			writeJSON(w, http.StatusConflict, errorResponse{Error: "a site can have at most 50 listed viewers"})

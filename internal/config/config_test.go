@@ -117,6 +117,9 @@ func TestLoadCompleteConfiguration(t *testing.T) {
 	if cfg.Audit.AccessLogRetentionDays != defaultAccessLogRetentionDays {
 		t.Fatalf("Audit.AccessLogRetentionDays = %d, want the default %d", cfg.Audit.AccessLogRetentionDays, defaultAccessLogRetentionDays)
 	}
+	if defaultAccessLogVisibility != "counts" {
+		t.Fatalf("default ACCESS_LOG_VISIBILITY = %q, want counts: owners see aggregates, only admins see who", defaultAccessLogVisibility)
+	}
 	if cfg.Audit.AccessLogVisibility != defaultAccessLogVisibility {
 		t.Fatalf("Audit.AccessLogVisibility = %q, want the default %q", cfg.Audit.AccessLogVisibility, defaultAccessLogVisibility)
 	}
@@ -153,7 +156,7 @@ func TestLoadAuditRetention(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects a visibility value that is neither owner nor admin", func(t *testing.T) {
+	t.Run("rejects a visibility value that is not counts, owner or admin", func(t *testing.T) {
 		t.Setenv("AUDIT_RETENTION_DAYS", "")
 		t.Setenv("ACCESS_LOG_RETENTION_DAYS", "")
 		t.Setenv("ACCESS_LOG_VISIBILITY", "everyone")

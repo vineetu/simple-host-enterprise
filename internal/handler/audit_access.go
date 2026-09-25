@@ -24,16 +24,16 @@ type AuditHandler struct {
 	database   *sql.DB
 	reader     *audit.Reader
 	limits     *AbuseLimits
-	visibility string // "owner" (default) or "admin" — design.md 8.2, ACCESS_LOG_VISIBILITY
+	visibility string // "counts" (default), "owner" or "admin" — ACCESS_LOG_VISIBILITY
 }
 
 // NewAuditHandler constructs the handler. visibility is config.AuditConfig's
-// AccessLogVisibility; an empty string is treated as "owner", the
-// documented default, so a caller that forgets to pass it does not
-// accidentally lock every non-admin out of their own access log.
+// AccessLogVisibility; an empty string is treated as "counts", the
+// documented default, so a caller that forgets to pass it never shows an
+// owner who visited.
 func NewAuditHandler(database *sql.DB, reader *audit.Reader, visibility string, limits ...*AbuseLimits) *AuditHandler {
 	if visibility == "" {
-		visibility = "owner"
+		visibility = "counts"
 	}
 	return &AuditHandler{database: database, reader: reader, limits: chooseAbuseLimits(limits), visibility: visibility}
 }
@@ -267,8 +267,9 @@ type accessListResponse struct {
 // database lookup is needed to filter by them — but that also means
 // authorization has to be checked here rather than left to a WHERE clause:
 // a non-admin must name an owner whose label is their own or one of their
-// teams'. ACCESS_LOG_VISIBILITY=admin (design 8.2) refuses every non-admin
-// outright, before any of that.
+// teams'. ACCESS_LOG_VISIBILITY=admin refuses every non-admin outright,
+// before any of that; the default, counts, answers a non-admin with
+// aggregates only (listAccessCounts).
 func (h *AuditHandler) listAccess(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r.Context())
 	if user == nil {
@@ -299,6 +300,10 @@ func (h *AuditHandler) listAccess(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusForbidden, errorResponse{Error: "forbidden"})
 			return
 		}
+		if h.visibility == "counts" {
+			h.listAccessCounts(w, r, owner, site)
+			return
+		}
 	}
 
 	from, ok := parseAuditTimeParam(w, r, "from")
@@ -322,6 +327,51 @@ func (h *AuditHandler) listAccess(w http.ResponseWriter, r *http.Request) {
 		out = append(out, toAccessLogEntryResponse(e))
 	}
 	writeJSON(w, http.StatusOK, accessListResponse{Entries: out, NextCursor: page.NextCursor})
+}
+
+type accessDayCountResponse struct {
+	Day           string `json:"day"`
+	Views         int64  `json:"views"`
+	UniqueViewers int64  `json:"unique_viewers"`
+}
+
+type accessCountsResponse struct {
+	From          time.Time                `json:"from"`
+	To            time.Time                `json:"to"`
+	UniqueViewers int64                    `json:"unique_viewers"`
+	Days          []accessDayCountResponse `json:"days"`
+}
+
+// listAccessCounts is GET /api/access for a non-admin under the default
+// ACCESS_LOG_VISIBILITY=counts: views per day and how many distinct
+// signed-in people viewed, over from..to (default the last 30 days). Who
+// they were is for admins only.
+func (h *AuditHandler) listAccessCounts(w http.ResponseWriter, r *http.Request, owner, site string) {
+	from, ok := parseAuditTimeParam(w, r, "from")
+	if !ok {
+		return
+	}
+	to, ok := parseAuditTimeParam(w, r, "to")
+	if !ok {
+		return
+	}
+	if to.IsZero() {
+		to = time.Now().UTC()
+	}
+	if from.IsZero() {
+		from = to.AddDate(0, 0, -30)
+	}
+	counts, err := db.ListAccessCounts(r.Context(), h.database, owner, site, from, to)
+	if err != nil {
+		log.Printf("audit: access counts for %s/%s: %v", owner, site, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	out := accessCountsResponse{From: from, To: to, UniqueViewers: counts.UniqueViewers, Days: make([]accessDayCountResponse, 0, len(counts.Days))}
+	for _, d := range counts.Days {
+		out.Days = append(out.Days, accessDayCountResponse{Day: d.Day.Format("2006-01-02"), Views: d.Views, UniqueViewers: d.UniqueViewers})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // parseAuditTimeParam parses an RFC3339 query parameter, writing a 400 and

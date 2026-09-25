@@ -332,7 +332,7 @@ func ListAllUsers(ctx context.Context, db *sql.DB) ([]User, error) {
 
 func ListAllSites(ctx context.Context, db *sql.DB) ([]Site, error) {
 	const query = `
-		SELECT id, user_id, name, active_version, public, uses_state, uses_versioned_state, created_at, updated_at
+		SELECT id, user_id, name, active_version, public, uses_state, uses_versioned_state, created_at, updated_at, access
 		FROM sites
 		ORDER BY created_at ASC, name ASC
 	`
@@ -346,7 +346,7 @@ func ListAllSites(ctx context.Context, db *sql.DB) ([]Site, error) {
 
 func ListSitesByUser(ctx context.Context, db *sql.DB, userID string) ([]Site, error) {
 	const query = `
-		SELECT id, user_id, name, active_version, public, uses_state, uses_versioned_state, created_at, updated_at
+		SELECT id, user_id, name, active_version, public, uses_state, uses_versioned_state, created_at, updated_at, access
 		FROM sites
 		WHERE user_id = $1
 		ORDER BY created_at ASC, name ASC
@@ -361,7 +361,7 @@ func ListSitesByUser(ctx context.Context, db *sql.DB, userID string) ([]Site, er
 
 func ListSitesByUsername(ctx context.Context, db *sql.DB, username string) ([]Site, error) {
 	const query = `
-		SELECT s.id, s.user_id, s.name, s.active_version, s.public, s.uses_state, s.uses_versioned_state, s.created_at, s.updated_at
+		SELECT s.id, s.user_id, s.name, s.active_version, s.public, s.uses_state, s.uses_versioned_state, s.created_at, s.updated_at, s.access
 		FROM sites s
 		INNER JOIN users u ON u.id = s.user_id
 		WHERE u.username = $1
@@ -392,6 +392,7 @@ func scanSiteRows(rows *sql.Rows) ([]Site, error) {
 			&site.UsesVersionedState,
 			&site.CreatedAt,
 			&site.UpdatedAt,
+			&site.Access,
 		); err != nil {
 			return nil, err
 		}
@@ -899,29 +900,4 @@ func GetActiveSiteVersion(ctx context.Context, db *sql.DB, siteID string) (Versi
 		&version.CreatedAt,
 	)
 	return version, err
-}
-
-// --- Chunk 3: visibility toggle ---
-
-// UpdateSitePublic flips the public flag for a site owned by userID. We
-// deliberately do NOT bump updated_at — visibility is metadata, not a
-// content change; admin/showcase listings shouldn't re-order on toggle.
-func UpdateSitePublic(ctx context.Context, q Querier, userID, siteName string, public bool) (Site, error) {
-	const query = `
-		UPDATE sites
-		SET public = $3
-		WHERE user_id = $1 AND name = $2
-		RETURNING id, user_id, name, active_version, public, created_at, updated_at
-	`
-	var site Site
-	err := q.QueryRowContext(ctx, query, userID, siteName, public).Scan(
-		&site.ID,
-		&site.UserID,
-		&site.Name,
-		&site.ActiveVersion,
-		&site.Public,
-		&site.CreatedAt,
-		&site.UpdatedAt,
-	)
-	return site, err
 }
