@@ -196,6 +196,9 @@ func run() (runErr error) {
 	handoffHandler := handler.NewHandoffHandler(database, signingKeys, hosts, auditRecorder, abuseLimits)
 	handoffHandler.Register(mux, authMW)
 	handler.RegisterUIRoutes(mux)
+	handler.RegisterPluginRoute(mux, cfg.PublicBaseURL)
+	connector := handler.NewConnectorHandler(database, cfg.PublicBaseURL, cfg.OAuthRedirectHosts, signingKeys, cfg.Session.Idle, auditRecorder, hosts, abuseLimits)
+	connector.Register(mux, authMW)
 	siteFiles := handler.NewSiteFiles(diskStorage, database, cookiePolicy, signingKeys, cfg.Session.Idle).WithAccessWriter(accessWriter)
 	siteAPIHandler := handler.NewSiteAPIHandler(database, diskStorage, storage.AssetLimits{
 		MaxFileBytes: cfg.Assets.MaxFileBytes,
@@ -219,7 +222,9 @@ func run() (runErr error) {
 	// method conflicts with the UI's "GET /" catch-all, and GET and DELETE must
 	// answer 405 themselves so an older client can detect the era instead of
 	// being handed the landing page.
-	mcpServer := mcp.NewServer(mux, "simple-host", pluginVersion)
+	// Every method needs an API key or an OAuth access token first, so an
+	// unauthenticated client of any method is told where to sign in.
+	mcpServer := connector.ProtectMCP(authMW, mcp.NewServer(mux, "simple-host", pluginVersion))
 	mux.Handle("POST /mcp", mcpServer)
 	mux.Handle("GET /mcp", mcpServer)
 	mux.Handle("DELETE /mcp", mcpServer)
@@ -250,6 +255,7 @@ func run() (runErr error) {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	connector.StartSweep(ctx)
 	// Indexed pages carry whatever address SiteLink gives, so the index
 	// follows the cutover; existing documents are reindexed by hand after the
 	// flip (docs/subdomains/migration.md phase 4).

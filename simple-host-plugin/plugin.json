@@ -1,0 +1,20 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "simple-host",
+  "version": "{{VERSION}}",
+  "description": "Deploy and collaborate on static sites in Simple Host at {{BASE_URL}}. Sign in with your work account the first time the app connects.",
+  "author": {
+    "name": "Simple Host"
+  },
+  "homepage": "{{BASE_URL}}",
+  "keywords": ["website", "hosting", "publish", "static site", "mcp"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Simple Host",
+        "shortDescription": "Publish and manage your team's static sites.",
+        "websiteURL": "{{BASE_URL}}"
+      }
+    }
+  }
+}
