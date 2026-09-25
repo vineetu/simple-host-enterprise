@@ -2,7 +2,9 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"log"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vsriram/simple-host/internal/audit"
 	"github.com/vsriram/simple-host/internal/auth"
 	db "github.com/vsriram/simple-host/internal/db"
 	"github.com/vsriram/simple-host/internal/storage"
@@ -1124,4 +1127,33 @@ func TestHostGateAssetServeRoute(t *testing.T) {
 			t.Fatalf("status = %d, calls = %+v", response.Code, fake.calls)
 		}
 	})
+}
+
+type recordingRecorder struct{ events []audit.Event }
+
+func (r *recordingRecorder) Record(_ context.Context, e audit.Event) { r.events = append(r.events, e) }
+func (r *recordingRecorder) RecordTx(ctx context.Context, _ *sql.Tx, e audit.Event) error {
+	r.Record(ctx, e)
+	return nil
+}
+
+func TestHostGateRecordsAccessDenied(t *testing.T) {
+	store, _ := newServeTestStorage(t)
+	writeGateSite(t, store, "alice", "my-site", "alice-index")
+	gate := testHostGate(t, store, testHostModel(t))
+	recorder := &recordingRecorder{}
+	gate.audit = recorder
+	gate.viewerAllowed = func(r *http.Request, siteID, userID string) (bool, error) { return false, nil }
+	handler := gate.wrap(newHostGateTestMux())
+
+	gateAuthedRequest(t, handler, http.MethodGet, "alice.foo.example", "/my-site/")
+	gateAuthedRequest(t, handler, http.MethodGet, "alice.foo.example", "/api/sites/my-site/state")
+	if len(recorder.events) != 2 {
+		t.Fatalf("recorded %d events, want 2", len(recorder.events))
+	}
+	for _, e := range recorder.events {
+		if e.Action != "access_denied" || e.ActorID != hostGateTestUserID || e.Extra["reason"] != "not_a_viewer" {
+			t.Fatalf("event = %+v", e)
+		}
+	}
 }

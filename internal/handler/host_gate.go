@@ -99,6 +99,21 @@ type hostGate struct {
 	// the same reason as the funcs above: a test asserts what was logged
 	// without a live Postgres behind the writer.
 	recordAccess func(audit.AccessEvent)
+	// audit records access_denied when a signed-in person is refused a
+	// site (viewerAllowed or writerAllowed). nil records nothing.
+	audit audit.Recorder
+}
+
+// recordDenied writes one access_denied audit row for a signed-in caller
+// the gate refused.
+func (g *hostGate) recordDenied(r *http.Request, siteID, userID, reason string) {
+	if g.audit == nil {
+		return
+	}
+	g.audit.Record(r.Context(), audit.Event{
+		ActorID: userID, Action: "access_denied", SiteID: siteID,
+		Detail: r.Method + " " + r.Host + r.URL.Path, Extra: map[string]any{"reason": reason},
+	})
 }
 
 // NewHostGate returns middleware that decides, per hostname, which routes the
@@ -132,6 +147,7 @@ func NewHostGate(hosts HostModel, files *SiteFiles, database *sql.DB, signingKey
 		},
 		siteAPI:        siteAPI,
 		authMiddleware: authMiddleware,
+		audit:          siteAPIRecorder(siteAPI),
 		originCheck:    cookieOriginCheck(hosts, publicBaseURL),
 	}
 	return gate.wrap
@@ -442,10 +458,18 @@ func (g *hostGate) checkViewerAllowed(w http.ResponseWriter, r *http.Request, si
 		return false
 	}
 	if !allowed {
+		g.recordDenied(r, siteID, userID, "not_a_viewer")
 		http.NotFound(w, r)
 		return false
 	}
 	return true
+}
+
+func siteAPIRecorder(h *SiteAPIHandler) audit.Recorder {
+	if h == nil {
+		return nil
+	}
+	return h.audit
 }
 
 // siteAPIRouteKind is which of design.md 7.3's site-facing API routes a
@@ -677,6 +701,7 @@ func (g *hostGate) checkSiteAccess(w http.ResponseWriter, r *http.Request, siteI
 		return false
 	}
 	if !allowed {
+		g.recordDenied(r, siteID, userID, "not_a_viewer")
 		http.NotFound(w, r)
 		return false
 	}
@@ -690,6 +715,7 @@ func (g *hostGate) checkSiteAccess(w http.ResponseWriter, r *http.Request, siteI
 		return false
 	}
 	if !writable {
+		g.recordDenied(r, siteID, userID, "not_a_writer")
 		writeJSON(w, http.StatusForbidden, errorResponse{Error: "forbidden"})
 		return false
 	}

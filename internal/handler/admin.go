@@ -180,7 +180,7 @@ func (h *AdminHandler) Register(mux *http.ServeMux, authMiddleware, skillVersion
 	// a leaked one must not carry an admin's powers with it.
 	adminAPI := func(next http.Handler) http.Handler {
 		return h.limitAdminClient(
-			authMiddleware(requireSessionAuth(auth.RequireAdmin(skillVersionMiddleware(h.limitAdminIdentity(next))))),
+			authMiddleware(requireSessionAuth(h.requireAdmin(skillVersionMiddleware(h.limitAdminIdentity(next))))),
 		)
 	}
 	mux.Handle("POST /api/admin/users/{username}/disable", dashboardCheck(adminAPI(http.HandlerFunc(h.disableUser))))
@@ -188,6 +188,21 @@ func (h *AdminHandler) Register(mux *http.ServeMux, authMiddleware, skillVersion
 	mux.Handle("POST /api/admin/archive-versions", dashboardCheck(adminAPI(http.HandlerFunc(h.archiveVersions))))
 	mux.Handle("POST /api/admin/classify-sites", dashboardCheck(adminAPI(http.HandlerFunc(h.classifySites))))
 	mux.Handle("GET /api/admin/export", adminAPI(http.HandlerFunc(h.exportAuditOrAccess)))
+}
+
+// requireAdmin is auth.RequireAdmin plus an access_denied audit row when a
+// signed-in non-admin is refused.
+func (h *AdminHandler) requireAdmin(next http.Handler) http.Handler {
+	admin := auth.RequireAdmin(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if user := auth.GetUser(r.Context()); user != nil && !user.IsAdmin {
+			h.audit.Record(r.Context(), audit.Event{
+				ActorID: user.ID, Action: "access_denied",
+				Detail: r.Method + " " + r.URL.Path, Extra: map[string]any{"reason": "not_an_admin"},
+			})
+		}
+		admin.ServeHTTP(w, r)
+	})
 }
 
 func (h *AdminHandler) limitAdminClient(next http.Handler) http.Handler {

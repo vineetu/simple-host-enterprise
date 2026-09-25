@@ -3,8 +3,14 @@ package audit
 import (
 	"context"
 	"database/sql"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/vsriram/simple-host/internal/reqlog"
 )
 
 // Compile-time check that both Recorder implementations in this package
@@ -114,4 +120,21 @@ func TestNewReaderPanicsOnNilDatabase(t *testing.T) {
 		}
 	}()
 	NewReader((*sql.DB)(nil))
+}
+
+func TestWithRequestInfoFillsFromTheRequestLog(t *testing.T) {
+	var got Event
+	handler := reqlog.Middleware(slog.New(slog.NewTextHandler(io.Discard, nil)), nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = withRequestInfo(r.Context(), Event{Action: "key_mint"})
+	}))
+	request := httptest.NewRequest(http.MethodPost, "/api/keys", nil)
+	request.RemoteAddr = "192.0.2.7:1234"
+	request.Header.Set("User-Agent", "ci-runner/1")
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+	if got.IP != "192.0.2.7" || got.UserAgent != "ci-runner/1" || got.RequestID == "" {
+		t.Fatalf("event = %+v", got)
+	}
+	if kept := withRequestInfo(context.Background(), Event{IP: "x"}); kept.IP != "x" {
+		t.Fatalf("outside a request: %+v", kept)
+	}
 }
