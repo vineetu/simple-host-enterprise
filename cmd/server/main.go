@@ -121,6 +121,7 @@ func run() (runErr error) {
 		return fmt.Errorf("create backup client: %w", err)
 	}
 
+	reqlog.SetTrustedProxies(cfg.TrustedProxies)
 	mux := http.NewServeMux()
 	hosts, err := handler.NewHostModel(cfg.PublicBaseURL)
 	if err != nil {

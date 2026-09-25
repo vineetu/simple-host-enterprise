@@ -10,9 +10,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"log/slog"
-	"net"
 	"net/http"
+	"net/netip"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,6 +28,10 @@ type contextKey struct{}
 // though the line is written outside their scope.
 type Record struct {
 	ID string
+	// IP is ClientIP of the request and UserAgent its User-Agent, kept here
+	// so code that has only the context (the audit recorder) can fill them.
+	IP        string
+	UserAgent string
 
 	mu     sync.Mutex
 	userID string
@@ -68,7 +74,7 @@ func Middleware(logger *slog.Logger, skip func(*http.Request) bool) func(http.Ha
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			record := &Record{ID: newID()}
+			record := &Record{ID: newID(), IP: ClientIP(r), UserAgent: r.UserAgent()}
 			w.Header().Set(Header, record.ID)
 			recorder := &statusRecorder{ResponseWriter: w}
 			started := time.Now()
@@ -90,7 +96,7 @@ func Middleware(logger *slog.Logger, skip func(*http.Request) bool) func(http.Ha
 					slog.Int("status", status),
 					slog.Int64("bytes", recorder.bytes),
 					slog.Int64("duration_ms", time.Since(started).Milliseconds()),
-					slog.String("remote", peerAddress(r)),
+					slog.String("remote", record.IP),
 					slog.String("user_agent", r.UserAgent()),
 				}
 				if user := record.user(); user != "" {
@@ -119,13 +125,67 @@ func newID() string {
 	return hex.EncodeToString(raw[:])
 }
 
-func peerAddress(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
+var trustedProxies atomic.Pointer[[]netip.Prefix]
+
+// SetTrustedProxies installs TRUSTED_PROXY_CIDRS. Call once at startup,
+// before serving.
+func SetTrustedProxies(prefixes []netip.Prefix) {
+	trustedProxies.Store(&prefixes)
 }
+
+func isTrustedProxy(addr netip.Addr) bool {
+	prefixes := trustedProxies.Load()
+	if prefixes == nil {
+		return false
+	}
+	for _, p := range *prefixes {
+		if p.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+// ClientIP is the one answer to "which address did this request come
+// from", used by rate limits, the request log, access_log, sessions.ip and
+// audit rows alike. It is the TCP peer, unless the peer is inside
+// TRUSTED_PROXY_CIDRS: then X-Forwarded-For is read right to left and the
+// first address that is not itself a trusted proxy is the client. Entries
+// further left were written by the client and are never believed. "" when
+// the peer address cannot be parsed.
+func ClientIP(r *http.Request) string {
+	peer, ok := parseAddr(r.RemoteAddr)
+	if !ok {
+		return ""
+	}
+	if !isTrustedProxy(peer) {
+		return peer.String()
+	}
+	hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
+	client := peer
+	for i := len(hops) - 1; i >= 0; i-- {
+		addr, ok := parseAddr(strings.TrimSpace(hops[i]))
+		if !ok {
+			break
+		}
+		client = addr
+		if !isTrustedProxy(addr) {
+			break
+		}
+	}
+	return client.String()
+}
+
+func parseAddr(s string) (netip.Addr, bool) {
+	if ap, err := netip.ParseAddrPort(s); err == nil {
+		return ap.Addr().Unmap(), true
+	}
+	if a, err := netip.ParseAddr(s); err == nil {
+		return a.Unmap(), true
+	}
+	return netip.Addr{}, false
+}
+
 
 // statusRecorder captures what the handler wrote without changing how it
 // wrote it. Unwrap keeps http.ResponseController working, and Flush keeps the

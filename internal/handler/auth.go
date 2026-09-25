@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"html"
 	"log"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -20,6 +19,7 @@ import (
 	"github.com/vsriram/simple-host/internal/auth"
 	db "github.com/vsriram/simple-host/internal/db"
 	"github.com/vsriram/simple-host/internal/oidc"
+	"github.com/vsriram/simple-host/internal/reqlog"
 )
 
 // oauthStateCookie carries the one-time state, nonce and PKCE verifier
@@ -208,7 +208,7 @@ type oauthState struct {
 }
 
 func (h *AuthHandler) login(w http.ResponseWriter, r *http.Request) {
-	if decision := h.limits.allow(authClientPolicy, remoteClientKey(r)); !decision.Allowed {
+	if decision := h.limits.allow(authClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -242,7 +242,7 @@ func (h *AuthHandler) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) callback(w http.ResponseWriter, r *http.Request) {
-	if decision := h.limits.allow(authClientPolicy, remoteClientKey(r)); !decision.Allowed {
+	if decision := h.limits.allow(authClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -337,7 +337,7 @@ func (h *AuthHandler) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	ip := reqlog.ClientIP(r)
 	expiresAt := time.Now().Add(h.sessionTTL)
 	session, err := db.CreateSession(r.Context(), h.database, user.ID, expiresAt, ip, r.UserAgent())
 	if err != nil {

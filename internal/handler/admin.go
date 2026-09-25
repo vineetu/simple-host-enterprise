@@ -192,7 +192,7 @@ func (h *AdminHandler) Register(mux *http.ServeMux, authMiddleware, skillVersion
 
 func (h *AdminHandler) limitAdminClient(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if decision := h.limits.allow(adminClientPolicy, remoteClientKey(r)); !decision.Allowed {
+		if decision := h.limits.allow(adminClientPolicy, clientLimitKey(r)); !decision.Allowed {
 			writeRateLimit(w, decision)
 			return
 		}

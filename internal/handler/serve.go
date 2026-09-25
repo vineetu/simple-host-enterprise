@@ -19,6 +19,7 @@ import (
 
 	"github.com/vsriram/simple-host/internal/audit"
 	"github.com/vsriram/simple-host/internal/auth"
+	"github.com/vsriram/simple-host/internal/reqlog"
 	dbstore "github.com/vsriram/simple-host/internal/db"
 	"github.com/vsriram/simple-host/internal/safepath"
 	"github.com/vsriram/simple-host/internal/storage"
@@ -223,7 +224,7 @@ func (s *SiteFiles) serveSite(w http.ResponseWriter, r *http.Request, user, site
 		Method:     r.Method,
 		Status:     recorder.status,
 		Bytes:      recorder.bytes,
-		IP:         remoteClientKey(r),
+		IP:         reqlog.ClientIP(r),
 		UserAgent:  r.UserAgent(),
 		ClientKind: classifyClient(r).String(),
 	})
