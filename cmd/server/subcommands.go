@@ -234,7 +234,7 @@ func runRestore(args []string) error {
 	}); err != nil {
 		return fmt.Errorf("record audit: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
+	if err := audit.Commit(tx); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
 	log.Printf("restored %s v%d into %s/%s as v%d (site %s, live=%t)", *fromSiteID, *version, *owner, *site, newVersion, target.ID, *setCurrent || created)

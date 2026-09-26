@@ -397,7 +397,7 @@ func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	if commitErr := tx.Commit(); commitErr != nil {
+	if commitErr := audit.Commit(tx); commitErr != nil {
 		result := reconcileSiteCommit(h.database, access.OwnerID, siteName, siteCommitExpectation{
 			applied:    existingSiteCommitSnapshot(access.Site.ID, versionNumber),
 			rolledBack: existingSiteCommitSnapshot(access.Site.ID, previousVersion),
@@ -501,7 +501,7 @@ func (h *SiteHandler) rollbackCollaborationSite(w http.ResponseWriter, r *http.R
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	if commitErr := tx.Commit(); commitErr != nil {
+	if commitErr := audit.Commit(tx); commitErr != nil {
 		result := reconcileSiteCommit(h.database, access.OwnerID, siteName, siteCommitExpectation{
 			applied:    existingSiteCommitSnapshot(access.Site.ID, request.Version),
 			rolledBack: existingSiteCommitSnapshot(access.Site.ID, previousVersion),
@@ -591,7 +591,7 @@ func (h *SiteHandler) downloadCollaborationVersion(w http.ResponseWriter, r *htt
 		return
 	}
 	defer lease.Close()
-	if err := tx.Commit(); err != nil {
+	if err := audit.Commit(tx); err != nil {
 		log.Printf("commit collaboration archive admission %s/%s v%d: %v", ownerUsername, siteName, versionNumber, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return

@@ -10,9 +10,9 @@ import (
 )
 
 // Stream writes the SIEM lines (one "type":"audit" JSON line per event) off
-// the caller's goroutine. DBRecorder emits while the caller's transaction
-// still holds the audit chain's head lock, so a stdout that blocks (a full
-// pipe, a stalled log agent) must never stall the writer: lines go through
+// the caller's goroutine. DBRecorder emits once the event's transaction has
+// committed, on the request path, so a stdout that blocks (a full
+// pipe, a stalled log agent) must never stall the request: lines go through
 // a buffered channel drained by one goroutine, and a line that finds the
 // buffer full is dropped and counted rather than waited for. The database
 // row, not the line, is the record; Dropped is on /metrics

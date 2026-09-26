@@ -350,7 +350,7 @@ func (h *AuthHandler) callback(w http.ResponseWriter, r *http.Request) {
 		err = h.audit.RecordTx(r.Context(), tx, audit.Event{ActorID: user.ID, Action: "sign_in", Detail: "session " + session.ID, RequestID: auditRequestID(r.Context())})
 	}
 	if err == nil {
-		err = tx.Commit()
+		err = audit.Commit(tx)
 	}
 	if err != nil {
 		log.Printf("auth: create session for %s: %v", user.Username, err)
@@ -540,7 +540,7 @@ func (h *AuthHandler) revokeSession(w http.ResponseWriter, r *http.Request) {
 	}
 	err = h.audit.RecordTx(r.Context(), tx, audit.Event{ActorID: user.ID, Action: "session_revoke", Detail: "session " + id, RequestID: auditRequestID(r.Context())})
 	if err == nil {
-		err = tx.Commit()
+		err = audit.Commit(tx)
 	}
 	if err != nil {
 		log.Printf("auth: record/commit revoke session %s: %v", id, err)

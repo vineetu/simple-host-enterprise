@@ -206,12 +206,12 @@ owning role, never from the server's own connection pool.
 
 ## Streaming the audit log to a SIEM
 
-Nothing to configure. After each audit row is written, the server writes
+Nothing to configure. After each audit row is committed, the server writes
 the same event to stdout as one JSON line, alongside the request log's
 lines (the two share one writer, so lines never interleave):
 
 ```json
-{"time":"...","level":"INFO","msg":"audit","type":"audit","at":"2026-09-26T10:00:00.123Z","action":"key_mint","actor_id":"...","actor_kind":"person","key_id":"","owner_id":"","site_id":"","team_id":"","ip":"10.0.0.9","user_agent":"...","request_id":"...","detail":{"note":"abc123"}}
+{"time":"...","level":"INFO","msg":"audit","type":"audit","at":"2026-09-26T10:00:00.123Z","action":"key_mint","actor_id":"...","actor_kind":"person","key_id":"","owner_id":"","site_id":"","team_id":"","ip":"10.0.0.9","user_agent":"...","request_id":"...","detail":{"note":"abc123"},"seq":42,"hash":"9f2c..."}
 ```
 
 The line is handed to a writer goroutine through a buffer of 4096 lines, so
@@ -224,11 +224,18 @@ backfill from `GET /api/admin/export` if it ever moves.
 `type` is always `"audit"` and the field names are stable; an empty string
 means the field does not apply. `at` is the server's clock at write time
 (the row's own `at` is the database's). A line is written only after the
-database write succeeded, but an event recorded inside a larger
-transaction is streamed before that transaction commits, so the database
-(and its hash chain, `simple-host audit-verify`) is authoritative. Every
-`state_write` is streamed, including the ones the database coalesces into
-one row per five-minute window.
+transaction holding the audit row has committed, so a rolled-back change
+is never streamed. `seq` and `hash` are the event's row in the audit hash
+chain as the database stored it (hex SHA-256); they anchor the chain
+outside the database: a database owner who rewrites events and recomputes
+the chain cannot change what the SIEM already holds, and
+`simple-host audit-verify -expect SEQ:HASH` with any line's values fails
+if the chain no longer carries that hash at that seq
+(`docs/security-review.md`, 2(e)). Every `state_write` is streamed,
+including the ones the database coalesces into one row per five-minute
+window; those carry the window row's `seq` and `hash`. A line for a row
+that is not chained (one from before migration 0036) has no `seq` or
+`hash`.
 
 Forward it with whatever log shipper the cluster already runs (Fluent Bit,
 Vector, the OpenTelemetry Collector, the Datadog Agent, Splunk OTel, Elastic

@@ -3,6 +3,7 @@ package audit
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
@@ -44,16 +45,14 @@ type ChainExpectation struct {
 }
 
 // verifyChainQuery walks audit_chain in seq order with the event each row
-// names, recomputing the hash in SQL through the same
-// audit_event_canonical the trigger used, so the Go side only compares.
+// names, read raw: the hash is recomputed in Go (chainedEvent.canonical),
+// never through a database function, so an owner who redefines
+// audit_event_canonical cannot make a changed row verify.
 const verifyChainQuery = `
 	SELECT c.seq, c.event_id, c.event_at, c.prev_hash, c.hash,
-	       e.id IS NOT NULL,
-	       CASE WHEN e.id IS NULL THEN NULL ELSE sha256(c.prev_hash || convert_to(audit_event_canonical(
-	           e.id, e.at, e.request_id, e.actor_id, e.actor_kind, e.key_id,
-	           e.action, e.owner_id, e.site_id, e.team_id, e.via_site_label,
-	           e.via_site_name, e.via_site_observed, e.ip, e.user_agent, e.detail
-	       ), 'UTF8')) END
+	       e.id IS NOT NULL, e.at, e.request_id, e.actor_id::text, e.actor_kind, e.key_id::text,
+	       e.action, e.owner_id::text, e.site_id::text, e.team_id::text, e.via_site_label,
+	       e.via_site_name, e.via_site_observed, e.ip::text, e.user_agent, e.detail::text
 	FROM audit_chain c
 	LEFT JOIN audit_events e ON e.id = c.event_id AND e.at = c.event_at
 	ORDER BY c.seq
@@ -100,14 +99,22 @@ func VerifyChain(ctx context.Context, db *sql.DB, expect ChainExpectation) (Chai
 	)
 	for rows.Next() {
 		var (
-			seq, eventID     int64
-			at               time.Time
-			prev, hash, calc []byte
-			present          bool
+			seq, eventID int64
+			at           time.Time
+			prev, hash   []byte
+			present      bool
+			e            chainedEvent
+			eAt          sql.NullTime
+			kind, action sql.NullString
+			observed     sql.NullBool
 		)
-		if err := rows.Scan(&seq, &eventID, &at, &prev, &hash, &present, &calc); err != nil {
+		if err := rows.Scan(&seq, &eventID, &at, &prev, &hash,
+			&present, &eAt, &e.RequestID, &e.ActorID, &kind, &e.KeyID,
+			&action, &e.OwnerID, &e.SiteID, &e.TeamID, &e.ViaSiteLabel,
+			&e.ViaSiteName, &observed, &e.IP, &e.UserAgent, &e.Detail); err != nil {
 			return report, err
 		}
+		e.ID, e.At, e.ActorKind, e.Action, e.ViaSiteObserved = eventID, eAt.Time, kind.String, action.String, observed.Bool
 		fail := func(reason string) (ChainReport, error) {
 			report.Break = &ChainBreak{Seq: seq, EventID: eventID, At: at, Reason: reason}
 			return report, nil
@@ -125,7 +132,12 @@ func VerifyChain(ctx context.Context, db *sql.DB, expect ChainExpectation) (Chai
 		if !present {
 			return fail("event is missing from audit_events")
 		}
-		if !bytes.Equal(calc, hash) {
+		canonical, err := e.canonical()
+		if err != nil {
+			return report, err
+		}
+		calc := sha256.Sum256(append(append([]byte{}, prev...), canonical...))
+		if !bytes.Equal(calc[:], hash) {
 			return fail("event does not match its hash (changed after it was written)")
 		}
 		if expect.Seq != 0 && seq == expect.Seq && !bytes.Equal(hash, expect.Hash) {

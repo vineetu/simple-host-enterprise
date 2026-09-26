@@ -3,7 +3,9 @@ package audit
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"log"
 	"log/slog"
 	"time"
@@ -55,8 +57,8 @@ func (r *DBRecorder) SetStream(stream *Stream) {
 	r.stream = stream
 }
 
-// Record persists event outside any caller transaction, using its own
-// implicit one, for a call site with no transaction to share (see
+// Record persists event outside any caller transaction, in a short one of
+// its own, for a call site with no transaction to share (see
 // docs/security-review.md for which those are). A failure is retried and
 // then logged, not returned, so a sign-out or an access refusal is never
 // blocked by the audit sink being unavailable — the "must not block the
@@ -69,9 +71,12 @@ func (r *DBRecorder) SetStream(stream *Stream) {
 func (r *DBRecorder) Record(ctx context.Context, event Event) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
+	event = withRequestInfo(ctx, event)
 	var err error
 	for attempt := 0; ; attempt++ {
-		if err = r.write(ctx, r.db, event); err == nil {
+		var line []slog.Attr
+		if line, err = r.recordOwnTx(ctx, event); err == nil {
+			r.emit(line)
 			return
 		}
 		if attempt >= len(r.retryDelays) || ctx.Err() != nil {
@@ -83,30 +88,59 @@ func (r *DBRecorder) Record(ctx context.Context, event Event) {
 		event.Action, event.ActorID, event.OwnerID, event.SiteID, event.TeamID, event.RequestID, err)
 }
 
+func (r *DBRecorder) recordOwnTx(ctx context.Context, event Event) ([]slog.Attr, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	line, err := r.write(ctx, tx, event)
+	if err != nil {
+		return nil, err
+	}
+	return line, tx.Commit()
+}
+
 // RecordTx persists event inside tx, so a caller whose mutation and audit
 // row must commit together can roll both back on either
-// failing. A nil tx falls back to Record's own implicit transaction and
+// failing. A nil tx falls back to Record's own transaction and
 // never returns an error, so a caller written before a transaction existed
-// at its call site does not have to change.
+// at its call site does not have to change. The SIEM line is held until the
+// caller commits tx through Commit, so a rolled-back event is never streamed.
 func (r *DBRecorder) RecordTx(ctx context.Context, tx *sql.Tx, event Event) error {
 	if tx == nil {
 		r.Record(ctx, event)
 		return nil
 	}
-	return r.write(ctx, tx, event)
-}
-
-func (r *DBRecorder) write(ctx context.Context, q dbstore.Querier, event Event) error {
-	event = withRequestInfo(ctx, event)
-	now := time.Now()
-	if err := r.persist(ctx, q, event, now); err != nil {
+	line, err := r.write(ctx, tx, withRequestInfo(ctx, event))
+	if err != nil {
 		return err
 	}
-	r.emit(event, now)
+	if r.stream != nil {
+		holdUntilCommit(ctx, tx, r.stream, line)
+	}
 	return nil
 }
 
-func (r *DBRecorder) persist(ctx context.Context, q dbstore.Querier, event Event, now time.Time) error {
+// write persists event in tx and returns its SIEM line, carrying the chain
+// seq and hash the insert produced.
+func (r *DBRecorder) write(ctx context.Context, tx *sql.Tx, event Event) ([]slog.Attr, error) {
+	now := time.Now()
+	id, at, err := r.persist(ctx, tx, event, now)
+	if err != nil {
+		return nil, err
+	}
+	seq, hash, chained, err := dbstore.AuditChainEntry(ctx, tx, id, at)
+	if err != nil {
+		return nil, fmt.Errorf("audit: read chain entry: %w", err)
+	}
+	if r.stream == nil {
+		return nil, nil
+	}
+	return streamLine(event, now, seq, hash, chained), nil
+}
+
+func (r *DBRecorder) persist(ctx context.Context, q dbstore.Querier, event Event, now time.Time) (int64, time.Time, error) {
 	if event.Action == "state_write" {
 		// The coalescing arbiter is (site_id, actor_id, at); Postgres never
 		// considers one NULL equal to another, so a state_write with either
@@ -115,9 +149,9 @@ func (r *DBRecorder) persist(ctx context.Context, q dbstore.Querier, event Event
 		// call site that ever constructs a state_write BumpStateWriteParams,
 		// so the failure names the event rather than a generic db error.
 		if event.ActorID == "" || event.SiteID == "" {
-			return errors.New("audit: state_write requires both ActorID and SiteID to coalesce correctly")
+			return 0, time.Time{}, errors.New("audit: state_write requires both ActorID and SiteID to coalesce correctly")
 		}
-		return dbstore.BumpStateWrite(ctx, q, dbstore.BumpStateWriteParams{
+		if err := dbstore.BumpStateWrite(ctx, q, dbstore.BumpStateWriteParams{
 			WindowStart: now.UTC().Truncate(coalesceWindow),
 			ActorID:     event.ActorID,
 			OwnerID:     event.OwnerID,
@@ -127,7 +161,10 @@ func (r *DBRecorder) persist(ctx context.Context, q dbstore.Querier, event Event
 			KeyID:       event.KeyID,
 			IP:          event.IP,
 			UserAgent:   event.UserAgent,
-		})
+		}); err != nil {
+			return 0, time.Time{}, err
+		}
+		return dbstore.StateWriteRow(ctx, q, event.ActorID, event.SiteID)
 	}
 	return dbstore.InsertAuditEvent(ctx, q, event.row(now))
 }
@@ -152,15 +189,12 @@ func withRequestInfo(ctx context.Context, event Event) Event {
 	return event
 }
 
-// emit writes event to the SIEM stream, after the database write
-// succeeded. For RecordTx the caller's transaction can still roll back
-// after this, so a streamed line can describe a change that never
-// committed: the database (and its hash chain) is authoritative. "at" is
-// this server's clock; the row's own at is the database's.
-func (r *DBRecorder) emit(event Event, now time.Time) {
-	if r.stream == nil {
-		return
-	}
+// streamLine is event's SIEM line. seq and hash are the chain row the
+// database wrote for it (for a coalesced state_write, the window's row), so
+// a SIEM holding them can later compare against audit-verify; they are left
+// out for a row that is not chained. "at" is this server's clock; the row's
+// own at is the database's.
+func streamLine(event Event, now time.Time, seq int64, hash []byte, chained bool) []slog.Attr {
 	kind := event.ActorKind
 	if kind == "" {
 		kind = "person"
@@ -169,7 +203,7 @@ func (r *DBRecorder) emit(event Event, now time.Time) {
 	if detail == nil {
 		detail = map[string]any{}
 	}
-	r.stream.emit([]slog.Attr{
+	line := []slog.Attr{
 		slog.String("type", "audit"),
 		slog.String("at", now.UTC().Format(time.RFC3339Nano)),
 		slog.String("action", event.Action),
@@ -183,5 +217,18 @@ func (r *DBRecorder) emit(event Event, now time.Time) {
 		slog.String("user_agent", event.UserAgent),
 		slog.String("request_id", event.RequestID),
 		slog.Any("detail", detail),
-	})
+	}
+	if chained {
+		line = append(line, slog.Int64("seq", seq), slog.String("hash", hex.EncodeToString(hash)))
+	}
+	return line
+}
+
+// emit queues line on the SIEM stream (never blocking; see Stream). It is
+// called only once the event's transaction has committed.
+func (r *DBRecorder) emit(line []slog.Attr) {
+	if r.stream == nil || line == nil {
+		return
+	}
+	r.stream.emit(line)
 }

@@ -170,7 +170,7 @@ func (h *SiteHandler) setSiteAccessForTarget(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	if err := tx.Commit(); err != nil {
+	if err := audit.Commit(tx); err != nil {
 		log.Printf("commit access %s/%s: %v", target.OwnerUsername, siteName, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -336,7 +336,7 @@ func (h *SiteHandler) restoreStateVersion(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	if err := tx.Commit(); err != nil {
+	if err := audit.Commit(tx); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
@@ -460,7 +460,7 @@ func (h *AdminHandler) decideNetworkAccess(w http.ResponseWriter, r *http.Reques
 		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	if err := tx.Commit(); err != nil {
+	if err := audit.Commit(tx); err != nil {
 		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
 		return
 	}

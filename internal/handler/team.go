@@ -200,7 +200,7 @@ func (h *TeamHandler) createTeam(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	if err := tx.Commit(); err != nil {
+	if err := audit.Commit(tx); err != nil {
 		log.Printf("commit create team %q: %v", name, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -662,7 +662,7 @@ func (h *TeamHandler) inTeamTransaction(r *http.Request, teamID string, fn func(
 	if err := fn(tx); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return audit.Commit(tx)
 }
 
 // writeMembers answers with the team's members. extra is key/value pairs added

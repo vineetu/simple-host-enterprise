@@ -128,8 +128,11 @@ the chain only by inserting an event. What it covers, and what it does not:
   chain. Against that, keep the `head SEQ:HASH` `audit-verify` prints
   somewhere the database owner cannot edit (a ticket, the SIEM), and pass it
   to the next run as `audit-verify -expect SEQ:HASH`: the chain must still
-  carry that hash at that seq. The SIEM stream below is a second,
-  independent copy of every event.
+  carry that hash at that seq. The SIEM stream below anchors every event
+  the same way: each line carries its chain `seq` and `hash`, so any line
+  the SIEM holds can be passed as `-expect`, and a rewrite of any event
+  the SIEM saw is caught by comparing `audit-verify`'s recomputed hashes
+  against the SIEM's copy.
 - Performance: the head lock is held until the inserting transaction
   commits. Audited mutations are low-volume, and `state_write` takes the
   lock only on the first write of each window. Every code path records its
@@ -140,8 +143,10 @@ the chain only by inserting an event. What it covers, and what it does not:
 **Verifying.** `simple-host audit-verify` connects as the owning role (the
 same credentials `prune` uses), walks the chain in `seq` order, checks
 each `prev_hash` against the previous row's hash, recomputes each hash in
-SQL with the same `audit_event_canonical` function, and checks the last row
-against the head. It prints the first break (seq, event id, time, and
+Go from the row's raw columns (the same canonical form as the trigger's
+`audit_event_canonical`, reimplemented, never calling it, so an owner who
+redefines that function cannot make a changed row verify), and checks the
+last row against the head. It prints the first break (seq, event id, time, and
 whether the event is missing, changed, or chain rows were deleted) and
 exits non-zero; on success it prints the rows checked and the head as
 `SEQ:HASH`. To pass `-expect`, add it to the args list below
@@ -154,12 +159,14 @@ or `audit chain BROKEN at ...`, and deletes the job):
 kubectl --context "$CTX" -n simple-host create job simple-host-audit-verify --from=cronjob/simple-host-prune --dry-run=client -o json | python3 -c "import json,sys; j=json.load(sys.stdin); j['spec']['template']['spec']['containers'][0]['args']=['audit-verify']; j['spec']['backoffLimit']=0; j['spec']['template']['spec']['restartPolicy']='Never'; print(json.dumps(j))" | kubectl --context "$CTX" -n simple-host create -f - && kubectl --context "$CTX" -n simple-host logs -f --pod-running-timeout=2m job/simple-host-audit-verify; kubectl --context "$CTX" -n simple-host delete job simple-host-audit-verify
 ```
 
-**SIEM stream.** After an audit row is written, the server also writes the
-event to stdout as one JSON line with `"type":"audit"` (see "Streaming the
-audit log to a SIEM" in `docs/configuration.md`). For an event recorded
-inside a larger transaction the line is written before that transaction
-commits, so a rolled-back change can still appear in the stream: the
-database and its chain are authoritative.
+**SIEM stream.** After an audit row is committed, the server also writes
+the event to stdout as one JSON line with `"type":"audit"`, carrying the
+event's chain `seq` and `hash` (see "Streaming the audit log to a SIEM" in
+`docs/configuration.md`). An event recorded inside a larger transaction is
+held until that transaction commits (`audit.Commit`), so a rolled-back
+change never reaches the stream. Lines go through a bounded buffer and are
+never waited for: a line dropped because stdout fell behind is counted in
+`simplehost_audit_stream_dropped_total`, which should stay 0.
 
 ## 3. What a penetration test should try
 
