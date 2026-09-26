@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+# The owner-hosts reconciler (internal/ownerhosts). Every site is served at
+# "<site>.<owner>.<base>", and a TLS wildcard covers one label, so each owner
+# needs a "*.<owner>.<base>" certificate. This Deployment keeps one Ingress
+# per owner with sites, annotated for cert-manager, and records in the
+# database which owners' certificates are Ready; the server moves an owner's
+# sites to their own hosts only then. Needs cert-manager and a ClusterIssuer
+# named by OWNER_CERT_ISSUER in config.env.
+#
+# It runs apart from the server so the server's pods keep no Kubernetes
+# credential: this is the one pod in the install with a ServiceAccount
+# token, and its Role allows ingresses and reading Certificates in this
+# namespace, nothing else. Installs that issue owner certificates
+# themselves leave this component out and set OWNER_CERTS=manual.
+resources:
+  - serviceaccount.yaml
+  - rbac.yaml
+  - deployment.yaml

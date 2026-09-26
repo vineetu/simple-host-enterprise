@@ -275,7 +275,7 @@ func renderSiteRankingCard(b *strings.Builder, hosts HostModel, rows []siteRank,
 		if i >= rankTop {
 			break
 		}
-		writeRankRow(b, i+1, hosts.SiteLink(row.owner, row.name), row.name, siteMetricCell(row, metric))
+		writeRankRow(b, i+1, hosts.SiteURL(row.owner, row.name), row.name, siteMetricCell(row, metric))
 	}
 	b.WriteString(`</div></div>`)
 }

@@ -86,7 +86,7 @@ func (w *accessWorld) teamSiteIDs(name string) []string {
 func TestLeaveTeamAsNonLastMember(t *testing.T) {
 	w := newAccessWorld(t)
 	w.newTeam("crew", "mo", "alice")
-	w.deploy("mo", "/api/collaboration/sites/crew/board")
+	w.deploy("mo", "/api/collaboration/sites/team-crew/board")
 
 	rec := w.api("alice", http.MethodPost, "/api/teams/crew/leave", nil)
 	if rec.Code != http.StatusOK {
@@ -100,7 +100,7 @@ func TestLeaveTeamAsNonLastMember(t *testing.T) {
 	if out.TeamDeleted || len(out.Members) != 1 || out.Members[0].Username != "mo" {
 		t.Errorf("leave answered %s", rec.Body)
 	}
-	if !w.teamExists("crew") || len(w.teamSiteIDs("crew")) != 1 {
+	if !w.teamExists("team-crew") || len(w.teamSiteIDs("team-crew")) != 1 {
 		t.Fatal("leaving as a non-last member touched the team or its sites")
 	}
 	// Alice is out: the team is now a 404 to her.
@@ -115,9 +115,9 @@ func TestLeaveTeamAsNonLastMember(t *testing.T) {
 func TestLastMemberLeaveNeedsConfirmAndDeletesSites(t *testing.T) {
 	w := newAccessWorld(t)
 	w.newTeam("crew", "mo")
-	w.deploy("mo", "/api/collaboration/sites/crew/board")
-	w.deploy("mo", "/api/collaboration/sites/crew/wiki")
-	ids := w.teamSiteIDs("crew")
+	w.deploy("mo", "/api/collaboration/sites/team-crew/board")
+	w.deploy("mo", "/api/collaboration/sites/team-crew/wiki")
+	ids := w.teamSiteIDs("team-crew")
 
 	for _, path := range []string{"/api/teams/crew/leave", "/api/teams/crew/leave?confirm_name=crow"} {
 		rec := w.api("mo", http.MethodPost, path, nil)
@@ -134,7 +134,7 @@ func TestLastMemberLeaveNeedsConfirmAndDeletesSites(t *testing.T) {
 			t.Errorf("%s answered %s", path, rec.Body)
 		}
 	}
-	if !w.teamExists("crew") || len(w.teamSiteIDs("crew")) != 2 {
+	if !w.teamExists("team-crew") || len(w.teamSiteIDs("team-crew")) != 2 {
 		t.Fatal("an unconfirmed leave deleted something")
 	}
 
@@ -142,7 +142,7 @@ func TestLastMemberLeaveNeedsConfirmAndDeletesSites(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"team_deleted":true`) {
 		t.Fatalf("confirmed leave = %d %s", rec.Code, rec.Body)
 	}
-	w.assertTeamGone("crew", ids, "last_member_left")
+	w.assertTeamGone("team-crew", ids, "last_member_left")
 }
 
 // Removing yourself through the members route is leaving; removing the last
@@ -150,13 +150,13 @@ func TestLastMemberLeaveNeedsConfirmAndDeletesSites(t *testing.T) {
 func TestRemoveMemberPaths(t *testing.T) {
 	w := newAccessWorld(t)
 	w.newTeam("crew", "mo", "alice")
-	w.deploy("mo", "/api/collaboration/sites/crew/board")
-	ids := w.teamSiteIDs("crew")
+	w.deploy("mo", "/api/collaboration/sites/team-crew/board")
+	ids := w.teamSiteIDs("team-crew")
 
 	if rec := w.api("mo", http.MethodDelete, "/api/teams/crew/members/alice", nil); rec.Code != http.StatusOK {
 		t.Fatalf("remove other = %d %s", rec.Code, rec.Body)
 	}
-	if !w.teamExists("crew") || len(w.teamSiteIDs("crew")) != 1 {
+	if !w.teamExists("team-crew") || len(w.teamSiteIDs("team-crew")) != 1 {
 		t.Fatal("removing the last other member deleted the team")
 	}
 
@@ -167,15 +167,15 @@ func TestRemoveMemberPaths(t *testing.T) {
 	if rec := w.api("mo", http.MethodDelete, "/api/teams/crew/members/mo?confirm_name=crew", nil); rec.Code != http.StatusOK {
 		t.Fatalf("confirmed remove self = %d %s", rec.Code, rec.Body)
 	}
-	w.assertTeamGone("crew", ids, "last_member_left")
+	w.assertTeamGone("team-crew", ids, "last_member_left")
 }
 
 // A disabled account cannot sign in, so it does not keep a team alive.
 func TestDisabledMembersDoNotCountAsLastMember(t *testing.T) {
 	w := newAccessWorld(t)
 	w.newTeam("crew", "mo", "alice", "vera")
-	w.deploy("mo", "/api/collaboration/sites/crew/board")
-	ids := w.teamSiteIDs("crew")
+	w.deploy("mo", "/api/collaboration/sites/team-crew/board")
+	ids := w.teamSiteIDs("team-crew")
 	w.disable("alice")
 	w.disable("vera")
 
@@ -186,14 +186,14 @@ func TestDisabledMembersDoNotCountAsLastMember(t *testing.T) {
 	if rec := w.api("mo", http.MethodPost, "/api/teams/crew/leave?confirm_name=crew", nil); rec.Code != http.StatusOK {
 		t.Fatalf("confirmed leave = %d %s", rec.Code, rec.Body)
 	}
-	w.assertTeamGone("crew", ids, "last_member_left")
+	w.assertTeamGone("team-crew", ids, "last_member_left")
 }
 
 func TestDeleteTeamWithSitesNeedsConfirm(t *testing.T) {
 	w := newAccessWorld(t)
 	w.newTeam("crew", "mo", "alice")
-	w.deploy("mo", "/api/collaboration/sites/crew/board")
-	ids := w.teamSiteIDs("crew")
+	w.deploy("mo", "/api/collaboration/sites/team-crew/board")
+	ids := w.teamSiteIDs("team-crew")
 
 	if rec := w.api("alice", http.MethodDelete, "/api/teams/crew", nil); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"site_count":1`) {
 		t.Fatalf("unconfirmed delete = %d %s", rec.Code, rec.Body)
@@ -201,7 +201,7 @@ func TestDeleteTeamWithSitesNeedsConfirm(t *testing.T) {
 	if rec := w.api("alice", http.MethodDelete, "/api/teams/crew?confirm_name=crew", nil); rec.Code != http.StatusNoContent {
 		t.Fatalf("confirmed delete = %d %s", rec.Code, rec.Body)
 	}
-	w.assertTeamGone("crew", ids, "deleted")
+	w.assertTeamGone("team-crew", ids, "deleted")
 
 	// A team with no sites still deletes without ceremony.
 	w.newTeam("empty", "mo")
@@ -213,21 +213,21 @@ func TestDeleteTeamWithSitesNeedsConfirm(t *testing.T) {
 func TestAdminDeletesTeamOnlyWhenNoMemberIsActive(t *testing.T) {
 	w := newAccessWorld(t)
 	w.newTeam("crew", "mo", "alice")
-	w.deploy("mo", "/api/collaboration/sites/crew/board")
-	ids := w.teamSiteIDs("crew")
+	w.deploy("mo", "/api/collaboration/sites/team-crew/board")
+	ids := w.teamSiteIDs("team-crew")
 
 	w.disable("mo")
-	if rec := w.admin(http.MethodPost, "/api/admin/teams/crew/delete"); rec.Code != http.StatusConflict {
+	if rec := w.admin(http.MethodPost, "/api/admin/teams/team-crew/delete"); rec.Code != http.StatusConflict {
 		t.Fatalf("admin delete with an active member = %d %s", rec.Code, rec.Body)
 	}
-	if !w.teamExists("crew") {
+	if !w.teamExists("team-crew") {
 		t.Fatal("admin deleted a team that still had an active member")
 	}
 	w.disable("alice")
-	if rec := w.admin(http.MethodPost, "/api/admin/teams/crew/delete"); rec.Code != http.StatusOK {
+	if rec := w.admin(http.MethodPost, "/api/admin/teams/team-crew/delete"); rec.Code != http.StatusOK {
 		t.Fatalf("admin delete = %d %s", rec.Code, rec.Body)
 	}
-	w.assertTeamGone("crew", ids, "admin_no_active_members")
+	w.assertTeamGone("team-crew", ids, "admin_no_active_members")
 	if n := w.count(`SELECT count(*) FROM audit_events WHERE action = 'team_delete' AND actor_id = $1`, w.users["root"]); n != 1 {
 		t.Errorf("admin team_delete audit rows = %d, want 1", n)
 	}
@@ -235,7 +235,7 @@ func TestAdminDeletesTeamOnlyWhenNoMemberIsActive(t *testing.T) {
 	// Not an admin: refused, and nothing happens.
 	w.newTeam("other", "vera")
 	r := w.api("vera", http.MethodPost, "/api/admin/teams/other/delete", nil)
-	if r.Code < 400 || !w.teamExists("other") {
+	if r.Code < 400 || !w.teamExists("team-other") {
 		t.Fatalf("non-admin delete = %d", r.Code)
 	}
 }

@@ -1,6 +1,12 @@
 package handler
 
-import "testing"
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"strings"
+	"testing"
+)
 
 func TestOwnerLabel(t *testing.T) {
 	cases := []struct{ in, want string }{
@@ -107,12 +113,10 @@ func TestNewHostModel(t *testing.T) {
 	}
 }
 
-// TestHostModelClassify covers the three shapes: base, owner
-// ("<label>.<base>"), and restricted-site ("<owner label>--<site
-// label>.<base>"). "--" is reserved in owner labels, so any
-// label containing it that cannot form a valid restricted-site pair (the
-// owner part shorter than three characters, per RFC 5890's rule)
-// classifies as unknown rather than as an ordinary owner.
+// TestHostModelClassify covers the shapes: base, owner ("<label>.<base>"),
+// site ("<site part>.<owner label>.<base>") and the v1.2 specific-site
+// address ("<owner>--<site>.<base>", which only redirects). "--" is reserved
+// in owner labels; "xn--" reads as punycode and is refused in any position.
 func TestHostModelClassify(t *testing.T) {
 	m, err := NewHostModel("https://foo.example")
 	if err != nil {
@@ -130,7 +134,6 @@ func TestHostModelClassify(t *testing.T) {
 		{"alice.foo.example.", hostOwner, "alice"},
 		{"Alice.foo.example:8443", hostOwner, "alice"},
 		{"alice-smith.foo.example", hostOwner, "alice-smith"},
-		{"alice.bob.foo.example", hostUnknown, ""},
 		{"-x.foo.example", hostUnknown, ""},
 		{"x-.foo.example", hostUnknown, ""},
 		{"xfoo.example", hostUnknown, ""},
@@ -141,17 +144,29 @@ func TestHostModelClassify(t *testing.T) {
 		{"", hostUnknown, ""},
 		{"evil.com", hostUnknown, ""},
 		{"foo.example.evil.com", hostUnknown, ""},
-		// Restricted-site shape: owner label at least 3 characters.
-		{"alice--blog.foo.example", hostRestrictedSite, "alice--blog"},
-		{"ali--blog.foo.example", hostRestrictedSite, "ali--blog"},
-		{"ALICE--Blog.foo.example", hostRestrictedSite, "alice--blog"}, // normalizeHost lowercases first
-		// Owner part too short (RFC 5890's "--" at position 3 is reserved):
-		// neither an owner label (it contains "--", which is reserved) nor a
-		// well-formed restricted-site label.
-		{"ab--blog.foo.example", hostUnknown, ""},
-		{"a--blog.foo.example", hostUnknown, ""},
+		// A site's own host: two labels under the base.
+		{"blog.alice.foo.example", hostSite, "blog.alice"},
+		{"BLOG.Alice.foo.example", hostSite, "blog.alice"}, // normalizeHost lowercases first
+		{"q3.team-sales.foo.example", hostSite, "q3.team-sales"},
+		{"blog.a.foo.example", hostSite, "blog.a"},
+		{"a--b.alice.foo.example", hostSite, "a--b.alice"}, // a site part may hold "--"
+		// Three labels deep is nobody's.
+		{"a.b.c.foo.example", hostUnknown, ""},
+		// Malformed parts.
+		{"-blog.alice.foo.example", hostUnknown, ""},
+		{"blog.-alice.foo.example", hostUnknown, ""},
+		{"blog.al--ice.foo.example", hostUnknown, ""}, // owner labels never hold "--"
+		{".alice.foo.example", hostUnknown, ""},
+		{"blog..foo.example", hostUnknown, ""},
+		// Punycode, in either position.
+		{"xn--blog.foo.example", hostUnknown, ""},
+		{"xn--blog.alice.foo.example", hostUnknown, ""},
+		{"blog.xn--alice.foo.example", hostUnknown, ""},
+		// The v1.2 specific-site address.
+		{"alice--blog.foo.example", hostLegacySite, "alice--blog"},
+		{"ALICE--Blog.foo.example", hostLegacySite, "alice--blog"},
+		{"team-sales--q3.foo.example", hostLegacySite, "team-sales--q3"},
 		{"--blog.foo.example", hostUnknown, ""},
-		// A site part that is empty or itself malformed.
 		{"alice--.foo.example", hostUnknown, ""},
 		{"alice---blog.foo.example", hostUnknown, ""}, // splits to site "-blog", leading hyphen invalid
 	}
@@ -163,52 +178,127 @@ func TestHostModelClassify(t *testing.T) {
 	}
 }
 
-func TestSplitRestrictedSiteLabel(t *testing.T) {
+func TestSplitSiteLabel(t *testing.T) {
 	cases := []struct {
 		in        string
-		wantOwner string
 		wantSite  string
+		wantOwner string
 		wantOK    bool
 	}{
-		{"alice--blog", "alice", "blog", true},
-		{"ali--my-blog", "ali", "my-blog", true},
-		{"noseparator", "", "", false},
+		{"blog.alice", "blog", "alice", true},
+		{"my-blog.ali", "my-blog", "ali", true},
+		{"x--y.ab", "x--y", "ab", true},
+		{"noseparator", "noseparator", "", false},
 	}
 	for _, tc := range cases {
-		owner, site, ok := SplitRestrictedSiteLabel(tc.in)
-		if owner != tc.wantOwner || site != tc.wantSite || ok != tc.wantOK {
-			t.Errorf("SplitRestrictedSiteLabel(%q) = (%q, %q, %v), want (%q, %q, %v)",
-				tc.in, owner, site, ok, tc.wantOwner, tc.wantSite, tc.wantOK)
+		site, owner, ok := SplitSiteLabel(tc.in)
+		if site != tc.wantSite || owner != tc.wantOwner || ok != tc.wantOK {
+			t.Errorf("SplitSiteLabel(%q) = (%q, %q, %v), want (%q, %q, %v)",
+				tc.in, site, owner, ok, tc.wantSite, tc.wantOwner, tc.wantOK)
 		}
 	}
 }
 
-func TestRestrictedSiteAddressable(t *testing.T) {
+func TestSplitLegacySiteLabel(t *testing.T) {
+	owner, site, ok := splitLegacySiteLabel("alice--x--y")
+	if owner != "alice" || site != "x--y" || !ok {
+		t.Errorf("splitLegacySiteLabel = (%q, %q, %v)", owner, site, ok)
+	}
+	if _, _, ok := splitLegacySiteLabel("alice"); ok {
+		t.Error("splitLegacySiteLabel(alice) ok, want not")
+	}
+}
+
+// siteHostPart keeps a name that is already a label (every name a new site
+// may have, and every "specific" site's pre-v1.3 address), and gives any
+// other name a deterministic, collision-resistant part. It depends on the
+// name alone, never on the owner.
+func TestSiteHostPart(t *testing.T) {
+	long := strings.Repeat("a", 70)
+	cases := []struct {
+		site, want string
+	}{
+		{"blog", "blog"},
+		{"My.Site", "my-site"},
+		{"Notes", "notes"},
+		{strings.Repeat("a", 63), strings.Repeat("a", 63)},
+		{"two words", "two-words-" + shortHash("two words")},
+		{"a_b__c", "a-b-c-" + shortHash("a_b__c")},
+		{"!!!", "s-" + shortHash("!!!")},
+		{long, strings.Repeat("a", 63-7) + "-" + shortHash(long)},
+		{"xn--abc", "abc-" + shortHash("xn--abc")},
+	}
+	for _, tc := range cases {
+		got := siteHostPart(tc.site)
+		if got != tc.want {
+			t.Errorf("siteHostPart(%q) = %q, want %q", tc.site, got, tc.want)
+		}
+		if !isValidLabel(got) || strings.HasPrefix(got, "xn--") {
+			t.Errorf("siteHostPart(%q) = %q is not a usable label", tc.site, got)
+		}
+	}
+}
+
+func shortHash(name string) string {
+	sum := sha256.Sum256([]byte(name))
+	return hex.EncodeToString(sum[:])[:6]
+}
+
+func TestValidNewSiteName(t *testing.T) {
 	m := testHostModel(t)
+	longOwner := strings.Repeat("o", 63)
 	cases := []struct {
 		owner, site string
 		want        bool
 	}{
 		{"alice", "blog", true},
-		{"ali", "blog", true},
-		{"ab", "blog", false},       // owner label too short (2 chars)
-		{"alice", "my site", false}, // site name does not fold to a valid label
-		{"al@ice", "blog", false},   // owner name is not addressable at all
+		{"ab", "blog", true},
+		{"team-sales", "q3-plan", true},
+		{"alice", "Blog", false},
+		{"alice", "my.site", false},
+		{"alice", "my site", false},
+		{"alice", "-x", false},
+		{"alice", "xn--blog", false},
+		{"alice", strings.Repeat("a", 63), true},
+		{"alice", strings.Repeat("a", 64), false},
+		// The owner's length no longer shortens the name.
+		{longOwner, strings.Repeat("a", 63), true},
 	}
 	for _, tc := range cases {
-		if got := m.RestrictedSiteAddressable(tc.owner, tc.site); got != tc.want {
-			t.Errorf("RestrictedSiteAddressable(%q, %q) = %v, want %v", tc.owner, tc.site, got, tc.want)
+		if got := m.ValidNewSiteName(tc.owner, tc.site); got != tc.want {
+			t.Errorf("ValidNewSiteName(%q, %q) = %v, want %v", tc.owner, tc.site, got, tc.want)
 		}
+	}
+	if got := MaxSiteNameLen("alice"); got != 63 {
+		t.Errorf("MaxSiteNameLen(alice) = %d, want 63", got)
+	}
+
+	// A host longer than DNS allows is refused even for a valid name.
+	long, err := NewHostModel("https://" + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + ".example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if long.ValidNewSiteName(longOwner, strings.Repeat("a", 63)) {
+		t.Error("ValidNewSiteName accepted a host over 253 characters")
+	}
+	if !long.ValidNewSiteName("alice", "blog") {
+		t.Error("ValidNewSiteName refused a short host under a long base")
 	}
 }
 
-func TestHostModelSiteHostAndOwnsLabel(t *testing.T) {
+func TestHostModelHostsAndOwnsLabel(t *testing.T) {
 	m, err := NewHostModel("https://foo.example")
 	if err != nil {
 		t.Fatalf("NewHostModel: %v", err)
 	}
-	if got := m.SiteHost("Alice.Smith"); got != "alice-smith.foo.example" {
+	if got := m.OwnerHost("Alice.Smith"); got != "alice-smith.foo.example" {
+		t.Errorf("OwnerHost = %q", got)
+	}
+	if got := m.SiteHost("Alice.Smith", "blog"); got != "blog.alice-smith.foo.example" {
 		t.Errorf("SiteHost = %q", got)
+	}
+	if got := m.SiteHost("al@ice", "blog"); got != "" {
+		t.Errorf("SiteHost(al@ice) = %q, want none", got)
 	}
 	if !m.OwnsLabel("alice-smith", "Alice.Smith") {
 		t.Error("OwnsLabel should match derived label")
@@ -232,8 +322,9 @@ func TestHostModelRedirectHost(t *testing.T) {
 		{"alice.safe.example", "alice.safe.example"},
 		{"Alice.Safe.Example.", "alice.safe.example"},
 		{"alice.safe.example:8080", "alice.safe.example"},
+		{"blog.alice.safe.example", "blog.alice.safe.example"},
 		{"alice--blog.safe.example", "alice--blog.safe.example"},
-		{"a.b.safe.example", "safe.example"},
+		{"a.b.c.safe.example", "safe.example"},
 		{"-x.safe.example", "safe.example"},
 		{"10.0.0.5:8080", "safe.example"},
 		{"evil.com", "safe.example"},
@@ -247,33 +338,26 @@ func TestHostModelRedirectHost(t *testing.T) {
 	}
 }
 
-// TestHostModelSiteURL covers the rule that site links are always the
-// absolute short form: there is no long-path fallback any more, only the
-// owner's own host (restricted=false) or the restricted site's own host
-// (restricted=true). An owner whose name cannot be a hostname label, or a
-// restricted site that cannot form its own label, gets "" rather than a
-// broken address spliced from unsafe input.
+// TestHostModelSiteURL: once the owner is ready a site's address is the
+// root of its own host; until then it is "<owner>.<base>/<site>/". An owner
+// whose name cannot be a hostname label gets "" rather than a broken
+// address spliced from unsafe input.
 func TestHostModelSiteURL(t *testing.T) {
 	cases := []struct {
 		name       string
 		base       string
 		user, site string
-		restricted bool
 		want       string
 	}{
-		{name: "owner host short address", base: "https://foo.example", user: "Alice.B", site: "my-site",
-			want: "https://alice-b.foo.example/my-site/"},
-		{name: "escapes the site segment", base: "https://foo.example", user: "alice", site: "100%",
-			want: "https://alice.foo.example/100%25/"},
+		{name: "own host", base: "https://foo.example", user: "Alice.B", site: "my-site",
+			want: "https://my-site.alice-b.foo.example/"},
 		{name: "keeps the base scheme and port", base: "http://Foo.Example:8080/", user: "alice", site: "s",
-			want: "http://alice.foo.example:8080/s/"},
+			want: "http://s.alice.foo.example:8080/"},
+		{name: "short owner", base: "https://foo.example", user: "ab", site: "private",
+			want: "https://private.ab.foo.example/"},
+		{name: "pre-v1.3 name that is not a label", base: "https://foo.example", user: "alice", site: "two words",
+			want: "https://two-words-" + shortHash("two words") + ".alice.foo.example/"},
 		{name: "an owner whose name is not a label has no address", base: "https://foo.example", user: "al@ice", site: "s",
-			want: ""},
-		{name: "restricted site's own host", base: "https://foo.example", user: "alice", site: "private", restricted: true,
-			want: "https://alice--private.foo.example/"},
-		{name: "restricted but owner label too short", base: "https://foo.example", user: "ab", site: "private", restricted: true,
-			want: ""},
-		{name: "restricted but site name not addressable", base: "https://foo.example", user: "alice", site: "two words", restricted: true,
 			want: ""},
 	}
 	for _, tc := range cases {
@@ -282,7 +366,7 @@ func TestHostModelSiteURL(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewHostModel: %v", err)
 			}
-			if got := m.SiteURL(tc.user, tc.site, tc.restricted); got != tc.want {
+			if got := m.SiteURL(tc.user, tc.site); got != tc.want {
 				t.Errorf("SiteURL = %q, want %q", got, tc.want)
 			}
 		})
@@ -291,14 +375,52 @@ func TestHostModelSiteURL(t *testing.T) {
 	// The zero value is what handler tests build with: no base host, so
 	// there is no address to give.
 	var zero HostModel
-	if got := zero.SiteURL("alice", "s", false); got != "" {
+	if got := zero.SiteURL("alice", "s"); got != "" {
 		t.Errorf("zero SiteURL = %q, want \"\"", got)
 	}
 }
 
-// OwnerOrigin rebuilds an owner host's origin from the configured base URL's
-// scheme and port. It is what the Origin check compares against on an owner
-// host, and what shortSiteURL is built on, so the two can never disagree.
+// Until an owner's certificate is ready, SiteURL and SiteHostResolver point
+// at the owner host; once it is, at the site's own host. Readiness is asked
+// per owner label.
+func TestHostModelOwnerReadiness(t *testing.T) {
+	base := newTestHostModel(t, "https://foo.example")
+	if !base.OwnerReady("anyone") {
+		t.Error("no readiness func: every owner should be ready")
+	}
+	var asked []string
+	m := base.WithOwnerReadiness(func(label string) bool {
+		asked = append(asked, label)
+		return label == "ready-one"
+	})
+	for _, tc := range []struct{ user, site, wantURL, wantHost string }{
+		{"Ready.One", "blog", "https://blog.ready-one.foo.example/", "blog.ready-one.foo.example"},
+		{"alice", "blog", "https://alice.foo.example/blog/", "alice.foo.example"},
+		{"alice", "two words", "https://alice.foo.example/two%20words/", "alice.foo.example"},
+	} {
+		if got := m.SiteURL(tc.user, tc.site); got != tc.wantURL {
+			t.Errorf("SiteURL(%q, %q) = %q, want %q", tc.user, tc.site, got, tc.wantURL)
+		}
+		got, err := m.SiteHostResolver()(context.Background(), tc.user, tc.site)
+		if err != nil || got != tc.wantHost {
+			t.Errorf("SiteHostResolver(%q, %q) = %q, %v, want %q", tc.user, tc.site, got, err, tc.wantHost)
+		}
+	}
+	if len(asked) == 0 || asked[0] != "ready-one" {
+		t.Errorf("readiness asked with %v, want owner labels", asked)
+	}
+	if _, err := m.SiteHostResolver()(context.Background(), "al@ice", "s"); err == nil {
+		t.Error("SiteHostResolver for an unaddressable owner: want an error")
+	}
+	// The original model is unchanged: HostModel is a value.
+	if !base.OwnerReady("alice") {
+		t.Error("WithOwnerReadiness changed the model it was called on")
+	}
+}
+
+// OwnerOrigin rebuilds an owner or site host's origin from the configured
+// base URL's scheme and port. It is what the Origin check compares against,
+// and what SiteURL is built on, so the two can never disagree.
 func TestOwnerOrigin(t *testing.T) {
 	for _, test := range []struct {
 		base  string
@@ -313,9 +435,7 @@ func TestOwnerOrigin(t *testing.T) {
 		if got := m.OwnerOrigin(test.label); got != test.want {
 			t.Errorf("OwnerOrigin(%q) on %q = %q, want %q", test.label, test.base, got, test.want)
 		}
-		// The short site URL is the same origin plus the site path, so a
-		// change to one cannot silently diverge from the other.
-		if got, want := m.SiteURL(test.label, "demo", false), test.want+"/demo/"; got != want {
+		if got, want := m.SiteURL(test.label, "demo"), m.OwnerOrigin("demo."+test.label)+"/"; got != want {
 			t.Errorf("SiteURL on %q = %q, want %q", test.base, got, want)
 		}
 	}

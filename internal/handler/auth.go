@@ -462,6 +462,11 @@ func (h *AuthHandler) createUser(ctx context.Context, sub, email, usernameHint s
 	if base == "" {
 		return db.User{}, "", errors.New("could not derive a valid username from the sign-in email")
 	}
+	// "team-" begins every team name, so a person's handle never does:
+	// "team-alpha" signs in as "teamalpha".
+	if rest, ok := strings.CutPrefix(base, db.TeamPrefix); ok {
+		base = "team" + rest
+	}
 
 	// A derived name may be unusable in two different ways: reserved (the
 	// rule is to append a short suffix and tell the person on collision — an

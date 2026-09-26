@@ -3,12 +3,13 @@
 Read this file completely before building a project for Simple Host. Detect the
 framework from `package.json`, scripts, dependencies, and root config files.
 
-A site is served at `<owner-label>.<base>/<sitename>/`, and at its own host
-(`<owner-label>--<sitename-label>.<base>/`, no `/<sitename>/` segment) once it
-is restricted to named viewers. **Build with relative asset paths (`./`)**: a
-page that loads `./assets/app.js` works at both, and never needs rebuilding when
-the site is restricted or unrestricted. An absolute path (`/assets/app.js`, or
-`/<sitename>/assets/app.js`) breaks on one of the two.
+Every site is served at the root of its own host,
+`<sitename>.<owner-label>.<base>/`, with no `/<sitename>/` segment. For a short
+time after an owner's first site is created, a site may be served at
+`<owner-label>.<base>/<sitename>/` instead. **Build with relative asset paths
+(`./`)**: a page that loads `./assets/app.js` works at both. A root-absolute
+path (`/assets/app.js`) works only on the site's own host, and a path with the
+site name in it (`/<sitename>/assets/app.js`) only at the short-lived address.
 
 Use hash-based client routing (`#/page`) for a single-page app: a relative base
 cannot serve history-mode deep links.
@@ -74,19 +75,21 @@ export default { kit: { adapter: adapter({ fallback: 'index.html' }), router: { 
 
 `npm run build`, then upload `build/`.
 
-## Frameworks that need an absolute base
+## Frameworks that build for the root
 
 Next.js, Astro, Nuxt, and Gatsby cannot build reliably with relative paths.
-Build them with the site's path on its owner's host, `/<sitename>` (the setting
-below), and tell the user: if the site is later restricted to named viewers it
-moves to its own host, and must be rebuilt with no base path and deployed again.
+Build them for the root of the site's own host: leave the base path unset (no
+`basePath`, `base`, `baseURL`, or `pathPrefix`). If the deploy response's `url`
+is still the `<owner-label>.<base>/<sitename>/` form, their `/`-prefixed assets
+do not load there yet: tell the user, check `url` again with `get_site` later,
+and verify once it is the site's own host. Do not rebuild with a base path.
 
 | Framework | Detect | Setting | Build | Upload |
 |---|---|---|---|---|
-| Next.js | `next` | `basePath: '/<sitename>'`, `output: 'export'`, `images: { unoptimized: true }`, `trailingSlash: true` | `npx next build` | `out/` |
-| Astro | `astro` | `base: '/<sitename>'`, `output: 'static'` | `npx astro build` | `dist/` |
-| Nuxt 3/4 | `nuxt` | `app: { baseURL: '/<sitename>/' }` | `npx nuxt generate` | `.output/public/` |
-| Gatsby | `gatsby` | `pathPrefix: '/<sitename>'` | `npx gatsby build --prefix-paths` | `public/` |
+| Next.js | `next` | `output: 'export'`, `images: { unoptimized: true }`, `trailingSlash: true`, no `basePath` | `npx next build` | `out/` |
+| Astro | `astro` | `output: 'static'`, no `base` | `npx astro build` | `dist/` |
+| Nuxt 3/4 | `nuxt` | no `app.baseURL` (defaults to `/`) | `npx nuxt generate` | `.output/public/` |
+| Gatsby | `gatsby` | no `pathPrefix` | `npx gatsby build` | `public/` |
 
 API routes, server actions, middleware, and SSR are not deployable here.
 
@@ -104,7 +107,7 @@ For Eleventy, Hugo, Jekyll, VitePress, Docusaurus, or another unlisted tool:
 1. Identify the exact framework and version.
 2. Check its official documentation for relative asset paths (often a
    `base`, `publicPath`, or `relativeURLs` setting). Use `./` where supported.
-3. If it only supports an absolute base, treat it like the table above.
+3. If it only supports an absolute base, use `/`, like the table above.
 4. Upload only a fully static output directory.
 
 If the framework cannot emit a static build, explain the blocker; do not

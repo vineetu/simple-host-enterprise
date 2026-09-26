@@ -207,7 +207,7 @@ func (h *ShowcaseHandler) page(w http.ResponseWriter, r *http.Request) {
 		b.WriteString(`<div class="sites" id="showcase-sites">`)
 
 		for _, e := range entries {
-			publicPath := hosts.SiteURL(e.owner, e.site.Name, false)
+			publicPath := hosts.SiteURL(e.owner, e.site.Name)
 			ranks := rankBySiteID[e.site.ID]
 			fmt.Fprintf(&b, `<div class="site" data-filter-text="%s"%s>
   <div class="site-id">

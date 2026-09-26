@@ -60,3 +60,18 @@ patches:
             items:
               - key: ca.crt
                 path: ca.crt
+  # The owner-hosts reconciler (deploy/components/owner-hosts, listed before
+  # this component) connects as the application role the same way.
+  - target:
+      kind: Deployment
+      name: simple-host-owner-hosts
+    patch: |
+      - op: replace
+        path: /spec/template/spec/volumes/0
+        value:
+          name: db-ca
+          secret:
+            secretName: postgres-tls
+            items:
+              - key: ca.crt
+                path: ca.crt

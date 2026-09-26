@@ -617,3 +617,33 @@ func SearchTeamMemberCandidates(ctx context.Context, q Querier, teamID, search s
 	}
 	return candidates, nil
 }
+
+// TeamPrefix begins every team name from v1.3 on, so a team can never take a
+// name a person might sign in with. Migration 0041 renamed older teams.
+const TeamPrefix = "team-"
+
+const legacyTeamLabelQuery = `
+	SELECT t.username
+	FROM users t
+	WHERE t.kind = 'team' AND t.username = 'team-' || $1
+	  AND NOT EXISTS (SELECT 1 FROM users u WHERE lower(replace(u.username, '.', '-')) = $1)
+`
+
+// LegacyTeamName reports the team a pre-v1.3 team address now belongs to:
+// label names no account, and a team called "team-<label>" exists. Once a
+// person takes the old name, the old address is theirs and this reports
+// nothing.
+func LegacyTeamName(ctx context.Context, q Querier, label string) (string, bool, error) {
+	if strings.HasPrefix(label, TeamPrefix) {
+		return "", false, nil
+	}
+	var name string
+	err := q.QueryRowContext(ctx, legacyTeamLabelQuery, label).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return name, true, nil
+}

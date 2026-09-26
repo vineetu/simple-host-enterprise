@@ -5,7 +5,8 @@
 - `configuration.md` — every environment variable the server reads.
 - `security-review.md` — the controls, the pen-test list and what was run,
   and the accepted limitations.
-- `site-isolation.md` — which pages share a browser origin and why.
+- `site-isolation.md` — every site on its own origin (`<site>.<owner>.<base>`),
+  the fallback until an owner's certificate is ready, and the redirects.
 
 The top-level `README.md` says how to run the package locally, `CLAUDE.md`
 and `AGENTS.md` carry the working rules, and `SCRUB.md` is the checklist that

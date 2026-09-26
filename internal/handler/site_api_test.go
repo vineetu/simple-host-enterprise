@@ -350,7 +350,7 @@ func TestSiteAPICreateAssetAndServeHeaders(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
 		t.Fatalf("decode create response: %v", err)
 	}
-	if created.ID == "" || !strings.Contains(created.URL, "/demo/_assets/"+created.ID+"/logo.png") {
+	if created.ID == "" || created.URL != "https://demo.alice.foo.example/_assets/"+created.ID+"/logo.png" {
 		t.Fatalf("create response = %+v", created)
 	}
 

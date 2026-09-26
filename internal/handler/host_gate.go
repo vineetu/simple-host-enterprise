@@ -36,18 +36,18 @@ type siteAPIRoutes interface {
 // through untouched, except that a path shaped like the site-facing API
 // (state, and later assets) is refused outright — one mux serves every host,
 // and /api/sites/{site}/state would otherwise match the base host too. An
-// owner host ("<label>.<base>") serves only that owner's hosted content, the
-// site-facing API, and the session hand-off; a restricted site serves the
-// same three things on its own flat label ("<owner label>--<site
-// label>.<base>") instead of at its owner's short path.
+// owner host ("<label>.<base>") serves that owner's index page, the session
+// hand-off, and redirects from its pre-v1.3 site paths; a site's own host
+// ("<owner label>--<site part>.<base>") serves that one site's content, its
+// site-facing API, and the session hand-off.
 // Anything else — an unrecognised host, a bare IP, a port-forward — answers
 // only the Kubernetes probes.
 
 type hostGate struct {
 	hosts HostModel
 	// files serves site files and carries the store client site files live
-	// in (internal/storage's bucket store); resolveOwner and
-	// resolveRestrictedSiteName read it from there.
+	// in (internal/storage's bucket store); resolveLabelHolder and
+	// resolveSiteName read it from there.
 	files       *SiteFiles
 	signingKeys []auth.SigningKey
 	// negCache backs VerifyHostedSession: hosted content checks a session's
@@ -95,6 +95,9 @@ type hostGate struct {
 	// auth; factored into a field for the same reason as
 	// siteForServing/viewerAllowed/writerAllowed above.
 	touchHostSession func(sessionID string)
+	// legacyTeam is db.LegacyTeamName by default: which team a pre-v1.3
+	// team address now belongs to. nil redirects nothing.
+	legacyTeam func(r *http.Request, label string) (string, bool, error)
 	// ownerIndex backs the root of an owner host (owner_index.go), wired in
 	// NewHostGate from the database and factored into a field for the same
 	// reason as siteForServing above.
@@ -148,6 +151,9 @@ func NewHostGate(hosts HostModel, files *SiteFiles, database *sql.DB, signingKey
 			}
 		},
 		ownerIndex: newOwnerIndexData(database),
+		legacyTeam: func(r *http.Request, label string) (string, bool, error) {
+			return db.LegacyTeamName(r.Context(), database, label)
+		},
 		recordAccess: func(event audit.AccessEvent) {
 			if files != nil {
 				files.access.Enqueue(event)
@@ -171,8 +177,7 @@ func (g *hostGate) wrap(next http.Handler) http.Handler {
 		switch kind {
 		case hostBase:
 			// The site-facing API is not a mux route at all
-			// any more — it is served directly by serveOwnerHost and
-			// serveRestrictedSiteHost below. But the base host's own mux
+			// any more — it is served directly by serveSiteHost below. But the base host's own mux
 			// carries a catch-all "GET /" landing-page route (and every
 			// other host-agnostic pattern), so a request shaped like the
 			// site-facing API must still be refused explicitly here, or it
@@ -188,8 +193,10 @@ func (g *hostGate) wrap(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		case hostOwner:
 			g.serveOwnerHost(w, r, label, next)
-		case hostRestrictedSite:
-			g.serveRestrictedSiteHost(w, r, label, next)
+		case hostSite:
+			g.serveSiteHost(w, r, label, next)
+		case hostLegacySite:
+			g.serveLegacySiteHost(w, r, label, next)
 		default:
 			// The probes in deploy/base/deployment.yaml set no host, so
 			// they arrive addressed to the Pod IP and must keep working.
@@ -203,7 +210,7 @@ func (g *hostGate) wrap(next http.Handler) http.Handler {
 }
 
 // applyOwnerHostSecurity sets the headers required on every
-// owner-host and restricted-site-host response, and reports whether the
+// owner-host and site-host response, and reports whether the
 // request may proceed at all: a Sec-Fetch-Site of same-site or cross-site is
 // refused unless Sec-Fetch-Dest is document, so a navigation from a
 // colleague's link (including the hand-off's own redirects) still works
@@ -219,12 +226,11 @@ func applyOwnerHostSecurity(w http.ResponseWriter, r *http.Request) bool {
 	// in), so a shared cache must never keep a copy — "private, no-cache"
 	// means "revalidate with the origin every time, and never on a shared
 	// cache at all," not merely "vary by cookie." Set for every owner-host
-	// and restricted-site-host response (hosted content, the site-facing
+	// and site-host response (hosted content, the site-facing
 	// API, the hand-off), not hosted content alone: none of it belongs in
 	// a cache another viewer could be served from.
 	w.Header().Set("Cache-Control", "private, no-cache")
-	// No service workers on hosted hosts: one registered at a restricted
-	// site's root would intercept the navigation to /auth/session and read
+	// No service workers on hosted hosts: one registered at a site's root would intercept the navigation to /auth/session and read
 	// a hand-off code before this server ever sees (and spends) it.
 	if r.Header.Get("Service-Worker") != "" {
 		return false
@@ -236,7 +242,13 @@ func applyOwnerHostSecurity(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// serveOwnerHost is the exhaustive allow-list for an owner host.
+// serveOwnerHost is the exhaustive allow-list for an owner host: the
+// person's or team's index page at "/", the session hand-off, and the
+// pre-v1.3 addresses beneath it, "/<site>/..." and "/api/sites/<site>/...".
+// Once the owner's certificate is ready those redirect to the site's own
+// host, path and query kept, computed from the address alone (never from
+// whether the site exists or who is asking, so the answer confirms
+// nothing). Until then this host serves them itself (serveOwnerPath).
 func (g *hostGate) serveOwnerHost(w http.ResponseWriter, r *http.Request, label string, next http.Handler) {
 	if !applyOwnerHostSecurity(w, r) {
 		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
@@ -251,14 +263,49 @@ func (g *hostGate) serveOwnerHost(w http.ResponseWriter, r *http.Request, label 
 		g.handoff.redeemHandoffSession(w, r, requestHost)
 		return
 	}
+	if r.URL.Path == "/" {
+		g.serveOwnerIndex(w, r, label, requestHost)
+		return
+	}
 
-	// The site-facing API: the site is named by the {site}
-	// path segment, never a Referer. Only the named shape is honoured on an
-	// owner host — the nameless convenience shape (/api/site/...) would be
-	// ambiguous the moment an owner has more than one site, with nothing left
-	// to disambiguate it now that Referer parsing is gone; that shape is
-	// reserved for a restricted site's own host below, which serves exactly
-	// one site and so has no such ambiguity.
+	escaped := r.URL.EscapedPath()
+	var siteName, target string
+	if _, siteFromPath, _, named, ok := parseSiteAPIPath(r.URL.Path); ok && named {
+		// The site's own host accepts the named shape unchanged.
+		siteName, target = siteFromPath, escaped
+	} else {
+		rest, _ := strings.CutPrefix(escaped, "/")
+		segment, after, _ := strings.Cut(rest, "/")
+		name, err := neturl.PathUnescape(segment)
+		// "/api/..." and "/sites/..." were never site paths here.
+		if err != nil || name == "" || reservedSiteNames[name] || !safepath.IsSegment(name) {
+			http.NotFound(w, r)
+			return
+		}
+		siteName, target = name, "/"+after
+	}
+	if current := g.currentOwnerLabel(r, label); current != label {
+		// A pre-v1.3 team address: the same path on the team's own host,
+		// which then serves or redirects it by its own readiness.
+		g.redirectToHost(w, r, current, escaped)
+		return
+	}
+	if g.hosts.OwnerReady(label) {
+		host := siteHostPart(siteName) + "." + label
+		if len(host)+1+len(g.hosts.BaseHost()) > maxHostLen {
+			http.NotFound(w, r)
+			return
+		}
+		g.redirectToHost(w, r, host, target)
+		return
+	}
+	g.serveOwnerPath(w, r, label, requestHost)
+}
+
+// serveOwnerPath serves "<owner>.<base>/<site>/..." and the named site API
+// on the owner host while the owner's own certificate is not ready yet: the
+// v1.2 shape, with the owner's sites sharing this origin until it is.
+func (g *hostGate) serveOwnerPath(w http.ResponseWriter, r *http.Request, label, requestHost string) {
 	if route, siteFromPath, assetID, named, ok := parseSiteAPIPath(r.URL.Path); ok {
 		if !named {
 			http.NotFound(w, r)
@@ -269,22 +316,10 @@ func (g *hostGate) serveOwnerHost(w http.ResponseWriter, r *http.Request, label 
 			http.NotFound(w, r)
 			return
 		}
-		g.serveSiteAPI(w, r, route, owner, siteFromPath, assetID, label, false)
+		g.serveSiteAPI(w, r, route, owner, siteFromPath, assetID, label)
 		return
 	}
-
-	// Hosted content: the short path /{sitename} and /{sitename}/...
-	rest, ok := strings.CutPrefix(r.URL.Path, "/")
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	// The root of an owner host is that person's index of what they have
-	// published, not a 404 (owner_index.go).
-	if rest == "" {
-		g.serveOwnerIndex(w, r, label, requestHost)
-		return
-	}
+	rest, _ := strings.CutPrefix(r.URL.Path, "/")
 	sitename, afterSite, hasSlash := strings.Cut(rest, "/")
 	if sitename == "" || reservedSiteNames[sitename] || !safepath.IsSegment(sitename) {
 		http.NotFound(w, r)
@@ -300,13 +335,6 @@ func (g *hostGate) serveOwnerHost(w http.ResponseWriter, r *http.Request, label 
 		if err != db.ErrSiteNotFound {
 			log.Printf("host gate: resolve site %s/%s for serving: %v", owner, sitename, err)
 		}
-		http.NotFound(w, r)
-		return
-	}
-	if restricted {
-		// This site's address moved to its own host the moment it gained a
-		// first viewer; the owner-host short path no
-		// longer serves it, the same way a deleted site does not.
 		http.NotFound(w, r)
 		return
 	}
@@ -326,11 +354,6 @@ func (g *hostGate) serveOwnerHost(w http.ResponseWriter, r *http.Request, label 
 	if !anonymous && !g.checkViewerAllowed(w, r, siteID, userID) {
 		return
 	}
-	// GET /{site}/_assets/{id}[/{name}]: a top-level
-	// "_assets" entry can never exist in a real upload (tarball refuses it),
-	// so this interception is always unambiguous. Reuses every check above
-	// (owner and site resolution, restriction, session, viewerAllowed) —
-	// assets are viewerAllowed just like hosted content.
 	if assetID, _, ok := parseAssetServePath(afterSite); ok {
 		g.siteAPI.ServeAsset(w, r, siteAPICall{Owner: owner, SiteName: sitename, SiteID: siteID, Restricted: restricted}, assetID)
 		return
@@ -338,11 +361,93 @@ func (g *hostGate) serveOwnerHost(w http.ResponseWriter, r *http.Request, label 
 	g.files.serveSite(w, r, owner, sitename, "/"+sitename, userID, sessionID)
 }
 
-// serveRestrictedSiteHost is the exhaustive allow-list for a restricted
-// site's own host, "<owner label>--<site label>.<base>".
-// The whole host is dedicated to one site, so there is no "/<site>/"
-// segment: the request path is the site's own file path directly.
-func (g *hostGate) serveRestrictedSiteHost(w http.ResponseWriter, r *http.Request, label string, next http.Handler) {
+// serveLegacySiteHost answers "<owner>--<site>.<base>", where v1.2 served a
+// site shared with named people, by redirecting to that site's current
+// address with the rest of the path and the query.
+func (g *hostGate) serveLegacySiteHost(w http.ResponseWriter, r *http.Request, label string, next http.Handler) {
+	if !applyOwnerHostSecurity(w, r) {
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return
+	}
+	if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
+		next.ServeHTTP(w, r)
+		return
+	}
+	ownerPart, sitePart, ok := splitLegacySiteLabel(label)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	owner, ok := g.resolveLabelHolder(g.currentOwnerLabel(r, ownerPart))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	sitename, ok := g.resolveSiteName(owner, sitePart)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	location := g.hosts.SiteURL(owner, sitename)
+	if location == "" {
+		http.NotFound(w, r)
+		return
+	}
+	rest := strings.TrimPrefix(r.URL.EscapedPath(), "/")
+	if suffix, nameless := strings.CutPrefix(rest, "api/site/"); nameless && !g.hosts.OwnerReady(ownerLabel(owner)) {
+		// The owner path serves only the named API shape.
+		location = g.hosts.OwnerOrigin(ownerLabel(owner)) + "/"
+		rest = "api/sites/" + neturl.PathEscape(sitename) + "/" + suffix
+	}
+	location += rest
+	if r.URL.RawQuery != "" {
+		location += "?" + r.URL.RawQuery
+	}
+	code := http.StatusMovedPermanently
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		code = http.StatusPermanentRedirect
+	}
+	http.Redirect(w, r, location, code)
+}
+
+// currentOwnerLabel is label, unless it is a pre-v1.3 team address: no
+// account holds it and "team-<label>" is a team (db.LegacyTeamName).
+func (g *hostGate) currentOwnerLabel(r *http.Request, label string) string {
+	if g.legacyTeam == nil {
+		return label
+	}
+	team, ok, err := g.legacyTeam(r, label)
+	if err != nil {
+		log.Printf("host gate: legacy team lookup %q: %v", label, err)
+		return label
+	}
+	if ok {
+		return ownerLabel(team)
+	}
+	return label
+}
+
+// redirectToHost sends the request to hostLabel's host with escapedPath and
+// the original query. A navigation or a read is a 301; anything else is a
+// 308 so a client that follows it repeats the same method and body.
+// hostLabel is always built by this server, never taken from the request.
+func (g *hostGate) redirectToHost(w http.ResponseWriter, r *http.Request, hostLabel, escapedPath string) {
+	location := g.hosts.OwnerOrigin(hostLabel) + escapedPath
+	if r.URL.RawQuery != "" {
+		location += "?" + r.URL.RawQuery
+	}
+	code := http.StatusMovedPermanently
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		code = http.StatusPermanentRedirect
+	}
+	http.Redirect(w, r, location, code)
+}
+
+// serveSiteHost is the exhaustive allow-list for a site's own host,
+// "<site part>.<owner label>.<base>". The whole host is dedicated to one
+// site, so there is no "/<site>/" segment: the request path is the site's
+// own file path directly.
+func (g *hostGate) serveSiteHost(w http.ResponseWriter, r *http.Request, label string, next http.Handler) {
 	if !applyOwnerHostSecurity(w, r) {
 		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 		return
@@ -357,7 +462,7 @@ func (g *hostGate) serveRestrictedSiteHost(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	ownerLabelPart, siteLabelPart, ok := SplitRestrictedSiteLabel(label)
+	sitePart, ownerLabelPart, ok := SplitSiteLabel(label)
 	if !ok {
 		http.NotFound(w, r)
 		return
@@ -367,39 +472,31 @@ func (g *hostGate) serveRestrictedSiteHost(w http.ResponseWriter, r *http.Reques
 		http.NotFound(w, r)
 		return
 	}
-	sitename, ok := g.resolveRestrictedSiteName(owner, siteLabelPart)
+	sitename, ok := g.resolveSiteName(owner, sitePart)
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
 
-	// The site-facing API: a restricted site's own host
-	// serves exactly one site, so the nameless convenience shape
-	// (/api/site/...) is unambiguous here — this is the one place it is
-	// honoured. The named shape (/api/sites/{site}/...) is accepted too, but
-	// only when it names this exact site: a mismatch is not this route, not
-	// a hint to try somewhere else.
+	// The site-facing API: this host serves exactly one site, so the
+	// nameless convenience shape (/api/site/...) is unambiguous. The named
+	// shape (/api/sites/{site}/...) is accepted too, but only when it names
+	// this exact site: a mismatch is not this route, not a hint to try
+	// somewhere else.
 	if route, siteFromPath, assetID, named, ok := parseSiteAPIPath(r.URL.Path); ok {
 		if named && siteFromPath != sitename {
 			http.NotFound(w, r)
 			return
 		}
-		g.serveSiteAPI(w, r, route, owner, sitename, assetID, label, true)
+		g.serveSiteAPI(w, r, route, owner, sitename, assetID, label)
 		return
 	}
 
 	siteID, restricted, err := g.siteForServing(r, owner, sitename)
 	if err != nil {
 		if err != db.ErrSiteNotFound {
-			log.Printf("host gate: resolve restricted site %s/%s for serving: %v", owner, sitename, err)
+			log.Printf("host gate: resolve site %s/%s for serving: %v", owner, sitename, err)
 		}
-		http.NotFound(w, r)
-		return
-	}
-	if !restricted {
-		// This address exists only for a site that currently has viewers;
-		// an unrestricted site is not reachable here even if the labels
-		// happen to match.
 		http.NotFound(w, r)
 		return
 	}
@@ -408,15 +505,17 @@ func (g *hostGate) serveRestrictedSiteHost(w http.ResponseWriter, r *http.Reques
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 		return
 	}
-	userID, sessionID, ok := g.requireHostSession(w, r, requestHost)
+	userID, sessionID, anonymous, ok := g.requireHostSessionOrNetwork(w, r, requestHost, siteID)
 	if !ok {
 		return
 	}
-	if !g.checkViewerAllowed(w, r, siteID, userID) {
+	if !anonymous && !g.checkViewerAllowed(w, r, siteID, userID) {
 		return
 	}
-	// GET /_assets/{id}[/{name}]: root-served, matching how
-	// hosted content itself has no site segment on this host kind.
+	// GET /_assets/{id}[/{name}]: root-served, matching how hosted content
+	// itself has no site segment on this host. A top-level "_assets" entry
+	// can never exist in a real upload (tarball refuses it), so this
+	// interception is always unambiguous.
 	if assetID, _, ok := parseAssetServePath(strings.TrimPrefix(r.URL.Path, "/")); ok {
 		g.siteAPI.ServeAsset(w, r, siteAPICall{Owner: owner, SiteName: sitename, SiteID: siteID, Restricted: restricted}, assetID)
 		return
@@ -491,7 +590,7 @@ func (g *hostGate) requireHostSessionOrNetwork(w http.ResponseWriter, r *http.Re
 }
 
 // viewerAllowed applies its own rule and writes a 404 (never 403: a
-// restricted site's existence is not confirmed to somebody it refuses) when
+// site's existence is not confirmed to somebody it refuses) when
 // it does not hold.
 func (g *hostGate) checkViewerAllowed(w http.ResponseWriter, r *http.Request, siteID, userID string) bool {
 	allowed, err := g.viewerAllowed(r, siteID, userID)
@@ -551,7 +650,7 @@ func looksLikeSiteFacingAPIPath(p string) bool {
 // parseSiteAPIPath recognises every site-facing API path shape, state and
 // assets alike, in both the named form
 // (/api/sites/{site}/...) and the nameless convenience form (/api/site/...,
-// honoured only on a restricted site's own host — see serveRestrictedSiteHost).
+// the site's own host serves exactly one site — see serveSiteHost).
 // It does not recognise the asset *serve* route
 // (/{site}/_assets/{id}[/{name}]), which lives under the hosted-content path
 // shape instead and is handled by parseAssetServePath at the point hosted
@@ -596,7 +695,7 @@ func parseSiteAPISuffix(suffix string) (kind siteAPIRouteKind, assetID string, o
 }
 
 // parseAssetServePath recognises the asset-serving path once the
-// site (or, on a restricted host, nothing) has already been stripped off:
+// leading "/" has been stripped off:
 // "_assets/{id}" or "_assets/{id}/{name}". name is display-only — id alone
 // resolves the file — so an invalid name does not fail the parse.
 func parseAssetServePath(p string) (id, name string, ok bool) {
@@ -611,27 +710,18 @@ func parseAssetServePath(p string) (id, name string, ok bool) {
 	return id, name, true
 }
 
-// serveSiteAPI is the shared dispatcher for both host kinds once the owner
-// and site name are resolved: it looks up the site, checks Origin on a
-// non-safe method, authenticates (session or X-API-Key, via the same
-// authMiddleware every other route uses), checks viewerAllowed (every
-// route) and writerAllowed (every route but a plain read), builds the
-// via_site claim, and calls the matching SiteAPIHandler method.
-//
-// onRestrictedHost says which host kind is answering: a restricted site's
-// API is served only on its own host and an unrestricted site's only on its
-// owner's host, the same rule hosted content follows, so the owner host's
-// shared origin never reaches a restricted site's state or assets.
-func (g *hostGate) serveSiteAPI(w http.ResponseWriter, r *http.Request, kind siteAPIRouteKind, owner, siteName, assetID, label string, onRestrictedHost bool) {
+// serveSiteAPI is the dispatcher once a site's own host has resolved the
+// owner and site name: it looks up the site, checks Origin on a non-safe
+// method, authenticates (session or X-API-Key, via the same authMiddleware
+// every other route uses), checks viewerAllowed (every route) and
+// writerAllowed (every route but a plain read), builds the via_site claim,
+// and calls the matching SiteAPIHandler method.
+func (g *hostGate) serveSiteAPI(w http.ResponseWriter, r *http.Request, kind siteAPIRouteKind, owner, siteName, assetID, label string) {
 	siteID, restricted, err := g.siteForServing(r, owner, siteName)
 	if err != nil {
 		if err != db.ErrSiteNotFound {
 			log.Printf("host gate: resolve site %s/%s for site API: %v", owner, siteName, err)
 		}
-		http.NotFound(w, r)
-		return
-	}
-	if restricted != onRestrictedHost {
 		http.NotFound(w, r)
 		return
 	}
@@ -688,7 +778,7 @@ func (g *hostGate) serveSiteAPI(w http.ResponseWriter, r *http.Request, kind sit
 		Owner: owner, SiteName: siteName, SiteID: siteID, Restricted: restricted,
 		ActorUserID: user.ID, ActorKind: actorKind, KeyID: keyID,
 		ViaSiteLabel: label, ViaSiteName: siteName,
-		ViaSiteObserved: viaSiteObserved(r, siteName, restricted, label+"."+g.hosts.BaseHost()),
+		ViaSiteObserved: viaSiteObserved(r, label+"."+g.hosts.BaseHost()),
 	}
 
 	switch kind {
@@ -750,7 +840,7 @@ func (g *hostGate) authenticateSiteAPI(w http.ResponseWriter, r *http.Request) (
 // checkSiteAPIOrigin runs cookieOriginCheck, which enforces Origin only when
 // a session cookie is present (an X-API-Key caller is never a browser page)
 // and compares against the addressed host's own origin (origin.go's
-// expectedFor, which treats an owner host and a restricted site's own host
+// expectedFor, which treats an owner host and a site's own host
 // identically). false means the check already wrote the 403.
 func (g *hostGate) checkSiteAPIOrigin(w http.ResponseWriter, r *http.Request) bool {
 	ok := false
@@ -793,24 +883,12 @@ func (g *hostGate) checkSiteAccess(w http.ResponseWriter, r *http.Request, siteI
 }
 
 // viaSiteObserved corroborates the via_site claim where the browser allows
-// it: Sec-Fetch-Dest must be "empty" (a
-// fetch, not a navigation — a hosted page's own script call looks like
-// this; a top-level page load does not), and, when a Referer is present,
-// its first path segment must agree with the claimed site name. Most
-// callers send neither header, so false is the common case and is not
-// itself a sign of anything wrong — see the field's own doc comment.
-// viaSiteObserved corroborates the via_site claim two different ways
-// depending on host kind, because a restricted site is root-served and so
-// has no "/<site>/" path segment for its own pages
-// to carry at all — comparing the Referer's first path segment against the
-// site name there would always fail, silently marking every legitimate
-// restricted-site write as unobserved (review finding). For a restricted
-// site, ownHost (the site's own "<owner>--<site>.<base>" host) is the one
-// thing that names "this exact site" unambiguously, so the Referer's own
-// host is compared against it instead. An owner host, where several sites
-// share one origin, keeps the path-segment rule: the host alone cannot
-// distinguish which of an owner's sites a page belongs to.
-func viaSiteObserved(r *http.Request, claimedSite string, restricted bool, ownHost string) bool {
+// it: Sec-Fetch-Dest must be "empty" (a fetch, not a navigation — a hosted
+// page's own script call looks like this; a top-level page load does not),
+// and the Referer's host must be this site's own host, the one thing that
+// names "this exact site". Most callers send neither header, so false is the
+// common case and is not itself a sign of anything wrong.
+func viaSiteObserved(r *http.Request, ownHost string) bool {
 	if r.Header.Get("Sec-Fetch-Dest") != "empty" {
 		return false
 	}
@@ -822,22 +900,15 @@ func viaSiteObserved(r *http.Request, claimedSite string, restricted bool, ownHo
 	if err != nil {
 		return false
 	}
-	if restricted {
-		return normalizeHost(parsed.Host) == normalizeHost(ownHost)
-	}
-	segment, _, _ := strings.Cut(strings.TrimPrefix(parsed.EscapedPath(), "/"), "/")
-	name, err := neturl.PathUnescape(segment)
-	if err != nil {
-		return false
-	}
-	return name == claimedSite
+	return normalizeHost(parsed.Host) == normalizeHost(ownHost)
 }
 
 // resolveLabelHolder finds the single username whose label is label, among
 // the owners of at least one site. It is resolveOwner without the per-site
-// filter, for the restricted-site host's owner part, which names no site
-// until resolveRestrictedSiteName runs; the reason for failing closed on a
-// collision is the one documented on resolveOwner.
+// filter, for the site host's owner part, which names no site until
+// resolveSiteName runs; two accounts sharing a label is a collision
+// the registration guard is supposed to prevent, and serving either would
+// let one owner's page answer for another's, so that fails closed.
 func (g *hostGate) resolveLabelHolder(label string) (string, bool) {
 	users, err := g.files.store.ListUsers()
 	if err != nil {
@@ -861,12 +932,14 @@ func (g *hostGate) resolveLabelHolder(label string) (string, bool) {
 	}
 }
 
-// resolveRestrictedSiteName finds the single site under owner whose DNS
-// label (siteLabel) is siteLabelPart — the same fail-closed-on-collision
-// pattern resolveOwner uses for the owner label itself. It also requires a
-// current version to exist, so a site with no live content is not
-// addressable here either.
-func (g *hostGate) resolveRestrictedSiteName(owner, siteLabelPart string) (string, bool) {
+// resolveSiteName finds the site under owner whose host part
+// (siteHostPart) is sitePart. It also requires a current version to exist,
+// so a site with no live content is not addressable. Two sites can share a
+// part only when both predate v1.3 and their names differ by case or by '.'
+// against '-'; the one whose name is exactly the part keeps the address
+// whatever the others' state, and otherwise neither is served (fail
+// closed, logged).
+func (g *hostGate) resolveSiteName(owner, sitePart string) (string, bool) {
 	names, err := g.files.store.ListSites(owner)
 	if err != nil {
 		log.Printf("host gate: list sites for %q: %v", owner, err)
@@ -874,7 +947,7 @@ func (g *hostGate) resolveRestrictedSiteName(owner, siteLabelPart string) (strin
 	}
 	var matches []string
 	for _, name := range names {
-		if siteLabel(name) != siteLabelPart {
+		if siteHostPart(name) != sitePart {
 			continue
 		}
 		_, ok, err := g.files.store.CurrentVersion(owner, name)
@@ -882,9 +955,13 @@ func (g *hostGate) resolveRestrictedSiteName(owner, siteLabelPart string) (strin
 			log.Printf("host gate: owner %q site %q: current version unreadable, refusing to resolve: %v", owner, name, err)
 			return "", false
 		}
-		if ok {
-			matches = append(matches, name)
+		if !ok {
+			continue
 		}
+		if name == sitePart {
+			return name, true
+		}
+		matches = append(matches, name)
 	}
 	switch len(matches) {
 	case 1:
@@ -892,7 +969,7 @@ func (g *hostGate) resolveRestrictedSiteName(owner, siteLabelPart string) (strin
 	case 0:
 		return "", false
 	default:
-		log.Printf("host gate: owner %q site label %q resolves to %d sites %v; refusing to serve any of them", owner, siteLabelPart, len(matches), matches)
+		log.Printf("host gate: owner %q site part %q resolves to %d sites %v; refusing to serve any of them", owner, sitePart, len(matches), matches)
 		return "", false
 	}
 }

@@ -162,12 +162,12 @@ func (w *accessWorld) adminAs(user, method, path string) *httptest.ResponseRecor
 	return w.do(r)
 }
 
-// view opens a site's page as user ("" for an anonymous visitor), on the
-// owner host or, when restricted, the site's own host.
-func (w *accessWorld) view(user, owner, site string, restricted bool) int {
-	host, path := owner+"."+accessBase, "/"+site+"/"
-	if restricted {
-		host, path = owner+"--"+site+"."+accessBase, "/"
+// view opens a site's page as user ("" for an anonymous visitor) on the
+// site's own host, or with ownerHost on its pre-v1.3 owner-host path.
+func (w *accessWorld) view(user, owner, site string, ownerHost bool) int {
+	host, path := site+"."+owner+"."+accessBase, "/"
+	if ownerHost {
+		host, path = owner+"."+accessBase, "/"+site+"/"
 	}
 	r := httptest.NewRequest(http.MethodGet, "https://"+host+path, nil)
 	r.Header.Set("Accept", "text/html")
@@ -177,9 +177,10 @@ func (w *accessWorld) view(user, owner, site string, restricted bool) int {
 	return w.do(r).Code
 }
 
-// state reads or writes a site's saved data on the owner host, anonymously.
+// state reads or writes a site's saved data on the site's own host,
+// anonymously.
 func (w *accessWorld) anonymousState(method, owner, site, body string) int {
-	host := owner + "." + accessBase
+	host := site + "." + owner + "." + accessBase
 	r := httptest.NewRequest(method, "https://"+host+"/api/sites/"+site+"/state/versioned", strings.NewReader(body))
 	r.Header.Set("Origin", "https://"+host)
 	r.Header.Set("Content-Type", "application/json")
@@ -246,18 +247,16 @@ func TestAccessLevelsWhoCanOpen(t *testing.T) {
 		{db.AccessListed, ok, ok, ok, signIn},
 	} {
 		w.setAccess("alice", "/api/sites/demo/access", map[string]any{"level": tc.level}, http.StatusOK)
-		restricted := tc.level == db.AccessSpecific
-		got := []int{w.view("alice", "alice", "demo", restricted), w.view("vera", "alice", "demo", restricted), w.view("olly", "alice", "demo", restricted), w.view("", "alice", "demo", restricted)}
+		got := []int{w.view("alice", "alice", "demo", false), w.view("vera", "alice", "demo", false), w.view("olly", "alice", "demo", false), w.view("", "alice", "demo", false)}
 		want := []int{tc.owner, tc.viewer, tc.other, tc.anon}
 		for i, who := range []string{"owner", "viewer", "other", "anonymous"} {
 			if got[i] != want[i] {
 				t.Errorf("%s: %s got %d, want %d", tc.level, who, got[i], want[i])
 			}
 		}
-		if restricted {
-			if code := w.view("alice", "alice", "demo", false); code != http.StatusNotFound {
-				t.Errorf("specific: owner host still serves the site (%d)", code)
-			}
+		// The pre-v1.3 owner-host path only redirects, to anyone.
+		if code := w.view("olly", "alice", "demo", true); code != http.StatusMovedPermanently {
+			t.Errorf("%s: owner-host path = %d, want 301", tc.level, code)
 		}
 	}
 
@@ -338,7 +337,7 @@ func TestNetworkAccessRequestApproveDeclineRevert(t *testing.T) {
 	if code := w.anonymousState(http.MethodPut, "alice", "demo", `{"version":0,"state":{"n":1}}`); code != http.StatusUnauthorized {
 		t.Fatalf("anonymous state write = %d, want 401", code)
 	}
-	anonAsset := httptest.NewRequest(http.MethodPost, "https://alice."+accessBase+"/api/sites/demo/assets", strings.NewReader("x"))
+	anonAsset := httptest.NewRequest(http.MethodPost, "https://demo.alice."+accessBase+"/api/sites/demo/assets", strings.NewReader("x"))
 	if rec := w.do(anonAsset); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous asset upload = %d, want 401", rec.Code)
 	}
@@ -347,7 +346,7 @@ func TestNetworkAccessRequestApproveDeclineRevert(t *testing.T) {
 		t.Fatalf("signed-in view on a network site = %d", code)
 	}
 	// ?signin takes a visitor with no session through the hand-off.
-	signin := httptest.NewRequest(http.MethodGet, "https://alice."+accessBase+"/demo/?signin", nil)
+	signin := httptest.NewRequest(http.MethodGet, "https://demo.alice."+accessBase+"/?signin", nil)
 	signin.Header.Set("Accept", "text/html")
 	if rec := w.do(signin); rec.Code != http.StatusFound {
 		t.Fatalf("?signin = %d, want the hand-off redirect", rec.Code)

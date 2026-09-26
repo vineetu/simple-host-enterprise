@@ -9,7 +9,7 @@ they share it, and live the moment it exists.
 AI agents already produce artifacts constantly. Every one of them lands at a random UUID on a
 vendor's domain: unattributable, unfindable a week later, and hosted on someone else's internet
 whether or not that is what anyone wanted. That is the problem this solves. Here the artifact
-lives under its author's own subdomain, it is theirs, and it stays theirs alone until they decide
+lives under its author's own name, it is theirs, and it stays theirs alone until they decide
 otherwise.
 
 The result is closer to a portfolio than to a web host. The unit is the person, not the
@@ -28,10 +28,11 @@ artifact.
 
 ## What success looks like
 
-- Someone's agent publishes, and the thing is live under that person's subdomain in seconds.
+- Someone's agent publishes, and the thing is live under that person's name in seconds.
   No repo, no pipeline, no YAML, no per-artifact subdomain to provision.
-- A person accumulates hundreds of artifacts without that becoming a problem — one subdomain
-  each, not one per artifact.
+- A person accumulates hundreds of artifacts without that becoming a problem — one namespace
+  each, not one per artifact. Each site's own address sits beneath its owner's name;
+  nothing is provisioned per site.
 - Nothing is visible to anyone else until its author shares it. A new site is open only to its
   owner (or, for a team site, the team). The author then picks who can open it: named people or
   teams, anyone signed in at the company, the company showcase, or — with an admin's approval —
@@ -46,7 +47,7 @@ artifact.
 
 ## Non-goals
 
-- **Not a general web host.** No per-site custom domains. A person's subdomain is the identity;
+- **Not a general web host.** No per-site custom domains. A person's name in the address is the identity;
   handing out domains would dissolve it.
 - **Not a public publishing platform.** Sharing is inside the organisation, against the
   organisation's own identity provider. The one exception is a site an admin has approved for
@@ -77,7 +78,9 @@ artifact.
 
 - **2026-09-23 — The unit is the person, not the artifact.** Each user owns one subdomain; all
   their work lives beneath it. Rejected: a subdomain per artifact, which does not survive
-  someone making hundreds.
+  someone making hundreds. *(Since 2026-09-26 each site is served on its own host beneath the
+  owner's, `<site>.<owner>`; nothing is provisioned per site and the unit is still the
+  person.)*
 - **2026-09-23 — Unlisted by default** (`sites.public = false`, migration 0006). *Superseded
   by the 2026-09-25 access levels decision below; kept for history.* A new site was
   absent from search and the showcase, but any signed-in colleague with the link could open it
@@ -120,10 +123,23 @@ artifact.
   with only disabled accounts is deleted by an admin. No roles and no directory-group sync:
   simple beats configurable here, and a fork that needs roles can add them.
 - **2026-09-26 — Enterprise controls in v1.2, each the smallest thing that works.** An owner's
-  sites sharing one origin, and arbitrary JavaScript under the company domain, are features and
-  stay. Added: sessions and connector tokens with enterprise defaults and hard caps (match the
-  IdP; disable leavers in the IdP and in Simple Host, by hand or by an `offboard` key); API keys
+  sites sharing one origin *(superseded the same day by "Every site gets its own origin" below)*,
+  and arbitrary JavaScript under the company domain, are features and stay. Added: sessions
+  and connector tokens with enterprise defaults and hard caps (match the IdP; disable leavers in the IdP and in Simple Host, by hand or by an `offboard` key); API keys
   scoped `publish` by default; connector tokens only on `/mcp`; a hash-chained audit log streamed
   to stdout for any SIEM (no webhook); per-owner upload quotas and an optional clamd scan;
   envelope key rotation by `reencrypt`; optional two-admin network approval; security-relevant
   rate limits shared across replicas in Postgres. No new master keys.
+- **2026-09-26 — Every site gets its own origin** (v1.3). Each site, at every access level, is
+  served at the root of `<site>.<owner>.<base>`, so an owner's sites no longer share cookies,
+  storage or scripts. The owner namespace stays the identity: the site sits beneath the
+  person's name, `<owner>.<base>` is their index page, and old addresses redirect. The dash
+  form `<owner>--<site>.<base>` was rejected by the owner the same day as unreadable for an
+  enterprise audience. A TLS wildcard covers one label, so each owner needs a
+  `*.<owner>.<base>` certificate: cert-manager issues it, driven by a separate reconciler so
+  the server itself keeps no Kubernetes credential. Until an owner's certificate is ready their
+  sites are served at `<owner>.<base>/<site>/`, so nobody is sent to a host without one. New
+  site names must be usable as the address.
+- **2026-09-26 — Teams are named `team-<name>`** (migration 0041). A team can then never take a
+  name a person signs in with, and the address says at a glance whose it is. Typing `sales` or
+  `team-sales` both work; old team addresses redirect while no person holds the old name.

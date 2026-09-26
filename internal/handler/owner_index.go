@@ -49,8 +49,8 @@ type ownerIndexEntry struct {
 	// the distinction, because only the owner is shown anything that is not
 	// shared.
 	shared bool
-	// restricted marks a site that lives on its own host and is readable by
-	// a named list. Only ever shown to the owner.
+	// restricted marks a site readable by a named list ("specific"). Only
+	// ever shown to the owner.
 	restricted bool
 }
 
@@ -73,7 +73,7 @@ func ownerIndexVisible(owner string, sites []db.Site, restricted map[string]bool
 		}
 		entries = append(entries, ownerIndexEntry{
 			name:       s.Name,
-			url:        hosts.SiteURL(owner, s.Name, isRestricted),
+			url:        hosts.SiteURL(owner, s.Name),
 			updatedAt:  s.UpdatedAt,
 			shared:     s.Public,
 			restricted: isRestricted,
@@ -116,8 +116,14 @@ func (g *hostGate) serveOwnerIndex(w http.ResponseWriter, r *http.Request, label
 	var written int64
 	defer func() { g.recordOwnerIndexVisit(r, label, userID, sessionID, status, written) }()
 
-	owner, ok := g.resolveOwnerLabel(label)
+	owner, ok := g.resolveLabelHolder(label)
 	if !ok {
+		// A pre-v1.3 team address: the team is now "team-<name>".
+		if current := g.currentOwnerLabel(r, label); current != label {
+			status = http.StatusMovedPermanently
+			g.redirectToHost(w, r, current, "/")
+			return
+		}
 		status = http.StatusNotFound
 		http.NotFound(w, r)
 		return
@@ -171,33 +177,6 @@ func (g *hostGate) recordOwnerIndexVisit(r *http.Request, label, userID, session
 		UserAgent:  r.UserAgent(),
 		ClientKind: classifyClient(r).String(),
 	})
-}
-
-// resolveOwnerLabel maps a host label to the single user who owns it, reading
-// the same user list resolveOwner does. It refuses an ambiguous label for the
-// same reason: two users whose names normalise to one label must not have one
-// of them silently chosen for the other.
-func (g *hostGate) resolveOwnerLabel(label string) (string, bool) {
-	users, err := g.files.store.ListUsers()
-	if err != nil {
-		log.Printf("host gate: list users for label %q: %v", label, err)
-		return "", false
-	}
-	var holders []string
-	for _, user := range users {
-		if g.hosts.OwnsLabel(label, user) {
-			holders = append(holders, user)
-		}
-	}
-	switch len(holders) {
-	case 1:
-		return holders[0], true
-	case 0:
-		return "", false
-	default:
-		log.Printf("host gate: label %q resolves to %d users %v; refusing to serve an index for any of them", label, len(holders), holders)
-		return "", false
-	}
 }
 
 // renderOwnerIndex writes the page. Every style is inline: an owner host

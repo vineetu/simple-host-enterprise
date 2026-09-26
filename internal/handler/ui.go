@@ -28,13 +28,14 @@ const (
 	skillBundleName      = "simple-host-skills"
 	skillBundleURL       = "/skills.zip"
 	// skillReleaseType is hand-set, so it has to move with the version above
-	// it. 0.12.1 asks for a publish key by default (Full only for
+	// it. 0.13.0 documents per-site addresses (<site>.<owner>.<base>) and
+	// team- names; 0.12.1 asks for a publish key by default (Full only for
 	// management actions); 0.12.0 documented API key scopes
 	// (publish/full/offboard), upload quotas and two-admin network
 	// approval; 0.11.0 stays the minimum
 	// (notice_middleware.go), since no route an 0.11.0 skill calls went
 	// away. An agent reads this to decide how loudly to mention the update.
-	skillReleaseType     = "patch"
+	skillReleaseType     = "minor"
 	skillReleaseNotesURL = "/changelog.html"
 
 	agentSkillsDiscoverySchema = "https://schemas.agentskills.io/discovery/0.2.0/schema.json"

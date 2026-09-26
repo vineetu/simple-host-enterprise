@@ -42,8 +42,9 @@ type Server struct {
 	serverName string
 	version    string
 
-	// siteAPI serves a request addressed to an owner's own host (the site
-	// API behind the host gate), and siteHost names that host. Both are nil
+	// siteAPI serves a request addressed to a site's own host, or to its
+	// owner's host before the owner's certificate is ready (the site API
+	// behind the host gate), and siteHost names that host. Both are nil
 	// until WithSiteAPI, and the state tools say so rather than guess.
 	siteAPI  http.Handler
 	siteHost func(ctx context.Context, owner, site string) (string, error)
@@ -59,8 +60,8 @@ func NewServer(upstream http.Handler, serverName, version string) *Server {
 }
 
 // WithSiteAPI lets the state tools reach the site API, which answers only on
-// an owner's own host: handler is the host-gated application and siteHost
-// maps an owner to that host.
+// a site's own host (or its owner's host until that is ready): handler is the host-gated application and siteHost
+// maps an owner and site to that host.
 func (s *Server) WithSiteAPI(handler http.Handler, siteHost func(ctx context.Context, owner, site string) (string, error)) *Server {
 	s.siteAPI = handler
 	s.siteHost = siteHost
@@ -336,14 +337,16 @@ have settled on, and refuses rather than converting it into the other.
 Every site has an owner, and an owner is a namespace: a person or a team. A
 team owns sites exactly as a person does, but it is not a person and has no key
 of its own — its members act with their own. There is one role, so being in a
-team grants everything on that team's sites. Pass the team's name as the owner;
-list_teams gives the teams this account is in. Creating a team is never a side
+team grants everything on that team's sites. Pass the team's name as the owner,
+as list_teams gives it: team names begin with "team-". Creating a team is never a side
 effect of publishing: call create_team only when the user asks for a team.
 
-Never compose a site's address. A site restricted to named viewers moves to
-its own address, so quote the url and public_path that list_sites, get_site
-and deploy_site return, exactly as they came back. Build pages with relative
-asset paths (./) so they work at either address.
+Never compose a site's address. A site is served at the root of its own
+address, <site>.<owner>.<base>, but right after an owner's first site it can
+be at <owner>.<base>/<site>/ for a while, so quote the url and public_path
+from the latest list_sites, get_site or deploy_site response, exactly as they
+came back. Build pages with relative asset paths (./) so they work at either
+address.
 
 A site needs an index.html at its root, and changing one that already exists
 takes an etag from get_site, so a concurrent deploy is caught rather than
@@ -514,7 +517,7 @@ func codeHint(code string, tool Tool) string {
 	case "name_taken":
 		return "That team name is already registered. Ask the user for a different one rather than composing a variation of it."
 	case "name_conflict":
-		return "That name is too close to an existing account name — the two would share one web address. Ask the user for a clearly different name."
+		return "That name would share one web address with an existing account or site. Ask the user for a clearly different name."
 	case "team_limit":
 		return "This account already belongs to the maximum number of teams and cannot create another. Do not retry; tell the user."
 	case "site_limit":
@@ -542,7 +545,7 @@ func statusHint(status int, tool Tool) string {
 	switch status {
 	case http.StatusBadRequest:
 		if tool.Name == "create_team" {
-			return "The name was refused. Team names are lowercase letters, numbers and hyphens, with no dots. " +
+			return "The name was refused. Team names are lowercase letters, numbers and hyphens, with no dots; \"team-\" is added if it is not there. " +
 				"Ask the user for a name that fits rather than editing theirs into one."
 		}
 		return "The request was rejected as invalid. The message above says what is wrong with it — correct the arguments, " +

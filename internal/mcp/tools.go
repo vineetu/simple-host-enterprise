@@ -53,12 +53,12 @@ type upstream struct {
 	// no chain: it exists so a single tool can cover create-or-update.
 	FallbackOn int
 	Fallback   *upstream
-	// SiteHost names the owner whose host serves this request. The site API
-	// (state) answers only on an owner's own host, behind the host gate, so
-	// such a request is served there rather than into the bare router.
+	// SiteHost names the owner of the site whose host serves this request.
+	// The site API (state) answers only on the site's own host (or the
+	// owner's host until that is ready), behind the host gate, so such a
+	// request is served there rather than into the bare router.
 	SiteHost string
-	// SiteName is the site on that host; a restricted site answers only on
-	// its own host, so the host depends on it.
+	// SiteName is the site; with SiteHost it names the host.
 	SiteName string
 	// Transform turns a successful response body into the tool's result, for
 	// a route whose answer is not already the JSON a model wants (a zip).
@@ -70,12 +70,13 @@ type upstream struct {
 // Shared argument wording. A model only knows what these say, and the same
 // concept described two ways reads as two concepts.
 const (
-	siteArgDesc = "Site name as it appears in the URL, e.g. `my-portfolio` — lowercase letters, numbers and hyphens. Not the site's display title."
+	siteArgDesc = "Site name, e.g. `my-portfolio`, exactly as list_sites shows it. A new site's name is lowercase letters, numbers and hyphens, starting and ending with a letter or number, at most 63 characters, and becomes its web address; " +
+		"sites made earlier may have other names. Not the site's display title."
 
 	ownerArgDesc = "Name of the namespace the site belongs to. A namespace is a person or a team: your own username (from get_account), a team you are in (from list_teams), or the owner shown by list_sites. " +
 		"Being in a team grants everything on that team's sites, so a team site is acted on exactly like your own — only the owner differs. A username or team name, never a display name or email."
 
-	teamArgDesc = "Team name as it appears in the URL, e.g. `acme-team` — lowercase letters, numbers and hyphens. Get it from list_teams; a team you are not in is indistinguishable from one that does not exist, so do not guess."
+	teamArgDesc = "Team name as it appears in the URL, e.g. `team-acme` — every team name begins with `team-`. Get it from list_teams; a team you are not in is indistinguishable from one that does not exist, so do not guess."
 
 	etagArgDesc = "The site's ETag as it was when you started editing — capture it with get_site before making any change and keep it with the working copy. " +
 		"Required when anyone else can deploy the site (a team owns it), optional otherwise. " +
@@ -500,7 +501,7 @@ func toolList() []Tool {
 			Title: "Choose who can open a site",
 			Description: "Set who can open a site. Every view needs a company sign-in except `network`. Levels: " +
 				"`only_me` — only you (for a team site, the team's members); a new site starts here. " +
-				"`specific` — plus the people or teams named with grant_site_viewer; the site moves to its own address, so call get_site afterwards for the new url. " +
+				"`specific` — plus the people or teams named with grant_site_viewer; the site keeps its address. " +
 				"`company` — anyone signed in with the link; not listed. " +
 				"`listed` — company, and shown in the company showcase and search. " +
 				"`network` — anyone who can reach the server, no sign-in; this is only a REQUEST, it needs `reason`, and an admin must approve it (two different admins where the server requires two; the person who asked never counts). Until then the site keeps its current level and get_site shows the pending request with `approvals` of `approvals_required`. " +
@@ -587,8 +588,7 @@ func toolList() []Tool {
 		{
 			Name:  "grant_site_viewer",
 			Title: "Share a site with named people or teams",
-			Description: "Add people or teams to a site's viewer list and set its access level to `specific`: only they, plus the owner or the owning team, can open it, " +
-				"at its own address — call get_site afterwards for the new url. " +
+			Description: "Add people or teams to a site's viewer list and set its access level to `specific`: only they, plus the owner or the owning team, can open it. " +
 				"Names must be exact — call find_users. Works for the owner or a member of the owning team.",
 			InputSchema: object(map[string]any{
 				"site":  str(siteArgDesc),
@@ -813,7 +813,7 @@ func toolList() []Tool {
 				"You become its first member. There is one role and no other: everybody in a team may publish, roll back, relist and delete any of the team's sites, add and remove members, leave, and delete the team. " +
 				"Call this ONLY when the user asks for a team. Creating one is never a step on the way to publishing something, and never the answer to a deploy that failed.",
 			InputSchema: object(map[string]any{
-				"name": str("The team's name, e.g. `acme-team` — lowercase letters, numbers and hyphens, no dots. " +
+				"name": str("The team's name, e.g. `acme` — lowercase letters, numbers and hyphens, no dots. Every team name begins with `team-`: `acme` and `team-acme` both create `team-acme`, and the `name` in the response is the one to use from then on. " +
 					"It becomes part of the team's web address and cannot be changed afterwards, so use the name the user gave rather than one you compose from it."),
 			}, "name"),
 			Annotations: writes(false, false),
@@ -1033,8 +1033,8 @@ func stringList(args map[string]any, key string) ([]string, error) {
 }
 
 // stateRoute is the site API's versioned state route for one site. It answers
-// only on the owner's own host (the host gate), so the request carries that
-// owner for serveUpstream to address.
+// only on the site's own host or its owner's (the host gate), so the request carries the
+// owner and site for serveUpstream to address.
 func stateRoute(args map[string]any, method string, body []byte) (upstream, error) {
 	site, err := stringArg(args, "site")
 	if err != nil {

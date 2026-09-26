@@ -47,6 +47,12 @@ that provider, or a certificate issued out of band (for example certbot with the
 provider's DNS hooks) into the `simple-host-tls` Secret, with the cert-manager
 annotation removed from the Ingress.
 
+Owner certificates (`*.<owner>.<base>`) work with ingress-nginx as written: the
+reconciler's per-owner Ingresses copy its class and annotations, and cert-manager
+issues from `OWNER_CERT_ISSUER`. An internal CA issuer needs no DNS solver and has no
+rate limits; certbot out of band does not keep up with new owners, so use
+`OWNER_CERTS=manual` only if something else issues them.
+
 ## 3. Postgres
 
 Managed PostgreSQL 16. TLS is on.

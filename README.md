@@ -2,10 +2,11 @@
 
 A single Go service that hosts static sites for the people in one
 organisation. Someone signs in through your own OIDC provider, their coding
-agent publishes a directory, and the result is live at that person's own
-hostname with a JSON data store and an asset store behind it. A new site is
-open only to its owner (or their team); the owner then shares it with named
-people or teams (on its own dedicated hostname, 404 to everyone else), the
+agent publishes a directory, and the result is live at its own hostname
+under that person's name (`todo.alice.<base>`), with a JSON data store and
+an asset store behind it. A new site is open only to its owner (or their
+team); the owner then shares it with named people or teams (404 to everyone
+else), the
 whole company, the company showcase, or — once an admin approves — anyone
 on the network without sign-in. Every mutation and every visit is recorded
 to an audit trail and access log; owners see view counts, admins see who. The same process serves the API, the sites, the
@@ -43,9 +44,10 @@ make local-down
 ```
 
 The instance answers at `https://simple-host.127-0-0-1.nip.io`, which resolves
-to loopback through public DNS; every owner is one label beneath it, and a
-restricted site gets its own `<owner>--<site>` label under the same wildcard
-certificate. The certificate comes from mkcert, so the browser trusts it once
+to loopback through public DNS; every owner is one label beneath it, and every
+site one label beneath its owner (`todo.alice.<base>`), with a wildcard
+certificate per owner that cert-manager issues on the owner's first site.
+Every certificate comes from the mkcert CA, so the browser trusts them once
 `mkcert -install` has been accepted. `make local` prints two Dex test
 accounts (`admin@example.com` / `person@example.com`) to sign in with; see
 `docs/install.md` section 4 for signing in with a real provider like Google.

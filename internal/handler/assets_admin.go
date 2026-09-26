@@ -36,11 +36,7 @@ func (h *SiteHandler) registerAssetAdminRoutes(mux *http.ServeMux, ownerMutation
 }
 
 func (h *SiteHandler) assetResponses(ctx context.Context, access db.SiteAccess, rows []db.Asset) []assetAdminResponse {
-	restricted, err := db.IsSiteRestricted(ctx, h.database, access.Site.ID)
-	if err != nil {
-		restricted = false
-	}
-	base := h.hosts.SiteURL(access.OwnerUsername, access.Site.Name, restricted)
+	base := h.hosts.SiteURL(access.OwnerUsername, access.Site.Name)
 	out := make([]assetAdminResponse, 0, len(rows))
 	for _, a := range rows {
 		out = append(out, assetAdminResponse{

@@ -89,7 +89,7 @@ func TestShowcaseWithoutQueryPreservesPublicGallery(t *testing.T) {
 		`<div class="site-owner"><a href="https://alice.foo.example/" target="_blank" rel="noopener">alice</a></div>`,
 		`data-rank-views="0"`,
 		`data-filter-text="alice portfolio"`,
-		`href="https://alice.foo.example/portfolio/"`,
+		`href="https://portfolio.alice.foo.example/"`,
 		`<span class="chip">v3</span>`,
 		`<b>12</b> views / <b>5</b> visits today <span>30 views 7d</span>`,
 	} {

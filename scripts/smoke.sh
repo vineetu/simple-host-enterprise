@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Smoke test against a running installation. Signs in through Dex as the
 # local overlay's two static test accounts, mints and revokes an API key,
-# publishes a one-page site, and checks that the base host, the owner host,
-# the probes and the request log behave. Exit status is the number of
-# failures, so it can gate a rollout.
+# publishes a one-page site, and checks that the base host, the owner host
+# (index, the fallback that serves a site until the owner's wildcard
+# certificate is ready, and the redirects after), the site's own host
+# (<site>.<owner>.<base>, where every site is served), the probes and the
+# request log behave. CERT_WAIT (seconds, default 300) bounds the wait for
+# an owner's certificate. Exit status is the number of failures, so it can gate
+# a rollout.
 #
-#   BASE=simple-host.127-0-0-1.nip.io CLUSTER_CONTEXT=docker-desktop \
-#     NAMESPACE=simple-host ./scripts/smoke.sh
+#   BASE=simple-host.127-0-0-1.nip.io CLUSTER_CONTEXT=docker-desktop NAMESPACE=simple-host ./scripts/smoke.sh
 #
 # Identity is OIDC sign-in now, not a pasted admin key, so
 # this script drives the whole Authorization Code + PKCE dance against Dex
@@ -26,7 +29,8 @@ set -u
 BASE="${BASE:?set BASE to the base hostname}"
 CLUSTER_CONTEXT="${CLUSTER_CONTEXT:-docker-desktop}"
 NAMESPACE="${NAMESPACE:-simple-host}"
-SKILL_VERSION="${SKILL_VERSION:-0.12.1}"
+SKILL_VERSION="${SKILL_VERSION:-0.13.0}"
+CERT_WAIT="${CERT_WAIT:-300}"
 DEX_HOST="dex.simple-host.svc.cluster.local"
 DEX_PORT="5556"
 
@@ -235,19 +239,20 @@ expect 201 "$BASE" "/api/collaboration/sites/$owner/$name" -X POST \
 
 label="$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]' | tr . -)"
 owner_host="$label.$BASE"
+site_host="$name.$label.$BASE"
+dash_host="$label--$name.$BASE"
 
 echo "== the base host no longer serves site content or the site-facing API"
 expect 404 "$BASE" "/$name/"
 expect 404 "$BASE" "/api/sites/$owner/$name/state"
 expect 404 "$BASE" "/api/site/state"
 
-echo "== the owner host $owner_host refuses everything but hosted content, the site-facing API, the hand-off, and probes"
-expect 404 "$owner_host" "/"
-expect 404 "$owner_host" "/admin"
+echo "== the owner host $owner_host serves its index behind a session, redirects the old site addresses, and nothing else"
+expect 401 "$owner_host" "/"
+expect 404 "$owner_host" "/api/sites"
+expect 404 "$owner_host" "/api/site/state"
+expect 404 "$owner_host" "/sites/$name/"
 expect 200 "$owner_host" "/healthz"
-
-echo "== viewing hosted content on the owner host requires a session"
-expect 401 "$owner_host" "/$name/"
 
 # hand_off_session <base-jar-with-a-signed-in-session> <jar-to-fill> <host> <path>
 #
@@ -257,8 +262,8 @@ expect 401 "$owner_host" "/$name/"
 # one-time code, authenticated by the caller's base session, and redirects
 # to the target host's own /auth/session, which redeems the code against
 # the nonce cookie and sets that host's own session cookie. Leaves a usable
-# session in <jar>. Works identically for an owner host and a restricted
-# site's own host — both answer /auth/session the same way.
+# session in <jar>. Works identically for an owner host and a site's own
+# host — both answer /auth/session the same way.
 hand_off_session() {
   local base_jar="$1" jar="$2" host="$3" path="$4"
   local hdr1 hdr2 hdr3 handoff_url session_url
@@ -285,58 +290,102 @@ hand_off_session() {
   return 0
 }
 
+# wait_site_host <owner-host> <site> <site-host> — waits until <site-host>
+# presents a certificate curl trusts (the owner's *.<owner-host> wildcard is
+# issued) and the old address https://<owner-host>/<site>/ has switched from
+# the fallback to the redirect. Non-zero after CERT_WAIT seconds.
+wait_site_host() {
+  local oh="$1" s="$2" sh="$3"
+  for _ in $(seq 1 $((CERT_WAIT / 5 + 1))); do
+    # Each server replica re-reads which owners are ready every 15 s, so
+    # once one replica redirects, give the others time to agree.
+    if curl -sS -o /dev/null "https://$sh/healthz" 2>/dev/null && [ "$(curl -sS -o /dev/null -w "$code_fmt" "https://$oh/$s/" 2>/dev/null)" = "301" ]; then sleep 20; return 0; fi
+    sleep 5
+  done
+  return 1
+}
+
+echo "== until the owner certificate is ready, the old address keeps serving the site (fallback, no redirect)"
+if curl -sS -o /dev/null "https://$site_host/healthz" 2>/dev/null; then
+  echo "  (skipped: *.$owner_host already has its certificate, so the fallback cannot be observed on this run)"
+else
+  expect 401 "$owner_host" "/$name/"
+  fallback_jar="$work/cj-fallback"
+  check "hand-off mints a session on $owner_host for the fallback" hand_off_session "$admin_jar" "$fallback_jar" "$owner_host" "/$name/"
+  expect 200 "$owner_host" "/$name/" -b "$fallback_jar"
+fi
+
+echo "== waiting up to ${CERT_WAIT}s for the certificate of *.$owner_host and the switch to the redirect"
+if ! check "$site_host presents a valid certificate and the old address redirects" wait_site_host "$owner_host" "$name" "$site_host"; then
+  echo "passed $pass, failed $fails"; exit "$fails"
+fi
+
+echo "== once it is ready, the old address and the v1.2 dash host redirect to $site_host"
+expect 301 "$owner_host" "/$name/"
+expect_header_value "$owner_host" "/$name/a/b.html?q=1" Location "https://$site_host/a/b.html?q=1"
+expect_header_value "$owner_host" "/$name//evil.example.com" Location "https://$site_host//evil.example.com"
+expect_header_value "$owner_host" "/api/sites/$name/state/versioned" Location "https://$site_host/api/sites/$name/state/versioned"
+expect 308 "$owner_host" "/api/sites/$name/state/versioned" -X PUT -H "Content-Type: application/json" -d '{}'
+expect_header "$owner_host" "/$name/" Cross-Origin-Resource-Policy
+expect 301 "$dash_host" "/p?q=1"
+expect_header_value "$dash_host" "/p?q=1" Location "https://$site_host/p?q=1"
+
+echo "== viewing hosted content on the site's own host $site_host requires a session"
+expect 401 "$site_host" "/"
+
 echo "== the session hand-off round trip"
 owner_jar="$work/cj-owner"
-check "hand-off mints a session on $owner_host" hand_off_session "$admin_jar" "$owner_jar" "$owner_host" "/$name/"
-expect 200 "$owner_host" "/$name/" -b "$owner_jar"
+check "hand-off mints a session on $site_host" hand_off_session "$admin_jar" "$owner_jar" "$site_host" "/"
+expect 200 "$site_host" "/" -b "$owner_jar"
 
-echo "== every owner-host response carries the CORP and Cache-Control headers"
-expect_header "$owner_host" "/$name/" Cross-Origin-Resource-Policy
-expect_header_value "$owner_host" "/$name/" Cache-Control "private, no-cache" -b "$owner_jar"
+echo "== every site-host response carries the CORP and Cache-Control headers"
+expect_header "$site_host" "/" Cross-Origin-Resource-Policy
+expect_header_value "$site_host" "/" Cache-Control "private, no-cache" -b "$owner_jar"
 
-echo "== a sibling-origin subresource load is refused; a navigation still works"
-expect 403 "$owner_host" "/$name/" -b "$owner_jar" -H "Sec-Fetch-Site: same-site" -H "Sec-Fetch-Dest: script"
-expect 200 "$owner_host" "/$name/" -b "$owner_jar" -H "Sec-Fetch-Site: same-site" -H "Sec-Fetch-Dest: document"
+echo "== a sibling-origin subresource load is refused (the owner's own host and other sites are siblings now); a navigation still works"
+expect 403 "$site_host" "/" -b "$owner_jar" -H "Sec-Fetch-Site: same-site" -H "Sec-Fetch-Dest: script"
+expect 403 "$site_host" "/" -b "$owner_jar" -H "Sec-Fetch-Site: same-site" -H "Sec-Fetch-Dest: script" -H "Referer: https://$owner_host/"
+expect 200 "$site_host" "/" -b "$owner_jar" -H "Sec-Fetch-Site: same-site" -H "Sec-Fetch-Dest: document"
 
 echo "== hosted-content auth advances sessions.last_seen_at (review finding)"
 owner_id="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["id"])' "$admin_me" 2>/dev/null || true)"
 if [ -n "$owner_id" ] && db_query "SELECT 1" >/dev/null 2>&1; then
   db_query "UPDATE sessions SET last_seen_at = now() - interval '10 minutes' WHERE user_id = '$owner_id'::uuid" >/dev/null
   before="$(db_query "SELECT max(last_seen_at) FROM sessions WHERE user_id = '$owner_id'::uuid")"
-  curl -sS -b "$owner_jar" -o /dev/null "https://$owner_host/$name/"
+  curl -sS -b "$owner_jar" -o /dev/null "https://$site_host/"
   after="$(db_query "SELECT max(last_seen_at) FROM sessions WHERE user_id = '$owner_id'::uuid")"
   check "hosted-content request advanced sessions.last_seen_at" bash -c "[ -n '$after' ] && [ '$after' != '$before' ]"
 else
   echo "  (skipped: could not resolve the admin's user id or reach Postgres directly from this script)"
 fi
 
-echo "== state on the owner host, by session and by X-API-Key"
-expect 200 "$owner_host" "/api/sites/$name/state/versioned" -b "$owner_jar"
-put_body="$(curl -sS -b "$owner_jar" -H "Origin: https://$owner_host" -H "Content-Type: application/json" \
-  -X PUT "https://$owner_host/api/sites/$name/state/versioned" -d '{"version":0,"state":{"hello":"world"}}')"
+echo "== state on the site host, by session and by X-API-Key"
+expect 200 "$site_host" "/api/sites/$name/state/versioned" -b "$owner_jar"
+put_body="$(curl -sS -b "$owner_jar" -H "Origin: https://$site_host" -H "Content-Type: application/json" \
+  -X PUT "https://$site_host/api/sites/$name/state/versioned" -d '{"version":0,"state":{"hello":"world"}}')"
 check "session state write returns version 1" bash -c "printf '%s' '$put_body' | grep -q '\"version\":1'"
-get_body="$(curl -sS -b "$owner_jar" "https://$owner_host/api/sites/$name/state/versioned")"
+get_body="$(curl -sS -b "$owner_jar" "https://$site_host/api/sites/$name/state/versioned")"
 check "state read reflects the session write" bash -c "printf '%s' '$get_body' | grep -q '\"hello\":\"world\"'"
 echo "== PUT with a session but no Origin is refused (Origin required on non-safe methods)"
-expect 403 "$owner_host" "/api/sites/$name/state/versioned" -b "$owner_jar" -X PUT -H "Content-Type: application/json" -d '{"version":1,"state":{}}'
+expect 403 "$site_host" "/api/sites/$name/state/versioned" -b "$owner_jar" -X PUT -H "Content-Type: application/json" -d '{"version":1,"state":{}}'
 echo "== an X-API-Key needs no Origin at all"
 key_put_body="$(curl -sS -H "X-API-Key: $key" -H "Content-Type: application/json" \
-  -X PUT "https://$owner_host/api/sites/$name/state/versioned" -d '{"version":1,"state":{"via":"key"}}')"
+  -X PUT "https://$site_host/api/sites/$name/state/versioned" -d '{"version":1,"state":{"via":"key"}}')"
 check "key state write returns version 2" bash -c "printf '%s' '$key_put_body' | grep -q '\"version\":2'"
-expect 401 "$owner_host" "/api/sites/$name/state/versioned"
+expect 401 "$site_host" "/api/sites/$name/state/versioned"
 
 echo "== assets: upload, list, serve headers, attachment disposition"
 printf 'hello asset world\n' > "$work/asset.txt"
-asset_upload_body="$(curl -sS -b "$owner_jar" -H "Origin: https://$owner_host" \
+asset_upload_body="$(curl -sS -b "$owner_jar" -H "Origin: https://$site_host" \
   -F "file=@$work/asset.txt;filename=notes.txt;type=text/plain" \
-  "https://$owner_host/api/sites/$name/assets")"
+  "https://$site_host/api/sites/$name/assets")"
 asset_id="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["id"])' "$asset_upload_body" 2>/dev/null || true)"
 check "asset upload returned an id" bash -c "[ -n '$asset_id' ]"
 if [ -n "$asset_id" ]; then
-  expect 200 "$owner_host" "/$name/_assets/$asset_id/notes.txt" -b "$owner_jar"
-  expect_header "$owner_host" "/$name/_assets/$asset_id/notes.txt" Content-Disposition -b "$owner_jar"
-  expect_header "$owner_host" "/$name/_assets/$asset_id/notes.txt" X-Content-Type-Options -b "$owner_jar"
-  asset_list_body="$(curl -sS -b "$owner_jar" "https://$owner_host/api/sites/$name/assets")"
+  expect 200 "$site_host" "/_assets/$asset_id/notes.txt" -b "$owner_jar"
+  expect_header "$site_host" "/_assets/$asset_id/notes.txt" Content-Disposition -b "$owner_jar"
+  expect_header "$site_host" "/_assets/$asset_id/notes.txt" X-Content-Type-Options -b "$owner_jar"
+  asset_list_body="$(curl -sS -b "$owner_jar" "https://$site_host/api/sites/$name/assets")"
   check "asset appears in the list" bash -c "printf '%s' '$asset_list_body' | grep -q '\"notes.txt\"'"
 
   echo "== the dashboard's own asset admin route sees the same asset (base host, owner session)"
@@ -346,7 +395,7 @@ if [ -n "$asset_id" ]; then
   check "dashboard asset list includes the uploaded asset" bash -c "printf '%s' '$dashboard_asset_list' | grep -q '\"notes.txt\"'"
   curl -sS -b "$admin_jar" -c "$admin_jar" -H "Origin: https://$BASE" -H "X-Simple-Host-Client: control-ui" \
     -X DELETE "https://$BASE/api/collaboration/sites/$owner/$name/assets/$asset_id" -o /dev/null
-  expect 404 "$owner_host" "/$name/_assets/$asset_id/notes.txt" -b "$owner_jar"
+  expect 404 "$site_host" "/_assets/$asset_id/notes.txt" -b "$owner_jar"
 fi
 
 echo "== an archive with a top-level _assets/ entry is refused at upload (pen item)"
@@ -360,7 +409,7 @@ expect 400 "$BASE" "/api/collaboration/sites/$owner/$name-badassets" -X POST \
 
 echo "== an asset that sniffs as HTML is refused regardless of its declared type or extension (pen item: content-type confusion)"
 printf '<html><body>not really text</body></html>\n' > "$work/fake.txt"
-expect 415 "$owner_host" "/api/sites/$name/assets" -b "$owner_jar" -H "Origin: https://$owner_host" \
+expect 415 "$site_host" "/api/sites/$name/assets" -b "$owner_jar" -H "Origin: https://$site_host" \
   -F "file=@$work/fake.txt;filename=fake.txt;type=text/plain"
 
 echo "== every state and asset write lands a real audit_events row"
@@ -384,7 +433,7 @@ fi
 
 echo "== every hosted-content view is logged to access_log, including the owner's own"
 if [ -n "$site_id" ] && db_query "SELECT 1" >/dev/null 2>&1; then
-  # $owner_jar viewed $owner_host/$name/ several times above; the
+  # $owner_jar viewed $site_host/ several times above; the
   # isSelfTraffic exclusion is documented as applying only to the
   # pageview/download analytics counters, never to access_log itself.
   # AccessWriter batches on a 2-second flush interval (access_writer.go),
@@ -396,19 +445,26 @@ else
   echo "  (skipped: could not resolve this run's site id or reach Postgres directly from this script)"
 fi
 
-echo "== restricting a site moves it to its own host"
-curl -sS -b "$admin_jar" -H "Origin: https://$BASE" -H "Content-Type: application/json" \
-  -X POST "https://$BASE/api/collaboration/sites/$owner/$name/viewers" -d "{\"usernames\":[\"$owner\"]}" >/dev/null
-restricted_host="${label}--${name}.$BASE"
-expect 404 "$owner_host" "/$name/" -b "$owner_jar"
+echo "== restricting a site keeps it on its own host"
+curl -sS -b "$admin_jar" -H "Origin: https://$BASE" -H "Content-Type: application/json" -X POST "https://$BASE/api/collaboration/sites/$owner/$name/viewers" -d "{\"usernames\":[\"$owner\"]}" >/dev/null
+restricted_host="$site_host"
+restricted_url="$(curl -sS -b "$admin_jar" "https://$BASE/api/collaboration/sites/$owner/$name" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("url",""))' 2>/dev/null)"
+check "the restricted site's url is still https://$site_host/" bash -c "[ '$restricted_url' = 'https://$site_host/' ]"
+# The old address still redirects: computed from the address alone, it
+# confirms nothing about the site or its viewers.
+expect 301 "$owner_host" "/$name/"
 
 echo "== a host session cookie is refused on a different host, even the same owner's (pen item: session fixation across hosts)"
-# owner_jar's cookie was minted for $owner_host and admin is a listed
-# viewer of the now-restricted site — without the host binding this would
-# wrongly serve 200 on $restricted_host too, since the session and the
-# viewer grant are both otherwise valid; the host mismatch alone must
-# refuse it.
-expect 401 "$restricted_host" "/" -b "$owner_jar"
+# owner_index_jar's cookie is minted for $owner_host (the owner's index) and
+# admin is a listed viewer of the now-restricted site — without the host
+# binding this would wrongly serve 200 on $site_host too, since the session
+# and the viewer grant are both otherwise valid; the host mismatch alone
+# must refuse it.
+owner_index_jar="$work/cj-owner-index"
+check "hand-off mints a session on the owner index $owner_host" hand_off_session "$admin_jar" "$owner_index_jar" "$owner_host" "/"
+expect 200 "$owner_host" "/" -b "$owner_index_jar"
+expect 401 "$site_host" "/" -b "$owner_index_jar"
+expect 401 "$owner_host" "/" -b "$owner_jar"
 
 person_restricted_jar="$work/cj-person-restricted"
 if [ -n "$person_username" ] && [ -f "$person_jar" ]; then
@@ -422,7 +478,7 @@ if [ -n "$person_username" ] && [ -f "$person_jar" ]; then
 fi
 expect_header "$restricted_host" "/" Cross-Origin-Resource-Policy
 
-echo "== state on the restricted site's own host, by session (restricted sites get a working state route too)"
+echo "== state on the restricted site's own host, by session, nameless shape"
 restricted_owner_jar="$work/cj-owner-restricted"
 check "hand-off to the restricted host for its own owner" \
   hand_off_session "$admin_jar" "$restricted_owner_jar" "$restricted_host" "/"
@@ -472,10 +528,11 @@ if [ -n "$person_username" ]; then
     --data-binary "@$work/person-site.tar.gz" "https://$BASE/api/collaboration/sites/$person_username/$person_site")"
   if [ "$person_create_status" = "201" ]; then
     person_label="$(printf '%s' "$person_username" | tr '[:upper:]' '[:lower:]' | tr . -)"
-    person_owner_host="$person_label.$BASE"
+    person_site_host="$person_site.$person_label.$BASE"
+    check "$person_site_host becomes usable" wait_site_host "$person_label.$BASE" "$person_site" "$person_site_host"
     person_owner_jar="$work/cj-person-owner"
-    check "hand-off mints a session on $person_owner_host" hand_off_session "$person_jar" "$person_owner_jar" "$person_owner_host" "/$person_site/"
-    curl -sS -b "$person_owner_jar" -o /dev/null "https://$person_owner_host/$person_site/"
+    check "hand-off mints a session on $person_site_host" hand_off_session "$person_jar" "$person_owner_jar" "$person_site_host" "/"
+    curl -sS -b "$person_owner_jar" -o /dev/null "https://$person_site_host/"
     sleep 3
     person_own_access_body="$(curl -sS -b "$person_jar" -H "X-Simple-Host-Client: control-ui" "https://$BASE/api/access?owner=$person_username&site=$person_site")"
     check "GET /api/access as a real non-admin owner sees counts of their own views" \

@@ -55,6 +55,19 @@ IAM policy for that role: `route53:GetChange` on `arn:aws:route53:::change/*`;
 `route53:ChangeResourceRecordSets` and `route53:ListResourceRecordSets` on
 `arn:aws:route53:::hostedzone/<zone-id>`; `route53:ListHostedZonesByName` on `*`.
 
+**Owner certificates (`*.<owner>.<base>`).** The ALB takes certificates from ACM
+only, never from the Secrets cert-manager writes, and an Ingress without a shared
+`alb.ingress.kubernetes.io/group.name` gets its own ALB. So the reconciler's
+automatic mode does not fit the ALB. Pick one:
+
+- Serve through an in-cluster ingress controller behind an NLB, with the cert-manager
+  issuer above (or an internal CA issuer) in `OWNER_CERT_ISSUER`. Owner certificates
+  are then automatic.
+- Keep the ALB, set `OWNER_CERTS=manual`, leave out the owner-hosts component, and
+  for each owner put an ACM certificate for `*.<owner>.<base>` on the ALB and a host
+  rule for it, before that owner's first site. An ALB holds a limited number of
+  certificates (a service quota); check it against the number of owners.
+
 ## 3. Postgres
 
 RDS for PostgreSQL 16.

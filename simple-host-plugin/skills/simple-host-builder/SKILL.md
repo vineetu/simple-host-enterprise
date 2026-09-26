@@ -9,7 +9,7 @@ Use this skill when a user wants help deciding what to build on Simple Host, or 
 
 ## What Simple Host gives you
 
-Simple Host is a server at `{{BASE_URL}}`. A site belongs to a namespace owned by a person or a team and is served at `<owner-label>.<base>/<name>/`, or at its own host once shared with named viewers. Every viewer signs in with their company account, except on a site an admin has opened to the network. Deployed pages can call the site API from the browser; there is no separate backend.
+Simple Host is a server at `{{BASE_URL}}`. A site belongs to a namespace owned by a person or a team (team names begin with `team-`) and is served at the root of its own host, `<name>.<owner-label>.<base>/` (for a short time after an owner's first site, at `<owner-label>.<base>/<name>/`). Every viewer signs in with their company account, except on a site an admin has opened to the network. Deployed pages can call the site API from the browser; there is no separate backend.
 
 | Capability | Endpoint (from the page) | Who can use it |
 |---|---|---|
@@ -38,7 +38,7 @@ When to choose: every Simple Host site starts here. Deploy first, then layer sta
 
 How to deploy: invoke the `simple-host` skill. It gets the user signed in, detects the framework, builds, packages, and uploads.
 
-Gotchas: **build with relative asset paths (`./`)**, so the site works on its owner's host and on its own host if it is later restricted. Report only the `url` the API returns; never compose an address. For plain HTML, the `fix-paths-for-subpath-hosting` skill makes paths relative.
+Gotchas: a new site's name becomes its address, so it takes lowercase letters, digits, and hyphens, starting and ending with a letter or digit, at most 63 characters, not starting with `xn--` (`400` `invalid_site_name` otherwise; `409` `name_conflict` if it would take the address of another site of the same owner). **Build with relative asset paths (`./`)** so the site works at either address. Report only the `url` the latest API response returns; never compose an address. For plain HTML, the `fix-paths-for-subpath-hosting` skill makes paths relative.
 
 A page never works out its own address or site name from `location.pathname`. When it needs its site name (for the state API), write the name into the page.
 
@@ -120,7 +120,7 @@ A new site opens only for its owner (or, for a team site, the team). The owner t
 | Level | Who can open it |
 |---|---|
 | `only_me` | the owner, or the team's members |
-| `specific` | also named people or teams; the site moves to its own address |
+| `specific` | also named people or teams |
 | `company` | anyone signed in at the company with the link |
 | `listed` | company, and shown in the showcase and search |
 | `network` | anyone who can reach the server, no sign-in; an admin must approve it |

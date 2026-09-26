@@ -2,8 +2,13 @@ openapi: 3.0.3
 info:
   title: Simple Host API
   description: |
-    Internal static website hosting at `<owner>.<base>/<sitename>/` (or, for
-    a site shared with named viewers, its own `<owner>--<sitename>.<base>/`). Uploads may
+    Internal static website hosting. Every site is served at the root of its
+    own host, `<sitename>.<owner>.<base>/` (for example
+    `todo.alice.example.com/`). The owner host `<owner>.<base>/` serves the
+    person's or team's index page. Until the owner's certificate is ready it
+    also serves their sites at `<owner>.<base>/<sitename>/`; after that,
+    those addresses redirect to each site's own host. Always use the `url`
+    from the latest response rather than composing an address. Uploads may
     be gzip-compressed tar or ZIP archives; nested regular-file downloads such
     as ZIP and DMG artifacts are supported.
 
@@ -12,8 +17,8 @@ info:
     `ETag` / `If-Match` protection.
 
     Every site has an access level: `only_me` (the owner, or the team's
-    members; the default for a new site), `specific` (plus named viewers, on
-    the site's own host), `company` (anyone signed in with the link),
+    members; the default for a new site), `specific` (plus named viewers),
+    `company` (anyone signed in with the link),
     `listed` (company, plus showcase and search), or `network` (anyone who
     can reach the server, no sign-in). `network` is requested with a reason
     and applies only once an admin approves it; anonymous visitors can read a
@@ -288,10 +293,18 @@ paths:
         `.php`, and `.exe` are rejected case-insensitively. Other regular files,
         including nested ZIP and DMG downloads, are supported, except entries
         whose basename is `.DS_Store` or starts with `._`; those macOS metadata
-        files are omitted. The response's `url` is the site's address; use it as
-        returned rather than composing it by hand: a site shared with named
-        viewers moves to its own address. A new site's access level is
-        `only_me`.
+        files are omitted. The response's `url` is the site's address: the
+        root of its own host `<sitename>.<owner>.<base>/`, or for a short while
+        after an owner's first site `<owner>.<base>/<sitename>/`. Use it as
+        returned rather than composing it by hand, and take it from the latest
+        response. A new site's access level is `only_me`.
+
+        A new site's name becomes its address: lowercase letters, digits and
+        hyphens, starting and ending with a letter or digit, at most
+        63 characters, and not starting with `xn--`. Any other name is
+        refused with `400 invalid_site_name`. A name equal to the address of
+        one of the owner's older sites (for example `notes` beside an older
+        `Notes`) is refused with `409 name_conflict`.
       tags: [Sites]
       security:
         - apiKey: []
@@ -329,7 +342,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '409':
-          description: Site already exists
+          description: Site already exists, or `name_conflict` (the name equals the address of one of the owner's older sites)
           content:
             application/json:
               schema:
@@ -552,8 +565,8 @@ paths:
         once; moving off `network` ends its approval, and moving to any level
         withdraws a pending network request. `network` needs a `reason` (at
         most 500 characters) and returns `202`: the site keeps its level until
-        an admin approves the request. `specific` moves the site to its own
-        address; add viewers through the viewers routes.
+        an admin approves the request. The site's address does not change;
+        add viewers for `specific` through the viewers routes.
       tags: [Sites]
       security:
         - apiKey: []
@@ -890,8 +903,8 @@ paths:
         once; moving off `network` ends its approval, and moving to any level
         withdraws a pending network request. `network` needs a `reason` (at
         most 500 characters) and returns `202`: the site keeps its level until
-        an admin approves the request. `specific` moves the site to its own
-        address; add viewers through the viewers routes.
+        an admin approves the request. The site's address does not change;
+        add viewers for `specific` through the viewers routes.
       tags: [Collaboration]
       security:
         - apiKey: []
@@ -1213,12 +1226,13 @@ paths:
         Returns the raw JSON document, `{}` for a site that has never saved.
         On a `network` site anyone may read it without signing in; writes
         still need a signed-in viewer.
-        Served only on the site's own host (its owner's `<owner>.<base>`, or
-        a `specific` site's `<owner>--<site>.<base>`), never on the base host.
-        The caller is the signed-in viewer's session (or an `X-API-Key`), and
-        anyone who may open the site may read and write its state. On a
-        `specific` site's own host the nameless form `/api/site/...` also
-        works. A `401` means the session expired: reload the page. Do not put
+        Served on the site's own host `<site>.<owner>.<base>`, where the
+        nameless form `/api/site/...` also works and the named form works only
+        when it names that site. While the site is served at
+        `<owner>.<base>/<site>/`, the named form is served on the owner host
+        instead. Never on the base host. The caller is the signed-in viewer's
+        session (or an `X-API-Key`), and anyone who may open the site may read
+        and write its state. A `401` means the session expired: reload the page. Do not put
         secrets or PII in state.
       tags: [State]
       parameters:
@@ -1248,12 +1262,13 @@ paths:
         `/api/sites/{sitename}/state/versioned` and use this endpoint only when
         unconditional saves are deliberately required. Body is the raw
         document (any valid JSON, up to 1 MiB); response echoes it back.
-        Served only on the site's own host (its owner's `<owner>.<base>`, or
-        a `specific` site's `<owner>--<site>.<base>`), never on the base host.
-        The caller is the signed-in viewer's session (or an `X-API-Key`), and
-        anyone who may open the site may read and write its state. On a
-        `specific` site's own host the nameless form `/api/site/...` also
-        works. A `401` means the session expired: reload the page. Do not put
+        Served on the site's own host `<site>.<owner>.<base>`, where the
+        nameless form `/api/site/...` also works and the named form works only
+        when it names that site. While the site is served at
+        `<owner>.<base>/<site>/`, the named form is served on the owner host
+        instead. Never on the base host. The caller is the signed-in viewer's
+        session (or an `X-API-Key`), and anyone who may open the site may read
+        and write its state. A `401` means the session expired: reload the page. Do not put
         secrets or PII in state.
       tags: [State]
       parameters:
@@ -1301,12 +1316,13 @@ paths:
         `{"version": N, "state": {...}}`; a never-saved site reads
         `{"version": 0, "state": {}}`. A page writes its own site name into
         the call rather than reading it from `location.pathname`.
-        Served only on the site's own host (its owner's `<owner>.<base>`, or
-        a `specific` site's `<owner>--<site>.<base>`), never on the base host.
-        The caller is the signed-in viewer's session (or an `X-API-Key`), and
-        anyone who may open the site may read and write its state. On a
-        `specific` site's own host the nameless form `/api/site/...` also
-        works. A `401` means the session expired: reload the page. Do not put
+        Served on the site's own host `<site>.<owner>.<base>`, where the
+        nameless form `/api/site/...` also works and the named form works only
+        when it names that site. While the site is served at
+        `<owner>.<base>/<site>/`, the named form is served on the owner host
+        instead. Never on the base host. The caller is the signed-in viewer's
+        session (or an `X-API-Key`), and anyone who may open the site may read
+        and write its state. A `401` means the session expired: reload the page. Do not put
         secrets or PII in state.
       tags: [State]
       parameters:
@@ -1340,12 +1356,13 @@ paths:
         semantic mutation to that freshest state and retry; never retry a
         stale whole snapshot. `version` is required; first save on a fresh
         site sends `version: 0`. 1 MiB cap.
-        Served only on the site's own host (its owner's `<owner>.<base>`, or
-        a `specific` site's `<owner>--<site>.<base>`), never on the base host.
-        The caller is the signed-in viewer's session (or an `X-API-Key`), and
-        anyone who may open the site may read and write its state. On a
-        `specific` site's own host the nameless form `/api/site/...` also
-        works. A `401` means the session expired: reload the page. Do not put
+        Served on the site's own host `<site>.<owner>.<base>`, where the
+        nameless form `/api/site/...` also works and the named form works only
+        when it names that site. While the site is served at
+        `<owner>.<base>/<site>/`, the named form is served on the owner host
+        instead. Never on the base host. The caller is the signed-in viewer's
+        session (or an `X-API-Key`), and anyone who may open the site may read
+        and write its state. A `401` means the session expired: reload the page. Do not put
         secrets or PII in state.
       tags: [State]
       parameters:
@@ -1663,7 +1680,7 @@ paths:
           description: '`{"teams": [{"id", "name"}]}`'
     post:
       summary: Create a team
-      description: 'Body `{"name": "acme-team"}` — letters, numbers and hyphens. The caller becomes its first member. There is one role: every member may publish to, and delete, any of the team''s sites, add and remove members, leave, and delete the team.'
+      description: 'Body `{"name": "acme"}` or `{"name": "team-acme"}` — letters, numbers and hyphens. Both create the team `team-acme`, and the response `name` is `team-acme`. The caller becomes its first member. There is one role: every member may publish to, and delete, any of the team''s sites, add and remove members, leave, and delete the team.'
       tags: [Teams]
       responses:
         '201':
@@ -1855,10 +1872,10 @@ components:
       name: team
       in: path
       required: true
-      description: The team's name.
+      description: The team's name, `team-<name>`. The `/api/teams/{team}` routes also accept it without the `team-` prefix.
       schema:
         type: string
-      example: acme-team
+      example: team-acme
     confirmTeamName:
       name: confirm_name
       in: query
@@ -1870,7 +1887,7 @@ components:
       name: owner
       in: path
       required: true
-      description: The site's owner — a username or a team name.
+      description: The site's owner — a username or a stored team name (`team-<name>`), as list responses give it.
       schema:
         type: string
       example: alice.smith
@@ -1953,10 +1970,10 @@ components:
               format: date-time
         public_path:
           type: string
-          example: https://alice-smith.simple-host.example.com/my-cool-site/
+          example: https://my-cool-site.alice-smith.simple-host.example.com/
         url:
           type: string
-          example: https://alice-smith.simple-host.example.com/my-cool-site/
+          example: https://my-cool-site.alice-smith.simple-host.example.com/
         etag:
           type: string
           example: '"site-4b256b3b-9d15-4ce5-bba7-b04ef26f49e5-v7"'
@@ -2100,7 +2117,7 @@ components:
             note:
               type: string
               description: Human-readable info about the site URL
-              example: "Site is available at https://alice-smith.simple-host.example.com/my-cool-site/"
+              example: "Site is available at https://my-cool-site.alice-smith.simple-host.example.com/"
 
     Version:
       type: object
@@ -2183,8 +2200,8 @@ components:
           description: Relative path of the best-matching HTML page inside the active site version.
         url:
           type: string
-          description: Absolute address of the matching page, on its owner's host.
-          example: https://alice-smith.simple-host.example.com/release-notes/archive/release.html
+          description: Absolute address of the matching page. Pages indexed before v1.3 may carry an older owner-host address, which redirects once the site has its own host.
+          example: https://release-notes.alice-smith.simple-host.example.com/archive/release.html
         title:
           type: string
         snippet:

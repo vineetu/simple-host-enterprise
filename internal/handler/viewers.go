@@ -15,8 +15,7 @@ import (
 )
 
 // Viewer management: the named viewers of a site at the "specific" access
-// level. Granting a viewer also moves the site to that level, which serves
-// it at "<owner>--<site>.<base>" (handler.HostModel). Removing the last
+// level. Granting a viewer also moves the site to that level. Removing the last
 // viewer leaves the level alone, so the site narrows to its owner rather
 // than silently widening. Owner-role gate, in-transaction recheck,
 // bounded-batch grant.

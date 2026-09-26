@@ -90,6 +90,7 @@ func completeEnv(t *testing.T) {
 	t.Setenv("TRUSTED_PROXY_CIDRS", "")
 	t.Setenv("API_KEY_MAX_DAYS", "")
 	t.Setenv("NETWORK_ACCESS_APPROVALS", "")
+	t.Setenv("OWNER_CERTS", "")
 }
 
 func TestLoadCompleteConfiguration(t *testing.T) {

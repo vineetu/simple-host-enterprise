@@ -89,7 +89,9 @@ local-third-party:
 	$(KUBECTL) -n cert-manager rollout status deploy/cert-manager-cainjector --timeout=300s
 
 # mkcert installs a local CA into the system and browser trust stores, then
-# issues the base host and its wildcard. __Host- cookies need HTTPS, and a
+# issues the base host and its wildcard. The same CA backs the
+# simple-host-local-ca ClusterIssuer, which signs each owner's
+# *.<owner>.<base> certificate (deploy/components/owner-hosts). __Host- cookies need HTTPS, and a
 # certificate the browser trusts is the only way to test them honestly.
 local-certs:
 	mkcert -install
@@ -97,6 +99,8 @@ local-certs:
 	$(KUBECTL) create namespace $(NAMESPACE) --dry-run=client -o yaml | $(KUBECTL) apply -f -
 	$(KUBECTL) -n $(NAMESPACE) create secret tls simple-host-local-tls \
 	  --cert=$(LOCAL_OVERLAY)/tls.crt --key=$(LOCAL_OVERLAY)/tls.key --dry-run=client -o yaml | $(KUBECTL) apply -f -
+	$(KUBECTL) -n cert-manager create secret tls simple-host-local-ca --cert="$$(mkcert -CAROOT)/rootCA.pem" --key="$$(mkcert -CAROOT)/rootCA-key.pem" --dry-run=client -o yaml | $(KUBECTL) apply -f -
+	printf 'apiVersion: cert-manager.io/v1\nkind: ClusterIssuer\nmetadata:\n  name: simple-host-local-ca\nspec:\n  ca:\n    secretName: simple-host-local-ca\n' | $(KUBECTL) apply -f -
 
 # secrets.env is generated once with random values and never committed.
 # DB_PASSWORD is the owning role migrations run as; DB_APP_PASSWORD is the
@@ -118,6 +122,7 @@ local-up:
 	$(KUBECTL) -n $(NAMESPACE) rollout status statefulset/minio --timeout=300s
 	$(KUBECTL) -n $(NAMESPACE) rollout status deploy/dex --timeout=180s
 	$(KUBECTL) -n $(NAMESPACE) rollout status deploy/simple-host --timeout=300s
+	$(KUBECTL) -n $(NAMESPACE) rollout status deploy/simple-host-owner-hosts --timeout=180s
 
 local-down:
 	kustomize build $(LOCAL_OVERLAY) | $(KUBECTL) delete --ignore-not-found -f -

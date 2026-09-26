@@ -43,6 +43,13 @@ cert-manager has no built-in OCI DNS solver. Pick one:
 - Run a community OCI DNS webhook.
 - Issue the wildcard out of band into the `simple-host-tls` Secret.
 
+Owner certificates (`*.<owner>.<base>`) come from `OWNER_CERT_ISSUER`. An internal CA
+issuer needs no DNS solver, which sidesteps the missing OCI one. With an in-cluster
+controller the reconciler's per-owner Ingresses work as written. With the native
+ingress controller, confirm that several Ingresses share one load balancer and serve
+TLS from Secrets before relying on it (unverified); otherwise use `OWNER_CERTS=manual`
+(`INSTALL.md`, "Site addresses").
+
 ## 3. Postgres
 
 OCI Database with PostgreSQL 16. It only accepts TLS.

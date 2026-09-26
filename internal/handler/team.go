@@ -90,7 +90,7 @@ type teamMemberResponse struct {
 // both answer 404: whether a given name is a team is not something a stranger
 // needs told.
 func (h *TeamHandler) requireMember(w http.ResponseWriter, r *http.Request, user *db.User) (db.Team, bool) {
-	name := strings.ToLower(strings.TrimSpace(r.PathValue("team")))
+	name := teamName(r.PathValue("team"))
 	if safepath.ValidateSegment(name) != nil {
 		http.NotFound(w, r)
 		return db.Team{}, false
@@ -136,7 +136,7 @@ func (h *TeamHandler) createTeam(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid request body"})
 		return
 	}
-	name := strings.ToLower(strings.TrimSpace(request.Name))
+	name := teamName(request.Name)
 
 	// A team name is the first name on this platform somebody types rather
 	// than has derived from their email, so it goes through the stricter rule:
@@ -206,6 +206,18 @@ func (h *TeamHandler) createTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, teamResponse{ID: team.ID, Name: team.Username})
+}
+
+// teamName is the stored name for a team name somebody typed: lowercased,
+// with "team-" added unless it is already there. "sales" and "team-sales"
+// name the same team, so a person never has to know the prefix, and a team
+// can never take a name a person signs in with.
+func teamName(typed string) string {
+	name := strings.ToLower(strings.TrimSpace(typed))
+	if name == "" || strings.HasPrefix(name, db.TeamPrefix) {
+		return name
+	}
+	return db.TeamPrefix + name
 }
 
 // teamNameRefusal turns a validation sentinel into words for somebody who just
@@ -558,7 +570,7 @@ var errTeamDeleteUnconfirmed = errors.New("team delete not confirmed")
 // confirmedTeamName reports whether the request typed the team's name back
 // as ?confirm_name=, the guard on every path that deletes a team's sites.
 func confirmedTeamName(r *http.Request, team db.Team) bool {
-	return strings.ToLower(strings.TrimSpace(r.URL.Query().Get("confirm_name"))) == team.Username
+	return teamName(r.URL.Query().Get("confirm_name")) == team.Username
 }
 
 // writeTeamDeleteUnconfirmed says how much would be destroyed, so the agent

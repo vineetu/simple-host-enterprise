@@ -379,7 +379,7 @@ const dashboardSitesScript = `<script>
       '<button type="button" class="btn-login access-button">Save</button></div>' +
       '<p class="share-help access-status">' + (site.network_request ? 'Network access requested; waiting for ' + (site.network_request.approvals_required > 1 ? 'two admins' + approvalProgress(site.network_request) : 'an admin') + '. The site keeps its current level until then.' : '') + '</p></div>' +
       '<div class="site-subsection"><h4>Viewers</h4>' +
-      '<p class="share-help">Named viewers can open the site while it is set to specific people or teams, at its own address. Adding one sets that level.</p>' +
+      '<p class="share-help">Named viewers can open the site while it is set to specific people or teams. Adding one sets that level.</p>' +
       '<div class="viewer-list" aria-live="polite"></div>' +
       '<div class="add-row"><input type="text" class="add-viewer-input" placeholder="username, another-username" autocomplete="off">' +
       '<button type="button" class="btn-login add-viewer-button">Add</button></div></div>' +

@@ -50,7 +50,8 @@ Ask these in one message. Do not ask anything else up front.
    Google Cloud (GKE), Azure (AKS), Oracle Cloud (OKE), or other. Which
    kubectl context, if there is more than one.
 2. **Base domain.** The hostname the dashboard lives at, e.g.
-   `corp-sites.com`. Every person gets `<name>.<base>`, so the company
+   `corp-sites.com`. Every person gets `<name>.<base>` and every site
+   `<site>.<name>.<base>`, so the company
    must control DNS for `<base>` and `*.<base>`. It must be a separate
    registrable domain from the company's other apps (`corp-sites.com`, not
    `simple-host.corp.com`): hosted pages are written by anyone in the
@@ -203,7 +204,8 @@ docker buildx imagetools inspect ghcr.io/vineetu/simple-host-enterprise@sha256:<
 
 If the company mirrors images into a private registry, the pull secret goes
 on the ServiceAccount, not the Deployment (`docs/install.md` section 10,
-"If you use a private registry").
+"If you use a private registry"), and on the owner-hosts reconciler's
+ServiceAccount too (section 6, "Site addresses").
 
 ## 4. Write config.env and secrets.env
 
@@ -218,6 +220,7 @@ lines (kustomize reads them as env files).
 | Variable | Value |
 |---|---|
 | `PUBLIC_BASE_URL` | `https://<base>`, origin only, no trailing path |
+| `OWNER_CERT_ISSUER` | The ClusterIssuer that signs each owner's `*.<owner>.<base>` certificate (section 6, "Site addresses") |
 | `SECURE_MODE`, `PORT`, `HTTPS_REDIRECT_PORT` | Leave as in the example |
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID` | From HUMAN STEP A |
 | `OIDC_SCOPES` | Leave at `openid email profile` unless the provider notes say otherwise |
@@ -455,6 +458,10 @@ A hostname in that output means a `CNAME` (or an alias record on Route 53);
 an IP means an `A` record. Per-cloud notes: section 2 (DNS & wildcard
 certificate) of each `docs/cloud/*.md`.
 
+These two records are all the DNS there is: `*.<base>` also matches every
+site host, `<site>.<owner>.<base>`. Certificates for site hosts are per
+owner; see "Site addresses" below.
+
 ### C. DNS-01 ClusterIssuer (only if none exists)
 
 The certificate covers `<base>` and `*.<base>`, which needs DNS-01. If the
@@ -463,6 +470,124 @@ can solve DNS-01 for `<base>` and its name. Worked examples: section 2
 (DNS & wildcard certificate) of `docs/cloud/aws.md` (Route 53), `gcp.md`
 (Cloud DNS), `azure.md` (Azure DNS), and `oci.md`. Scope its DNS
 credential to the one zone.
+
+### Site addresses (owner certificates)
+
+Every site is served at the root of its own host, `<site>.<owner>.<base>`
+(for example `todo.alice.<base>`), so each site is its own browser origin.
+
+- **DNS: nothing more.** The `*.<base>` record from step B already matches
+  names at any depth, including `todo.alice.<base>`.
+- **TLS: one certificate per owner.** A TLS wildcard covers exactly one
+  label: the base certificate covers `alice.<base>` but not
+  `todo.alice.<base>`. Each owner needs `*.<owner>.<base>`. With
+  `OWNER_CERTS=auto` (the default), the component
+  `deploy/components/owner-hosts`, already listed under `components:` in the
+  byo `kustomization.yaml`, keeps one Ingress per owner with sites,
+  annotated for cert-manager, and cert-manager issues that owner's
+  certificate from the ClusterIssuer named in `OWNER_CERT_ISSUER`.
+- **Sites keep serving at `<owner>.<base>/<site>/` until each owner's
+  certificate is ready**, and responses give that address in `url` until
+  then. Nothing breaks while a certificate is pending.
+
+**Template annotations.** Every annotation on the install's own Ingress
+(`OWNER_INGRESS_TEMPLATE`, default `simple-host`) except `cert-manager.io/*`
+is copied onto each owner's Ingress, so keep base-host-only settings (a
+`configuration-snippet`, an `auth-url`) off it.
+
+**Ingress controller.** Automatic owner certificates are tested with an
+in-cluster controller (ingress-nginx). AWS ALB (ACM certificates only, one
+load balancer per Ingress without a shared `group.name`) and GKE's `gce`
+Ingress (one load balancer per Ingress) do not fit one Ingress per owner:
+run an in-cluster controller for the site hosts, or use `OWNER_CERTS=manual`.
+
+Ask the human which ClusterIssuer signs owner certificates, then set
+`OWNER_CERT_ISSUER=<its name>` in `config.env`:
+
+- **An internal CA (recommended).** No rate limits. A cert-manager CA
+  issuer is the smallest; Vault and Venafi issuers work the same way. The
+  company's devices must trust the CA (managed devices usually already do).
+
+  ```yaml
+  apiVersion: cert-manager.io/v1
+  kind: ClusterIssuer
+  metadata:
+    name: company-ca
+  spec:
+    ca:
+      # A kubernetes.io/tls Secret in the cert-manager namespace holding the
+      # CA's certificate and key.
+      secretName: company-ca
+  ```
+
+- **ACME, such as Let's Encrypt.** Wildcards need DNS-01, so the DNS-01
+  ClusterIssuer from step C works as it is. Let's Encrypt limits new
+  certificates per registered domain per week, and this issues one per
+  owner, so a large company hits the limit during rollout. Use an internal
+  CA instead, or put the base domain on the Public Suffix List (each
+  `<owner>.<base>` then counts as its own registered domain).
+
+**Private registry.** The reconciler runs as its own ServiceAccount,
+`simple-host-owner-hosts`. Add the same pull secret to it as to
+`simple-host` (section 3), or it sits in `ImagePullBackOff` and every site
+stays at its fallback address:
+
+```yaml
+patches:
+  - target: {kind: ServiceAccount, name: simple-host-owner-hosts}
+    patch: |
+      - op: add
+        path: /imagePullSecrets
+        value: [{name: registry-pull}]
+```
+
+**Issuing owner certificates yourself.** If the platform team will not let
+a pod create Ingresses, delete `- ../../components/owner-hosts` from
+`components:` and set `OWNER_CERTS=manual` in `config.env`. Every owner is
+then treated as ready, so each owner's certificate and ingress host rule
+must exist before that owner publishes a first site. For owner `alice`
+(copy the class and controller annotations from `ingress-patch.yaml`):
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: sh-owner-alice-tls
+  namespace: simple-host
+spec:
+  secretName: sh-owner-alice-tls
+  dnsNames: ["*.alice.<base>"]
+  issuerRef:
+    kind: ClusterIssuer
+    name: <issuer>
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sh-owner-alice
+  namespace: simple-host
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 128m
+spec:
+  # ingressClassName: the same as ingress-patch.yaml, if set there
+  tls:
+    - hosts: ["*.alice.<base>"]
+      secretName: sh-owner-alice-tls
+  rules:
+    - host: "*.alice.<base>"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: simple-host
+                port:
+                  name: http
+```
+
+Any other way of getting a `*.alice.<base>` certificate onto the ingress
+works too. See `docs/site-isolation.md` for why each site has its own host.
 
 ## 7. Apply
 
@@ -505,6 +630,12 @@ kubectl --context "$CTX" -n simple-host get certificate
 `READY` must be `True`. If not, `kubectl describe` the certificate and its
 `challenge` objects; the usual cause is the issuer's DNS credential.
 
+Owner certificates appear as owners publish: after the first site, `kubectl --context "$CTX" -n simple-host get ingress,certificate` lists `sh-owner-<owner>` and `sh-owner-<owner>-tls`. Check the reconciler is running:
+
+```sh
+kubectl --context "$CTX" -n simple-host logs deploy/simple-host-owner-hosts --tail=50
+```
+
 ## 8. Verify from outside
 
 ```sh
@@ -541,7 +672,7 @@ This is `scripts/smoke-remote.sh`. It uses only public HTTPS and the admin's
 key from HUMAN STEP D (read from the file, never printed): probes and TLS,
 key auth, publish, update and roll back a throwaway `smoke-…` site, the
 owner host, state read/write, an asset upload, list and delete, restricting
-the site (its old address must answer 404), then deletes the site, on
+the site (its own host then refuses anyone it is not shared with), then deletes the site, on
 failure too. Every line reads `ok` or `FAIL`; the exit status is the number
 of failures. Without `BASE`, `make smoke` is the local overlay's test; do
 not run that here.
@@ -590,6 +721,7 @@ against `https://<base>`.
 | Signed-in admin does not see `/admin` | Their address is not in `ADMIN_EMAILS` (compared lowercased), or the admin claim does not match. Takes effect at the next sign-in; removal from `ADMIN_EMAILS` also takes effect at the next server restart. |
 | Upload of a site fails with 413 | The ingress body-size limit. Section 5 step 3. |
 | Certificate never becomes ready | DNS-01 solver credential or zone. `kubectl describe` the `certificate`, `order`, and `challenge`. |
+| Sites stay at `<owner>.<base>/<site>/` | The owner's certificate is not ready. Read the `simple-host-owner-hosts` logs, check `OWNER_CERT_ISSUER` names a ClusterIssuer that exists, and `kubectl describe certificate sh-owner-<owner>-tls`. Section 6, "Site addresses". |
 | CronJob in `ImagePullBackOff` | Pull secret on the Deployment instead of the ServiceAccount. `docs/install.md` section 10. |
 | `429` or "gave no redirect" after many sign-ins | `/auth/*` is rate limited per address. Wait two to three minutes. |
 

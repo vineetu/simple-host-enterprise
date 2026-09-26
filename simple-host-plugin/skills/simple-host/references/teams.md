@@ -62,10 +62,15 @@ All routes are authenticated with the acting person's key and the current
 POST /api/teams
 Content-Type: application/json
 
-{"name": "acme-team"}
+{"name": "acme"}
 ```
 
-The caller becomes its first member. **Only ever do this when the user asks for a
+The caller becomes its first member. Every team's name begins with `team-`:
+sending `acme` or `team-acme` both create `team-acme`, and the response `name`
+is the one to use from then on (in `<owner>`, in `simple-host.json`, and when
+talking to the user). The team routes below accept either spelling; the
+collaboration routes take the name as the API returns it, so take names from
+`GET /api/teams` or the site list rather than typing them. **Only ever do this when the user asks for a
 team.** Creating a team is never a side effect of a deploy, and no failure hint
 should lead you into it.
 
@@ -127,8 +132,9 @@ owner-qualified collaboration routes with the team's name as `<owner>`, and ever
 update needs the `If-Match` ETag captured before editing. Read
 [`collaboration.md`](collaboration.md).
 
-Build with relative asset paths, and report the `url` and `public_path` the API
-returns, exactly as returned.
+Each team site is served on its own host, like any other site. Build with
+relative asset paths, and report the `url` and `public_path` the API returns,
+exactly as returned.
 
 ## Wording
 
@@ -141,4 +147,4 @@ returns, exactly as returned.
   publish a new site under the team from local source, keep the old one, and
   never delete the old site in the same turn.
 - A name that is close but not exact — "deploy this to acme" when the team is
-  `acme-ai` — is not a match. Show the list and ask. Never create `acme`.
+  `team-acme-ai` — is not a match. Show the list and ask. Never create `team-acme`.

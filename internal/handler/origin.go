@@ -58,16 +58,16 @@ func originCheckMiddleware(hosts HostModel, publicBaseURL string, reject ...orig
 		log.Printf("origin check DISABLED FOR SAFETY: public base URL %q is not a bare origin", publicBaseURL)
 	}
 	// expectedFor names the origin this request had to come from. An owner
-	// host, or a restricted site's own host, expects its own origin — both
-	// classify to a label OwnerOrigin builds the right authority from
-	// unchanged (a restricted-site label already carries "owner--site"); the
+	// host, or a site's own host, expects its own origin — both classify to
+	// a label OwnerOrigin builds the right authority from unchanged (a site
+	// label already carries "<site>.<owner>"); the
 	// base host and anything else expect the configured base origin, exactly
 	// as before. An owner origin that will not parse refuses rather than
 	// falling open: the base URL is validated at startup and the label
 	// passed Classify, so it cannot happen in practice, and if it somehow
 	// does the safe answer is to demand nothing less.
 	expectedFor := func(r *http.Request) (requestOrigin, bool) {
-		if kind, label := hosts.Classify(r.Host); kind == hostOwner || kind == hostRestrictedSite {
+		if kind, label := hosts.Classify(r.Host); kind == hostOwner || kind == hostSite {
 			return parseRequestOrigin(hosts.OwnerOrigin(label))
 		}
 		return expected, true

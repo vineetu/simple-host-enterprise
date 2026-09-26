@@ -2,28 +2,28 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
 	"net/url"
 	"strings"
-
-	"github.com/vsriram/simple-host/internal/db"
 )
 
-// The hostname model for per-owner subdomains. The server answers on
-// "<label>.<base>", where base is the hostname of the configured public base
-// URL and label is derived from a username by ownerLabel. It also answers on
-// "<owner label>--<site label>.<base>" for a restricted site: the
-// double hyphen is reserved in owner labels precisely so it can
-// never collide with this second shape.
+// The hostname model. Every site has its own origin,
+// "<site>.<owner label>.<base>" (siteHostPart), so no two sites share
+// cookies, storage or scripts, whoever owns them. A TLS wildcard covers one
+// label, so each owner needs its own "*.<owner>.<base>" certificate; until
+// it is ready (OwnerReady) the owner's sites are served at
+// "<owner>.<base>/<site>/", and once it is, those addresses redirect. The
+// owner's own "<owner>.<base>" keeps the person's or team's index page.
+// "<owner>--<site>.<base>", where v1.2 served a site shared with named
+// people, redirects; the double hyphen is reserved in owner labels so that
+// shape never collides with an owner.
 //
-// There is deliberately no label -> username resolution here, and no site
-// label -> site name resolution either. The comparison only ever goes
-// name -> label (OwnsLabel derives a label from a known username and
-// compares strings; nothing in this file resolves a label back to a name).
-// The host gate does that resolution against disk, the same way it already
-// resolves an owner label to a username.
+// Addresses are only ever computed name -> label here. The host gate
+// resolves a label back to a name against the site index.
 
 // ownerLabel maps a username to its DNS label: lowercase, every '.' becomes
 // '-'. It is the only place the username -> label rule lives in Go; the
@@ -33,13 +33,9 @@ func ownerLabel(username string) string {
 	return strings.ReplaceAll(strings.ToLower(username), ".", "-")
 }
 
-// siteLabel folds a site name into a DNS label candidate the same way
-// ownerLabel folds a username: lowercase, every '.' becomes '-'. Unlike a
-// username, a site name is not constrained to look like a label at all (it
-// may contain spaces, underscores, uppercase letters unrelated to a dot);
-// isValidLabel(siteLabel(name)) is what actually decides whether a site can
-// be given a restricted-site hostname, and a site whose name does not fold
-// to a valid label simply cannot be — see HostModel.RestrictedSiteAddressable.
+// siteLabel folds a site name the same way ownerLabel folds a username:
+// lowercase, every '.' becomes '-'. siteHostPart decides what a name that
+// does not fold to a valid label gets instead.
 func siteLabel(name string) string {
 	return strings.ReplaceAll(strings.ToLower(name), ".", "-")
 }
@@ -111,42 +107,55 @@ func normalizeHost(raw string) string {
 type hostKind int
 
 const (
-	// hostUnknown is anything that is neither the base host, an owner host,
-	// nor a restricted-site host: a pod IP, a port-forward, an alias, a
-	// nested label, or a "--" label whose owner part is too short to form
-	// (see restrictedSiteLabelMinOwnerLen).
+	// hostUnknown is anything that is none of the kinds below: a pod IP, a
+	// port-forward, an alias, a host three or more labels deep, or a label
+	// that would read as punycode ("xn--...").
 	hostUnknown hostKind = iota
 	// hostBase is exactly the configured base host.
 	hostBase
-	// hostOwner is exactly "<valid label>.<base>" containing no "--".
+	// hostOwner is exactly "<valid label>.<base>" containing no "--": the
+	// person's or team's index page, and the pre-v1.3
+	// "<owner>.<base>/<site>/" addresses.
 	hostOwner
-	// hostRestrictedSite is "<owner label>--<site label>.<base>".
-	hostRestrictedSite
+	// hostSite is "<site part>.<owner label>.<base>", one site's own
+	// origin. Every site is served here, whatever its access level, once its
+	// owner's certificate is ready (HostModel.OwnerReady).
+	hostSite
+	// hostLegacySite is "<owner label>--<site label>.<base>", where a site
+	// shared with named people was served before v1.3. It only redirects.
+	hostLegacySite
 )
 
-// restrictedSiteLabelMinOwnerLen follows RFC 5890's rule: a label
-// whose third and fourth characters are both '-' is a reserved LDH label, so
-// "<owner>--<site>" is only formed when the owner part is at least three
-// characters (positions 0-2), keeping the "--" no earlier than position 3.
-const restrictedSiteLabelMinOwnerLen = 3
+// maxLabelLen is the DNS limit on one label.
+const maxLabelLen = 63
+
+// maxHostLen is the DNS limit on a whole name.
+const maxHostLen = 253
+
+// siteHashLen is how many hex digits of sha256(site name) end the host part
+// of a site whose name is not already a usable label (see siteHostPart).
+const siteHashLen = 6
 
 // HostModel knows the base host and can classify request hosts, build owner
-// and restricted-site hosts against it, and say which address a site should
-// be handed out under.
+// and site hosts against it, and say which address a site is handed out
+// under.
 //
 // The zero value is usable and behaves as "no base host": it classifies
 // everything as unknown, which is what handler tests that never set a base
 // URL rely on.
 type HostModel struct {
 	base string
-	// origin is the public base URL with any trailing slash removed, exactly
-	// what the deploy response prefixed onto the long path before subdomains.
+	// origin is the public base URL with any trailing slash removed.
 	origin string
-	// scheme and port are those of the public base URL; an owner or
-	// restricted-site host is reached over the same scheme and port as the
-	// base host.
+	// scheme and port are those of the public base URL; an owner or site
+	// host is reached over the same scheme and port as the base host.
 	scheme string
 	port   string
+	// ready reports whether an owner label's "*.<owner>.<base>" certificate
+	// is in place (OwnerHostReadiness). nil means every owner's is: an
+	// install that manages those certificates itself (OWNER_CERTS=manual),
+	// and tests.
+	ready func(ownerLabel string) bool
 }
 
 // NewHostModel derives the base host from the public base URL's hostname (no
@@ -170,19 +179,32 @@ func NewHostModel(publicBaseURL string) (HostModel, error) {
 	}, nil
 }
 
+// WithOwnerReadiness returns m answering OwnerReady from ready. Set it before
+// the model is handed to anything, since HostModel is copied by value.
+func (m HostModel) WithOwnerReadiness(ready func(ownerLabel string) bool) HostModel {
+	m.ready = ready
+	return m
+}
+
+// OwnerReady reports whether sites of the owner with this label are handed
+// out at, and redirected to, their own "<site>.<owner>.<base>" host. Until
+// then they are served at "<owner>.<base>/<site>/", so nobody is ever sent
+// to a host whose certificate does not exist yet.
+func (m HostModel) OwnerReady(ownerLbl string) bool {
+	return m.ready == nil || m.ready(ownerLbl)
+}
+
 // BaseHost returns the normalized base host, for example
 // "simple-host.example.com".
 func (m HostModel) BaseHost() string {
 	return m.base
 }
 
-// Classify normalizes raw (a request Host header) and reports whether it is
-// the base host, an owner host, a restricted-site host, or something else.
-// For hostOwner the label is the owner's label; for hostRestrictedSite it is
-// the composed "<owner label>--<site label>" (split it with
-// SplitRestrictedSiteLabel). Owner and restricted-site hosts are exactly one
-// label deep, so "a.b.<base>" is hostUnknown, and a label that fails
-// isValidLabel (such as "-x" or "x-") is hostUnknown too.
+// Classify normalizes raw (a request Host header) and reports what kind of
+// host it is. The label is everything before ".<base>": the owner label for
+// hostOwner, "<site part>.<owner label>" for hostSite (split it with
+// SplitSiteLabel), "<owner>--<site>" for hostLegacySite. Every label must
+// pass isValidLabel, so "-x" or "x-" is hostUnknown.
 func (m HostModel) Classify(raw string) (hostKind, string) {
 	h := normalizeHost(raw)
 	if h == "" || m.base == "" {
@@ -196,31 +218,39 @@ func (m HostModel) Classify(raw string) (hostKind, string) {
 		return hostUnknown, ""
 	}
 	label := strings.TrimSuffix(h, suffix)
-	if strings.Contains(label, ".") || !isValidLabel(label) {
+	if strings.HasPrefix(label, "xn--") {
+		// Browsers render a punycode label as Unicode; never ours.
+		return hostUnknown, ""
+	}
+	if sitePart, ownerPart, two := strings.Cut(label, "."); two {
+		if strings.Contains(ownerPart, ".") || strings.Contains(ownerPart, "--") ||
+			!isValidLabel(ownerPart) || !isValidLabel(sitePart) {
+			return hostUnknown, ""
+		}
+		return hostSite, label
+	}
+	if !isValidLabel(label) {
 		return hostUnknown, ""
 	}
 	if idx := strings.Index(label, "--"); idx >= 0 {
-		if idx < restrictedSiteLabelMinOwnerLen {
-			// Too short to be a well-formed restricted-site label, and "--"
-			// is reserved so this can never be an ordinary owner label
-			// either: refuse it outright rather than guessing which one
-			// was meant.
+		if !isValidLabel(label[:idx]) || !isValidLabel(label[idx+2:]) {
 			return hostUnknown, ""
 		}
-		ownerPart, sitePart := label[:idx], label[idx+2:]
-		if !isValidLabel(ownerPart) || !isValidLabel(sitePart) {
-			return hostUnknown, ""
-		}
-		return hostRestrictedSite, label
+		return hostLegacySite, label
 	}
 	return hostOwner, label
 }
 
-// SplitRestrictedSiteLabel splits a hostRestrictedSite label (as returned by
-// Classify) into its owner and site parts. It assumes label was already
-// produced by Classify and so does not re-validate; ok is false only if
-// label does not contain "--" at all.
-func SplitRestrictedSiteLabel(label string) (ownerLabelPart, siteLabelPart string, ok bool) {
+// SplitSiteLabel splits a hostSite label (as returned by Classify) into its
+// site part and owner label. ok is false if label is not two labels.
+func SplitSiteLabel(label string) (sitePart, ownerLabelPart string, ok bool) {
+	sitePart, ownerLabelPart, ok = strings.Cut(label, ".")
+	return sitePart, ownerLabelPart, ok
+}
+
+// splitLegacySiteLabel splits a hostLegacySite label at its first "--";
+// owner labels never contain "--", so the split is unambiguous.
+func splitLegacySiteLabel(label string) (ownerLabelPart, sitePart string, ok bool) {
 	idx := strings.Index(label, "--")
 	if idx < 0 {
 		return "", "", false
@@ -228,34 +258,70 @@ func SplitRestrictedSiteLabel(label string) (ownerLabelPart, siteLabelPart strin
 	return label[:idx], label[idx+2:], true
 }
 
-// SiteHost returns the host a username's sites are served on:
+// OwnerHost returns the host of a person's or team's index page:
 // ownerLabel(username) + "." + BaseHost().
-func (m HostModel) SiteHost(username string) string {
+func (m HostModel) OwnerHost(username string) string {
 	return ownerLabel(username) + "." + m.base
 }
 
-// RestrictedSiteHost returns the host a restricted site is served on:
-// "<owner label>--<site label>.<base>". Only meaningful when
-// RestrictedSiteAddressable reports true; callers that skip that check may
-// get a host nothing will ever classify as hostRestrictedSite (for example,
-// a two-character owner) or, if the site name folds to something invalid,
-// a nonsensical label.
-func (m HostModel) RestrictedSiteHost(owner, siteName string) string {
-	return ownerLabel(owner) + "--" + siteLabel(siteName) + "." + m.base
+// siteHostPart is a site's own label in "<part>.<owner>.<base>", a pure
+// function of the site name so every address can be computed without a
+// lookup. A name that already folds (siteLabel) to a valid label keeps it,
+// which is every name a new site may have and every pre-v1.3 "specific"
+// site's address. Any other name (spaces, underscores, longer than a label)
+// becomes its folded name with every other character replaced by '-', cut
+// to fit, plus "-" and the first six hex digits of sha256(name), so two
+// such names never share a part.
+func siteHostPart(siteName string) string {
+	if folded := siteLabel(siteName); isValidLabel(folded) && !strings.HasPrefix(folded, "xn--") {
+		return folded
+	}
+	var b strings.Builder
+	for _, c := range []byte(siteLabel(siteName)) {
+		if c >= 'a' && c <= 'z' || c >= '0' && c <= '9' {
+			b.WriteByte(c)
+		} else if b.Len() > 0 && !strings.HasSuffix(b.String(), "-") {
+			b.WriteByte('-')
+		}
+	}
+	stem := strings.TrimPrefix(strings.TrimRight(b.String(), "-"), "xn-")
+	if limit := maxLabelLen - siteHashLen - 1; len(stem) > limit {
+		stem = strings.TrimRight(stem[:limit], "-")
+	}
+	sum := sha256.Sum256([]byte(siteName))
+	digest := hex.EncodeToString(sum[:])[:siteHashLen]
+	if stem == "" {
+		return "s-" + digest
+	}
+	return stem + "-" + digest
 }
 
-// RestrictedSiteAddressable reports whether a restricted site's own hostname
-// can be formed at all: both the owner and site names must fold to valid DNS
-// labels, and the owner label must be at least restrictedSiteLabelMinOwnerLen
-// characters so the composed label does not fall foul of the RFC 5890 "--"
-// reservation. A site that fails this cannot be restricted
-// to specific viewers until it (or, for the owner, the account) is renamed;
-// the dashboard is expected to say so rather than silently forming a broken
-// address.
-func (m HostModel) RestrictedSiteAddressable(owner, siteName string) bool {
-	return isAddressableOwner(owner) &&
-		len(ownerLabel(owner)) >= restrictedSiteLabelMinOwnerLen &&
-		isValidLabel(siteLabel(siteName))
+// SiteHost returns a site's own host, "<site part>.<owner label>.<base>",
+// or "" when the owner cannot be a label or the name would be too long.
+func (m HostModel) SiteHost(owner, siteName string) string {
+	if m.base == "" || !isAddressableOwner(owner) {
+		return ""
+	}
+	host := siteHostPart(siteName) + "." + ownerLabel(owner) + "." + m.base
+	if len(host) > maxHostLen {
+		return ""
+	}
+	return host
+}
+
+// ValidNewSiteName reports whether name may be given to a new site under
+// owner: it must already be its own host label, so the address reads
+// exactly as the name was typed — lowercase letters, digits and hyphens,
+// not starting or ending with a hyphen, at most 63 characters. Sites created
+// before v1.3 keep whatever name they had.
+func (m HostModel) ValidNewSiteName(owner, name string) bool {
+	return isValidLabel(name) && !strings.HasPrefix(name, "xn--") &&
+		(m.base == "" || m.SiteHost(owner, name) != "")
+}
+
+// MaxSiteNameLen is the longest new site name.
+func MaxSiteNameLen(string) int {
+	return maxLabelLen
 }
 
 // isAddressableOwner reports whether ownerLabel(username) is a valid DNS
@@ -267,39 +333,21 @@ func isAddressableOwner(username string) bool {
 }
 
 // SiteURL returns the absolute address a person or agent should be given for
-// a site: the short address on the owner's own host, or on the restricted
-// site's own host when restricted is true. Subdomain addressing is the only
-// addressing this server has; an owner whose name cannot be
-// a hostname label has no address at all, which should not happen for any
-// account created since validateOwnerName started enforcing it, but is
-// reported as "" rather than panicking so a caller can decide how to degrade.
-func (m HostModel) SiteURL(username, siteName string, restricted bool) string {
-	if m.base == "" || !isAddressableOwner(username) {
+// a site: the root of its own host once its owner's certificate is ready,
+// "<owner>.<base>/<site>/" until then. "" when it has none, so a caller can
+// decide how to degrade.
+func (m HostModel) SiteURL(username, siteName string) string {
+	host := m.SiteHost(username, siteName)
+	if host == "" {
 		return ""
 	}
-	if restricted {
-		if !m.RestrictedSiteAddressable(username, siteName) {
-			return ""
-		}
-		return m.restrictedSiteURL(username, siteName)
+	if !m.OwnerReady(ownerLabel(username)) {
+		return m.OwnerOrigin(ownerLabel(username)) + "/" + url.PathEscape(siteName) + "/"
 	}
-	return m.shortSiteURL(username, siteName)
+	return m.OwnerOrigin(strings.TrimSuffix(host, "."+m.base)) + "/"
 }
 
-// SiteLink is a narrow compatibility shim for the admin dashboard's ranking
-// cards (admin_rankings.go), which rank sites by a struct with no site id
-// and so cannot look up whether a given site is restricted the way every
-// other caller of SiteURL now does. It always reports the unrestricted
-// address; for a site that has since been restricted, that link 404s on the
-// rank card while the same site's row elsewhere on the same dashboard (which
-// does carry a site id) links correctly. Accepted as a cosmetic gap rather
-// than threading a site id through the ranking pipeline for this one
-// internal, admin-only view — see docs/security-review.md.
-func (m HostModel) SiteLink(username, siteName string) string {
-	return m.SiteURL(username, siteName, false)
-}
-
-// OwnerOrigin returns the origin an owner host is reached at,
+// OwnerOrigin returns the origin an owner or site host is reached at,
 // "<scheme>://<label>.<base>[:port]", built from the configured public base
 // URL's scheme and port. label is a label this model produced (from Classify
 // or ownerLabel); the request's own Host header is never echoed into it, so a
@@ -319,31 +367,14 @@ func (m HostModel) OwnerPageURL(username string) string {
 	return m.OwnerOrigin(ownerLabel(username)) + "/"
 }
 
-// shortSiteURL builds "<scheme>://<label>.<base>[:port]/<site>/" from the
-// public base URL's scheme and port, so a base URL with a port keeps it.
-func (m HostModel) shortSiteURL(username, siteName string) string {
-	return m.OwnerOrigin(ownerLabel(username)) + "/" + url.PathEscape(siteName) + "/"
-}
-
-// restrictedSiteURL builds "<scheme>://<owner>--<site>.<base>[:port]/", the
-// root of a restricted site's own host; there is no "/<site>/" segment
-// because the whole host is dedicated to this one site.
-func (m HostModel) restrictedSiteURL(username, siteName string) string {
-	authority := m.RestrictedSiteHost(username, siteName)
-	if m.port != "" {
-		authority += ":" + m.port
-	}
-	return m.scheme + "://" + authority + "/"
-}
-
 // RedirectHost returns the canonical host a plain-HTTP request addressed to
 // raw should be redirected to: the base host for the base host and for any
-// unrecognised host, and the rebuilt owner or restricted-site label for the
+// unrecognised host, and the rebuilt owner or site label for the
 // other two kinds. It never echoes raw, so a client-controlled Host header
 // cannot become a Location target.
 func (m HostModel) RedirectHost(raw string) string {
 	switch kind, label := m.Classify(raw); kind {
-	case hostOwner, hostRestrictedSite:
+	case hostOwner, hostSite, hostLegacySite:
 		return label + "." + m.base
 	default:
 		return m.base
@@ -358,21 +389,18 @@ func (m HostModel) OwnsLabel(label, username string) bool {
 }
 
 // SiteHostResolver returns the host that serves a site's own API: the
-// restricted site's dedicated host when it is restricted, the owner's host
-// otherwise (including when the site does not exist, so the caller gets that
-// host's ordinary 404).
-func (m HostModel) SiteHostResolver(q db.Querier) func(ctx context.Context, owner, site string) (string, error) {
-	return func(ctx context.Context, owner, site string) (string, error) {
-		_, restricted, err := db.SiteForServing(ctx, q, owner, site)
-		if errors.Is(err, db.ErrSiteNotFound) {
-			return m.SiteHost(owner), nil
+// site's own host once its owner is ready, the owner host (which serves the
+// named API shape until then) before. It needs no lookup; a site that does
+// not exist gets that host's ordinary 404.
+func (m HostModel) SiteHostResolver() func(ctx context.Context, owner, site string) (string, error) {
+	return func(_ context.Context, owner, site string) (string, error) {
+		host := m.SiteHost(owner, site)
+		if host == "" {
+			return "", fmt.Errorf("site %s/%s has no address", owner, site)
 		}
-		if err != nil {
-			return "", err
+		if !m.OwnerReady(ownerLabel(owner)) {
+			return m.OwnerHost(owner), nil
 		}
-		if restricted {
-			return m.RestrictedSiteHost(owner, site), nil
-		}
-		return m.SiteHost(owner), nil
+		return host, nil
 	}
 }

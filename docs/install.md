@@ -45,7 +45,10 @@ you want to run them individually):
 3. `local-certs` — runs `mkcert -install` (see the interactive-step
    callout below), then issues a certificate for
    `simple-host.127-0-0-1.nip.io` and its wildcard, and loads it as a TLS
-   Secret in the `simple-host` namespace.
+   Secret in the `simple-host` namespace. It also creates the
+   `simple-host-local-ca` ClusterIssuer from the same mkcert CA, which signs
+   each owner's `*.<owner>.simple-host.127-0-0-1.nip.io` certificate (the
+   local `config.env` names it in `OWNER_CERT_ISSUER`).
 4. `local-secrets` — writes `deploy/overlays/local/secrets.env` with
    freshly generated random values, if it does not already exist. This
    file is gitignored; it is never committed.
@@ -103,8 +106,8 @@ make smoke
 revokes an API key, confirms `X-API-Key` and the session cookie both
 authenticate `/api/sites`, drives the full
 hand-off round trip from the base host to an owner host's own session,
-restricts a site to a named viewer and confirms it serves only on its own
-`<owner>--<site>` hostname (404 to everyone else), checks the
+restricts a site to a named viewer and confirms its own site host answers
+404 to everyone else, checks the
 `Cross-Origin-Resource-Policy` and `Sec-Fetch-Site` refusal headers, reads
 and writes a site's state and uploads/lists/deletes an asset through the
 site-facing API by both session and `X-API-Key`, and confirms an
@@ -251,7 +254,10 @@ person's address rather than the ingress's (`docs/configuration.md`).
    the base's placeholder `sha256:REPLACE_WITH_THE_RELEASE_DIGEST`, which
    `make preflight` refuses.
 6. Point a wildcard DNS record at your ingress controller's address for
-   both `<base>` and `*.<base>`.
+   both `<base>` and `*.<base>`. That is all the DNS there is: `*.<base>`
+   also matches every site host, `<site>.<owner>.<base>`. Site hosts need a
+   certificate per owner; see "Site addresses" below, and set
+   `OWNER_CERT_ISSUER` in `config.env` before applying.
 7. Apply:
 
    ```sh
@@ -276,13 +282,129 @@ top of the same `byo` shape, for a company that wants a separate
 environment before the one it puts employees on; they copy `byo`'s
 `.example` files today and are not further along.
 
-## 6. Sign-in, hand-off, and restricted sites
+### Site addresses (owner certificates)
+
+Every site is served at the root of its own host, `<site>.<owner>.<base>`
+(for example `todo.alice.<base>`), so each site is its own browser origin.
+
+- **DNS: nothing more.** The `*.<base>` record from step 6 above already matches
+  names at any depth, including `todo.alice.<base>`.
+- **TLS: one certificate per owner.** A TLS wildcard covers exactly one
+  label: the base certificate covers `alice.<base>` but not
+  `todo.alice.<base>`. Each owner needs `*.<owner>.<base>`. With
+  `OWNER_CERTS=auto` (the default), the component
+  `deploy/components/owner-hosts`, already listed under `components:` in the
+  byo `kustomization.yaml`, keeps one Ingress per owner with sites,
+  annotated for cert-manager, and cert-manager issues that owner's
+  certificate from the ClusterIssuer named in `OWNER_CERT_ISSUER`.
+- **Sites keep serving at `<owner>.<base>/<site>/` until each owner's
+  certificate is ready**, and responses give that address in `url` until
+  then. Nothing breaks while a certificate is pending.
+
+Choose the ClusterIssuer that signs owner certificates, then set
+`OWNER_CERT_ISSUER=<its name>` in `config.env`:
+
+- **An internal CA (recommended).** No rate limits. A cert-manager CA
+  issuer is the smallest; Vault and Venafi issuers work the same way. The
+  company's devices must trust the CA (managed devices usually already do).
+
+  ```yaml
+  apiVersion: cert-manager.io/v1
+  kind: ClusterIssuer
+  metadata:
+    name: company-ca
+  spec:
+    ca:
+      # A kubernetes.io/tls Secret in the cert-manager namespace holding the
+      # CA's certificate and key.
+      secretName: company-ca
+  ```
+
+- **ACME, such as Let's Encrypt.** Wildcards need DNS-01, so the DNS-01
+  ClusterIssuer from step 4 works as it is. Let's Encrypt limits new
+  certificates per registered domain per week, and this issues one per
+  owner, so a large company hits the limit during rollout. Use an internal
+  CA instead, or put the base domain on the Public Suffix List (each
+  `<owner>.<base>` then counts as its own registered domain).
+
+**Private registry.** The reconciler runs as its own ServiceAccount,
+`simple-host-owner-hosts`. Add the same pull secret to it as to
+`simple-host` (section 10, "If you use a private registry"), or it sits in `ImagePullBackOff` and every site
+stays at its fallback address:
+
+```yaml
+patches:
+  - target: {kind: ServiceAccount, name: simple-host-owner-hosts}
+    patch: |
+      - op: add
+        path: /imagePullSecrets
+        value: [{name: registry-pull}]
+```
+
+**Issuing owner certificates yourself.** If the platform team will not let
+a pod create Ingresses, delete `- ../../components/owner-hosts` from
+`components:` and set `OWNER_CERTS=manual` in `config.env`. Every owner is
+then treated as ready, so each owner's certificate and ingress host rule
+must exist before that owner publishes a first site. For owner `alice`
+(copy the class and controller annotations from `ingress-patch.yaml`):
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: sh-owner-alice-tls
+  namespace: simple-host
+spec:
+  secretName: sh-owner-alice-tls
+  dnsNames: ["*.alice.<base>"]
+  issuerRef:
+    kind: ClusterIssuer
+    name: <issuer>
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sh-owner-alice
+  namespace: simple-host
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 128m
+spec:
+  # ingressClassName: the same as ingress-patch.yaml, if set there
+  tls:
+    - hosts: ["*.alice.<base>"]
+      secretName: sh-owner-alice-tls
+  rules:
+    - host: "*.alice.<base>"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: simple-host
+                port:
+                  name: http
+```
+
+Any other way of getting a `*.alice.<base>` certificate onto the ingress
+works too. See `docs/site-isolation.md` for why each site has its own host.
+
+**Ingress controller.** Automatic owner certificates are tested with an
+in-cluster controller (ingress-nginx). AWS ALB (ACM certificates only, one
+load balancer per Ingress without a shared `group.name`) and GKE's `gce`
+Ingress (one load balancer per Ingress) do not fit one Ingress per owner:
+run an in-cluster controller for the site hosts, or use `OWNER_CERTS=manual`.
+
+## 6. Sign-in, hand-off, and site hosts
 
 Every hosted page and every site-facing API call requires a signed-in host
 session, except on a site an admin has approved for the network (below).
-There is no Referer-based attribution anywhere in this package. Signing in on the base host does not, by itself,
-authenticate you on `alice.<base>`: the first time you open a page on an
-owner host, the server sets a short-lived nonce cookie on that host,
+There is no Referer-based attribution anywhere in this package. Every
+site is served at the root of its own host, `todo.alice.<base>/`, once
+the owner's certificate is ready (at `alice.<base>/todo/` until then); the
+owner host `alice.<base>/` is the person's (or team's) index page. Signing in on the base host does not, by itself,
+authenticate you on those hosts: the first time you open a page on an
+owner host or a site host, the server sets a short-lived nonce cookie on that host,
 redirects you to `<base>/auth/handoff` to mint a one-time code bound to
 that nonce, and redirects you back to redeem it and mint that host's own
 `__Host-sh_session` cookie. This is transparent in a browser (it is one
@@ -315,26 +437,28 @@ to any lower level at any time; that ends its network approval.
 Named viewers are managed under a site's "Viewers" section or through the
 API (`GET`/`POST /api/collaboration/sites/{owner}/{sitename}/viewers`,
 `DELETE .../viewers/{username}`). Adding one sets the site to `specific`;
-removing the last one leaves it there, open only to the owner or team. A
-`specific` site lives on its own dedicated hostname,
-`<owner>--<site>.simple-host.127-0-0-1.nip.io` on the local overlay, and
-stops being reachable at the ordinary `alice.<base>/<site>/` address at
-all — anyone it is not shared with gets `404`, not `403`, so the site's
-existence is never confirmed to someone it isn't shown to. The local
-overlay's wildcard certificate, `*.simple-host.127-0-0-1.nip.io`, already
-covers this address with no extra step: `<owner>--<site>` is one DNS label
-(it contains a hyphen, not a dot), so `mkcert`'s existing wildcard from
-section 2 matches it exactly the same way it matches an ordinary owner
-label. The same is true of your own wildcard on a real cluster.
+removing the last one leaves it there, open only to the owner or team.
+Anyone a site is not shared with gets `404`, not `403`, so the site's
+existence is never confirmed to someone it isn't shown to.
 
-One naming rule: a label whose third and fourth characters are `--` is a
-reserved LDH label under RFC 5890 and some validators refuse it, so the
-`--` address is only offered when the *owner's* label is at least three
-characters (rare to hit in practice, since the label derives from an
-email's local part); a two-character owner sees an explanation in the
-dashboard rather than the option, and a site name that itself does not
-fold into a valid DNS label has no working restricted address yet either
-(a known gap — see `docs/security-review.md`'s Remains).
+Every site, at every level, lives on its own host,
+`<site>.<owner>.simple-host.127-0-0-1.nip.io` on the local overlay, so
+each site is its own browser origin. On the local overlay the owner's
+certificate is signed by the `simple-host-local-ca` ClusterIssuer from
+section 2 within seconds of the first site. Until an owner's certificate
+is ready, their sites are served at `<owner>.<base>/<site>/`. After that,
+an old `<owner>.<base>/<site>/` address redirects to the site's host (301,
+or 308 for methods other than GET and HEAD), path and query kept, and a
+v1.2 `<owner>--<site>.<base>` host redirects to the site's current
+address; every redirect is computed from the address alone and confirms
+nothing.
+
+Naming: a new site name is lowercase letters, digits and hyphens, starting
+and ending with a letter or digit, at most 63 characters, and not starting
+`xn--`; otherwise `400 invalid_site_name`.
+Sites created before v1.3 keep their names; where a name is not a DNS label,
+its address uses a folded form plus six hex digits. Always use the `url` a
+response returns rather than composing an address.
 
 ## 7. Reading and writing a site's own state and assets
 
@@ -343,11 +467,11 @@ A page's own JavaScript calls
 `GET`/`PUT /api/sites/{site}/state/versioned` (compare-and-set; the
 default for a new stateful site) on its own host, authenticated by the
 viewer's session cookie exactly like viewing the page itself — there is no
-separate token to manage. `{site}` is computed from the page's own address
-with `location.pathname.split('/')[1]` on an ordinary owner host; a
-restricted site's own host has no `/<site>/` segment, so a page that might
-be restricted should call the nameless `/api/site/state...` shape instead
-or bake its site name in at deploy time, per
+separate token to manage. A page writes its site name in at build time and
+calls `/api/sites/<site>/...` as a root-relative path: that works on the
+site's own host (where the named shape is accepted only when it names that
+site) and at the fallback `<owner>.<base>/<site>/` address. It never reads
+the name from `location.pathname`. See
 `simple-host-plugin/skills/simple-host/references/state-and-ai.md`. A
 `401` means the session expired or the page moved hosts; the fix is
 `location.reload()`, which re-enters the hand-off above, not a retry with
@@ -359,7 +483,8 @@ Assets — a photo, PDF, audio/video clip, or a CSV/JSON/plain-text/zip/gzip
 file a page wants to reference by URL, outside the site's own version
 history — use `POST`/`GET /api/sites/{site}/assets`,
 `DELETE /api/sites/{site}/assets/{id}`, and
-`GET /{site}/_assets/{id}[/{name}]` on the same host and the same session.
+`GET /_assets/{id}[/{name}]` on the site's own host (`/<site>/_assets/...`
+at the fallback address) and the same session.
 The upload is refused (`415`) whenever the file's sniffed bytes don't
 match the allowlist (`image/*`, `video/*`, `audio/*`, `application/pdf`,
 JSON, CSV, plain text, zip, gzip) regardless of its declared type or
@@ -609,7 +734,9 @@ still count in memory until they are replaced.
 Put the pull secret on the **ServiceAccount**, not the Deployment. Two
 workloads run this image: the server and the `prune` CronJob. Kubernetes
 applies a ServiceAccount's `imagePullSecrets` to every pod that uses it, so
-one patch covers both.
+one patch covers both. The owner-hosts reconciler runs as its own
+ServiceAccount, `simple-host-owner-hosts`; patch it the same way (section
+5, "Site addresses").
 
 Patching only the Deployment leaves the CronJob in `ImagePullBackOff`. The
 instance serves normally, so nothing looks wrong — but no audit partition is

@@ -64,7 +64,7 @@ func (w *accessWorld) siteID(owner, site string) string {
 func (w *accessWorld) uploadAsset(user, owner, site, name string, content []byte) *httptest.ResponseRecorder {
 	w.t.Helper()
 	request := multipartUploadRequest(w.t, name, content)
-	request.URL.Host = owner + "." + accessBase
+	request.URL.Host = site + "." + owner + "." + accessBase
 	request.Host = request.URL.Host
 	request.URL.Scheme = "https"
 	request.URL.Path = "/api/sites/" + site + "/assets"
@@ -94,9 +94,9 @@ func TestQuotaSiteLimitPerOwner(t *testing.T) {
 		t.Fatalf("update at the site limit = %d %s", rec.Code, rec.Body)
 	}
 	// A team is its own owner with its own count.
-	w.deploy("alice", "/api/collaboration/sites/crew/a")
-	w.deploy("alice", "/api/collaboration/sites/crew/b")
-	if rec := w.api("alice", http.MethodPost, "/api/collaboration/sites/crew/c", zipOf(t, map[string][]byte{"index.html": []byte("x")})); rec.Code != http.StatusConflict {
+	w.deploy("alice", "/api/collaboration/sites/team-crew/a")
+	w.deploy("alice", "/api/collaboration/sites/team-crew/b")
+	if rec := w.api("alice", http.MethodPost, "/api/collaboration/sites/team-crew/c", zipOf(t, map[string][]byte{"index.html": []byte("x")})); rec.Code != http.StatusConflict {
 		t.Fatalf("team's third site = %d %s", rec.Code, rec.Body)
 	}
 
@@ -111,7 +111,7 @@ func TestQuotaSiteLimitPerOwner(t *testing.T) {
 	if me.Usage[0].Owner != "alice" || me.Usage[0].Sites != 2 || me.Usage[0].MaxSites != 2 || me.Usage[0].Bytes <= 0 {
 		t.Fatalf("alice usage = %+v", me.Usage[0])
 	}
-	if me.Usage[1].Owner != "crew" || me.Usage[1].Sites != 2 {
+	if me.Usage[1].Owner != "team-crew" || me.Usage[1].Sites != 2 {
 		t.Fatalf("crew usage = %+v", me.Usage[1])
 	}
 
@@ -122,7 +122,7 @@ func TestQuotaSiteLimitPerOwner(t *testing.T) {
 	page.AddCookie(w.cookie("alice", ""))
 	out := httptest.NewRecorder()
 	dashboard.ServeHTTP(out, page)
-	if !strings.Contains(out.Body.String(), "2 of 2 sites") || !strings.Contains(out.Body.String(), ">crew<") {
+	if !strings.Contains(out.Body.String(), "2 of 2 sites") || !strings.Contains(out.Body.String(), ">team-crew<") {
 		t.Fatalf("dashboard usage missing: %d", out.Code)
 	}
 }

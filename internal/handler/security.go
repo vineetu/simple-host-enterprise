@@ -53,7 +53,7 @@ func SecurityHeaders(next http.Handler, secureMode bool, hosts HostModel) http.H
 		// base host.
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		kind, _ := hosts.Classify(r.Host)
-		hostedContent := kind == hostOwner || kind == hostRestrictedSite
+		hostedContent := kind == hostOwner || kind == hostSite
 		if !hostedContent {
 			w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
 		}

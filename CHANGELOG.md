@@ -4,6 +4,92 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## v1.3.0 — 2026-09-26
+
+Schema 0042. Migrations 0041 (renames team rows) and 0042 (adds the
+`owner_hosts` table) are both marked backward-compatible, so rolling back to
+v1.2.1 is safe; after a rollback sites are served at `<owner>.<base>/<site>/`
+again and old team addresses stop redirecting. Skills are at 0.13.0 (0.11.0
+still works).
+
+### Sites
+- Every site now has its own origin, at every access level: it is served at
+  the root of `<site>.<owner>.<base>/`, for example
+  `todo.alice.example.com/`. An owner's sites no longer share cookies,
+  storage or scripts with each other. The first visit to each site hands
+  the session over without a prompt, as restricted sites already did.
+- Until an owner's certificate is ready, their sites are served at
+  `<owner>.<base>/<site>/` as before, and responses give that address. Once
+  it is ready, `<owner>.<base>/<site>/...` and `/api/sites/<site>/...` on the
+  owner host redirect to the site's own host with path and query kept (301
+  for GET and HEAD, 308 otherwise). `<owner>.<base>/` keeps the person's or
+  team's index page.
+- A site shared with named people in v1.2 lived at `<owner>--<site>.<base>`;
+  that address now redirects to the site's current one.
+- New site names are lowercase letters, numbers and hyphens, start and end
+  with a letter or number, are at most 63 characters and do not begin with
+  `xn--`; the name becomes the address. Otherwise the create is refused with
+  400 `invalid_site_name`. Existing sites keep their names; one whose name
+  is not a valid address gets a derived one ending in six hex digits, and a
+  new name equal to that derived address is refused with 409
+  `name_conflict`. Always use the `url` a response gives.
+- Search results indexed before v1.3 carry the old addresses, which
+  redirect; each site's next deploy reindexes it.
+- Admin ranking cards link to each site's own address.
+
+### Certificates
+- A TLS wildcard covers one label, so each owner needs a `*.<owner>.<base>`
+  certificate. A new Deployment, `simple-host-owner-hosts`
+  (`deploy/components/owner-hosts`, the same image running
+  `simple-host owner-hosts`), keeps one Ingress per owner with sites,
+  annotated for cert-manager, and records in `owner_hosts` when that
+  owner's certificate is Ready. The server moves an owner to site hosts
+  within about 15 seconds of that.
+- It runs apart from the server so the server's pods still hold no
+  Kubernetes credential. Its Role allows Ingresses and reading Certificates
+  in the install's namespace; it never reads Secrets.
+- New settings: `OWNER_CERTS` (`auto`, the default, or `manual`),
+  `OWNER_CERT_ISSUER`, `OWNER_INGRESS_TEMPLATE`, `OWNER_HOSTS_INTERVAL`
+  (`docs/configuration.md`). With `manual`, leave the component out and
+  provide each owner's certificate and ingress rule yourself.
+
+### Teams
+- Team names begin with `team-`. Creating `sales` or `team-sales` both make
+  `team-sales`, and the team routes accept either spelling. A person's
+  sign-in name never begins with `team-` (`team-alpha` becomes `teamalpha`).
+- Migration 0041 renames existing teams `sales` to `team-sales`. It stops,
+  naming them, if a renamed team would take an existing account's address
+  or run past 58 characters; delete the team or remove the account, then
+  run it again.
+- Old team addresses (`sales.<base>/...`, and `sales--<site>.<base>`)
+  redirect to the `team-sales` ones for as long as no account holds the
+  name `sales`.
+
+### Upgrade notes
+- DNS: no change. The one `*.<base>` record already answers for names at
+  any depth, including `todo.alice.<base>`.
+- Certificates: install cert-manager and a ClusterIssuer (an internal CA is
+  best; Let's Encrypt limits certificates per domain per week), set
+  `OWNER_CERT_ISSUER` to its name, and include
+  `deploy/components/owner-hosts` in your overlay. On a private registry,
+  add the pull secret to the new `simple-host-owner-hosts` ServiceAccount.
+  `INSTALL.md`, "Site addresses", has the steps and the manual option.
+- Sites keep serving at `<owner>.<base>/<site>/` until each owner's
+  certificate is ready, so nothing breaks while certificates are issued or
+  if the component is not yet deployed.
+- Bookmarks and shared links redirect.
+- On a site's own host the path is the site's own file path, so a page that
+  requests `/<site>/...` from its own origin gets a 404 there. Relative
+  paths, which the skills have always asked for, work at both addresses.
+- Proven end to end on kind with ingress-nginx and cert-manager and a CA
+  ClusterIssuer: fallback, certificate issue, switch to site hosts,
+  redirects, and cleanup when an owner's last site is deleted.
+- Automatic owner certificates are tested only with an in-cluster ingress
+  controller (ingress-nginx); AWS ALB (ACM certificates only, and one load
+  balancer per Ingress without a shared `group.name`) and GKE's `gce`
+  Ingress (one load balancer per Ingress) need an in-cluster controller for
+  the site hosts, or `OWNER_CERTS=manual`.
+
 ## v1.2.1 — 2026-09-26
 
 Schema 0040. Migration 0040 only adds a read-only function and is marked

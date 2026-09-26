@@ -43,6 +43,10 @@ solvers:
 3. Label the cert-manager pods `azure.workload.identity/use: "true"`
    (Helm values: `podLabels: {azure.workload.identity/use: "true"}`).
 
+Owner certificates (`*.<owner>.<base>`) work with the add-on's NGINX as written: the
+reconciler's per-owner Ingresses copy its class and annotations. Name this issuer, or
+an internal CA issuer (no rate limits, no DNS), in `OWNER_CERT_ISSUER`.
+
 ## 3. Postgres
 
 Azure Database for PostgreSQL flexible server, version 16.

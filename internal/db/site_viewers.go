@@ -46,8 +46,7 @@ const siteForServingQuery = `
 // its own host by its owner's username and its own name — the pairing the
 // host gate has in hand once it has resolved a hostname label to an owner
 // and a site directory to a name. restricted is true exactly when the
-// site's access level is AccessSpecific (named viewers), the one level
-// served at "<owner>--<site>.<base>".
+// site's access level is AccessSpecific (named viewers).
 func SiteForServing(ctx context.Context, q Querier, ownerUsername, siteName string) (siteID string, restricted bool, err error) {
 	err = q.QueryRowContext(ctx, siteForServingQuery, ownerUsername, siteName).Scan(&siteID, &restricted)
 	if errors.Is(err, sql.ErrNoRows) {

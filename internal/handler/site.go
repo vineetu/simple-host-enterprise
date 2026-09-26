@@ -160,14 +160,9 @@ func stateUsageMarkerKey(siteID string, versioned bool) string {
 }
 
 // siteURL is the absolute address reported for a site in deploy and rollback
-// responses: the short address on the owner's own host, or on the
-// restricted site's own host once it has any viewers.
-func (h *SiteHandler) siteURL(ctx context.Context, username, siteName, siteID string) string {
-	restricted, err := db.IsSiteRestricted(ctx, h.database, siteID)
-	if err != nil {
-		log.Printf("site url: check restriction for %s/%s: %v", username, siteName, err)
-	}
-	return h.hosts.SiteURL(username, siteName, restricted)
+// responses: the root of the site's own host.
+func (h *SiteHandler) siteURL(_ context.Context, username, siteName, _ string) string {
+	return h.hosts.SiteURL(username, siteName)
 }
 
 func (h *SiteHandler) Register(mux *http.ServeMux, authMiddleware, skillVersionMiddleware func(http.Handler) http.Handler) {
@@ -290,6 +285,36 @@ func validatedNewSiteName(w http.ResponseWriter, r *http.Request) (string, bool)
 	return siteName, true
 }
 
+// newSiteNameAddressable refuses a new site name that cannot be its own host
+// label exactly as typed (HostModel.ValidNewSiteName), or whose address an
+// existing site of the same owner already has — possible only for a site
+// named before v1.3, such as "Notes" beside a new "notes".
+func (h *SiteHandler) newSiteNameAddressable(w http.ResponseWriter, r *http.Request, owner, siteName string) bool {
+	if !h.hosts.ValidNewSiteName(owner, siteName) {
+		writeJSON(w, http.StatusBadRequest, errorResponse{
+			Error: fmt.Sprintf("site names use lowercase letters, numbers and hyphens, start and end with a letter or number, and are at most %d characters; the name becomes the site's own web address", MaxSiteNameLen(owner)),
+			Code:  "invalid_site_name",
+		})
+		return false
+	}
+	existing, err := db.ListSiteNamesByOwnerUsername(r.Context(), h.database, owner)
+	if err != nil {
+		log.Printf("list sites for %q: %v", owner, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return false
+	}
+	for _, name := range existing {
+		if name != siteName && siteHostPart(name) == siteName {
+			writeJSON(w, http.StatusConflict, errorResponse{
+				Error: fmt.Sprintf("site %q already has that web address; pick another name", name),
+				Code:  "name_conflict",
+			})
+			return false
+		}
+	}
+	return true
+}
+
 func validateStoredUsername(w http.ResponseWriter, username string) bool {
 	if err := safepath.ValidateSegment(username); err != nil {
 		log.Printf("reject unsafe stored username %q: %v", username, err)
@@ -367,6 +392,9 @@ func (h *SiteHandler) createSite(w http.ResponseWriter, r *http.Request) {
 // locks, the disk paths, the sites row and the reported URL. See mutationTarget.
 func (h *SiteHandler) createSiteForTarget(w http.ResponseWriter, r *http.Request, target mutationTarget, siteName string) {
 	if !validateStoredUsername(w, target.OwnerUsername) {
+		return
+	}
+	if !h.newSiteNameAddressable(w, r, target.OwnerUsername, siteName) {
 		return
 	}
 	if decision := h.limits.allow(managementUserPolicy, target.ActorID); !decision.Allowed {

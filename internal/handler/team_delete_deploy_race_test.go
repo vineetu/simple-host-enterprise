@@ -19,8 +19,8 @@ import (
 func TestRaceDeployDuringTeamDelete(t *testing.T) {
 	w := newAccessWorld(t)
 	w.newTeam("crew", "mo", "alice")
-	w.deploy("mo", "/api/collaboration/sites/crew/board")
-	ids := w.teamSiteIDs("crew")
+	w.deploy("mo", "/api/collaboration/sites/team-crew/board")
+	ids := w.teamSiteIDs("team-crew")
 
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
@@ -45,7 +45,7 @@ func TestRaceDeployDuringTeamDelete(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		<-start
-		req := httptest.NewRequest(http.MethodPut, "https://"+accessBase+"/api/collaboration/sites/crew/board", bytes.NewReader(payload))
+		req := httptest.NewRequest(http.MethodPut, "https://"+accessBase+"/api/collaboration/sites/team-crew/board", bytes.NewReader(payload))
 		req.Header.Set("X-API-Key", w.apiKeys["mo"])
 		req.Header.Set("X-Simple-Host-Client", "control-ui")
 		req.Header.Set("If-Match", etag)
@@ -58,7 +58,7 @@ func TestRaceDeployDuringTeamDelete(t *testing.T) {
 	t.Logf("delete: %d %s", deleteCode, deleteBody)
 	t.Logf("deploy: %d %s", deployCode, deployBody)
 
-	teamGone := !w.teamExists("crew")
+	teamGone := !w.teamExists("team-crew")
 	t.Logf("team exists after race: %v", !teamGone)
 
 	if len(ids) != 1 {

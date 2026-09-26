@@ -35,12 +35,13 @@ what makes shared trackers work. So:
 
 ## Calling the routes from a page
 
-The routes are reached on the page's own host (`<owner-label>.<base>`, or the
-own host of a site shared with named viewers) and authenticate the viewer from their signed-in
-session, exactly like viewing the page. Write the site name into the page and
-call `/api/sites/<site>/...` as a root-relative path: that works on both hosts.
-Never read the site name from `location.pathname` (a restricted site's host has
-no `/<site>/` segment) and never hard-code an absolute API URL.
+The routes are reached on the site's own host and authenticate the viewer from
+their signed-in session, exactly like viewing the page. Write the site name into
+the page and call `/api/sites/<site>/...` as a root-relative path: that works
+on the site's own host and at the short-lived `<owner>.<base>/<site>/` address
+a new owner's site may have at first. Never read the site name from
+`location.pathname` (the path may or may not have a site segment) and never
+hard-code an absolute API URL.
 
 A `401` from either the state or the asset routes means the viewer's session
 expired or the page is now being viewed from a different host than expected.
@@ -164,10 +165,9 @@ output as untrusted content before inserting it into the DOM.
 
 ## Cross-origin isolation
 
-Every owner is served on their own address (`<label>.<base>`), and a
-site shared with named viewers (level `specific`) moves to its own dedicated
-address (`<owner>--<site>.<base>`). A page
-cannot read or write another owner's state or assets: the browser's session
-cookie is host-only, and the server checks `Origin` on every write. Sites
-belonging to the *same* owner still share that owner's origin on purpose (so
-they can deliberately share state), which is unchanged.
+Every site is served on its own host, at every access level. A page cannot
+read or write another site's state or assets, including another site of the
+same owner (while a new owner's sites are still at `<owner>.<base>/<site>/`,
+they share that owner's origin until they move): the browser's session cookie is host-only, and the server checks
+`Origin` on every write. A viewer's first visit to each site signs them in
+there automatically, with one redirect and no prompt.

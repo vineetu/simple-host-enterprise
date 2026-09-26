@@ -120,6 +120,13 @@ func run() (runErr error) {
 	if err != nil {
 		return fmt.Errorf("derive host model from public base URL: %w", err)
 	}
+	if cfg.OwnerCerts == "auto" {
+		// Sites move to "<site>.<owner>.<base>" only once the owner-hosts
+		// reconciler has recorded that owner's certificate ready.
+		readinessCtx, stopReadiness := context.WithCancel(context.Background())
+		defer stopReadiness()
+		hosts = hosts.WithOwnerReadiness(handler.NewOwnerHostReadiness(readinessCtx, database, 15*time.Second).Ready)
+	}
 	handler.SetExtraReservedLabels(cfg.ReservedLabels)
 	cookiePolicy := handler.CookiePolicy{Secure: cfg.SecureMode}
 	// Sign-in, hand-off, key mint and the connector token/registration
@@ -268,10 +275,11 @@ func run() (runErr error) {
 	// The host gate sits directly around the mux: it decides, per hostname,
 	// which routes the mux may answer. The base host is control plane only
 	// and refuses the site-facing API shape outright; an owner host
-	// ("<label>.<base>") serves only that owner's hosted content, its
-	// site-facing API, and the session hand-off, all behind a valid host
-	// session; a restricted site serves the same three things on its own
-	// "<owner>--<site>.<base>" host instead. Anything else gets probes only.
+	// ("<label>.<base>") serves that owner's index, and their sites at
+	// "/<site>/" until the owner's certificate is ready (then it redirects);
+	// a site's own host ("<site>.<owner>.<base>") serves its content, its
+	// site-facing API, and the session hand-off, behind a valid host
+	// session. Anything else gets probes only.
 	// The request log wraps everything, so every response carries a request
 	// id and every request, including one the gate refuses, is on record.
 	requestLog := reqlog.Middleware(stdoutLog, reqlog.ProbePaths)
@@ -279,7 +287,7 @@ func run() (runErr error) {
 	gated := hostGate(mux)
 	// The state tools reach the site API the way a page does: on the owner's
 	// own host, through the host gate and its access checks.
-	mcpServer.WithSiteAPI(gated, hosts.SiteHostResolver(database))
+	mcpServer.WithSiteAPI(gated, hosts.SiteHostResolver())
 	applicationServer := newApplicationServer(":"+cfg.Port, requestMetrics.Middleware(requestLog(handler.SecurityHeaders(gated, cfg.SecureMode, hosts))))
 	schemaVersion := "unknown"
 	if latest, err := migrate.Latest(); err == nil {
@@ -309,10 +317,10 @@ func run() (runErr error) {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	connector.StartSweep(ctx)
-	// Indexed pages carry whatever address SiteLink gives, so the index
+	// Indexed pages carry whatever address SiteURL gives, so the index
 	// follows the cutover; existing documents are reindexed by hand after the
 	// flip.
-	searchWorker, err := search.StartWorker(ctx, database, searchVersions{siteStore}, hosts.SiteLink)
+	searchWorker, err := search.StartWorker(ctx, database, searchVersions{siteStore}, hosts.SiteURL)
 	if err != nil {
 		return fmt.Errorf("start site search worker: %w", err)
 	}

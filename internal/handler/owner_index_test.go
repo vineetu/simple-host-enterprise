@@ -77,7 +77,7 @@ func TestOwnerIndexLinksRestrictedSiteToItsOwnHost(t *testing.T) {
 		if e.name != "payroll" {
 			continue
 		}
-		if want := hosts.SiteURL("alice", "payroll", true); e.url != want {
+		if want := hosts.SiteURL("alice", "payroll"); e.url != want {
 			t.Fatalf("restricted site url = %q, want %q", e.url, want)
 		}
 		return
@@ -226,10 +226,8 @@ func TestOwnerPageURLIsTheRootOfTheirHost(t *testing.T) {
 	if got, want := hosts.OwnerPageURL("alice"), "https://alice.foo.example/"; got != want {
 		t.Fatalf("OwnerPageURL = %q, want %q", got, want)
 	}
-	// The index lives at the root of the same host a short site path hangs
-	// off, so the two must agree on the origin.
-	site := hosts.SiteURL("alice", "gantt", false)
-	if !strings.HasPrefix(site, hosts.OwnerPageURL("alice")) {
-		t.Fatalf("site url %q is not under the owner page %q", site, hosts.OwnerPageURL("alice"))
+	// Each site has its own origin, still named after its owner first.
+	if got, want := hosts.SiteURL("alice", "gantt"), "https://gantt.alice.foo.example/"; got != want {
+		t.Fatalf("SiteURL = %q, want %q", got, want)
 	}
 }

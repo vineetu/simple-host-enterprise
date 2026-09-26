@@ -11,6 +11,12 @@ namespace: simple-host
 resources:
   - ../../base
 
+# The owner-hosts reconciler: one *.<owner>.<base> certificate per owner
+# through cert-manager (OWNER_CERT_ISSUER in config.env). Leave it out and
+# set OWNER_CERTS=manual if you issue owner certificates yourself.
+components:
+  - ../../components/owner-hosts
+
 generatorOptions:
   disableNameSuffixHash: true
 

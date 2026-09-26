@@ -149,9 +149,13 @@ func TestOriginCheckIsPerHost(t *testing.T) {
 		// The gate answers only the probes there, so this is belt and braces.
 		{name: "unknown host with the base origin", host: unknown, origin: "https://foo.example", want: http.StatusNoContent},
 		{name: "unknown host with an owner origin", host: unknown, origin: "https://alice.foo.example", want: http.StatusForbidden},
+		// A site's own host expects its own origin, not its owner's.
+		{name: "site host with its own origin", host: "a.alice.foo.example", origin: "https://a.alice.foo.example", want: http.StatusNoContent},
+		{name: "site host with its owner's origin", host: "a.alice.foo.example", origin: "https://alice.foo.example", want: http.StatusForbidden},
+		{name: "site host with a sibling site's origin", host: "a.alice.foo.example", origin: "https://b.alice.foo.example", want: http.StatusForbidden},
 		// A label the host model refuses is not an owner host, so it gets the
 		// base expectation and its own spelling is not accepted.
-		{name: "nested label with its own origin", host: "a.alice.foo.example", origin: "https://a.alice.foo.example", want: http.StatusForbidden},
+		{name: "three labels deep with its own origin", host: "a.b.alice.foo.example", origin: "https://a.b.alice.foo.example", want: http.StatusForbidden},
 	}
 
 	{

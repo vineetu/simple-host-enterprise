@@ -61,6 +61,18 @@ A `ManagedCertificate` does not issue wildcards. Pick one of these:
   wildcard, but it attaches to the load balancer through a certificate map on a
   **Gateway** (`networking.gke.io/certmap`), not on an Ingress.
 
+**Owner certificates (`*.<owner>.<base>`).** GKE Ingress makes one load balancer
+per Ingress, so the per-owner Ingresses the reconciler creates would each get
+their own address while `*.<base>` points at the static IP. Pick one:
+
+- Serve through an in-cluster ingress controller behind one `LoadBalancer`
+  Service on the static IP, with the cert-manager issuer above (or an internal CA
+  issuer) in `OWNER_CERT_ISSUER`. Owner certificates are then automatic.
+- Keep GKE Ingress, set `OWNER_CERTS=manual`, leave out the owner-hosts component,
+  and add each owner's `*.<owner>.<base>` certificate Secret as another `spec.tls`
+  entry on the install's own Ingress (served by SNI, within the load balancer's
+  certificate limit), before that owner's first site.
+
 ## 3. Postgres
 
 Cloud SQL for PostgreSQL 16 on a private IP. Run this as one command:

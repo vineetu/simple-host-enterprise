@@ -120,7 +120,7 @@ func realApp(t *testing.T, database *sql.DB) (*Server, *http.ServeMux, func(http
 	handoff := handler.NewHandoffHandler(database, keys, hosts, recorder, limits)
 	negCache := auth.NewNegativeSessionCache(database, time.Hour)
 	gate := handler.NewHostGate(hosts, files, database, keys, negCache, handoff, siteAPI, authMW, base)
-	return NewServer(mux, "simple-host", version).WithSiteAPI(gate(mux), hosts.SiteHostResolver(database)), mux, authMW
+	return NewServer(mux, "simple-host", version).WithSiteAPI(gate(mux), hosts.SiteHostResolver()), mux, authMW
 }
 
 func createPerson(t *testing.T, database *sql.DB, username string) string {
@@ -212,7 +212,7 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	call("set_site_access", map[string]any{"site": "demo", "owner": "alice", "level": "company"})
 
 	call("find_users", map[string]any{"site": "demo", "owner": "alice", "query": "a"})
-	call("grant_site_viewer", map[string]any{"site": "demo", "owner": "alice", "usernames": []any{"acme-team"}})
+	call("grant_site_viewer", map[string]any{"site": "demo", "owner": "alice", "usernames": []any{"team-acme-team"}})
 	call("list_site_viewers", map[string]any{"site": "demo", "owner": "alice"})
 
 	// State and files, on a restricted site: the owner host still answers.
@@ -254,7 +254,7 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	if got := call("restore_state_version", map[string]any{"site": "demo", "owner": "alice", "id": id}); got["version"] != float64(2) {
 		t.Errorf("restore_state_version = %v, want version 2", got)
 	}
-	call("revoke_site_viewer", map[string]any{"site": "demo", "owner": "alice", "username": "acme-team"})
+	call("revoke_site_viewer", map[string]any{"site": "demo", "owner": "alice", "username": "team-acme-team"})
 
 	call("list_sites", map[string]any{})
 	call("delete_site", map[string]any{"site": "other", "owner": "alice", "confirm_name": "other"})

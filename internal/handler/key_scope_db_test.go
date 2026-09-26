@@ -47,7 +47,7 @@ func TestAPIKeyScopes(t *testing.T) {
 		}
 	}
 	state := func(key, method, body string) int {
-		r := httptest.NewRequest(method, "https://alice."+accessBase+"/api/sites/demo/state", strings.NewReader(body))
+		r := httptest.NewRequest(method, "https://demo.alice."+accessBase+"/api/sites/demo/state", strings.NewReader(body))
 		r.Header.Set("X-API-Key", w.apiKeys[key])
 		r.Header.Set("Content-Type", "application/json")
 		return w.do(r).Code

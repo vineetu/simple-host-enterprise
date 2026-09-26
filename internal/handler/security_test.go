@@ -109,7 +109,7 @@ func TestSecurityHeadersByHostKind(t *testing.T) {
 	}{
 		{host: "foo.example", wantCSP: true, wantSubDoms: true},
 		{host: "alice.foo.example", wantCSP: false},
-		{host: "alice--private.foo.example", wantCSP: false},
+		{host: "private.alice.foo.example", wantCSP: false},
 		{host: "10.0.0.5:8080", wantCSP: true},
 	} {
 		t.Run(test.host, func(t *testing.T) {

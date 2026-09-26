@@ -89,7 +89,7 @@ type siteAPICall struct {
 	KeyID       string
 
 	// ViaSiteLabel is the host label the request arrived on (an owner
-	// label, or a full "owner--site" restricted-site label).
+	// label, or a full "<site>.<owner>" site label).
 	ViaSiteLabel string
 	// ViaSiteName is the site name the host+path claimed — the audited
 	// record, not necessarily re-verified.
@@ -159,7 +159,7 @@ func (h *SiteAPIHandler) resolveOwnerID(ctx context.Context, q db.Querier, usern
 // the short owner-host address, or the restricted site's own root, per
 // the URL in the {id, url} create response.
 func (h *SiteAPIHandler) siteURL(call siteAPICall) string {
-	return h.hosts.SiteURL(call.Owner, call.SiteName, call.Restricted)
+	return h.hosts.SiteURL(call.Owner, call.SiteName)
 }
 
 // GetState answers GET .../state. viewerAllowed is the gate's job (it calls

@@ -11,8 +11,11 @@ MCP tool name is missing from this file.
 
 Conventions. Routes are written exactly as registered on the mux
 (`METHOD /pattern`). "Host-gate routes" are not mux patterns: `internal/handler/host_gate.go`
-answers them itself on owner hosts (`<owner>.<base>`) and restricted-site hosts
-(`<owner>--<site>.<base>`); the base host refuses them. MCP tools live in
+answers them itself on owner hosts (`<owner>.<base>`: the owner's index page,
+the fallback `/<site>/` addresses until the owner's certificate is ready, then
+redirects of them), site hosts (`<site>.<owner>.<base>`, every site at every
+access level, served from the root) and v1.2 `<owner>--<site>.<base>` hosts
+(redirect only); the base host refuses them. MCP tools live in
 `internal/mcp/tools.go` and each resolves to one of the REST routes below
 (`go test ./internal/mcp/` asserts it). The skill is
 `simple-host-plugin/skills/simple-host/` (`SKILL.md` plus `references/`).
@@ -29,16 +32,17 @@ Config names are documented in `docs/configuration.md`; schema in
   signed with `SESSION_SIGNING_KEY`, idle and absolute limits
   (`SESSION_IDLE` 30m, `SESSION_TTL` 8h by default; capped at 8h and 24h,
   refused at startup beyond). A session on
-  the base host is handed to an owner or restricted-site host by a one-time
+  the base host is handed to an owner host or a site host by a one-time
   code (`/auth/handoff` on the base host mints; `/auth/session` on the target
-  host redeems, nonce-bound against login CSRF). Every session cookie is bound
+  host redeems, nonce-bound against login CSRF); the first visit to each site
+  host hands off transparently, one redirect round trip, no prompt. Every session cookie is bound
   to the host it was minted for; a hand-off cookie shares the sign-in's
   session row and expiry, so it never outlives it.
 - **Status.** Built.
 - **Routes.** `GET /auth/login`, `GET /auth/callback`, `POST /auth/logout`,
   `GET /auth/sessions` (sessions page), `POST /auth/sessions/{id}/revoke`,
   `GET /auth/handoff`, `GET /api/me`.
-  Host-gate: `GET /auth/session` (redeem, owner and restricted-site hosts).
+  Host-gate: `GET /auth/session` (redeem, owner and site hosts).
 - **MCP.** `get_account` (→ `GET /api/me`).
 - **Skill.** `references/account-recovery.md` (Sign-in and API keys);
   `SKILL.md` §1–2.
@@ -148,10 +152,26 @@ Config names are documented in `docs/configuration.md`; schema in
   per-owner lock (409 `site_limit`, 413 `storage_quota`), and, with
   `CLAMD_ADDR` set, every file is scanned before anything is stored (422
   `malware_found`, 503 `scanner_unavailable`, fail closed). Rollback
-  makes an earlier version live. Delete retires the whole site. Served at
-  `<owner>.<base>/<site>/` (or the restricted host, section 8). The owner-scoped
+  makes an earlier version live. Delete retires the whole site. Every site, at
+  every access level, is served at the root of its own host
+  `<site>.<owner>.<base>/` (e.g. `todo.alice.<base>/`) once the owner's
+  `*.<owner>.<base>` certificate is ready (section 19); until then it is
+  served at the fallback `<owner>.<base>/<site>/`, where the owner host
+  serves content, the named site API, `_assets` and hand-off itself. Every
+  response carries `url` in whichever form is current; agents quote `url`
+  from the latest response and never compose it. A site named before v1.3
+  that is not a DNS label keeps its name; its address uses the folded name
+  plus `-` and 6 hex digits. New names: lowercase letters, digits and
+  hyphens, starting and ending with a letter or digit, at most 63
+  characters, not starting `xn--` (400 `invalid_site_name`); a new name
+  equal to the address of an older site of the same owner is 409
+  `name_conflict`. Once the owner is ready, `<owner>.<base>/<site>/...` and
+  `<owner>.<base>/api/sites/<site>/...` redirect to the site host (301
+  GET/HEAD, 308 otherwise, path and query kept), computed from the address
+  alone, so a redirect confirms nothing. v1.2 `<owner>--<site>.<base>` hosts
+  redirect the same way to the site's current address. The owner-scoped
   routes act on the caller's own namespace; the collaboration routes name the
-  owner (person or team) explicitly.
+  owner (person or team) explicitly, by its stored name (`team-sales`).
 - **Status.** Built.
 - **Routes.** `POST /api/sites/{sitename}`, `PUT /api/sites/{sitename}`,
   `DELETE /api/sites/{sitename}`, `POST /api/sites/{sitename}/rollback`,
@@ -164,7 +184,10 @@ Config names are documented in `docs/configuration.md`; schema in
   `POST /api/collaboration/sites/{owner}/{sitename}/rollback`,
   `GET /api/collaboration/sites/{owner}/{sitename}/versions`,
   `GET /api/collaboration/sites/{owner}/{sitename}/versions/{version}/archive`.
-  Host-gate: `GET /{site}/...` on the owner host (hosted content).
+  Host-gate: every path on the site host `<site>.<owner>.<base>` (hosted
+  content, root-served); `/{site}/...` on the owner host (served before the
+  owner is ready, redirected after); every path on a v1.2
+  `<owner>--<site>.<base>` host (redirect).
 - **MCP.** `list_sites`, `get_site`, `deploy_site`, `list_site_versions`,
   `rollback_site`, `delete_site`, `list_site_files`, `read_site_file` (the last
   two read a version archive).
@@ -219,12 +242,12 @@ Config names are documented in `docs/configuration.md`; schema in
 ## 7. Access levels and network approval
 
 - **What.** `sites.access` is one of five levels: `only_me` (owner or team
-  members; default), `specific` (plus named viewers, own host — section 8),
+  members; default), `specific` (plus named viewers — section 8),
   `company` (anyone signed in with the link), `listed` (company plus showcase
   and search), `network` (anyone, no sign-in). `network` is a request with a
   reason (202) that an admin approves, declines or revokes on `/admin`;
   anonymous visitors to an approved site can read pages, assets and saved data
-  and write nothing. `sites.public` mirrors `listed`/`network`. The requester
+  on its own host and write nothing. `sites.public` mirrors `listed`/`network`. The requester
   (for a team site, the member who asked) can never approve their own
   request. With `NETWORK_ACCESS_APPROVALS=2` two different admins must
   approve: the first is recorded and audited as
@@ -252,9 +275,9 @@ Config names are documented in `docs/configuration.md`; schema in
 
 ## 8. Named viewers (restricted sites)
 
-- **What.** At level `specific` a site lists named viewers (people or teams).
-  Granting the first viewer moves the site to `<owner>--<site>.<base>`, its own
-  origin; only listed viewers (and the owner or team) can open it. Viewers
+- **What.** At level `specific` a site lists named viewers (people or teams);
+  it is served on its own host like every site, and only
+  listed viewers (and the owner or team) can open it. Viewers
   read, never write. Removing the last viewer leaves the level, narrowing the
   site to its owner.
 - **Status.** Built.
@@ -262,14 +285,16 @@ Config names are documented in `docs/configuration.md`; schema in
   `POST /api/collaboration/sites/{owner}/{sitename}/viewers`,
   `DELETE /api/collaboration/sites/{owner}/{sitename}/viewers/{username}`,
   `GET /api/collaboration/sites/{owner}/{sitename}/viewer-candidates`.
-  Host-gate: every path on the restricted-site host, including the nameless
-  `/api/site/...` site API.
+  Host-gate: every path on the site's own host, including the nameless
+  `/api/site/...` site API (or the fallback owner path, section 5). v1.2
+  `<owner>--<site>.<base>` addresses redirect to the current address.
 - **MCP.** `find_users`, `list_site_viewers`, `grant_site_viewer`,
   `revoke_site_viewer`.
 - **Skill.** `references/collaboration.md` §7 (Named viewers).
 - **Pages.** `/dashboard` viewers panel.
 - **Go.** `internal/handler/viewers.go`, `host_gate.go`
-  (`serveRestrictedSiteHost`), `host.go` (`SplitRestrictedSiteLabel`);
+  (`serveSiteHost`, `serveOwnerPath`, `serveLegacySiteHost`), `host.go`
+  (`SplitSiteLabel`);
   `internal/db/site_viewers.go`.
 - **DB.** `site_viewers` (0024).
 - **Config.** None. See `docs/site-isolation.md`.
@@ -277,7 +302,16 @@ Config names are documented in `docs/configuration.md`; schema in
 ## 9. Teams
 
 - **What.** A team is a namespace like a person, with one role: every member
-  may do everything, including delete. Created by any person (capped per
+  may do everything, including delete. Teams are named `team-<name>`:
+  `POST /api/teams` and `create_team` accept `sales` or `team-sales`, both
+  create `team-sales` (the response `name`), and `/api/teams/{team}/...`
+  accepts either spelling. A person's handle never starts with `team-` (a
+  derived `team-alpha` becomes `teamalpha`). Migration 0041 renamed older
+  teams, refusing (naming them) any that would collide with an account's
+  address or exceed 58 characters. Old team addresses redirect only while
+  no account holds the old name: `sales.<base>/...` to `team-sales.<base>/...`
+  (same path), `sales--<site>.<base>/` to the team site's current address.
+  Created by any person (capped per
   person). When the last active member leaves, the team and all its sites are
   deleted — refused with `409 confirm_team_delete` and `site_count` until the
   call carries `?confirm_name=<team>`; delete works the same way. A team whose
@@ -296,9 +330,12 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Skill.** `references/teams.md`; `references/account-recovery.md` (A team
   is not an account).
 - **Pages.** `/admin` orphan-team delete.
-- **Go.** `internal/handler/team.go`, `admin.go` (`deleteOrphanTeam`);
-  `internal/db/teams.go`.
-- **DB.** `team_members`, `team_audit`, `users.kind` = `team` (0019).
+- **Go.** `internal/handler/team.go` (`teamName`), `admin.go`
+  (`deleteOrphanTeam`), `auth.go` (handle prefix), `owner_index.go`,
+  `host_gate.go` (`currentOwnerLabel`); `internal/db/teams.go`
+  (`TeamPrefix`, `LegacyTeamName`).
+- **DB.** `team_members`, `team_audit`, `users.kind` = `team` (0019); 0041
+  renames teams to `team-<name>` (rows only, marked backward-compatible).
 - **Config.** None.
 
 ## 10. Saved state and its history
@@ -311,8 +348,9 @@ Config names are documented in `docs/configuration.md`; schema in
   can be restored by the owner or a team member.
 - **Status.** Built.
 - **Routes.** Host-gate: `GET|PUT /api/sites/{site}/state`,
-  `GET|PUT /api/sites/{site}/state/versioned` (and `/api/site/state[...]` on a
-  restricted host). Mux:
+  `GET|PUT /api/sites/{site}/state/versioned` on the site's own host (named
+  only when it names that site) or on the fallback owner host, and the
+  nameless `/api/site/state[...]` on every site host. Mux:
   `GET /api/collaboration/sites/{owner}/{sitename}/state-versions`,
   `GET /api/collaboration/sites/{owner}/{sitename}/state-versions/{id}`,
   `POST /api/collaboration/sites/{owner}/{sitename}/state-versions/{id}/restore`.
@@ -336,10 +374,10 @@ Config names are documented in `docs/configuration.md`; schema in
   upload is scanned before it is stored (422/503). Owners list and delete assets from the
   dashboard through base-host mirror routes.
 - **Status.** Built.
-- **Routes.** Host-gate: `GET|POST /api/sites/{site}/assets`,
-  `DELETE /api/sites/{site}/assets/{id}`, serve at
-  `GET /{site}/_assets/{id}[/{name}]` (root `/_assets/...` on a restricted
-  host). Mux: `GET /api/collaboration/sites/{owner}/{sitename}/assets`,
+- **Routes.** Host-gate, on the site's own host: `GET|POST /api/sites/{site}/assets`,
+  `DELETE /api/sites/{site}/assets/{id}` (or nameless `/api/site/assets[...]`),
+  serve at `GET /_assets/{id}[/{name}]`; on the fallback owner host the named
+  routes and `GET /{site}/_assets/{id}[/{name}]`. Mux: `GET /api/collaboration/sites/{owner}/{sitename}/assets`,
   `DELETE /api/collaboration/sites/{owner}/{sitename}/assets/{id}`.
 - **MCP.** None.
 - **Skill.** `references/state-and-ai.md` (Uploaded assets);
@@ -396,7 +434,8 @@ Config names are documented in `docs/configuration.md`; schema in
 - **What.** Server-rendered `/admin` for admins: users (disable/enable —
   disabling revokes sessions, API keys and connected apps in the same
   transaction as its audit row), orphan teams, access requests, rankings of users
-  and sites (views, storage from a cached bucket measurement, updated), new
+  and sites (views, storage from a cached bucket measurement, updated; each
+  site links to its current address), new
   users, state-backend usage, visitors and activity, all sites.
 - **Status.** Built.
 - **Routes.** `GET /admin`, `POST /api/admin/users/{username}/disable`,
@@ -433,11 +472,15 @@ Config names are documented in `docs/configuration.md`; schema in
 
 - **What.** Search indexes the text of `listed`/`network` sites (a background
   worker re-extracts on every deploy, rollback and delete; PostgreSQL full
-  text) and answers signed-in callers; clicks and impressions are recorded
+  text) and answers signed-in callers, linking each result to the site's
+  address at index time (documents indexed before v1.3, or before the owner
+  was ready, carry owner-host URLs, which redirect; each site's next deploy
+  reindexes it); clicks and impressions are recorded
   pseudonymously and pruned by a background loop. `/showcase` is the gallery
-  of listed sites. The root of an owner host (`GET /` on `<owner>.<base>`) lists
-  that owner's sites: everything to the owner, only listed sites to others,
-  never a restricted one.
+  of listed sites. The root of an owner host (`GET /` on `<owner>.<base>`,
+  sign-in required) is the owner's index page, linking to each site's
+  current address: everything to the owner, only listed sites to others, never a
+  `specific` one. A pre-v1.3 team address redirects to `team-<name>`.
 - **Status.** Built.
 - **Routes.** `GET /api/search`, `POST /api/search/click`, `GET /showcase`.
   Host-gate: `GET /` on an owner host.
@@ -501,14 +544,57 @@ Config names are documented in `docs/configuration.md`; schema in
   binary unless every newer migration is marked backward-compatible.
   `simple-host migrate` applies the schema and sets the least-privilege
   `simplehost_app` role's password; the server connects as that role.
-- **Subcommands.** `migrate`, `restore`, `migrate-storage`, `prune`, `version`.
+- **Subcommands.** `migrate`, `restore`, `migrate-storage`, `prune`,
+  `owner-hosts` (section 19), `version`.
 - **Go.** `internal/config/config.go`; `internal/migrate/`;
   `cmd/server/main.go`, `subcommands.go`.
 - **DB.** `simplehost_app` grants (0020); every migration.
 - **Config.** `DB_DSN` or `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`,
   `DB_PASSWORD`, `DB_SSLMODE`, `DB_SSL_ROOT_CERT`, `DB_APP_USER`,
-  `DB_APP_PASSWORD`, `DB_INSECURE_ALLOWED`, `DB_INCLUSTER_EVALUATION`; all of
+  `DB_APP_PASSWORD`, `DB_INSECURE_ALLOWED`, `DB_INCLUSTER_EVALUATION`,
+  `OWNER_CERTS` (`auto` or `manual`, refused otherwise); all of
   the above. Full list: `docs/configuration.md`.
+
+## 19. Owner hosts: per-owner certificates
+
+- **What.** A TLS wildcard covers one label, so `<site>.<owner>.<base>` needs
+  a `*.<owner>.<base>` certificate per owner (the existing `*.<base>` DNS
+  record already resolves every depth; no per-owner DNS). With
+  `OWNER_CERTS=auto` (default) a separate Deployment runs
+  `simple-host owner-hosts` every `OWNER_HOSTS_INTERVAL` (15 s): for each
+  owner with at least one site it server-side-applies one Ingress
+  `sh-owner-<owner>` (host `*.<owner>.<base>`, TLS secret
+  `sh-owner-<owner>-tls`, annotation `cert-manager.io/cluster-issuer:
+  <OWNER_CERT_ISSUER>`), copying ingress class, controller annotations and
+  backend from the install's own Ingress (`OWNER_INGRESS_TEMPLATE`);
+  cert-manager's ingress-shim issues the certificate. The reconciler reads
+  the Certificate's Ready condition (never the Secret) and records it in
+  `owner_hosts`. An owner with no sites left loses its row first, then its
+  Ingress (the Certificate goes with it; the TLS Secret is left behind).
+  The server reads `owner_hosts` through a per-replica cache refreshed every
+  15 s; until an owner is ready its sites are served at the fallback
+  `<owner>.<base>/<site>/` (section 5), so nobody is sent to a host without a
+  certificate. Without the reconciler deployed, everything keeps serving at
+  the fallback. With `OWNER_CERTS=manual` the component is left out, every
+  owner is treated as ready, and the operator provides each owner's
+  certificate and Ingress host rule. The server's pods keep no Kubernetes
+  credential; the reconciler's ServiceAccount is the one token in the
+  install (namespaced Role: ingresses get/list/create/patch/delete,
+  `certificates.cert-manager.io` get; no Secrets). It connects to Postgres
+  as the application role.
+- **Status.** Built.
+- **Routes.** None. **MCP.** None. **Skill.** None.
+- **Go.** `internal/ownerhosts/ownerhosts.go`; `internal/handler/owner_hosts.go`
+  (`OwnerHostReadiness`), `host.go` (`WithOwnerReadiness`, `OwnerReady`,
+  `SiteURL`); `cmd/server/subcommands.go` (`runOwnerHosts`),
+  `cmd/server/main.go`; `internal/config/config.go` (`LoadOwnerHosts`).
+- **Deploy.** `deploy/components/owner-hosts/` (`deployment.yaml`,
+  `rbac.yaml`, `serviceaccount.yaml`), included by the byo, production,
+  staging and local overlays.
+- **DB.** `owner_hosts` (0042, backward-compatible).
+- **Config.** `OWNER_CERTS` (server), `OWNER_CERT_ISSUER` (required by the
+  reconciler), `OWNER_INGRESS_TEMPLATE` (default `simple-host`),
+  `OWNER_HOSTS_INTERVAL` (default 15s). See `docs/site-isolation.md`.
 
 ---
 

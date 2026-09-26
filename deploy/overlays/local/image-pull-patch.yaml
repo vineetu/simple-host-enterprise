@@ -12,3 +12,14 @@ spec:
       containers:
         - name: simple-host
           imagePullPolicy: Never
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simple-host-owner-hosts
+spec:
+  template:
+    spec:
+      containers:
+        - name: owner-hosts
+          imagePullPolicy: Never

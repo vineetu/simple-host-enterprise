@@ -19,7 +19,9 @@ import (
 	"github.com/vsriram/simple-host/internal/audit"
 	"github.com/vsriram/simple-host/internal/config"
 	db "github.com/vsriram/simple-host/internal/db"
+	"github.com/vsriram/simple-host/internal/handler"
 	"github.com/vsriram/simple-host/internal/migrate"
+	"github.com/vsriram/simple-host/internal/ownerhosts"
 	"github.com/vsriram/simple-host/internal/safepath"
 	"github.com/vsriram/simple-host/internal/storage"
 )
@@ -41,11 +43,13 @@ func runSubcommand(name string, args []string) error {
 		return runPrune(args)
 	case "audit-verify":
 		return runAuditVerify(args)
+	case "owner-hosts":
+		return runOwnerHosts(args)
 	case "version":
 		fmt.Println(versionString())
 		return nil
 	default:
-		return fmt.Errorf("unknown subcommand %q (expected: migrate, restore, migrate-storage, reencrypt, prune, audit-verify, version)", name)
+		return fmt.Errorf("unknown subcommand %q (expected: migrate, restore, migrate-storage, reencrypt, prune, audit-verify, owner-hosts, version)", name)
 	}
 }
 
@@ -594,4 +598,41 @@ func waitForDatabase(ctx context.Context, db *sql.DB, wait time.Duration) error 
 		last = errors.New("timed out")
 	}
 	return fmt.Errorf("database not reachable after %s: %w", wait, last)
+}
+
+// runOwnerHosts is the owner-hosts reconciler (internal/ownerhosts): its
+// own Deployment, deploy/components/owner-hosts, with the one
+// ServiceAccount token in the install. -once runs a single pass.
+func runOwnerHosts(args []string) error {
+	fs := flag.NewFlagSet("owner-hosts", flag.ContinueOnError)
+	once := fs.Bool("once", false, "run one pass and exit")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := config.LoadOwnerHosts()
+	if err != nil {
+		return err
+	}
+	hosts, err := handler.NewHostModel(cfg.PublicBaseURL)
+	if err != nil {
+		return err
+	}
+	database, err := sql.Open("postgres", cfg.DSN)
+	if err != nil {
+		return fmt.Errorf("open postgres: %w", err)
+	}
+	defer database.Close()
+	kube, err := ownerhosts.NewInCluster()
+	if err != nil {
+		return err
+	}
+	r := ownerhosts.Reconciler{Kube: kube, Store: ownerhosts.DBStore{DB: database}, Base: hosts.BaseHost(), Issuer: cfg.Issuer, Template: cfg.TemplateIngress}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	if *once {
+		return r.Once(ctx)
+	}
+	log.Printf("owner hosts: reconciling every %s with issuer %s", cfg.Interval, cfg.Issuer)
+	r.Run(ctx, cfg.Interval)
+	return nil
 }

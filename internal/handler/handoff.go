@@ -119,7 +119,7 @@ func (h *HandoffHandler) validateHandoffTarget(to string) (targetHost, targetPat
 		return "", "", false
 	}
 	kind, _ := h.hosts.Classify(parsed.Host)
-	if kind != hostOwner && kind != hostRestrictedSite {
+	if kind != hostOwner && kind != hostSite {
 		return "", "", false
 	}
 	path := parsed.EscapedPath()

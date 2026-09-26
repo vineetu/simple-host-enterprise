@@ -1,0 +1,27 @@
+# Namespaced, and only what the reconciler calls: server-side apply, list
+# and delete of its own Ingresses (it reads the install's own Ingress as the
+# template), and reading the Certificates cert-manager makes for them. No
+# Secrets: readiness comes from the Certificate's status, never the key.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: simple-host-owner-hosts
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: simple-host-owner-hosts
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: simple-host-owner-hosts
+subjects:
+  - kind: ServiceAccount
+    name: simple-host-owner-hosts

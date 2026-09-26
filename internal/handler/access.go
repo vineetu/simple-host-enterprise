@@ -509,7 +509,7 @@ func (h *AdminHandler) renderAccessRequests(r *http.Request, b *strings.Builder,
 <div class="rank-list" role="region" aria-label="Access requests">`)
 	for _, e := range entries {
 		base := "/api/admin/access-requests/" + url.PathEscape(e.Owner) + "/" + url.PathEscape(e.SiteName)
-		link := h.hosts.SiteURL(e.Owner, e.SiteName, e.Access == db.AccessSpecific)
+		link := h.hosts.SiteURL(e.Owner, e.SiteName)
 		var detail, actions string
 		if e.RequestedAt != nil {
 			detail = fmt.Sprintf("requested by %s · now %s · %s", html.EscapeString(e.RequestedBy), html.EscapeString(accessLevelLabel(e.Access)), localTimeHTML(*e.RequestedAt, "datetime"))

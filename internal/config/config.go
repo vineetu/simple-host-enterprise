@@ -117,8 +117,15 @@ type Config struct {
 	// installation-specific hostnames that must never belong to an account,
 	// on top of the built-in set.
 	ReservedLabels []string
-	SecureMode     bool
-	Backup         BackupConfig
+	// OwnerCerts is OWNER_CERTS: "auto" (default) serves an owner's sites
+	// on their own "<site>.<owner>.<base>" hosts once the owner-hosts
+	// reconciler reports that owner's certificate ready, and at
+	// "<owner>.<base>/<site>/" until then; "manual" means the operator
+	// provides every owner's "*.<owner>.<base>" certificate and every owner
+	// is treated as ready.
+	OwnerCerts string
+	SecureMode bool
+	Backup     BackupConfig
 	// Assets bounds an upload through the site-facing API:
 	// per-file size, per-site total bytes, and per-site count.
 	Assets AssetLimits
@@ -354,6 +361,7 @@ func Load() (Config, error) {
 		DBInClusterEvaluation: os.Getenv("DB_INCLUSTER_EVALUATION") == "true",
 		PublicBaseURL:         need.require("PUBLIC_BASE_URL"),
 		ReservedLabels:        splitLowerTrimmed(os.Getenv("RESERVED_LABELS")),
+		OwnerCerts:            getEnvOrDefault("OWNER_CERTS", "auto"),
 		SecureMode:            secureMode,
 		Backup: BackupConfig{
 			Endpoint:        need.require("BACKUP_STORAGE_ENDPOINT"),
@@ -531,6 +539,9 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("PUBLIC_BASE_URL: %w", err)
 	}
 	cfg.PublicBaseURL = publicBaseURL
+	if cfg.OwnerCerts != "auto" && cfg.OwnerCerts != "manual" {
+		return Config{}, fmt.Errorf("OWNER_CERTS must be auto or manual, not %q", cfg.OwnerCerts)
+	}
 	if cfg.SecureMode && cfg.RedirectPort == cfg.Port {
 		return Config{}, errors.New("HTTPS_REDIRECT_PORT must differ from PORT in secure mode")
 	}
@@ -699,6 +710,56 @@ func serverDatabaseDSN() (string, []string, error) {
 		}
 	}
 	return databaseDSNAs(appUser, password, need)
+}
+
+// OwnerHostsConfig is what the owner-hosts reconciler needs beyond the
+// database: see docs/configuration.md.
+type OwnerHostsConfig struct {
+	PublicBaseURL string
+	// Issuer is OWNER_CERT_ISSUER, the cert-manager ClusterIssuer that signs
+	// every "*.<owner>.<base>" certificate.
+	Issuer string
+	// TemplateIngress is OWNER_INGRESS_TEMPLATE (default "simple-host"): the
+	// install's own Ingress, whose class, annotations and backend each
+	// owner's Ingress copies.
+	TemplateIngress string
+	Interval        time.Duration
+	DSN             string
+}
+
+// LoadOwnerHosts reads the owner-hosts reconciler's configuration. It
+// connects as the application role, like the server.
+func LoadOwnerHosts() (OwnerHostsConfig, error) {
+	var need missing
+	cfg := OwnerHostsConfig{
+		PublicBaseURL:   need.require("PUBLIC_BASE_URL"),
+		Issuer:          need.require("OWNER_CERT_ISSUER"),
+		TemplateIngress: getEnvOrDefault("OWNER_INGRESS_TEMPLATE", "simple-host"),
+	}
+	if err := need.err(); err != nil {
+		return OwnerHostsConfig{}, err
+	}
+	interval, err := durationEnv("OWNER_HOSTS_INTERVAL", 15*time.Second)
+	if err != nil {
+		return OwnerHostsConfig{}, err
+	}
+	cfg.Interval = interval
+	dsn, missingDB, err := serverDatabaseDSN()
+	if err != nil {
+		return OwnerHostsConfig{}, err
+	}
+	if err := missing(missingDB).err(); err != nil {
+		return OwnerHostsConfig{}, err
+	}
+	insecure, err := boolEnv("DB_INSECURE_ALLOWED", false)
+	if err != nil {
+		return OwnerHostsConfig{}, err
+	}
+	if err := validateDatabaseSSL(dsn, insecure); err != nil {
+		return OwnerHostsConfig{}, fmt.Errorf("database TLS: %w", err)
+	}
+	cfg.DSN = dsn
+	return cfg, nil
 }
 
 // LoadAuditRetention reads the three retention/visibility

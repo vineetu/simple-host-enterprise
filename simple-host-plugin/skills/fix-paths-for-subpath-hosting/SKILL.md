@@ -1,13 +1,13 @@
 ---
 name: fix-paths-for-subpath-hosting
-description: Make a static site's asset paths relative so it works wherever Simple Host serves it. First detects the framework — for any framework with a base-path build setting (Vite, Next.js, CRA, SvelteKit, Astro, Nuxt, Angular, Gatsby, Vue CLI), routes back to the simple-host skill's framework-specific build instructions. Mechanically rewrites root-relative paths to relative paths only for genuinely raw HTML projects with no build system. Use before deploying a plain HTML site, or when the deploy skill references this as a pre-deploy step.
+description: Make a static site's asset paths relative so it works wherever Simple Host serves it — the root of its own host, or the short-lived /<site>/ address a new owner's site may have at first. First detects the framework — for any framework with a base-path build setting (Vite, Next.js, CRA, SvelteKit, Astro, Nuxt, Angular, Gatsby, Vue CLI), routes back to the simple-host skill's framework-specific build instructions. Mechanically rewrites root-relative paths to relative paths only for genuinely raw HTML projects with no build system. Use before deploying a plain HTML site, when its assets 404, or when the deploy skill references this as a pre-deploy step.
 ---
 
 # Fix Paths for Subpath Hosting
 
-A Simple Host site is served at `<owner-host>/<name>/`, or at the root of its own host once it is restricted to named viewers. A root-relative path like `src="/assets/app.js"` 404s on the first; a path with the site name baked in 404s on the second. Relative paths (`assets/app.js`, `./`) work on both.
+A Simple Host site is served at the root of its own host, `<name>.<owner-host>/`, but for a short time after an owner's first site is created it may be at `<owner-host>/<name>/`. A root-relative path like `src="/assets/app.js"` 404s at the second; a path with the site name baked in 404s at the first. Relative paths (`assets/app.js`, `./`) work at both.
 
-There are two ways to fix this, and **picking the right one is more important than how well you execute either**:
+There are two ways to make paths relative, and **picking the right one is more important than how well you execute either**:
 
 1. **For framework projects (Vite, Next, React, Svelte, Astro, Nuxt, Angular, Gatsby, etc.)**: set the framework's base path at build time. The build tool then bakes the correct paths into the output. **Do not mechanically rewrite the build output** — minified variable names shift build-to-build, dynamic-import chunk loaders prepend a configured base to every chunk, and string-replacement is fragile.
 2. **For raw HTML/CSS/JS projects with no build step**: mechanically rewrite root-relative paths to relative paths in source. This is the only option for plain HTML, but it is a fallback, not a default.
@@ -221,7 +221,7 @@ navigator.serviceWorker.register('/sw.js', { scope: '/' });
 navigator.serviceWorker.register('sw.js', { scope: './' });
 ```
 
-**Note:** Using `./` for scope makes the service worker scope relative to its registration location, which will be the site's subpath.
+**Note:** Using `./` for scope makes the service worker scope relative to its registration location, which is wherever the site is served.
 
 ### 5. Web App Manifest (`manifest.webmanifest` / `manifest.json`)
 
@@ -261,7 +261,7 @@ Fix `start_url`, `scope`, and icon paths:
 - **Script depth mistake:** ANY JS file loaded via `<script>` must use the loading HTML page's depth for browser APIs (`fetch`, `register`, `new Worker`, DOM assignments), not the script's filesystem depth. Using `../` from the wrong depth escapes the site root.
 - **Shared script loaded at multiple depths:** If `shared/app.js` is loaded by both `index.html` (depth 0) and `admin/panel/index.html` (depth 2), a fixed relative path won't work for both. Use `document.currentScript.src` to compute the base at runtime.
 - **Iframe pages have their own depth:** An iframe at `frames/widgets/tool.html` (depth 2) loading `<script src="../../js/helper.js">` — the script's browser API calls resolve relative to the iframe page (depth 2), not the parent page.
-- **Forgetting the manifest:** `start_url: "/"` silently breaks PWA install — the app opens at domain root instead of the subpath
-- **Service worker scope:** A service worker registered with `scope: "/"` won't control pages under the subpath
+- **Forgetting the manifest:** `start_url: "/"` silently breaks PWA install when the site is under a sub-path — the app opens at domain root instead
+- **Service worker scope:** A service worker registered with `scope: "/"` won't control pages under a sub-path
 - **Bundled JS:** Build tools (Vite, Webpack) may inline root-relative paths at build time — check the output bundle, not just source files
 - **`<base>` tag caution:** Avoid `<base href>` as it affects ALL relative URLs on the page, including anchor fragments (`#section`) and form actions

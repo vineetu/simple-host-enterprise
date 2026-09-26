@@ -23,9 +23,12 @@ To let other people change a site, publish it under a team they are in
 
 ## Build with relative paths, quote to report
 
-Build with relative asset paths (`./`), as `frameworks.md` describes. Never
-compose a site's address: quote `url` and `public_path` exactly as the API
-returned them.
+Every site is served at the root of its own host, `<site>.<owner>.<base>/`
+(for a short time after an owner's first site, at `<owner>.<base>/<site>/`
+instead). Build with relative asset paths (`./`), as `frameworks.md` describes.
+Never compose a site's address: quote `url` and `public_path` exactly as the
+latest API response returned them. Take `<owner>`
+from the list response too: a team's name there begins with `team-`.
 
 ## 1. Resolve the exact target
 
@@ -125,6 +128,12 @@ Content-Type: application/gzip  # or application/zip
 
 Requires `access_role` `owner` or `member` in that namespace.
 
+A new site's name uses lowercase letters, digits, and hyphens, starting and
+ending with a letter or digit, at most 63 characters, not starting with
+`xn--`; it becomes the site's address. `400` `invalid_site_name` means the name
+breaks that rule. `409` `name_conflict` means it would take the address of an
+existing site of the same owner.
+
 A `409` means the server refused the name. Relay its message and ask the human;
 do not retry with a guessed variation and do not fall back to creating the site
 under your own username.
@@ -209,7 +218,7 @@ level:
 | Level | Who can open it |
 |---|---|
 | `only_me` | You, or the team's members for a team site. The default. |
-| `specific` | Also the people or teams you name (section 7). The site moves to its own address. |
+| `specific` | Also the people or teams you name (section 7). |
 | `company` | Anyone signed in at the company with the link. Not listed. |
 | `listed` | Company, and shown in the company showcase and search. |
 | `network` | Anyone who can reach the server, with no sign-in. Needs an admin's approval. |
@@ -244,8 +253,8 @@ POST /api/collaboration/sites/<owner>/<site>/viewers   {"usernames":["person.one
 DELETE /api/collaboration/sites/<owner>/<site>/viewers/<username>
 ```
 
-Granting a viewer (a person or a team) sets the level to `specific` and moves
-the site to its own address; quote the new `url` from `get_site` afterwards.
+Granting a viewer (a person or a team) sets the level to `specific`. The
+site's address does not change.
 Removing the last viewer leaves the site at `specific`, open only to the owner
 or team, until the level is changed. Connector tools: `find_users`,
 `list_site_viewers`, `grant_site_viewer`, `revoke_site_viewer`.
@@ -270,7 +279,7 @@ last active member leaving, deletes every site it owns; see [`teams.md`](teams.m
 ## Trust and state boundaries
 
 Team members are trusted collaborators. They can deploy browser JavaScript
-that runs on the team's own address. Do not describe collaboration as browser
+that runs on the team's sites. Do not describe collaboration as browser
 isolation.
 
 Anyone who can open a site can read and change its saved data, per

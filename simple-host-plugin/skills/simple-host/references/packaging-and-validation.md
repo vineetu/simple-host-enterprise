@@ -6,8 +6,10 @@ build system.
 
 ## Relative paths in, quoted address out
 
-Build with relative asset paths (`./`), as `frameworks.md` describes, so the
-site works on its owner's host and on its own host if it is later restricted.
+Build with relative asset paths (`./`) where the framework allows, as
+`frameworks.md` describes, so the site works on its own host and at the
+short-lived `<owner>.<base>/<site>/` address a new owner's site may have at
+first.
 Report the `url` and `public_path` the API returned, exactly as returned, and
 never an address you assembled.
 
@@ -68,13 +70,14 @@ grep -o 'href="[^"]*"' <build-dir>/index.html
 Select-String -Path (Join-Path '<build-dir>' 'index.html') -Pattern 'src="[^"]*"', 'href="[^"]*"' -AllMatches
 ```
 
-Every site-owned asset should be relative (`./assets/...` or `assets/...`). A
-bare `/assets/`, `/_app/`, or `/chunks/` path means the framework was built for
-the wrong base; rebuild it. The exception is a framework from the "absolute
-base" table in `frameworks.md`, whose assets must begin with `/<sitename>/`.
+Every site-owned asset should be relative (`./assets/...` or `assets/...`).
+A bare `/assets/`, `/_app/`, or `/chunks/` path means the framework was built
+for the wrong base; rebuild it. The exception is a framework from the "build for
+the root" table in `frameworks.md`, whose assets begin with `/`. A path that
+begins with `/<sitename>/` means a base path was set; rebuild without one.
 
-For raw HTML processed by `fix-paths-for-subpath-hosting`, inspect its own source
-files for remaining root-relative paths:
+For raw HTML processed by `fix-paths-for-subpath-hosting`, you can inspect its
+source files for remaining root-relative paths:
 
 ```bash
 grep -rn '"/[a-zA-Z]' <dir>

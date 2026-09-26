@@ -235,14 +235,6 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to load sites", http.StatusInternalServerError)
 		return
 	}
-	// A restricted site's own address is
-	// "<owner>--<site>.<base>", not "<owner>.<base>/<site>/"; every link this
-	// admin page renders for a site needs to know which one applies.
-	restrictedSiteIDs, err := db.ListRestrictedSiteIDs(r.Context(), h.database)
-	if err != nil {
-		log.Printf("admin restricted sites: %v", err)
-		restrictedSiteIDs = map[string]bool{}
-	}
 	analyticsBySiteID, err := db.ListSiteAnalyticsSummaries(r.Context(), h.database, analyticsDays)
 	if err != nil {
 		log.Printf("admin analytics: %v", err)
@@ -418,7 +410,7 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, s := range stateSites {
 			owner := usernameByID[s.UserID]
-			publicPath := hosts.SiteURL(owner, s.Name, restrictedSiteIDs[s.ID])
+			publicPath := hosts.SiteURL(owner, s.Name)
 			fmt.Fprintf(&b, `<div class="rank-row">
   <span class="rank-name"><a href="%s" target="_blank" rel="noopener">%s</a> <span class="rank-sub">%s</span></span>
   <span class="rank-metric">%s</span>
@@ -491,7 +483,7 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 
 		b.WriteString(`<div class="sites">`)
 		for _, s := range userSites {
-			writeSiteRow(&b, hosts, s, u.Username, analyticsBySiteID[s.ID], analyticsDays, false, restrictedSiteIDs[s.ID])
+			writeSiteRow(&b, hosts, s, u.Username, analyticsBySiteID[s.ID], analyticsDays, false)
 		}
 		b.WriteString(`</div></section>`)
 	}
@@ -504,7 +496,7 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 		// the other sorts operate on. Visible at load: this is the default.
 		b.WriteString(`<div id="sitelist" class="sites flat-sites">`)
 		for _, s := range flatSites {
-			writeSiteRow(&b, hosts, s, usernameByID[s.UserID], analyticsBySiteID[s.ID], analyticsDays, true, restrictedSiteIDs[s.ID])
+			writeSiteRow(&b, hosts, s, usernameByID[s.UserID], analyticsBySiteID[s.ID], analyticsDays, true)
 		}
 		b.WriteString(`</div>`)
 	}
@@ -578,7 +570,7 @@ func writeUserBlockHeader(b *strings.Builder, hosts HostModel, u db.User, siteCo
 // writeSiteRow emits one row of a site list. The grouped list under each user
 // leaves the owner off — the heading above it already says who that is — while
 // the flat list shows it, and carries the haystack the filter box searches.
-func writeSiteRow(b *strings.Builder, hosts HostModel, site db.Site, owner string, summary db.SiteAnalyticsSummary, analyticsDays int, showOwner, restricted bool) {
+func writeSiteRow(b *strings.Builder, hosts HostModel, site db.Site, owner string, summary db.SiteAnalyticsSummary, analyticsDays int, showOwner bool) {
 	visibility := fmt.Sprintf(`<span class="chip chip-muted">%s</span>`, html.EscapeString(accessLevelLabel(site.Access)))
 	if site.Access == db.AccessListed || site.Access == db.AccessNetwork {
 		visibility = fmt.Sprintf(`<span class="chip">%s</span>`, html.EscapeString(accessLevelLabel(site.Access)))
@@ -606,7 +598,7 @@ func writeSiteRow(b *strings.Builder, hosts HostModel, site db.Site, owner strin
   <div class="site-time">%s</div>
 	</div>`,
 		attrs,
-		html.EscapeString(hosts.SiteURL(owner, site.Name, restricted)),
+		html.EscapeString(hosts.SiteURL(owner, site.Name)),
 		html.EscapeString(site.Name),
 		ownerLine,
 		site.ActiveVersion,

@@ -21,8 +21,15 @@ goes in `deploy/overlays/byo/ingress-patch.yaml`.
    HTTPS, request body up to 128 MiB, idle/backend timeout 300 s, health check on
    `/healthz`.
 2. **DNS & wildcard certificate.** `<base>` and `*.<base>` resolve to the ingress;
-   one certificate covers both names. A wildcard needs DNS-01 (or a cloud-managed
-   certificate that supports wildcards).
+   `*.<base>` also matches every site host, `<site>.<owner>.<base>`. One certificate
+   covers `<base>` and `*.<base>`. A TLS wildcard covers one label, so each owner
+   also needs `*.<owner>.<base>`: by default the owner-hosts reconciler makes one
+   Ingress per owner and cert-manager issues it from `OWNER_CERT_ISSUER`
+   (`INSTALL.md`, "Site addresses"). That needs a controller that serves several
+   Ingresses on one address with TLS from Secrets (ingress-nginx, Traefik, the AKS
+   add-on's NGINX); each cloud file says what to do where the managed load balancer
+   does not. A wildcard from ACME needs DNS-01; an internal CA issuer needs no DNS
+   at all.
 3. **Postgres.** Managed Postgres 16, TLS enforced on the server, the app connecting
    with `DB_SSLMODE=verify-full` and the provider's CA bundle in
    `deploy/overlays/byo/db-ca.crt`; `DB_HOST` is a name the server certificate

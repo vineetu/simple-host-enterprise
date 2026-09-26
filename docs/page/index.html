@@ -218,10 +218,10 @@
       <section class="numbered" id="isolation">
         <span class="num">04 — Every site on its own address</span>
         <h2>Origin isolation is the architecture, not a migration target</h2>
-        <p>Every site serves at its owner's own subdomain, from day one — no shared control-plane origin, no legacy path, no flag to flip later. That single decision is what makes the rest of the security story simple to state:</p>
+        <p>Every site serves at its own subdomain under its owner's name, such as todo.alice — no shared control-plane origin, and no origin shared between two sites. That single decision is what makes the rest of the security story simple to state:</p>
         <ul>
-          <li>A page's script can only read and write its own owner's state and assets — never a colleague's.</li>
-          <li>A site can be restricted to a named list of viewers, served on its own hostname, refusing everyone else as if it didn't exist.</li>
+          <li>A page's script can only read and write its own site's state and assets — never a colleague's, and never another of the same person's sites.</li>
+          <li>A site can be restricted to a named list of viewers, refusing everyone else as if it didn't exist.</li>
           <li>Nothing about viewing or calling a site's API depends on a header a terminal can forge. The identity comes from a real, revocable session tied to that host.</li>
         </ul>
       </section>
