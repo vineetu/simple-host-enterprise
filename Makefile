@@ -1,7 +1,7 @@
 # Simple Host: build, test, and run the package on a local cluster.
 #
 #   make test          go test ./... and scripts/check-features.sh
-#   make test-db       the migration chain against a throwaway Postgres in Docker
+#   make test-db       go test ./... against a throwaway Postgres in Docker
 #   make vuln          govulncheck
 #   make image         docker build -t simple-host:local
 #   make local         bring the whole thing up on Docker Desktop Kubernetes
@@ -42,14 +42,19 @@ test:
 	go test ./...
 	./scripts/check-features.sh
 
-# Runs the embedded migration chain, start to finish, on a fresh database.
+# The whole suite against a throwaway Postgres in Docker, so the tests gated
+# on MIGRATE_TEST_DSN run instead of skipping — the same set CI runs. Fails
+# if any of them still skipped.
+TEST_PG_IMAGE ?= postgres:16.11@sha256:468e1f126ca5af849799cda06ac9b03d8090aae9fa5163408b3e8da44fad0702
+TEST_PG_NAME  ?= simple-host-test-pg
+TEST_PG_PORT  ?= 55432
 test-db:
-	docker rm -f simple-host-test-pg >/dev/null 2>&1 || true
-	docker run -d --name simple-host-test-pg -p 55432:5432 \
-	  -e POSTGRES_USER=test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=test postgres:16.11 >/dev/null
-	@until docker exec simple-host-test-pg pg_isready -U test >/dev/null 2>&1; do sleep 1; done
-	MIGRATE_TEST_DSN="postgres://test:test@localhost:55432/test?sslmode=disable" go test ./internal/migrate/ -run TestApplyAgainstPostgres -v
-	docker rm -f simple-host-test-pg >/dev/null
+	docker rm -f $(TEST_PG_NAME) >/dev/null 2>&1 || true
+	docker run -d --name $(TEST_PG_NAME) -p $(TEST_PG_PORT):5432 \
+	  -e POSTGRES_USER=test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=test $(TEST_PG_IMAGE) >/dev/null
+	@until docker exec $(TEST_PG_NAME) pg_isready -h 127.0.0.1 -U test >/dev/null 2>&1; do sleep 1; done
+	MIGRATE_TEST_DSN="postgres://test:test@localhost:$(TEST_PG_PORT)/test?sslmode=disable" ./scripts/test-db.sh; \
+	  rc=$$?; docker rm -f $(TEST_PG_NAME) >/dev/null; exit $$rc
 
 vuln:
 	govulncheck ./...
