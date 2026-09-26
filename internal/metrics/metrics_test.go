@@ -35,3 +35,18 @@ func TestMiddlewareCountsByStatusClass(t *testing.T) {
 		}
 	}
 }
+
+func TestAuditStreamDroppedMetric(t *testing.T) {
+	r := New()
+	rec := httptest.NewRecorder()
+	r.Handler(nil, Build{}).ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	if strings.Contains(rec.Body.String(), "simplehost_audit_stream_dropped_total") {
+		t.Fatal("metric present with no stream registered")
+	}
+	r.SetAuditStreamDropped(func() uint64 { return 3 })
+	rec = httptest.NewRecorder()
+	r.Handler(nil, Build{}).ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	if !strings.Contains(rec.Body.String(), "simplehost_audit_stream_dropped_total 3\n") {
+		t.Fatalf("metric missing: %s", rec.Body)
+	}
+}

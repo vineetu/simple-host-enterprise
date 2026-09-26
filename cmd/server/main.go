@@ -143,7 +143,9 @@ func run() (runErr error) {
 	// the audit stream (one "type":"audit" line per event, for a SIEM)
 	// share it so their lines never interleave.
 	stdoutLog := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	auditRecorder.SetStream(stdoutLog)
+	auditStream := audit.NewStream(stdoutLog, 0)
+	auditRecorder.SetStream(auditStream)
+	resources.auditStream = auditStream
 	accessWriter := audit.NewAccessWriter(database)
 	resources.accessWriter = accessWriter
 
@@ -198,6 +200,7 @@ func run() (runErr error) {
 	log.Printf("simple-host skill version: %s", pluginVersion)
 
 	requestMetrics := metrics.New()
+	requestMetrics.SetAuditStreamDropped(auditStream.Dropped)
 	handler.RegisterHealthRoutes(mux, database, siteStore.Ping, requestMetrics.SetBucketOK)
 	publicSearchHandler.Register(mux, authMW, handler.CookieOriginCheck(hosts, cfg.PublicBaseURL))
 	// Upload limits: per-owner quotas, and the malware scan when CLAMD_ADDR
@@ -464,6 +467,8 @@ type applicationResources struct {
 	// loop. Stopped alongside the other workers, before the database
 	// connection closes.
 	sessionCache *auth.NegativeSessionCache
+	// auditStream writes the SIEM lines; flushed after accessWriter.
+	auditStream *audit.Stream
 	// accessWriter batches access_log inserts. Closed here,
 	// after every worker has stopped and after runServersWithShutdownHook's
 	// http.Server.Shutdown calls have already returned (close runs from a
@@ -511,6 +516,9 @@ func (r *applicationResources) close() error {
 	// therefore every server's http.Server.Shutdown) has already returned,
 	// since this method runs from a defer registered before that call.
 	r.accessWriter.Close()
+	if r.auditStream != nil {
+		r.auditStream.Close(5 * time.Second)
+	}
 
 	var closeErr error
 	if r.store != nil {

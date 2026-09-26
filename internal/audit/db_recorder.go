@@ -30,7 +30,7 @@ type DBRecorder struct {
 	db *sql.DB
 	// stream, when set, gets one JSON line per event written (see
 	// SetStream). nil writes nothing.
-	stream *slog.Logger
+	stream *Stream
 	// retryDelays are the waits before Record's second and later
 	// attempts. A field so a test can shorten them.
 	retryDelays []time.Duration
@@ -46,12 +46,13 @@ func NewDBRecorder(database *sql.DB) *DBRecorder {
 }
 
 // SetStream makes the recorder also write every event it persists to
-// logger as one JSON line with "type":"audit" — the SIEM stream (see
-// docs/configuration.md). cmd/server passes the request log's own stdout
-// JSON logger, so the two share one writer and one lock and their lines
-// never interleave. It must be called before the recorder is used.
-func (r *DBRecorder) SetStream(logger *slog.Logger) {
-	r.stream = logger
+// stream as one JSON line with "type":"audit" — the SIEM stream (see
+// docs/configuration.md). cmd/server builds it on the request log's own
+// stdout JSON logger, so the two share one writer and one lock and their
+// lines never interleave. The write happens on the stream's goroutine, never
+// the caller's (see Stream). It must be called before the recorder is used.
+func (r *DBRecorder) SetStream(stream *Stream) {
+	r.stream = stream
 }
 
 // Record persists event outside any caller transaction, using its own
@@ -168,7 +169,7 @@ func (r *DBRecorder) emit(event Event, now time.Time) {
 	if detail == nil {
 		detail = map[string]any{}
 	}
-	r.stream.LogAttrs(context.Background(), slog.LevelInfo, "audit",
+	r.stream.emit([]slog.Attr{
 		slog.String("type", "audit"),
 		slog.String("at", now.UTC().Format(time.RFC3339Nano)),
 		slog.String("action", event.Action),
@@ -182,5 +183,5 @@ func (r *DBRecorder) emit(event Event, now time.Time) {
 		slog.String("user_agent", event.UserAgent),
 		slog.String("request_id", event.RequestID),
 		slog.Any("detail", detail),
-	)
+	})
 }

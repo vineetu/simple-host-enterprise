@@ -214,6 +214,13 @@ lines (the two share one writer, so lines never interleave):
 {"time":"...","level":"INFO","msg":"audit","type":"audit","at":"2026-09-26T10:00:00.123Z","action":"key_mint","actor_id":"...","actor_kind":"person","key_id":"","owner_id":"","site_id":"","team_id":"","ip":"10.0.0.9","user_agent":"...","request_id":"...","detail":{"note":"abc123"}}
 ```
 
+The line is handed to a writer goroutine through a buffer of 4096 lines, so
+a stdout that stalls never holds up the request (or the audit chain's
+lock); if the buffer fills, lines are dropped, counted in
+`simplehost_audit_stream_dropped_total` on `/metrics`, and logged once a
+minute. The database rows are unaffected, so alert on that counter and
+backfill from `GET /api/admin/export` if it ever moves.
+
 `type` is always `"audit"` and the field names are stable; an empty string
 means the field does not apply. `at` is the server's clock at write time
 (the row's own `at` is the database's). A line is written only after the

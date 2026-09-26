@@ -705,6 +705,7 @@ PodMonitor, pod annotations, or any in-cluster scraper.
 | `simplehost_db_wait_count_total`, `simplehost_db_wait_seconds_total` | Waits for a free connection |
 | `simplehost_build_info{version,commit,schema}` | The running release |
 | `simplehost_bucket_ok` | 1 when the last bucket check (made by `/readyz`) succeeded, 0 when it failed |
+| `simplehost_audit_stream_dropped_total` | Audit lines not written to stdout because the writer fell behind (the database rows are intact); should stay 0 |
 
 Probes: `/healthz` is liveness and checks nothing else. `/readyz` checks
 that the database is reachable and the schema is current; its result is

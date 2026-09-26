@@ -222,7 +222,9 @@ func runRestore(args []string) error {
 	// Recorded in the same transaction, like every other change to what a
 	// site serves; an operator command has no signed-in actor.
 	recorder := audit.NewDBRecorder(database)
-	recorder.SetStream(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	stream := audit.NewStream(slog.New(slog.NewJSONHandler(os.Stdout, nil)), 0)
+	defer stream.Close(5 * time.Second)
+	recorder.SetStream(stream)
 	if err := recorder.RecordTx(ctx, tx, audit.Event{
 		ActorKind: "system", Action: "site_restore", OwnerID: user.ID, SiteID: target.ID,
 		Extra: map[string]any{

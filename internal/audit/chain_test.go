@@ -288,12 +288,14 @@ func TestRecordStreamsOneLineAfterTheWrite(t *testing.T) {
 	db := openPruneTestDB(t)
 	var buf bytes.Buffer
 	r := newChainRecorder(db)
-	r.SetStream(slog.New(slog.NewJSONHandler(&buf, nil)))
+	stream := NewStream(slog.New(slog.NewJSONHandler(&buf, nil)), 0)
+	r.SetStream(stream)
 
 	r.Record(context.Background(), Event{
 		ActorID: chainActor, Action: "key_mint", Detail: "abc123", SubjectID: chainSite,
 		IP: "10.0.0.9", UserAgent: "test-agent", RequestID: "req-9",
 	})
+	stream.Close(time.Second)
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
 	if len(lines) != 1 {
 		t.Fatalf("got %d lines, want 1: %q", len(lines), buf.String())
@@ -339,7 +341,8 @@ func TestRecordRetriesThenLogsLoudly(t *testing.T) {
 	r := NewDBRecorder(db)
 	r.retryDelays = []time.Duration{time.Millisecond, time.Millisecond}
 	var buf bytes.Buffer
-	r.SetStream(slog.New(slog.NewJSONHandler(&buf, nil)))
+	stream := NewStream(slog.New(slog.NewJSONHandler(&buf, nil)), 0)
+	r.SetStream(stream)
 	db.Close()
 
 	var logged bytes.Buffer
@@ -349,6 +352,7 @@ func TestRecordRetriesThenLogsLoudly(t *testing.T) {
 	if !strings.Contains(logged.String(), "AUDIT WRITE FAILED: action=sign_out actor="+chainActor) {
 		t.Fatalf("log = %q, want the loud failure line", logged.String())
 	}
+	stream.Close(time.Second)
 	if buf.Len() != 0 {
 		t.Fatal("a failed write was streamed")
 	}

@@ -52,7 +52,9 @@ works).
   `audit-verify` would report as a break until v1.2's `prune` trims it.
 - Every audit event is also written to stdout as one JSON line with
   `"type":"audit"`, for any cluster log shipper to forward to a SIEM
-  (docs/configuration.md, "Streaming the audit log to a SIEM").
+  (docs/configuration.md, "Streaming the audit log to a SIEM"). The line is
+  written off the request's goroutine; if stdout stalls and the buffer fills,
+  lines are dropped and counted in `simplehost_audit_stream_dropped_total`.
 - Sign-in, session revoke, API key mint and revoke, and the connector's
   sign-in and revoke now commit their audit row in the same transaction as
   the change. The remaining best-effort writes retry, survive a client

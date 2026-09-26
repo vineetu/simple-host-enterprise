@@ -25,6 +25,9 @@ type Registry struct {
 	total   uint64
 	// bucket is the last readiness bucket check: 0 not yet run, 1 ok, 2 failing.
 	bucket int
+	// auditDropped reports SIEM stream lines dropped (audit.Stream); nil
+	// leaves the metric out.
+	auditDropped func() uint64
 }
 
 func New() *Registry {
@@ -48,6 +51,12 @@ func (r *Registry) observe(status int, elapsed time.Duration) {
 		}
 	}
 	r.counts[len(buckets)]++
+}
+
+// SetAuditStreamDropped registers the count of audit stream lines dropped
+// because stdout was not keeping up. Call before serving.
+func (r *Registry) SetAuditStreamDropped(dropped func() uint64) {
+	r.auditDropped = dropped
 }
 
 // SetBucketOK records the result of the latest bucket check made by /readyz.
@@ -124,6 +133,12 @@ func (r *Registry) Handler(db *sql.DB, build Build) http.Handler {
 				ok = 1
 			}
 			fmt.Fprintf(w, "simplehost_bucket_ok %d\n", ok)
+		}
+
+		if r.auditDropped != nil {
+			fmt.Fprintln(w, "# HELP simplehost_audit_stream_dropped_total Audit lines not written to stdout because the writer fell behind. The database rows are intact.")
+			fmt.Fprintln(w, "# TYPE simplehost_audit_stream_dropped_total counter")
+			fmt.Fprintf(w, "simplehost_audit_stream_dropped_total %d\n", r.auditDropped())
 		}
 
 		if db == nil {

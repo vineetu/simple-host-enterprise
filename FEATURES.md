@@ -372,7 +372,7 @@ Config names are documented in `docs/configuration.md`; schema in
 - **MCP.** None.
 - **Skill.** None.
 - **Pages.** `/dashboard` and `/admin` activity/visitor panels.
-- **Go.** `internal/audit/` (`audit.go`, `db_recorder.go`, `access_writer.go`,
+- **Go.** `internal/audit/` (`stream.go`, `audit.go`, `db_recorder.go`, `access_writer.go`,
   `reader.go`, `prune.go`, `chain.go`); `internal/handler/audit_access.go`,
   `audit_helpers.go`, `admin_export.go`; `internal/db/audit.go`;
   `cmd/server/subcommands.go` (`prune`, `audit-verify`); `cmd/server/main.go`
