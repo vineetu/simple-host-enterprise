@@ -359,9 +359,13 @@ Config names are documented in `docs/configuration.md`; schema in
   batching best-effort writer. Both partitioned monthly. Every audit event
   is hash-chained in `audit_chain` by an AFTER INSERT trigger (tamper
   evidence; `access_log` is not chained), and `simple-host audit-verify`
-  walks the chain and exits non-zero at the first break. Every event is also
-  written to stdout as one JSON line with `"type":"audit"` for a cluster log
-  shipper to forward to a SIEM. `GET /api/audit` and
+  walks the chain, recomputing every hash in Go (never through the
+  database's own function), and exits non-zero at the first break. Every
+  event is also written to stdout, after its transaction commits, as one
+  JSON line with `"type":"audit"` carrying its chain `seq` and `hash`, for a
+  cluster log shipper to forward to a SIEM (which then anchors the chain
+  outside the database; drops are counted in
+  `simplehost_audit_stream_dropped_total`). `GET /api/audit` and
   `GET /api/access` are scoped to the caller's namespaces (admins see all,
   from a browser session only: an admin's API key or connected app gets the
   same own-namespace view as anyone else);
@@ -375,13 +379,15 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Skill.** None.
 - **Pages.** `/dashboard` and `/admin` activity/visitor panels.
 - **Go.** `internal/audit/` (`stream.go`, `audit.go`, `db_recorder.go`, `access_writer.go`,
-  `reader.go`, `prune.go`, `chain.go`); `internal/handler/audit_access.go`,
+  `reader.go`, `prune.go`, `chain.go`, `canonical.go`, `commit.go`); `internal/handler/audit_access.go`,
   `audit_helpers.go`, `admin_export.go`; `internal/db/audit.go`;
   `cmd/server/subcommands.go` (`prune`, `audit-verify`); `cmd/server/main.go`
   (the shared stdout JSON logger).
 - **DB.** `audit_events`, `access_log` and their `_default` partitions (0027,
   0028, 0030); `audit_chain`, `audit_chain_head`, `audit_event_canonical()`,
-  `audit_chain_append()` and trigger `audit_events_chain` (0036, owner-only).
+  `audit_chain_append()` and trigger `audit_events_chain` (0036, owner-only);
+  `audit_chain_entry()` (0040, the app role's read of one event's seq and
+  hash for its SIEM line).
 - **Config.** `AUDIT_RETENTION_DAYS`, `ACCESS_LOG_RETENTION_DAYS`,
   `ACCESS_LOG_VISIBILITY`. The stream and the chain have no settings.
 

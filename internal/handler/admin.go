@@ -655,7 +655,7 @@ func (h *AdminHandler) setUserDisabled(w http.ResponseWriter, r *http.Request, d
 		err = h.audit.RecordTx(r.Context(), tx, h.userAuditEvent(r, action, target.ID, username, nil))
 	}
 	if err == nil {
-		err = tx.Commit()
+		err = audit.Commit(tx)
 	}
 	if err != nil {
 		if errors.Is(err, db.ErrLastAdmin) {
@@ -774,7 +774,7 @@ func (h *AdminHandler) disableUserByEmail(w http.ResponseWriter, r *http.Request
 		}
 	}
 	changed := len(events)
-	if err := tx.Commit(); err != nil {
+	if err := audit.Commit(tx); err != nil {
 		log.Printf("admin: offboard: commit: %v", err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -825,7 +825,7 @@ func (h *AdminHandler) deleteOrphanTeam(w http.ResponseWriter, r *http.Request) 
 		if err := deleteTeamAndSites(r.Context(), tx, h.audit, actorID, team, "admin_no_active_members"); err != nil {
 			return err
 		}
-		return tx.Commit()
+		return audit.Commit(tx)
 	}()
 	switch {
 	case errors.Is(err, errActiveMembers):

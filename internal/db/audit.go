@@ -48,17 +48,18 @@ func marshalDetail(detail map[string]any) ([]byte, error) {
 // InsertAuditEvent writes one row. q may be *sql.DB or *sql.Tx: it is
 // called inside the mutation's transaction where one exists, and Querier
 // is what lets this function serve both that caller and the plain
-// non-transactional one already used elsewhere in the handlers.
-func InsertAuditEvent(ctx context.Context, q Querier, e AuditEvent) error {
+// non-transactional one already used elsewhere in the handlers. It returns
+// the row's key (id, at), which AuditChainEntry takes.
+func InsertAuditEvent(ctx context.Context, q Querier, e AuditEvent) (int64, time.Time, error) {
 	if e.Action == "" {
-		return errors.New("db: InsertAuditEvent requires an action")
+		return 0, time.Time{}, errors.New("db: InsertAuditEvent requires an action")
 	}
 	if e.ActorKind == "" {
 		e.ActorKind = "person"
 	}
 	detail, err := marshalDetail(e.Detail)
 	if err != nil {
-		return fmt.Errorf("marshal audit detail: %w", err)
+		return 0, time.Time{}, fmt.Errorf("marshal audit detail: %w", err)
 	}
 	// No `at`: the column's default and migration 0030's trigger set it
 	// from the database clock, whatever a caller would have sent.
@@ -72,13 +73,41 @@ func InsertAuditEvent(ctx context.Context, q Querier, e AuditEvent) error {
 			NULLIF($6, '')::uuid, NULLIF($7, '')::uuid, NULLIF($8, '')::uuid, NULLIF($9, ''), NULLIF($10, ''),
 			$11, NULLIF($12, '')::inet, NULLIF($13, ''), $14::jsonb
 		)
+		RETURNING id, at
 	`
-	_, err = q.ExecContext(ctx, query,
+	var id int64
+	var at time.Time
+	err = q.QueryRowContext(ctx, query,
 		e.RequestID, e.ActorID, e.ActorKind, e.KeyID, e.Action,
 		e.OwnerID, e.SiteID, e.TeamID, e.ViaSiteLabel, e.ViaSiteName,
 		e.ViaSiteObserved, e.IP, e.UserAgent, detail,
-	)
-	return err
+	).Scan(&id, &at)
+	return id, at, err
+}
+
+// StateWriteRow returns the key (id, at) of the coalesced state_write row
+// BumpStateWrite just created or bumped. It must run in the same transaction
+// as that call: both compute the window from now(), the transaction's start.
+func StateWriteRow(ctx context.Context, q Querier, actorID, siteID string) (int64, time.Time, error) {
+	var id int64
+	var at time.Time
+	err := q.QueryRowContext(ctx, `
+		SELECT id, at FROM audit_events
+		WHERE action = 'state_write' AND site_id = $1::uuid AND actor_id = $2::uuid
+		  AND at = date_bin('5 minutes', now(), TIMESTAMPTZ '2000-01-01 00:00:00+00')`,
+		siteID, actorID).Scan(&id, &at)
+	return id, at, err
+}
+
+// AuditChainEntry returns the hash chain's seq and hash for one event
+// (migration 0040's SECURITY DEFINER function; the application role cannot
+// read audit_chain). ok is false for a row that is not chained.
+func AuditChainEntry(ctx context.Context, q Querier, id int64, at time.Time) (seq int64, hash []byte, ok bool, err error) {
+	err = q.QueryRowContext(ctx, `SELECT seq, hash FROM audit_chain_entry($1, $2)`, id, at).Scan(&seq, &hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil, false, nil
+	}
+	return seq, hash, err == nil, err
 }
 
 // BumpStateWriteParams is one state_write coalescing call: one row per

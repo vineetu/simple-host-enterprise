@@ -228,6 +228,13 @@ func TestChainAppRoleCannotWriteChain(t *testing.T) {
 	if _, err := conn.ExecContext(ctx, `INSERT INTO audit_events (actor_kind, action) VALUES ('system', 'sign_in')`); err != nil {
 		t.Fatalf("app role insert into audit_events: %v", err)
 	}
+	// It reads its own event's seq and hash through audit_chain_entry, for
+	// the SIEM line, and nothing more of the chain.
+	var seq int64
+	var hash []byte
+	if err := conn.QueryRowContext(ctx, `SELECT c.seq, c.hash FROM audit_events e, audit_chain_entry(e.id, e.at) c`).Scan(&seq, &hash); err != nil || seq != 1 || len(hash) != 32 {
+		t.Fatalf("app role audit_chain_entry: seq %d, hash %x, err %v", seq, hash, err)
+	}
 	for _, stmt := range []string{
 		`INSERT INTO audit_chain (seq, event_id, event_at, prev_hash, hash) VALUES (99, 1, now(), '\x00', '\x00')`,
 		`UPDATE audit_chain_head SET seq = 0`,
@@ -319,6 +326,13 @@ func TestRecordStreamsOneLineAfterTheWrite(t *testing.T) {
 	}
 	if _, err := time.Parse(time.RFC3339Nano, fmt.Sprint(got["at"])); err != nil {
 		t.Errorf("at = %v: %v", got["at"], err)
+	}
+	var hash []byte
+	if err := db.QueryRow(`SELECT hash FROM audit_chain WHERE seq = 1`).Scan(&hash); err != nil {
+		t.Fatal(err)
+	}
+	if got["seq"] != float64(1) || got["hash"] != hex.EncodeToString(hash) {
+		t.Errorf("seq, hash = %v, %v; want 1, %x (the chain row)", got["seq"], got["hash"], hash)
 	}
 
 	// A write that fails is not streamed.

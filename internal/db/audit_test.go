@@ -104,7 +104,7 @@ func TestDecodeAuditCursorRejectsGarbage(t *testing.T) {
 }
 
 func TestInsertAuditEventRequiresAction(t *testing.T) {
-	if err := InsertAuditEvent(context.Background(), nil, AuditEvent{}); err == nil {
+	if _, _, err := InsertAuditEvent(context.Background(), nil, AuditEvent{}); err == nil {
 		t.Fatal("InsertAuditEvent with no Action should be refused before it ever touches q")
 	}
 }

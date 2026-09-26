@@ -70,6 +70,21 @@ func (s *siteDeleteAuditState) query(query string, args []driver.NamedValue) (dr
 			}},
 		}, nil
 
+	case strings.Contains(normalized, "INSERT INTO audit_events"):
+		// db.InsertAuditEvent, via the real audit.DBRecorder (not a fake
+		// audit.Recorder) so the actual SQL and argument binding run.
+		// Positional args mirror internal/db/audit.go's InsertAuditEvent
+		// query: $5 is action, $7 is site_id. It returns the row's key.
+		s.mu.Lock()
+		s.auditActions = append(s.auditActions, namedString(args, 4))
+		s.auditSiteIDs = append(s.auditSiteIDs, namedString(args, 6))
+		s.mu.Unlock()
+		return &siteDeleteAuditRows{columns: numberedColumns(2), values: [][]driver.Value{{int64(1), createdAt}}}, nil
+
+	case strings.Contains(normalized, "FROM audit_chain_entry"):
+		// db.AuditChainEntry, for the SIEM line.
+		return &siteDeleteAuditRows{columns: numberedColumns(2), values: [][]driver.Value{{int64(1), make([]byte, 32)}}}, nil
+
 	default:
 		return nil, errors.New("unexpected site-delete-audit test query: " + normalized)
 	}
@@ -97,16 +112,6 @@ func (s *siteDeleteAuditState) exec(query string, args []driver.NamedValue) (dri
 		// stands in for the post-migration-0028 schema.
 		s.mu.Lock()
 		s.siteDeleted = true
-		s.mu.Unlock()
-		return driver.RowsAffected(1), nil
-	case strings.Contains(normalized, "INSERT INTO audit_events"):
-		// db.InsertAuditEvent, via the real audit.DBRecorder (not a fake
-		// audit.Recorder) so the actual SQL and argument binding run.
-		// Positional args mirror internal/db/audit.go's InsertAuditEvent
-		// query: $5 is action, $7 is site_id.
-		s.mu.Lock()
-		s.auditActions = append(s.auditActions, namedString(args, 4))
-		s.auditSiteIDs = append(s.auditSiteIDs, namedString(args, 6))
 		s.mu.Unlock()
 		return driver.RowsAffected(1), nil
 	default:

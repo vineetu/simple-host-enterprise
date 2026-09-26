@@ -663,7 +663,7 @@ func (h *ConnectorHandler) decide(w http.ResponseWriter, r *http.Request) {
 		Extra:  map[string]any{"client_id": req.Client.ClientID, "redirect_uri": req.RedirectURI},
 	})
 	if err == nil {
-		err = tx.Commit()
+		err = audit.Commit(tx)
 	}
 	if err != nil {
 		log.Printf("oauth: record/commit code: %v", err)
@@ -809,7 +809,7 @@ func (h *ConnectorHandler) redeemCode(w http.ResponseWriter, r *http.Request, cl
 	// The code is spent from here on: every refusal below commits the spend,
 	// so a failed attempt cannot be retried.
 	fail := func(code, desc string) {
-		_ = tx.Commit()
+		_ = audit.Commit(tx)
 		oauthError(w, http.StatusBadRequest, code, desc)
 	}
 	switch {
@@ -944,7 +944,7 @@ func (h *ConnectorHandler) issueTokens(w http.ResponseWriter, r *http.Request, t
 		oauthError(w, http.StatusInternalServerError, "server_error", "")
 		return
 	}
-	if err := tx.Commit(); err != nil {
+	if err := audit.Commit(tx); err != nil {
 		oauthError(w, http.StatusInternalServerError, "server_error", "")
 		return
 	}
@@ -989,7 +989,7 @@ func (h *ConnectorHandler) revoke(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		if err == nil {
-			err = tx.Commit()
+			err = audit.Commit(tx)
 		}
 		if err != nil {
 			log.Printf("oauth: revoke: %v", err)

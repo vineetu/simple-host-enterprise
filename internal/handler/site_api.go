@@ -242,7 +242,7 @@ func (h *SiteAPIHandler) PutState(w http.ResponseWriter, r *http.Request, call s
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	if err := tx.Commit(); err != nil {
+	if err := audit.Commit(tx); err != nil {
 		log.Printf("commit state_write %s/%s: %v", call.Owner, call.SiteName, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -346,7 +346,7 @@ func (h *SiteAPIHandler) PutStateVersioned(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	if err := tx.Commit(); err != nil {
+	if err := audit.Commit(tx); err != nil {
 		log.Printf("commit state_write %s/%s: %v", call.Owner, call.SiteName, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -556,7 +556,7 @@ func (h *SiteAPIHandler) CreateAsset(w http.ResponseWriter, r *http.Request, cal
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	if err := tx.Commit(); err != nil {
+	if err := audit.Commit(tx); err != nil {
 		keepObject = true
 		log.Printf("commit asset_create %s/%s id=%s: %v", call.Owner, call.SiteName, stored.ID, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
@@ -640,7 +640,7 @@ func (h *SiteAPIHandler) DeleteAsset(w http.ResponseWriter, r *http.Request, cal
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	if err := tx.Commit(); err != nil {
+	if err := audit.Commit(tx); err != nil {
 		log.Printf("commit asset_delete %s/%s id=%s: %v", call.Owner, call.SiteName, id, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return

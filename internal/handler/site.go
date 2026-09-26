@@ -473,7 +473,7 @@ func (h *SiteHandler) createSiteForTarget(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if commitErr := tx.Commit(); commitErr != nil {
+	if commitErr := audit.Commit(tx); commitErr != nil {
 		result := reconcileSiteCommit(h.database, target.OwnerID, siteName, siteCommitExpectation{
 			applied:    existingSiteCommitSnapshot(site.ID, versionNumber),
 			rolledBack: siteCommitSnapshot{},
@@ -620,7 +620,7 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if commitErr := tx.Commit(); commitErr != nil {
+	if commitErr := audit.Commit(tx); commitErr != nil {
 		result := reconcileSiteCommit(h.database, target.OwnerID, siteName, siteCommitExpectation{
 			applied:    existingSiteCommitSnapshot(site.ID, versionNumber),
 			rolledBack: existingSiteCommitSnapshot(site.ID, previousVersion),
@@ -792,7 +792,7 @@ func (h *SiteHandler) deleteSiteForTarget(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	if commitErr := tx.Commit(); commitErr != nil {
+	if commitErr := audit.Commit(tx); commitErr != nil {
 		result := reconcileSiteCommit(h.database, target.OwnerID, siteName, siteCommitExpectation{
 			applied:    siteCommitSnapshot{},
 			rolledBack: existingSiteCommitSnapshot(site.ID, site.ActiveVersion),
@@ -902,7 +902,7 @@ func (h *SiteHandler) rollbackSite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	if commitErr := tx.Commit(); commitErr != nil {
+	if commitErr := audit.Commit(tx); commitErr != nil {
 		result := reconcileSiteCommit(h.database, target.OwnerID, siteName, siteCommitExpectation{
 			applied:    existingSiteCommitSnapshot(site.ID, req.Version),
 			rolledBack: existingSiteCommitSnapshot(site.ID, previousVersion),

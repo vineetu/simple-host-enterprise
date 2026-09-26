@@ -623,8 +623,8 @@ of `docs/configuration.md`.
   new key first, deploying, running `simple-host reencrypt`, then removing
   the old key (`docs/storage.md`, "Rotating the envelope key"). Entra client
   secrets expire; note the date for the human.
-- **Audit**: every audit event is also one JSON line on the pod's stdout
-  with `"type":"audit"`; point the cluster's log shipper at it to feed a
+- **Audit**: every committed audit event is also one JSON line on the pod's
+  stdout with `"type":"audit"` and its hash-chain `seq` and `hash`; point the cluster's log shipper at it to feed a
   SIEM (`docs/configuration.md`, "Streaming the audit log to a SIEM").
   `simple-host audit-verify` checks the audit hash chain
   (`docs/security-review.md`, 2(e)).

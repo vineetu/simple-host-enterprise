@@ -160,7 +160,7 @@ func (h *KeysHandler) mint(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	if err := tx.Commit(); err != nil {
+	if err := audit.Commit(tx); err != nil {
 		log.Printf("keys: commit mint for %s: %v", user.Username, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -229,7 +229,7 @@ func (h *KeysHandler) revoke(w http.ResponseWriter, r *http.Request) {
 	}
 	err = h.audit.RecordTx(r.Context(), tx, audit.Event{ActorID: user.ID, Action: "key_revoke", Detail: id, RequestID: auditRequestID(r.Context())})
 	if err == nil {
-		err = tx.Commit()
+		err = audit.Commit(tx)
 	}
 	if err != nil {
 		log.Printf("keys: record/commit revoke %s for %s: %v", id, user.Username, err)
