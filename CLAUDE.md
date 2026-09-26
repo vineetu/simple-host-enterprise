@@ -20,6 +20,11 @@ anything: they say what exists and what is deliberately unfinished.
 - **Update `FEATURES.md` and `CHANGELOG.md` in the same commit** as any
   feature change. `scripts/check-features.sh` (in `make test` and CI) fails
   when a registered route or MCP tool is missing from `FEATURES.md`.
+- **Parity with hosted Simple Host** (`PARITY.md`, identical in both repos):
+  any security fix in one repo is checked against the other the same day
+  (note it in PARITY.md). A new or changed feature updates PARITY.md in the
+  same commit. `scripts/check-parity.sh` (in `make test` and CI) fails when a
+  `## N.` section of `FEATURES.md` has no PARITY.md row.
 - **Deploy and test before committing.** `make test`, then `make local` and
   `make smoke` for anything that touches serving, routing, the schema, or
   the manifests. Nothing is committed that has not run.

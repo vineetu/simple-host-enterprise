@@ -1,6 +1,6 @@
 # Simple Host: build, test, and run the package on a local cluster.
 #
-#   make test          go test ./... and scripts/check-features.sh
+#   make test          go test ./..., scripts/check-features.sh and check-parity.sh
 #   make test-db       go test ./... against a throwaway Postgres in Docker
 #   make vuln          govulncheck
 #   make image         docker build -t simple-host:local
@@ -41,6 +41,7 @@ build:
 test:
 	go test ./...
 	./scripts/check-features.sh
+	./scripts/check-parity.sh
 
 # The whole suite against a throwaway Postgres in Docker, so the tests gated
 # on MIGRATE_TEST_DSN run instead of skipping — the same set CI runs. Fails
