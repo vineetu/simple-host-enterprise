@@ -148,11 +148,11 @@ cloud in section 4 (Bucket) of each `docs/cloud/*.md`:
 - Oracle: Object Storage's S3 Compatibility API with a Customer Secret Key.
   The endpoint contains the tenancy's object-storage namespace.
 
-**Image.** Use the current release, `ghcr.io/vineetu/simple-host-enterprise:v1.3.0`
+**Image.** Use the current release, `ghcr.io/vineetu/simple-host-enterprise:v1.3.1`
 (public, linux/amd64 and linux/arm64), pinned by its digest:
 
 ```
-sha256:313d18cea526a1f2ea0b01ade46682d14bbe33972f3611730c11567e6358a7d7
+sha256:b29be17a87f351a220999d3fdca3864d212912c8e4df3cdc603f22505d3a75ca
 ```
 
 That is what section 5 step 1 puts in the overlay. The release workflow
@@ -330,7 +330,7 @@ edits to them.
 
 1. `kustomization.yaml`, `images:` entry (name `ghcr.io/vineetu/simple-host-enterprise`): set `newName` to
    `ghcr.io/vineetu/simple-host-enterprise` (or your mirror) and `digest`
-   to the verified digest from section 3 (for v1.3.0, `sha256:313d18cea526a1f2ea0b01ade46682d14bbe33972f3611730c11567e6358a7d7`).
+   to the verified digest from section 3 (for v1.3.1, `sha256:b29be17a87f351a220999d3fdca3864d212912c8e4df3cdc603f22505d3a75ca`).
    The base names the image with the placeholder digest
    `sha256:REPLACE_WITH_THE_RELEASE_DIGEST`, which `make preflight` refuses.
 2. `ingress-patch.yaml`: replace every `simple-host.example.com` with
