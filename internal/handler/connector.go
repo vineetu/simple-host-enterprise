@@ -9,10 +9,11 @@ package handler
 // /oauth/authorize in a browser. That page signs the person in through the
 // company's OIDC provider (/auth/login) and then asks once whether to allow
 // the app. "Allow" sends the app back with a single-use code, which it trades
-// with its PKCE verifier for a one-hour access token and a rotating refresh
+// with its PKCE verifier for a short-lived access token and a rotating refresh
 // token. The access token is accepted by auth.Middleware as
-// "Authorization: Bearer", so it carries exactly the person's own power, the
-// same as their API key; API keys keep working for CI.
+// "Authorization: Bearer" on /mcp (and the REST calls its tools make) and
+// nowhere else, carrying exactly the person's own power; API keys keep
+// working for CI.
 
 import (
 	"context"
@@ -40,11 +41,13 @@ import (
 )
 
 const (
-	oauthCodeTTL         = time.Minute
-	oauthAccessTTL       = time.Hour
-	oauthRefreshTTL      = 30 * 24 * time.Hour
-	oauthScope           = "sites"
-	oauthMaxRedirectURIs = 10
+	oauthCodeTTL = time.Minute
+	// defaultOAuthAccessTTL and defaultOAuthRefreshTTL apply until
+	// WithTokenTTLs sets OAUTH_ACCESS_TTL and OAUTH_REFRESH_TTL.
+	defaultOAuthAccessTTL  = time.Hour
+	defaultOAuthRefreshTTL = 30 * 24 * time.Hour
+	oauthScope             = "sites"
+	oauthMaxRedirectURIs   = 10
 	// maxAuthorizeReturnBytes keeps the /auth/login state cookie, which
 	// carries the return path, under browsers' 4 KB cookie limit.
 	maxAuthorizeReturnBytes = 2000
@@ -69,6 +72,8 @@ type ConnectorHandler struct {
 	limits        *AbuseLimits
 	hosts         HostModel
 	now           func() time.Time
+	accessTTL     time.Duration
+	refreshTTL    time.Duration
 }
 
 func NewConnectorHandler(database *sql.DB, publicBaseURL string, redirectHosts []string, signingKeys []auth.SigningKey, sessionIdle time.Duration, recorder audit.Recorder, hosts HostModel, limits ...*AbuseLimits) *ConnectorHandler {
@@ -86,7 +91,21 @@ func NewConnectorHandler(database *sql.DB, publicBaseURL string, redirectHosts [
 		limits:        chooseAbuseLimits(limits),
 		hosts:         hosts,
 		now:           time.Now,
+		accessTTL:     defaultOAuthAccessTTL,
+		refreshTTL:    defaultOAuthRefreshTTL,
 	}
+}
+
+// WithTokenTTLs sets the access token lifetime (OAUTH_ACCESS_TTL) and the
+// connection lifetime (OAUTH_REFRESH_TTL); zero keeps the default.
+func (h *ConnectorHandler) WithTokenTTLs(access, refresh time.Duration) *ConnectorHandler {
+	if access > 0 {
+		h.accessTTL = access
+	}
+	if refresh > 0 {
+		h.refreshTTL = refresh
+	}
+	return h
 }
 
 func (h *ConnectorHandler) Register(mux *http.ServeMux, authMiddleware func(http.Handler) http.Handler) {
@@ -127,7 +146,8 @@ func (h *ConnectorHandler) StartSweep(ctx context.Context) {
 
 // ProtectMCP requires an API key or an access token on /mcp, and answers a
 // missing or refused one with the 401 challenge that starts an OAuth
-// client's sign-in. A browser session is not a credential here.
+// client's sign-in. A browser session is not a credential here. It is the
+// only place an OAuth access token is accepted (auth.WithMCPCaller).
 func (h *ConnectorHandler) ProtectMCP(authMiddleware func(http.Handler) http.Handler, next http.Handler) http.Handler {
 	authed := authMiddleware(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +156,10 @@ func (h *ConnectorHandler) ProtectMCP(authMiddleware func(http.Handler) http.Han
 			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "sign in to use this server"})
 			return
 		}
-		authed.ServeHTTP(&challengeOn401{ResponseWriter: w, challenge: h.challenge("invalid_token")}, r)
+		// The mark is what lets an OAuth access token through auth.Middleware,
+		// here and in every REST call the MCP server makes on this request's
+		// context; a token sent straight to a REST route has no mark.
+		authed.ServeHTTP(&challengeOn401{ResponseWriter: w, challenge: h.challenge("invalid_token")}, r.WithContext(auth.WithMCPCaller(r.Context())))
 	})
 }
 
@@ -799,7 +822,7 @@ func (h *ConnectorHandler) redeemCode(w http.ResponseWriter, r *http.Request, cl
 		fail("invalid_grant", "account unavailable")
 		return
 	}
-	grantID, err := db.InsertOAuthGrant(r.Context(), tx, stored.UserID, client.ClientID, stored.Resource)
+	grantID, grantStart, err := db.InsertOAuthGrant(r.Context(), tx, stored.UserID, client.ClientID, stored.Resource)
 	if err != nil {
 		log.Printf("oauth: insert grant: %v", err)
 		oauthError(w, http.StatusInternalServerError, "server_error", "")
@@ -809,7 +832,7 @@ func (h *ConnectorHandler) redeemCode(w http.ResponseWriter, r *http.Request, cl
 		oauthError(w, http.StatusInternalServerError, "server_error", "")
 		return
 	}
-	h.issueTokens(w, r, tx, grantID)
+	h.issueTokens(w, r, tx, grantID, grantStart)
 }
 
 func (h *ConnectorHandler) refresh(w http.ResponseWriter, r *http.Request, client db.OAuthClient) {
@@ -872,21 +895,36 @@ func (h *ConnectorHandler) refresh(w http.ResponseWriter, r *http.Request, clien
 		return
 	}
 	_ = db.TouchOAuthGrant(r.Context(), tx, tok.GrantID)
-	h.issueTokens(w, r, tx, tok.GrantID)
+	h.issueTokens(w, r, tx, tok.GrantID, tok.GrantCreatedAt)
 }
 
 // issueTokens mints an access and a refresh token in grantID, commits, and
 // writes the token response.
-func (h *ConnectorHandler) issueTokens(w http.ResponseWriter, r *http.Request, tx *sql.Tx, grantID string) {
+//
+// The refresh token expires refreshTTL after the grant began (the person's
+// sign-in and "Allow"), however often it rotates: a rotation that granted a
+// fresh full lifetime would keep a connection alive forever without the
+// person ever signing in at the IdP again. The access token never outlives
+// the refresh token either.
+func (h *ConnectorHandler) issueTokens(w http.ResponseWriter, r *http.Request, tx *sql.Tx, grantID string, grantStart time.Time) {
 	access := randomToken(prefixAccess)
 	refresh := randomToken(prefixRefresh)
 	now := h.now()
-	if err := db.InsertOAuthToken(r.Context(), tx, db.HashAPIKey(access), grantID, "access", now.Add(oauthAccessTTL)); err != nil {
+	refreshExpires := grantStart.Add(h.refreshTTL)
+	if !refreshExpires.After(now) {
+		oauthError(w, http.StatusBadRequest, "invalid_grant", "the connection has expired; connect the app again")
+		return
+	}
+	accessExpires := now.Add(h.accessTTL)
+	if accessExpires.After(refreshExpires) {
+		accessExpires = refreshExpires
+	}
+	if err := db.InsertOAuthToken(r.Context(), tx, db.HashAPIKey(access), grantID, "access", accessExpires); err != nil {
 		log.Printf("oauth: insert access token: %v", err)
 		oauthError(w, http.StatusInternalServerError, "server_error", "")
 		return
 	}
-	if err := db.InsertOAuthToken(r.Context(), tx, db.HashAPIKey(refresh), grantID, "refresh", now.Add(oauthRefreshTTL)); err != nil {
+	if err := db.InsertOAuthToken(r.Context(), tx, db.HashAPIKey(refresh), grantID, "refresh", refreshExpires); err != nil {
 		log.Printf("oauth: insert refresh token: %v", err)
 		oauthError(w, http.StatusInternalServerError, "server_error", "")
 		return
@@ -899,7 +937,7 @@ func (h *ConnectorHandler) issueTokens(w http.ResponseWriter, r *http.Request, t
 	writeJSON(w, http.StatusOK, map[string]any{
 		"access_token":  access,
 		"token_type":    "Bearer",
-		"expires_in":    int(oauthAccessTTL / time.Second),
+		"expires_in":    int(accessExpires.Sub(now) / time.Second),
 		"refresh_token": refresh,
 		"scope":         oauthScope,
 	})

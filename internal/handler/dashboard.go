@@ -85,9 +85,13 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 
 <section>
   <h2 class="section-title">API keys</h2>
-  <p class="login-copy">A key authenticates CI or other automation as you. Mint one per job or machine so each can be revoked without touching the others. Keys expire; mint a fresh one when yours does.</p>
+  <p class="login-copy">A key authenticates CI or other automation as you. Mint one per job or machine so each can be revoked without touching the others. Keys expire; mint a fresh one when yours does. A publish key can deploy, update and roll back your sites and use their saved data and files; a full key can do everything you can, except administration.</p>
   <form id="mint-form" class="login-form" onsubmit="return false">
     <input type="text" id="key-name" placeholder="Name (e.g. laptop, CI)" maxlength="200" autocomplete="off">
+    <select id="key-scope" aria-label="What the key can do">
+      <option value="publish" selected>Publish</option>
+      <option value="full">Full</option>%s
+    </select>
     <button type="button" id="mint-button" class="btn-login">Create key</button>
   </form>
   <div id="mint-result" hidden></div>
@@ -96,6 +100,7 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 		notice,
 		html.EscapeString(user.Username),
 		adminBadge(user.IsAdmin),
+		offboardScopeOption(user.IsAdmin),
 	)
 	for _, k := range keys {
 		status := "active"
@@ -105,11 +110,12 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 			status = "expired"
 		}
 		fmt.Fprintf(&b, `<div class="rank-row" data-key-id="%s">
-  <span class="rank-name">%s <span class="rank-sub">%s · created %s · expires %s</span></span>
+  <span class="rank-name">%s <span class="rank-sub">%s · %s · created %s · expires %s</span></span>
   <span class="rank-metric">%s</span>`,
 			html.EscapeString(k.ID),
 			html.EscapeString(k.Name),
 			html.EscapeString(k.Prefix),
+			html.EscapeString(k.Scope),
 			localTimeHTML(k.CreatedAt, "datetime"),
 			localTimeHTML(k.ExpiresAt, "datetime"),
 			html.EscapeString(status),
@@ -136,6 +142,16 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(b.String()))
+}
+
+// offboardScopeOption offers the offboard scope to an admin only; the mint
+// route refuses it to anyone else either way.
+func offboardScopeOption(isAdmin bool) string {
+	if isAdmin {
+		return `
+      <option value="offboard">Offboard (disable leavers)</option>`
+	}
+	return ""
 }
 
 func adminBadge(isAdmin bool) string {
@@ -186,7 +202,7 @@ const dashboardScript = `<script>
       method: 'POST',
       credentials: 'same-origin',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name: nameInput.value || ''})
+      body: JSON.stringify({name: nameInput.value || '', scope: (document.getElementById('key-scope') || {}).value || 'publish'})
     }).then(function(r){ return r.json().then(function(body){ return {ok: r.ok, body: body}; }); })
       .then(function(res){
         mintButton.disabled = false;

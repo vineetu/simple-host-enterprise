@@ -78,7 +78,7 @@ func newAccessWorld(t *testing.T) *accessWorld {
 			t.Fatal(err)
 		}
 		key := "key-" + name + "-" + strings.Repeat("0", 40)
-		if _, err := db.CreateAPIKey(context.Background(), database, user.ID, "test", db.HashAPIKey(key), key[:8], time.Now().Add(time.Hour)); err != nil {
+		if _, err := db.CreateAPIKey(context.Background(), database, user.ID, "test", db.HashAPIKey(key), key[:8], time.Now().Add(time.Hour), db.APIKeyScopeFull); err != nil {
 			t.Fatal(err)
 		}
 		w.users[name], w.apiKeys[name] = user.ID, key

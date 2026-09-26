@@ -63,6 +63,9 @@ type mintKeyRequest struct {
 	// ExpiresInDays is the key's lifetime; 0 means the default (90 days, or
 	// the maximum if that is lower).
 	ExpiresInDays int `json:"expires_in_days"`
+	// Scope is what the key may call: "publish" (the default), "full", or
+	// "offboard" (admins only). See internal/auth/scope.go.
+	Scope string `json:"scope"`
 }
 
 type apiKeyResponse struct {
@@ -73,6 +76,7 @@ type apiKeyResponse struct {
 	LastUsedAt *string `json:"last_used_at,omitempty"`
 	RevokedAt  *string `json:"revoked_at,omitempty"`
 	ExpiresAt  string  `json:"expires_at"`
+	Scope      string  `json:"scope"`
 	// APIKey carries the plaintext, present only in the mint response. It is
 	// never stored and never returned again by any other route.
 	APIKey string `json:"api_key,omitempty"`
@@ -109,6 +113,22 @@ func (h *KeysHandler) mint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	switch req.Scope {
+	case "":
+		req.Scope = db.APIKeyScopePublish
+	case db.APIKeyScopePublish, db.APIKeyScopeFull:
+	case db.APIKeyScopeOffboard:
+		// An offboard key disables people; only an admin could do that with
+		// their own session, so only an admin may hand it to automation.
+		if !user.IsAdmin {
+			writeJSON(w, http.StatusForbidden, errorResponse{Error: "only an admin can create an offboard key"})
+			return
+		}
+	default:
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: `scope must be "publish", "full" or "offboard"`})
+		return
+	}
+
 	plaintext, err := auth.GenerateAPIKey()
 	if err != nil {
 		log.Printf("keys: generate key for %s: %v", user.Username, err)
@@ -116,7 +136,7 @@ func (h *KeysHandler) mint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hash := db.HashAPIKey(plaintext)
-	key, err := db.CreateAPIKey(r.Context(), h.database, user.ID, req.Name, hash, db.KeyPrefix(hash), time.Now().AddDate(0, 0, days))
+	key, err := db.CreateAPIKey(r.Context(), h.database, user.ID, req.Name, hash, db.KeyPrefix(hash), time.Now().AddDate(0, 0, days), req.Scope)
 	if err != nil {
 		if isUniqueViolation(err) {
 			// A hash collision on 256 random bits is not a real-world event;
@@ -128,13 +148,14 @@ func (h *KeysHandler) mint(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	h.audit.Record(r.Context(), audit.Event{ActorID: user.ID, Action: "key_mint", Detail: key.Prefix, RequestID: auditRequestID(r.Context())})
+	h.audit.Record(r.Context(), audit.Event{ActorID: user.ID, Action: "key_mint", Detail: key.Prefix, Extra: map[string]any{"scope": key.Scope}, RequestID: auditRequestID(r.Context())})
 	writeJSON(w, http.StatusCreated, apiKeyResponse{
 		ID:        key.ID,
 		Name:      key.Name,
 		Prefix:    key.Prefix,
 		CreatedAt: key.CreatedAt.Format(time.RFC3339),
 		ExpiresAt: key.ExpiresAt.Format(time.RFC3339),
+		Scope:     key.Scope,
 		APIKey:    plaintext,
 	})
 }
@@ -153,7 +174,7 @@ func (h *KeysHandler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]apiKeyResponse, 0, len(keys))
 	for _, k := range keys {
-		item := apiKeyResponse{ID: k.ID, Name: k.Name, Prefix: k.Prefix, CreatedAt: k.CreatedAt.Format(time.RFC3339), ExpiresAt: k.ExpiresAt.Format(time.RFC3339)}
+		item := apiKeyResponse{ID: k.ID, Name: k.Name, Prefix: k.Prefix, CreatedAt: k.CreatedAt.Format(time.RFC3339), ExpiresAt: k.ExpiresAt.Format(time.RFC3339), Scope: k.Scope}
 		if k.LastUsedAt != nil {
 			s := k.LastUsedAt.Format(time.RFC3339)
 			item.LastUsedAt = &s

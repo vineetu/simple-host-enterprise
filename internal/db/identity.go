@@ -122,7 +122,15 @@ func SetUserDisabled(ctx context.Context, database *sql.DB, userID string, disab
 		return err
 	}
 	defer tx.Rollback()
+	if err := SetUserDisabledTx(ctx, tx, userID, disabled); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
+// SetUserDisabledTx is SetUserDisabled inside the caller's transaction, so
+// the caller can write its audit row in the same commit.
+func SetUserDisabledTx(ctx context.Context, tx *sql.Tx, userID string, disabled bool) error {
 	if disabled {
 		// Lock every enabled admin row first, so two admins disabling each
 		// other concurrently cannot both see the other as the one left.
@@ -174,5 +182,37 @@ func SetUserDisabled(ctx context.Context, database *sql.DB, userID string, disab
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
+}
+
+// PersonByEmail is one account found by PeopleByEmail.
+type PersonByEmail struct {
+	ID       string
+	Username string
+	Disabled bool
+}
+
+// PeopleByEmail returns every person whose email is email (compared
+// case-insensitively), ordered by username. Offboarding
+// works by address, and an address can sit on more than one account (see
+// GetUserByEmail), so it answers with all of them rather than refusing.
+func PeopleByEmail(ctx context.Context, q Querier, email string) ([]PersonByEmail, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT id, username, disabled_at IS NOT NULL
+		FROM users
+		WHERE kind = 'person' AND email IS NOT NULL AND lower(email) = lower($1)
+		ORDER BY username`, email)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PersonByEmail
+	for rows.Next() {
+		var p PersonByEmail
+		if err := rows.Scan(&p.ID, &p.Username, &p.Disabled); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }

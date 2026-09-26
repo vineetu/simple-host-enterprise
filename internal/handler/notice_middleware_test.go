@@ -335,9 +335,9 @@ func (adminAuthConn) QueryContext(ctx context.Context, query string, args []driv
 			return noRowsResult{}, nil
 		}
 		return &fakeRows{
-			columns: []string{"id", "username", "is_admin", "created_at", "kind", "email", "disabled_at", "key_id"},
+			columns: []string{"id", "username", "is_admin", "created_at", "kind", "email", "disabled_at", "key_id", "scope"},
 			values: [][]driver.Value{{
-				fakeAdminUserID, fakeAdminUsername, true, createdAt, "person", "", nil, "fake-key-id",
+				fakeAdminUserID, fakeAdminUsername, true, createdAt, "person", "", nil, "fake-key-id", "full",
 			}},
 		}, nil
 
@@ -421,6 +421,7 @@ func TestRealAuthenticationPrecedesSkillVersionClassification(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/api/sites", nil)
+			req.Pattern = "GET /api/sites" // what the mux sets; API-key scopes are checked against it
 			if tt.apiKey != "" {
 				req.Header.Set("X-API-Key", tt.apiKey)
 			}

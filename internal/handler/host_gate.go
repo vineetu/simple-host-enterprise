@@ -670,7 +670,9 @@ func (g *hostGate) serveSiteAPI(w http.ResponseWriter, r *http.Request, kind sit
 		}
 	}
 
-	user, _, keyID, ok := g.authenticateSiteAPI(w, r.WithContext(auth.WithExpectedSessionHost(r.Context(), label+"."+g.hosts.BaseHost())))
+	// WithSiteAPI puts this request in the API-key scope table
+	// (auth.SiteAPIPattern): the mux never matched it, so it has no pattern.
+	user, _, keyID, ok := g.authenticateSiteAPI(w, r.WithContext(auth.WithSiteAPI(auth.WithExpectedSessionHost(r.Context(), label+"."+g.hosts.BaseHost()))))
 	if !ok {
 		return
 	}

@@ -223,11 +223,12 @@ type connectorFlow struct {
 	keys     []auth.SigningKey
 	user     db.User
 	cookie   *http.Cookie
+	h        *ConnectorHandler
 }
 
 func newConnectorFlow(t *testing.T) *connectorFlow {
 	database := connectorTestDB(t)
-	mux, _, keys := connectorTestMux(t, database)
+	mux, h, keys := connectorTestMux(t, database)
 	ctx := context.Background()
 	user, err := db.CreateOIDCUser(ctx, database, "alice", "sub-alice", "alice@example.com", false)
 	if err != nil {
@@ -242,7 +243,7 @@ func newConnectorFlow(t *testing.T) *connectorFlow {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &connectorFlow{t: t, mux: mux, database: database, keys: keys, user: user,
+	return &connectorFlow{t: t, mux: mux, database: database, keys: keys, user: user, h: h,
 		cookie: &http.Cookie{Name: auth.SessionCookieName, Value: value}}
 }
 
@@ -348,6 +349,14 @@ func TestConnectorFullFlowAndBearerOnMCP(t *testing.T) {
 	rec := serve(f.mux, mcpRequest(call, access))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `\"username\":\"alice\"`) {
 		t.Fatalf("tools/call list_sites = %d %s", rec.Code, rec.Body.String())
+	}
+
+	// The same token sent straight to that REST route is refused: it is
+	// for /mcp only.
+	direct := httptest.NewRequest(http.MethodGet, connectorTestBase+"/api/collaboration/sites", nil)
+	direct.Header.Set("Authorization", "Bearer "+access)
+	if rec := serve(f.mux, direct); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("bearer on a REST route = %d, want 401", rec.Code)
 	}
 
 	rec = serve(f.mux, mcpRequest(toolsList, "shat_not-a-token"))
@@ -476,6 +485,39 @@ func TestConnectorRefreshRotationAndReuse(t *testing.T) {
 	}
 	if rec, _ := f.tokenRequest(url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refresh2}, "client_id": {clientID}}); rec.Code != http.StatusBadRequest {
 		t.Fatalf("newest refresh after reuse = %d, want 400", rec.Code)
+	}
+}
+
+// Rotation does not extend a connection: the refresh token always expires
+// OAUTH_REFRESH_TTL after the grant began, so the person signs in again at
+// least that often.
+func TestConnectorRefreshLifetimeIsAbsolute(t *testing.T) {
+	f := newConnectorFlow(t)
+	f.h.WithTokenTTLs(time.Hour, 10*24*time.Hour)
+	clientID, _, refresh := f.connect("https://claude.ai/api/mcp/auth_callback")
+	var grantStart time.Time
+	if err := f.database.QueryRow(`SELECT created_at FROM oauth_grants WHERE user_id = $1`, f.user.ID).Scan(&grantStart); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	f.h.now = func() time.Time { return start.Add(9 * 24 * time.Hour) }
+	rec, out := f.tokenRequest(url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refresh}, "client_id": {clientID}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("refresh on day 9 = %d %s", rec.Code, rec.Body.String())
+	}
+	var expires time.Time
+	if err := f.database.QueryRow(`SELECT expires_at FROM oauth_tokens WHERE kind = 'refresh' AND used_at IS NULL`).Scan(&expires); err != nil {
+		t.Fatal(err)
+	}
+	if want := grantStart.Add(10 * 24 * time.Hour); expires.Sub(want).Abs() > time.Second {
+		t.Fatalf("rotated refresh token expires %s, want %s (grant start + 10 days)", expires, want)
+	}
+	if got := out["expires_in"].(float64); got > 24*3600 || got < 3500 {
+		t.Errorf("access expires_in = %v, want at most a day left on the grant", got)
+	}
+	f.h.now = func() time.Time { return start.Add(10*24*time.Hour + time.Minute) }
+	if rec, _ := f.tokenRequest(url.Values{"grant_type": {"refresh_token"}, "refresh_token": {out["refresh_token"].(string)}, "client_id": {clientID}}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("refresh after the connection lifetime = %d, want 400", rec.Code)
 	}
 }
 

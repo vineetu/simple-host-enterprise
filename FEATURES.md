@@ -26,11 +26,14 @@ Config names are documented in `docs/configuration.md`; schema in
 - **What.** People sign in only through the company's OIDC provider; an
   account is created at first sign-in (username/email from claims). Admin is
   `ADMIN_EMAILS` or an OIDC claim. Revocable session rows, `__Host-` cookies
-  signed with `SESSION_SIGNING_KEY`, idle and absolute limits. A session on
+  signed with `SESSION_SIGNING_KEY`, idle and absolute limits
+  (`SESSION_IDLE` 30m, `SESSION_TTL` 8h by default; capped at 8h and 24h,
+  refused at startup beyond). A session on
   the base host is handed to an owner or restricted-site host by a one-time
   code (`/auth/handoff` on the base host mints; `/auth/session` on the target
   host redeems, nonce-bound against login CSRF). Every session cookie is bound
-  to the host it was minted for.
+  to the host it was minted for; a hand-off cookie shares the sign-in's
+  session row and expiry, so it never outlives it.
 - **Status.** Built.
 - **Routes.** `GET /auth/login`, `GET /auth/callback`, `POST /auth/logout`,
   `GET /auth/sessions` (sessions page), `POST /auth/sessions/{id}/revoke`,
@@ -57,15 +60,23 @@ Config names are documented in `docs/configuration.md`; schema in
   (`shk_` prefix, stored hashed, 90 days by default, at most
   `API_KEY_MAX_DAYS`). Managing keys requires a browser session, never a key.
   Sent as `X-API-Key`. People and their agents use OIDC/MCP; keys are for CI.
+  Each key has a scope chosen at mint, enforced in `auth.Middleware` against
+  the matched route pattern (`internal/auth/scope.go`, deny-by-default, every
+  route classified by a test): `publish` (default: deploy, update, rollback,
+  list, versions, archives, saved data and assets including the host-gate
+  site API, `GET /api/me`, `/mcp`), `full` (every non-admin route), `offboard`
+  (admins only; `POST /api/admin/users/disable` and nothing else). Refusal is
+  403 with a JSON `scope`. Existing keys became `full`.
 - **Status.** Built.
 - **Routes.** `GET /api/keys`, `POST /api/keys`, `DELETE /api/keys/{id}`.
 - **MCP.** None (by design).
 - **Skill.** `references/account-recovery.md` (Get a key; Revoked, lost, or
   extra keys).
 - **Pages.** `/dashboard` "API keys" panel.
-- **Go.** `internal/handler/keys.go`; `internal/db/api_keys.go`;
-  `internal/auth/middleware.go`.
-- **DB.** `api_keys` (0022, 0029 expiry); `users.api_key` dropped (0025).
+- **Go.** `internal/handler/keys.go`, `dashboard.go`; `internal/db/api_keys.go`;
+  `internal/auth/middleware.go`, `scope.go`.
+- **DB.** `api_keys` (0022, 0029 expiry, 0035 scope); `users.api_key`
+  dropped (0025).
 - **Config.** `API_KEY_MAX_DAYS`.
 
 ## 3. MCP server, OAuth connector, plugin.zip
@@ -74,8 +85,13 @@ Config names are documented in `docs/configuration.md`; schema in
   in-process, carrying the caller's own identity. AI apps connect by OAuth:
   protected-resource metadata (RFC 9728), authorization-server metadata
   (RFC 8414), dynamic client registration (RFC 7591), PKCE authorize through
-  the company OIDC sign-in and one consent screen, one-hour access tokens and
-  30-day rotating refresh tokens accepted as `Authorization: Bearer`. An hourly
+  the company OIDC sign-in and one consent screen, access tokens
+  (`OAUTH_ACCESS_TTL`, 1h) and rotating refresh tokens whose lifetime
+  (`OAUTH_REFRESH_TTL`, 30 days) runs from the sign-in that connected the app,
+  not from the last rotation. The access token is accepted as
+  `Authorization: Bearer` only on `/mcp` and the in-process calls its tools
+  make (`ProtectMCP` marks the request context; `auth.Middleware` refuses an
+  unmarked Bearer with 401). An hourly
   sweep deletes expired codes and tokens. `/plugin.zip` is an installable
   plugin (Claude plugin and Agent Plugins manifests plus the skills) already
   pointing at `<base>/mcp`.
@@ -96,7 +112,8 @@ Config names are documented in `docs/configuration.md`; schema in
   `plugin_bundle.go`; `cmd/server/main.go` (mounts `/mcp`);
   `simple-host-plugin/embed.go`.
 - **DB.** `oauth_clients`, `oauth_grants`, `oauth_codes`, `oauth_tokens` (0031).
-- **Config.** `OAUTH_REDIRECT_HOSTS`, `PUBLIC_BASE_URL`.
+- **Config.** `OAUTH_REDIRECT_HOSTS`, `OAUTH_ACCESS_TTL`, `OAUTH_REFRESH_TTL`,
+  `PUBLIC_BASE_URL`.
 
 ## 4. Skills bundle and skill-version gate
 
@@ -336,19 +353,23 @@ Config names are documented in `docs/configuration.md`; schema in
 ## 13. Admin page
 
 - **What.** Server-rendered `/admin` for admins: users (disable/enable —
-  revokes sessions and keys), orphan teams, access requests, rankings of users
+  disabling revokes sessions, API keys and connected apps in the same
+  transaction as its audit row), orphan teams, access requests, rankings of users
   and sites (views, storage from a cached bucket measurement, updated), new
   users, state-backend usage, visitors and activity, all sites.
 - **Status.** Built.
 - **Routes.** `GET /admin`, `POST /api/admin/users/{username}/disable`,
-  `POST /api/admin/users/{username}/enable`; plus the admin routes in
-  sections 7, 9, 12.
+  `POST /api/admin/users/{username}/enable`,
+  `POST /api/admin/users/disable` (offboarding by `{"email"}`: every person
+  account with that address, idempotent, 404 when none; an admin's session
+  or an admin's `offboard` key); plus the admin routes in sections 7, 9, 12.
 - **MCP.** None.
 - **Pages.** `/admin`.
 - **Go.** `internal/handler/admin.go`, `admin_rankings.go`,
   `admin_disk_usage.go`, `access.go` (`renderAccessRequests`).
 - **DB.** `users.disabled_at` (0023), `site_daily_analytics` (0003, 0013).
-- **Config.** `ADMIN_EMAILS`, `OIDC_ADMIN_CLAIM`, `OIDC_ADMIN_VALUE`.
+- **Config.** `ADMIN_EMAILS`, `OIDC_ADMIN_CLAIM`, `OIDC_ADMIN_VALUE`. See
+  INSTALL.md "Sessions and leavers".
 
 ## 14. Dashboard
 
@@ -425,7 +446,9 @@ Config names are documented in `docs/configuration.md`; schema in
   `OIDC_ADMIN_CLAIM`/`OIDC_ADMIN_VALUE` set alone; bucket keys set alone;
   `BACKUP_SSE_KEY_ID` without `BACKUP_SSE=aws:kms` (or the reverse); malformed
   `SESSION_SIGNING_KEY`, `BACKUP_ENVELOPE_KEY` or `TRUSTED_PROXY_CIDRS`;
-  `API_KEY_MAX_DAYS` outside 1–365; clashing ports; `DB_APP_PASSWORD` equal to
+  `API_KEY_MAX_DAYS` outside 1–365; `SESSION_TTL` over 24h, `SESSION_IDLE`
+  over 8h or over `SESSION_TTL`, `OAUTH_ACCESS_TTL` over 24h or over
+  `OAUTH_REFRESH_TTL`, `OAUTH_REFRESH_TTL` over 90 days; clashing ports; `DB_APP_PASSWORD` equal to
   `DB_PASSWORD`; `DB_APP_USER` combined with `DB_DSN`; a schema newer than the
   binary unless every newer migration is marked backward-compatible.
   `simple-host migrate` applies the schema and sets the least-privilege

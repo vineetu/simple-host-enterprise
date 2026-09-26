@@ -21,7 +21,17 @@ type APIKey struct {
 	LastUsedAt *time.Time
 	RevokedAt  *time.Time
 	ExpiresAt  time.Time
+	// Scope is what the key may call (migration 0035): APIKeyScopePublish,
+	// APIKeyScopeFull or APIKeyScopeOffboard. internal/auth enforces it.
+	Scope string
 }
+
+// The scopes an API key can carry (api_keys_scope_check in 0035).
+const (
+	APIKeyScopePublish  = "publish"
+	APIKeyScopeFull     = "full"
+	APIKeyScopeOffboard = "offboard"
+)
 
 // HashAPIKey returns the SHA-256 of a plaintext key, the form stored in
 // key_hash and looked up on every X-API-Key request.
@@ -49,44 +59,44 @@ func KeyPrefix(hash []byte) string {
 // CreateAPIKey inserts a new key row. keyHash/prefix come from HashAPIKey /
 // KeyPrefix on the freshly generated plaintext, which the caller returns to
 // its client once and never persists.
-func CreateAPIKey(ctx context.Context, q Querier, userID, name string, keyHash []byte, prefix string, expiresAt time.Time) (APIKey, error) {
+func CreateAPIKey(ctx context.Context, q Querier, userID, name string, keyHash []byte, prefix string, expiresAt time.Time, scope string) (APIKey, error) {
 	const query = `
-		INSERT INTO api_keys (user_id, name, key_hash, prefix, expires_at)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, user_id, name, prefix, created_at, last_used_at, revoked_at, expires_at
+		INSERT INTO api_keys (user_id, name, key_hash, prefix, expires_at, scope)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, user_id, name, prefix, created_at, last_used_at, revoked_at, expires_at, scope
 	`
 	var k APIKey
-	err := q.QueryRowContext(ctx, query, userID, name, keyHash, prefix, expiresAt).Scan(
-		&k.ID, &k.UserID, &k.Name, &k.Prefix, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt, &k.ExpiresAt,
+	err := q.QueryRowContext(ctx, query, userID, name, keyHash, prefix, expiresAt, scope).Scan(
+		&k.ID, &k.UserID, &k.Name, &k.Prefix, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt, &k.ExpiresAt, &k.Scope,
 	)
 	return k, err
 }
 
 // GetUserByAPIKeyHash looks up the (unrevoked, unexpired) key by its hash and returns
-// the owning user. This is the X-API-Key hot path: one indexed lookup on
-// key_hash's unique constraint, one join to users.
-func GetUserByAPIKeyHash(ctx context.Context, db *sql.DB, keyHash []byte) (User, string, error) {
+// the owning user, the key's id and its scope. This is the X-API-Key hot
+// path: one indexed lookup on key_hash's unique constraint, one join to users.
+func GetUserByAPIKeyHash(ctx context.Context, db *sql.DB, keyHash []byte) (User, string, string, error) {
 	const query = `
 		SELECT u.id, u.username, u.is_admin, u.created_at, u.kind, COALESCE(u.email, ''), u.disabled_at,
-		       k.id
+		       k.id, k.scope
 		FROM api_keys k
 		JOIN users u ON u.id = k.user_id
 		WHERE k.key_hash = $1 AND k.revoked_at IS NULL AND k.expires_at > now()
 	`
 	var user User
 	var disabledAt *time.Time
-	var keyID string
+	var keyID, scope string
 	err := db.QueryRowContext(ctx, query, keyHash).Scan(
 		&user.ID, &user.Username, &user.IsAdmin, &user.CreatedAt, &user.Kind, &user.Email, &disabledAt,
-		&keyID,
+		&keyID, &scope,
 	)
 	if err != nil {
-		return User{}, "", err
+		return User{}, "", "", err
 	}
 	if disabledAt != nil {
-		return User{}, "", sql.ErrNoRows
+		return User{}, "", "", sql.ErrNoRows
 	}
-	return user, keyID, nil
+	return user, keyID, scope, nil
 }
 
 // touchAPIKeyInterval mirrors touchSessionInterval: last_used_at is display
@@ -110,7 +120,7 @@ func TouchAPIKey(ctx context.Context, db *sql.DB, keyID string) error {
 // can see what they turned off.
 func ListAPIKeysForUser(ctx context.Context, db *sql.DB, userID string) ([]APIKey, error) {
 	const query = `
-		SELECT id, user_id, name, prefix, created_at, last_used_at, revoked_at, expires_at
+		SELECT id, user_id, name, prefix, created_at, last_used_at, revoked_at, expires_at, scope
 		FROM api_keys
 		WHERE user_id = $1
 		ORDER BY created_at DESC
@@ -123,7 +133,7 @@ func ListAPIKeysForUser(ctx context.Context, db *sql.DB, userID string) ([]APIKe
 	var out []APIKey
 	for rows.Next() {
 		var k APIKey
-		if err := rows.Scan(&k.ID, &k.UserID, &k.Name, &k.Prefix, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt, &k.ExpiresAt); err != nil {
+		if err := rows.Scan(&k.ID, &k.UserID, &k.Name, &k.Prefix, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt, &k.ExpiresAt, &k.Scope); err != nil {
 			return nil, err
 		}
 		out = append(out, k)

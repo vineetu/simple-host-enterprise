@@ -76,6 +76,13 @@ func resultsTestDB(t *testing.T) *sql.DB {
 // real host gate, the way cmd/server/main.go does.
 func realServer(t *testing.T, database *sql.DB) *Server {
 	t.Helper()
+	s, _, _ := realApp(t, database)
+	return s
+}
+
+// realApp is realServer plus the router and the auth middleware it uses.
+func realApp(t *testing.T, database *sql.DB) (*Server, *http.ServeMux, func(http.Handler) http.Handler) {
+	t.Helper()
 	const base = "https://hosting.corp.test"
 	disk, err := storage.New(storage.Options{
 		Objects:       storage.NewMemoryObjects(),
@@ -113,7 +120,7 @@ func realServer(t *testing.T, database *sql.DB) *Server {
 	handoff := handler.NewHandoffHandler(database, keys, hosts, recorder, limits)
 	negCache := auth.NewNegativeSessionCache(database, time.Hour)
 	gate := handler.NewHostGate(hosts, files, database, keys, negCache, handoff, siteAPI, authMW, base)
-	return NewServer(mux, "simple-host", version).WithSiteAPI(gate(mux), hosts.SiteHostResolver(database))
+	return NewServer(mux, "simple-host", version).WithSiteAPI(gate(mux), hosts.SiteHostResolver(database)), mux, authMW
 }
 
 func createPerson(t *testing.T, database *sql.DB, username string) string {
@@ -124,7 +131,7 @@ func createPerson(t *testing.T, database *sql.DB, username string) string {
 		t.Fatalf("create %s: %v", username, err)
 	}
 	key := "key-" + username + "-" + strings.Repeat("0", 40)
-	if _, err := db.CreateAPIKey(ctx, database, user.ID, "test", db.HashAPIKey(key), key[:8], time.Now().Add(24*time.Hour)); err != nil {
+	if _, err := db.CreateAPIKey(ctx, database, user.ID, "test", db.HashAPIKey(key), key[:8], time.Now().Add(24*time.Hour), db.APIKeyScopeFull); err != nil {
 		t.Fatalf("create key for %s: %v", username, err)
 	}
 	return key

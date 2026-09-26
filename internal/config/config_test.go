@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestValidatePublicBaseURL(t *testing.T) {
@@ -289,6 +290,49 @@ func TestLoadParsesSessionLifetimeOverrides(t *testing.T) {
 	}
 	if cfg.Session.TTL.String() != "2h0m0s" || cfg.Session.Idle.String() != "15m0s" {
 		t.Fatalf("Session = %+v", cfg.Session)
+	}
+}
+
+func TestLoadRefusesOutOfRangeLifetimes(t *testing.T) {
+	for _, c := range []struct{ name, key, value, extraKey, extraValue string }{
+		{"session over a day", "SESSION_TTL", "25h", "", ""},
+		{"idle over 8h", "SESSION_IDLE", "9h", "SESSION_TTL", "24h"},
+		{"idle longer than ttl", "SESSION_IDLE", "3h", "SESSION_TTL", "2h"},
+		{"access token over a day", "OAUTH_ACCESS_TTL", "25h", "", ""},
+		{"refresh over 90 days", "OAUTH_REFRESH_TTL", "2161h", "", ""},
+		{"access longer than refresh", "OAUTH_ACCESS_TTL", "2h", "OAUTH_REFRESH_TTL", "1h"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			completeEnv(t)
+			t.Setenv(c.key, c.value)
+			if c.extraKey != "" {
+				t.Setenv(c.extraKey, c.extraValue)
+			}
+			if _, err := Load(); err == nil || !strings.Contains(err.Error(), c.key) {
+				t.Fatalf("Load() error = %v, want a refusal naming %s", err, c.key)
+			}
+		})
+	}
+}
+
+func TestLoadLifetimeDefaultsAndCaps(t *testing.T) {
+	completeEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Session.TTL != 8*time.Hour || cfg.Session.Idle != 30*time.Minute {
+		t.Errorf("session defaults = %s / %s, want 8h / 30m", cfg.Session.TTL, cfg.Session.Idle)
+	}
+	if cfg.OAuthAccessTTL != time.Hour || cfg.OAuthRefreshTTL != 720*time.Hour {
+		t.Errorf("oauth defaults = %s / %s, want 1h / 720h", cfg.OAuthAccessTTL, cfg.OAuthRefreshTTL)
+	}
+	t.Setenv("SESSION_TTL", "24h")
+	t.Setenv("SESSION_IDLE", "8h")
+	t.Setenv("OAUTH_ACCESS_TTL", "24h")
+	t.Setenv("OAUTH_REFRESH_TTL", "2160h")
+	if _, err := Load(); err != nil {
+		t.Fatalf("the caps themselves are refused: %v", err)
 	}
 }
 

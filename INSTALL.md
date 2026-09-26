@@ -232,6 +232,27 @@ lines (kustomize reads them as env files).
 Never set `DB_INSECURE_ALLOWED`, `BACKUP_STORAGE_INSECURE_ALLOWED` or
 `OIDC_INSECURE_ALLOWED` on a real install.
 
+### Sessions and leavers
+
+Simple Host asks the IdP about a person only when they sign in. Set
+`SESSION_TTL` and `SESSION_IDLE` (defaults `8h` and `30m`) to match the
+IdP's own session policy: they are how long someone disabled at the IdP can
+keep working here. `OAUTH_REFRESH_TTL` (default 30 days) does the same for an
+AI app connected to `/mcp`. All of them are in `docs/configuration.md`.
+
+Offboarding is two steps: disable the person in the IdP, **and** disable
+them in Simple Host, which ends their sessions, API keys and connected apps
+at once. Either press Disable on the `/admin` page, or let HR automation do
+it with an offboard key (an admin mints one on `/dashboard`, scope
+"Offboard"; it can call this one route and nothing else):
+
+```sh
+curl -fsS -X POST "$SIMPLE_HOST_URL/api/admin/users/disable" -H "X-API-Key: $SIMPLE_HOST_OFFBOARD_KEY" -H 'Content-Type: application/json' -d "{\"email\": \"$LEAVER_EMAIL\"}"
+```
+
+It answers 200 (`disabled`, or `already disabled` on a repeat), 404 for an
+address no account has, and is recorded in the audit log against the key.
+
 Pods do not restart when `config.env` or `secrets.env` change. After any
 later edit, re-apply and run
 `kubectl --context "$CTX" -n simple-host rollout restart deploy/simple-host`.

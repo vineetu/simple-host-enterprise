@@ -150,6 +150,16 @@ func (h *AdminHandler) Register(mux *http.ServeMux, authMiddleware, skillVersion
 		)
 	}
 	mux.Handle("POST /api/admin/users/{username}/disable", dashboardCheck(adminAPI(http.HandlerFunc(h.disableUser))))
+	// Offboarding by email, for HR automation as much as for an admin: an
+	// admin's browser session (Origin-checked like every admin POST) or an
+	// admin's offboard-scoped API key, which auth.Middleware lets reach this
+	// route and nothing else. JSON in and out, so no page redirect.
+	offboard := func(next http.Handler) http.Handler {
+		return originCheckMiddleware(h.hosts, h.publicBaseURL)(h.limitAdminClient(
+			authMiddleware(requireSessionOrOffboardKey(h.requireAdmin(h.limitAdminIdentity(next)))),
+		))
+	}
+	mux.Handle("POST /api/admin/users/disable", offboard(http.HandlerFunc(h.disableUserByEmail)))
 	mux.Handle("POST /api/admin/users/{username}/enable", dashboardCheck(adminAPI(http.HandlerFunc(h.enableUser))))
 	mux.Handle("POST /api/admin/teams/{team}/delete", dashboardCheck(adminAPI(http.HandlerFunc(h.deleteOrphanTeam))))
 	mux.Handle("GET /api/admin/export", adminAPI(http.HandlerFunc(h.exportAuditOrAccess)))
@@ -631,7 +641,21 @@ func (h *AdminHandler) setUserDisabled(w http.ResponseWriter, r *http.Request, d
 		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	if err := db.SetUserDisabled(r.Context(), h.database, target.ID, disabled); err != nil {
+	tx, err := h.database.BeginTx(r.Context(), nil)
+	if err != nil {
+		log.Printf("admin: %s %q: begin: %v", action, username, err)
+		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	defer tx.Rollback()
+	err = db.SetUserDisabledTx(r.Context(), tx, target.ID, disabled)
+	if err == nil {
+		err = h.audit.RecordTx(r.Context(), tx, h.userAuditEvent(r, action, target.ID, username, nil))
+	}
+	if err == nil {
+		err = tx.Commit()
+	}
+	if err != nil {
 		if errors.Is(err, db.ErrLastAdmin) {
 			h.respondAdmin(w, r, http.StatusConflict, "cannot disable the last enabled admin")
 			return
@@ -644,22 +668,111 @@ func (h *AdminHandler) setUserDisabled(w http.ResponseWriter, r *http.Request, d
 		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	actor := auth.GetUser(r.Context())
-	actorID := ""
-	if actor != nil {
-		actorID = actor.ID
-	}
-	actorKind, keyID := auditActorKind(r.Context())
-	h.audit.Record(r.Context(), audit.Event{
-		ActorID: actorID, ActorKind: actorKind, KeyID: keyID,
-		Action: action, SubjectID: target.ID, Detail: username,
-		RequestID: auditRequestID(r.Context()),
-	})
 	verb := "disabled"
 	if !disabled {
 		verb = "enabled"
 	}
 	h.respondAdmin(w, r, http.StatusOK, "user "+verb)
+}
+
+// userAuditEvent is the audit row of an admin acting on a person: the
+// actor, and the API key when the admin used one (an offboard key).
+func (h *AdminHandler) userAuditEvent(r *http.Request, action, subjectID, username string, extra map[string]any) audit.Event {
+	actorID := ""
+	if actor := auth.GetUser(r.Context()); actor != nil {
+		actorID = actor.ID
+	}
+	actorKind, keyID := auditActorKind(r.Context())
+	return audit.Event{
+		ActorID: actorID, ActorKind: actorKind, KeyID: keyID,
+		Action: action, SubjectID: subjectID, Detail: username, Extra: extra,
+		RequestID: auditRequestID(r.Context()),
+	}
+}
+
+// requireSessionOrOffboardKey admits a browser session or an offboard-scoped
+// API key. auth.Middleware already keeps every other key scope off the one
+// route this guards; saying so again here keeps the route safe even if the
+// scope table were edited carelessly.
+func requireSessionOrOffboardKey(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if auth.SessionID(r.Context()) == "" && auth.APIKeyScope(r.Context()) != db.APIKeyScopeOffboard {
+			writeJSON(w, http.StatusForbidden, errorResponse{Error: "this operation requires a browser session or an offboard API key"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+type disableByEmailRequest struct {
+	Email string `json:"email"`
+}
+
+// disableUserByEmail is offboarding by address: POST
+// /api/admin/users/disable {"email": "..."}. Every person account carrying
+// the address is disabled exactly as the per-username route does it
+// (db.SetUserDisabledTx: sessions, API keys and connected apps revoked with
+// the flag), each with its audit row, all in one transaction. Idempotent: an
+// address whose accounts are all already disabled answers 200 saying so.
+func (h *AdminHandler) disableUserByEmail(w http.ResponseWriter, r *http.Request) {
+	var req disableByEmailRequest
+	if !decodeSmallJSON(w, r, &req) {
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	if email == "" || !strings.Contains(email, "@") {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: `a JSON body {"email": "..."} is required`})
+		return
+	}
+	tx, err := h.database.BeginTx(r.Context(), nil)
+	if err != nil {
+		log.Printf("admin: offboard: begin: %v", err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	defer tx.Rollback()
+	people, err := db.PeopleByEmail(r.Context(), tx, email)
+	if err != nil {
+		log.Printf("admin: offboard: look up email: %v", err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	if len(people) == 0 {
+		writeJSON(w, http.StatusNotFound, errorResponse{Error: "no account has that email"})
+		return
+	}
+	usernames := make([]string, 0, len(people))
+	changed := 0
+	for _, p := range people {
+		usernames = append(usernames, p.Username)
+		if p.Disabled {
+			continue
+		}
+		err := db.SetUserDisabledTx(r.Context(), tx, p.ID, true)
+		if err == nil {
+			err = h.audit.RecordTx(r.Context(), tx, h.userAuditEvent(r, "admin_disable_user", p.ID, p.Username, map[string]any{"by": "email"}))
+		}
+		if errors.Is(err, db.ErrLastAdmin) {
+			writeJSON(w, http.StatusConflict, errorResponse{Error: "cannot disable the last enabled admin"})
+			return
+		}
+		if err != nil {
+			log.Printf("admin: offboard %q: %v", p.Username, err)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+			return
+		}
+		changed++
+	}
+	if err := tx.Commit(); err != nil {
+		log.Printf("admin: offboard: commit: %v", err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	status := "disabled"
+	if changed == 0 {
+		status = "already disabled"
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": status, "usernames": usernames})
 }
 
 // deleteOrphanTeam deletes a team whose members are all disabled, with its

@@ -76,9 +76,20 @@ shell.
 | Variable | Required | Default | Refusal it triggers when set wrong |
 |---|---|---|---|
 | `SESSION_SIGNING_KEY` | Yes | none | One or two comma-separated `<id>:<base64 32-byte key>` entries. More than two, a duplicate id, a non-base64 value, or a decoded length other than 32 bytes is refused. The `__Host-` session cookie has no insecure fallback, so this is required even on a rehearsal install. Rotation: add the new key second, deploy, swap the order so it signs, deploy, remove the old key after `SESSION_TTL` has fully elapsed. |
-| `SESSION_TTL` | No | `12h` | Must parse as a positive Go duration. |
-| `SESSION_IDLE` | No | `1h` | Must parse as a positive Go duration. |
-| `API_KEY_MAX_DAYS` | No | `365` | The longest lifetime an API key may be minted with; must be 1 to 365. API keys are for CI and other automation (people and their agents sign in through OIDC): a new key lives 90 days unless the mint request names `expires_in_days` (or the maximum, if it is below 90), an expired key is refused like a revoked one, and every new key starts with `shk_` so secret scanners can find it. |
+| `SESSION_TTL` | No | `8h` | How long a sign-in lasts, however active. At most `24h`; a positive Go duration. Refused at startup when out of range, so a typo cannot make sessions effectively permanent. Default: a working day, which is also where common IdPs set their own session default. Owner-host and restricted-site hand-off sessions share the sign-in's row and expiry, so none outlives it. |
+| `SESSION_IDLE` | No | `30m` | How long a sign-in survives unused. At most `8h` and never longer than `SESSION_TTL`; refused at startup otherwise. Default: ends an unattended browser's session well inside the working day. |
+| `OAUTH_ACCESS_TTL` | No | `1h` | Lifetime of an access token an AI app holds for `/mcp` (the OAuth connector). At most `24h`, never longer than `OAUTH_REFRESH_TTL`. Short, because a copy of the token held elsewhere stays usable until it expires even after the app is revoked. |
+| `OAUTH_REFRESH_TTL` | No | `720h` (30 days) | How long an AI app stays connected before the person must sign in at the IdP again. At most `2160h` (90 days). Measured from the sign-in that connected the app, not from the last refresh: rotating the refresh token never extends it. Go durations have no day unit; write days as hours. |
+| `API_KEY_MAX_DAYS` | No | `365` | The longest lifetime an API key may be minted with; must be 1 to 365. API keys are for CI and other automation (people and their agents sign in through OIDC): a new key lives 90 days unless the mint request names `expires_in_days` (or the maximum, if it is below 90), an expired key is refused like a revoked one, and every new key starts with `shk_` so secret scanners can find it. Each key carries a scope chosen when it is minted: `publish` (the default: deploy, update, roll back and list sites, their versions, archives, saved data and assets, `/api/me` and `/mcp`), `full` (everything the person can do through the REST API except administration), or `offboard` (admins only: `POST /api/admin/users/disable` and nothing else). |
+
+**Matching your IdP.** Set `SESSION_TTL` and `SESSION_IDLE` to match your
+IdP's session policy. Simple Host re-checks the IdP only at sign-in, so these
+are how long a leaver can keep working after being disabled at the IdP: a
+browser session for up to `SESSION_TTL` (less if idle), a connected AI app for
+up to `OAUTH_REFRESH_TTL` (each access token lasting `OAUTH_ACCESS_TTL`), and
+an API key until it expires. Disabling the person in Simple Host as well (the
+`/admin` page, or an offboard key; see INSTALL.md, "Sessions and leavers")
+ends all three at once.
 
 ## Database
 

@@ -210,7 +210,7 @@ func run() (runErr error) {
 	handoffHandler.Register(mux, authMW)
 	handler.RegisterUIRoutes(mux, cfg.PublicBaseURL)
 	handler.RegisterPluginRoute(mux, cfg.PublicBaseURL)
-	connector := handler.NewConnectorHandler(database, cfg.PublicBaseURL, cfg.OAuthRedirectHosts, signingKeys, cfg.Session.Idle, auditRecorder, hosts, abuseLimits)
+	connector := handler.NewConnectorHandler(database, cfg.PublicBaseURL, cfg.OAuthRedirectHosts, signingKeys, cfg.Session.Idle, auditRecorder, hosts, abuseLimits).WithTokenTTLs(cfg.OAuthAccessTTL, cfg.OAuthRefreshTTL)
 	connector.Register(mux, authMW)
 	siteFiles := handler.NewSiteFiles(siteStore, database, cookiePolicy, signingKeys, cfg.Session.Idle).WithAccessWriter(accessWriter)
 	siteAPIHandler := handler.NewSiteAPIHandler(database, siteStore, storage.AssetLimits{

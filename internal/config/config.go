@@ -55,8 +55,28 @@ const (
 
 	defaultOIDCScopes     = "openid email profile"
 	defaultOIDCEmailClaim = "email"
-	defaultSessionTTL     = 12 * time.Hour
-	defaultSessionIdle    = 1 * time.Hour
+	// Session lifetimes. Simple Host checks the identity provider only at
+	// sign-in, so these bound how long someone disabled at the IdP can keep
+	// working here. The absolute default is a working day, 8 hours, which
+	// is also where common IdPs set their own session default; the idle
+	// default of 30 minutes ends an unattended browser's session well
+	// before that. The caps stop a typo (24000h, 8d) from making a session
+	// effectively permanent.
+	defaultSessionTTL  = 8 * time.Hour
+	defaultSessionIdle = 30 * time.Minute
+	maxSessionTTL      = 24 * time.Hour
+	maxSessionIdle     = 8 * time.Hour
+
+	// OAuth connector tokens (an AI app connected to /mcp). The access
+	// token is short, so revoking the app or disabling the person takes
+	// effect within the hour even for a copy held elsewhere; the refresh
+	// token's lifetime runs from the grant's sign-in, not from its last
+	// rotation, so the person signs in at the IdP again at least this
+	// often (handler/connector.go).
+	defaultOAuthAccessTTL  = time.Hour
+	maxOAuthAccessTTL      = 24 * time.Hour
+	defaultOAuthRefreshTTL = 30 * 24 * time.Hour
+	maxOAuthRefreshTTL     = 90 * 24 * time.Hour
 
 	// Asset upload limits: a per-file size cap, a per-site
 	// total-bytes cap, and a per-site count cap. All three are overridable —
@@ -121,6 +141,11 @@ type Config struct {
 	// own machine, "scheme://host" for an app's own URL scheme, or "*" for
 	// any https host.
 	OAuthRedirectHosts []string
+	// OAuthAccessTTL and OAuthRefreshTTL are OAUTH_ACCESS_TTL and
+	// OAUTH_REFRESH_TTL: an AI app's access token lifetime, and how long a
+	// connection lasts from sign-in before the person must sign in again.
+	OAuthAccessTTL  time.Duration
+	OAuthRefreshTTL time.Duration
 }
 
 // defaultOAuthRedirectHosts covers the AI apps a company is most likely to
@@ -372,6 +397,32 @@ func Load() (Config, error) {
 	sessionIdle, err := durationEnv("SESSION_IDLE", defaultSessionIdle)
 	if err != nil {
 		return Config{}, err
+	}
+	if sessionTTL > maxSessionTTL {
+		return Config{}, fmt.Errorf("SESSION_TTL must be at most %s, got %s", maxSessionTTL, sessionTTL)
+	}
+	if sessionIdle > maxSessionIdle {
+		return Config{}, fmt.Errorf("SESSION_IDLE must be at most %s, got %s", maxSessionIdle, sessionIdle)
+	}
+	if sessionIdle > sessionTTL {
+		return Config{}, fmt.Errorf("SESSION_IDLE (%s) must not be longer than SESSION_TTL (%s)", sessionIdle, sessionTTL)
+	}
+	cfg.OAuthAccessTTL, err = durationEnv("OAUTH_ACCESS_TTL", defaultOAuthAccessTTL)
+	if err != nil {
+		return Config{}, err
+	}
+	if cfg.OAuthAccessTTL > maxOAuthAccessTTL {
+		return Config{}, fmt.Errorf("OAUTH_ACCESS_TTL must be at most %s, got %s", maxOAuthAccessTTL, cfg.OAuthAccessTTL)
+	}
+	cfg.OAuthRefreshTTL, err = durationEnv("OAUTH_REFRESH_TTL", defaultOAuthRefreshTTL)
+	if err != nil {
+		return Config{}, err
+	}
+	if cfg.OAuthRefreshTTL > maxOAuthRefreshTTL {
+		return Config{}, fmt.Errorf("OAUTH_REFRESH_TTL must be at most %s (90 days), got %s", maxOAuthRefreshTTL, cfg.OAuthRefreshTTL)
+	}
+	if cfg.OAuthAccessTTL > cfg.OAuthRefreshTTL {
+		return Config{}, fmt.Errorf("OAUTH_ACCESS_TTL (%s) must not be longer than OAUTH_REFRESH_TTL (%s)", cfg.OAuthAccessTTL, cfg.OAuthRefreshTTL)
 	}
 	cfg.Session = SessionConfig{
 		SigningKeys: toSigningKeys(signingKeys),

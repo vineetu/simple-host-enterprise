@@ -23,6 +23,7 @@ const (
 	sessionIDContextKey
 	apiKeyIDContextKey
 	sessionHostContextKey
+	apiKeyScopeContextKey
 )
 
 type errorResponse struct {
@@ -51,6 +52,12 @@ func GenerateAPIKey() (string, error) {
 // never be silently authenticated as whoever's browser session happens to be
 // riding along.
 //
+// An API key is then held to its scope (scope.go): the route the mux matched
+// must be one the key's scope allows, or the request is refused with 403
+// naming the scope. An OAuth access token is accepted only on a request that
+// came in through /mcp (WithMCPCaller); anywhere else it is refused before
+// it is even looked up.
+//
 // There is no more synthetic admin principal and no ADMIN_API_KEY: every
 // principal this middleware produces is a real *db.User row, and admin
 // status is whatever users.is_admin says.
@@ -59,7 +66,7 @@ func Middleware(database *sql.DB, signingKeys []SigningKey, sessionIdle time.Dur
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			apiKey := r.Header.Get("X-API-Key")
 			if apiKey != "" {
-				user, keyID, err := db.GetUserByAPIKeyHash(r.Context(), database, db.HashAPIKey(apiKey))
+				user, keyID, scope, err := db.GetUserByAPIKeyHash(r.Context(), database, db.HashAPIKey(apiKey))
 				if err != nil {
 					if errors.Is(err, sql.ErrNoRows) {
 						writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
@@ -70,8 +77,16 @@ func Middleware(database *sql.DB, signingKeys []SigningKey, sessionIdle time.Dur
 				}
 				touchAPIKey(r.Context(), database, keyID)
 				reqlog.SetUser(r.Context(), user.ID)
+				if !KeyScopeAllows(scope, requestPattern(r)) {
+					writeJSON(w, http.StatusForbidden, map[string]string{
+						"error": "this API key's scope (" + scope + ") does not allow this request; a person can mint a key with the scope it needs on the dashboard",
+						"scope": scope,
+					})
+					return
+				}
 				ctx := context.WithValue(r.Context(), userContextKey, &user)
 				ctx = context.WithValue(ctx, apiKeyIDContextKey, keyID)
+				ctx = context.WithValue(ctx, apiKeyScopeContextKey, scope)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -80,6 +95,15 @@ func Middleware(database *sql.DB, signingKeys []SigningKey, sessionIdle time.Dur
 			// behalf. Checked before the cookie, and never falls through to
 			// it: a bad token is a bad token even with a browser session.
 			if token, ok := BearerToken(r); ok {
+				// The token was issued for the /mcp resource (its audience),
+				// so on any other request it is not a valid token: 401 with
+				// the same body a bad token gets, and no lookup, so a stolen
+				// token cannot even be tested against the REST routes. The
+				// MCP server's own calls into those routes carry the mark.
+				if !viaMCP(r.Context()) {
+					writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
+					return
+				}
 				user, _, err := db.GetUserByOAuthAccessToken(r.Context(), database, db.HashAPIKey(token))
 				if err != nil {
 					if errors.Is(err, sql.ErrNoRows) {
@@ -226,6 +250,13 @@ func SessionID(ctx context.Context) string {
 func APIKeyID(ctx context.Context) string {
 	id, _ := ctx.Value(apiKeyIDContextKey).(string)
 	return id
+}
+
+// APIKeyScope returns the scope of the API key this request authenticated
+// with, or "" for a session or an OAuth token.
+func APIKeyScope(ctx context.Context) string {
+	scope, _ := ctx.Value(apiKeyScopeContextKey).(string)
+	return scope
 }
 
 // ContextWithTestAuth attaches exactly what Middleware would have (a user,

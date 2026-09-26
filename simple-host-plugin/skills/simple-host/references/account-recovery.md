@@ -40,7 +40,7 @@ more — do not explain the failure in detail, do not paste diagnostics, and do
 not send the user elsewhere:
 
 > Simple Host needs a sign-in. Open this page, sign in with your work account,
-> then open **API keys** and create one — about a minute: `{{BASE_URL}}/auth/login`
+> then open **API keys** and create one with scope **Full** — about a minute: `{{BASE_URL}}/auth/login`
 
 Point the user at their platform team only if they tell you the sign-in page
 itself would not let them in (their account is disabled, their email domain
@@ -103,6 +103,26 @@ not a person. If a key's owner needs to act on a team's sites, they do it
 through `/api/collaboration/sites/<team>/<sitename>` as a member, using their
 own personal key. If they are not a member, an existing member has to add
 them. There is nothing to sign in as "the team."
+
+## Key scopes
+
+Every key has a scope, chosen when it is created:
+
+- **Publish** (the default): deploy, update, roll back and list sites, their
+  versions and archives, saved data and uploaded files, `GET /api/me`, and
+  MCP. Enough for a CI job that publishes a site, and nothing more: it cannot
+  delete a site, change who can open it, manage viewers or teams, or read the
+  audit log.
+- **Full**: everything the person can do, except administration. What you
+  need to work on their behalf with this skill.
+- **Offboard**: only for an admin's HR automation; it can disable a leaver
+  and nothing else. Never ask for one.
+
+A `403` whose JSON body has a `scope` field means the key's scope does not
+allow that call. It is not revoked and not a permission problem on the
+site: tell the user the key is a publish key and ask them to create a Full
+one and paste it back, exactly as in "Get a key" above. Do not retry the
+call with the same key.
 
 ## Revoked, lost, or extra keys
 

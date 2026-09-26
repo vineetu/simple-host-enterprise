@@ -38,6 +38,9 @@ type OAuthToken struct {
 	UserID    string
 	ClientID  string
 	Resource  string
+	// GrantCreatedAt is when the person allowed the app: the start of the
+	// connection, which the refresh lifetime is measured from.
+	GrantCreatedAt time.Time
 }
 
 // ErrOAuthCodeUsed is returned by ConsumeOAuthCode for a code already
@@ -116,12 +119,15 @@ func SetOAuthCodeGrant(ctx context.Context, tx *sql.Tx, codeHash []byte, grantID
 	return err
 }
 
-func InsertOAuthGrant(ctx context.Context, tx *sql.Tx, userID, clientID, resource string) (string, error) {
+// InsertOAuthGrant records a new connection and returns its id and
+// created_at, the start its refresh lifetime is measured from.
+func InsertOAuthGrant(ctx context.Context, tx *sql.Tx, userID, clientID, resource string) (string, time.Time, error) {
 	var id string
+	var createdAt time.Time
 	err := tx.QueryRowContext(ctx, `
-		INSERT INTO oauth_grants (user_id, client_id, resource) VALUES ($1, $2, $3) RETURNING id`,
-		userID, clientID, resource).Scan(&id)
-	return id, err
+		INSERT INTO oauth_grants (user_id, client_id, resource) VALUES ($1, $2, $3) RETURNING id, created_at`,
+		userID, clientID, resource).Scan(&id, &createdAt)
+	return id, createdAt, err
 }
 
 func TouchOAuthGrant(ctx context.Context, q Querier, grantID string) error {
@@ -153,7 +159,7 @@ func InsertOAuthToken(ctx context.Context, tx *sql.Tx, tokenHash []byte, grantID
 // transaction that goes on to rotate it.
 func GetOAuthToken(ctx context.Context, q Querier, tokenHash []byte, forUpdate bool) (OAuthToken, error) {
 	query := `
-		SELECT t.grant_id, t.kind, t.expires_at, t.used_at, g.user_id, g.client_id, g.resource
+		SELECT t.grant_id, t.kind, t.expires_at, t.used_at, g.user_id, g.client_id, g.resource, g.created_at
 		FROM oauth_tokens t JOIN oauth_grants g ON g.id = t.grant_id
 		WHERE t.token_hash = $1`
 	if forUpdate {
@@ -161,7 +167,7 @@ func GetOAuthToken(ctx context.Context, q Querier, tokenHash []byte, forUpdate b
 	}
 	var t OAuthToken
 	err := q.QueryRowContext(ctx, query, tokenHash).
-		Scan(&t.GrantID, &t.Kind, &t.ExpiresAt, &t.UsedAt, &t.UserID, &t.ClientID, &t.Resource)
+		Scan(&t.GrantID, &t.Kind, &t.ExpiresAt, &t.UsedAt, &t.UserID, &t.ClientID, &t.Resource, &t.GrantCreatedAt)
 	return t, err
 }
 
