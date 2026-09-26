@@ -134,6 +134,56 @@ None of the shipped overlays (`local`, `byo`) set these; they are left at
 their code defaults unless an installation has a reason to raise or lower
 them.
 
+## Upload limits: quotas and malware scan
+
+Read by `config.Load()` (`internal/config/uploads.go`). An **owner** is a
+namespace: a person's own, or a team's (a team is a `users` row of kind
+`team`), so every team has its own quota, separate from its members'.
+
+| Variable | Required | Default | Refusal it triggers when set wrong |
+|---|---|---|---|
+| `QUOTA_MAX_SITES` | No | `1000` | Must be `0` or a positive integer; `0` is unlimited. The most sites one owner may have. A person is expected to accumulate hundreds, so the default sits well above that. |
+| `QUOTA_MAX_BYTES` | No | `10737418240` (10 GiB) | Must be `0` or a positive integer; `0` is unlimited. The most stored bytes one owner may hold: the compressed archive of every retained version of every site, plus every live uploaded asset. |
+| `QUOTA_MAX_VERSIONS` | No | `5` | Must be 1 to 100. Versions kept per site; five is what every release before this setting kept. |
+| `CLAMD_ADDR` | No | none (no scan) | Must be `host:port` with a port of 1 to 65535. When set, every file of a deploy and every uploaded asset is scanned by clamd before anything is stored. |
+| `CLAMD_TIMEOUT` | No | `30s` | Must parse as a positive Go duration. Bounds the scan of one file: connect, send and reply. |
+
+**Quotas.** Every deploy (create or update, on the owner-inferred routes, the
+owner-qualified collaboration routes and therefore the MCP `deploy_site`
+tool) and every asset upload is checked in the same transaction that records
+it, under a per-owner lock, so parallel deploys on any number of replicas
+cannot both slip under a limit. A new site over `QUOTA_MAX_SITES` is refused
+with `409` (`code: "site_limit"`, "too many sites (N of N)"); an upload that
+would take the owner over `QUOTA_MAX_BYTES` with `413`
+(`code: "storage_quota"`, "storage quota exceeded (used X of Y)"). Nothing is
+stored either way. A deploy that frees at least as much as it adds (a
+replacement no bigger than the version it retires) is always accepted, so an
+owner who is over after a limit was lowered can still update. After a
+deploy, versions beyond `QUOTA_MAX_VERSIONS` are removed oldest first, never
+the live one, and their objects go to the retire sweep; they stop counting
+at once. `GET /api/me` and the dashboard show each namespace's usage. A
+version recorded before this release (or by `restore` / `migrate-storage`)
+counts as zero until the server reads its size from the bucket, which it does
+in the background within minutes of starting. The per-site asset limits
+above still apply on their own.
+
+**Malware scan.** With `CLAMD_ADDR` set, the server streams each file to
+clamd with `INSTREAM`. An infected file refuses the whole upload with `422`
+(`code: "malware_found"`, naming the file and the signature), stores nothing,
+and records an `upload_infected` audit event. The scan **fails closed**: if
+clamd is unreachable, times out or answers with an error, the upload is
+refused with `503` (`code: "scanner_unavailable"`) — a configured scanner
+that is down never lets uploads through unscanned. Run clamd as a sidecar in
+the server's pod (`CLAMD_ADDR=127.0.0.1:3310`) or as a Service in the
+cluster (`CLAMD_ADDR=clamd.<namespace>.svc:3310`), with `TCPSocket 3310` in
+`clamd.conf`. Set clamd's `StreamMaxLength` at least as large as the largest
+file the server accepts — a single file in a deploy can be up to 500 MiB
+uncompressed, an asset up to `ASSET_MAX_FILE_BYTES` — or larger files are
+refused with `503`; raise `MaxFileSize` and `MaxScanSize` to match, since
+clamd reports content beyond those limits as clean without scanning it.
+Files are scanned one connection each, so a deploy of many files takes a
+little longer with the scan on.
+
 ## Retention and visibility (audit sink)
 
 Loaded by `config.LoadAuditRetention()`, the same narrow-loader shape
@@ -241,8 +291,9 @@ equivalent here; do not set them.
 - `deploy/overlays/staging`, `deploy/overlays/production` — reuse `byo`'s
   `.example` files by convention; they have none of their own yet.
 
-Neither overlay sets the Assets or Retention variables above; both are
-left at their code defaults unless an installation overrides them.
+Neither overlay sets the Assets, Upload limits or Retention variables
+above; they are left at their code defaults unless an installation
+overrides them.
 
 Editing `config.env` or `secrets.env` and re-applying does not restart the
 pods (the generated ConfigMap and Secret keep fixed names). Run

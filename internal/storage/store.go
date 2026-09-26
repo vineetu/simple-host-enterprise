@@ -80,25 +80,33 @@ func (s *Store) Objects() Objects { return s.objects }
 // Ping proves the bucket is reachable, for readiness.
 func (s *Store) Ping(ctx context.Context) error { return s.objects.Ping(ctx) }
 
-// PutVersion uploads a deploy's files as version's archive and returns the
-// total file bytes. Call it before committing the transaction that records
-// the version, so a committed version always has its object. Uploading the
-// same (site, version) again replaces an object no committed row refers to:
-// version numbers are allocated under the site's advisory lock, so a number
-// is only reused after the transaction that first took it rolled back.
-func (s *Store) PutVersion(ctx context.Context, siteID string, version int, files map[string][]byte) (int64, error) {
+// PutVersionResult is what PutVersion stored: the total bytes of the files,
+// and the size of the compressed archive that holds them, which is what the
+// owner's storage quota counts (versions.size_bytes).
+type PutVersionResult struct {
+	FileBytes   int64
+	StoredBytes int64
+}
+
+// PutVersion uploads a deploy's files as version's archive. Call it before
+// committing the transaction that records the version, so a committed
+// version always has its object. Uploading the same (site, version) again
+// replaces an object no committed row refers to: version numbers are
+// allocated under the site's advisory lock, so a number is only reused after
+// the transaction that first took it rolled back.
+func (s *Store) PutVersion(ctx context.Context, siteID string, version int, files map[string][]byte) (PutVersionResult, error) {
 	key, err := VersionKey(siteID, version)
 	if err != nil {
-		return 0, err
+		return PutVersionResult{}, err
 	}
 	archive, totals, err := buildVersionArchive(files)
 	if err != nil {
-		return 0, err
+		return PutVersionResult{}, err
 	}
 	if err := s.objects.Put(ctx, key, archive, "application/gzip"); err != nil {
-		return 0, err
+		return PutVersionResult{}, err
 	}
-	return totals.bytes, nil
+	return PutVersionResult{FileBytes: totals.bytes, StoredBytes: int64(len(archive))}, nil
 }
 
 // DeleteVersionObject removes an uploaded version whose transaction is known

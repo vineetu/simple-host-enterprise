@@ -307,6 +307,9 @@ func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		return
 	}
+	if !h.scanDeploy(w, r, mutationTarget{ActorID: actor.ID, ActorUsername: actor.Username, OwnerID: preliminary.OwnerID, OwnerUsername: preliminary.OwnerUsername}, siteName, preliminary.Site.ID, files) {
+		return
+	}
 
 	unlock := h.mutations.lock(preliminary.OwnerID, siteName)
 	defer unlock()
@@ -345,7 +348,8 @@ func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if _, err := h.store.PutVersion(r.Context(), access.Site.ID, versionNumber, files); err != nil {
+	put, err := h.store.PutVersion(r.Context(), access.Site.ID, versionNumber, files)
+	if err != nil {
 		log.Printf("upload collaboration files for %s/%s v%d actor=%s: %v", access.OwnerUsername, siteName, versionNumber, actor.ID, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -366,6 +370,15 @@ func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Req
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	freed, err := pruneVersions(r.Context(), tx, h.quota, access.Site.ID, versionNumber)
+	if err != nil {
+		log.Printf("prune collaboration versions for %s/%s: %v", access.OwnerUsername, siteName, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	if !h.enforceQuota(w, r, tx, access.OwnerID, version.ID, put.StoredBytes, freed, false) {
 		return
 	}
 	if err := db.EnqueueSiteSearch(r.Context(), tx, access.Site.ID, db.SiteSearchReconcile); err != nil {
@@ -399,9 +412,6 @@ func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Req
 	keepObject = true
 	access.Site.ActiveVersion = versionNumber
 	access.Site.UpdatedAt = time.Now().UTC()
-	if err := h.cleanupOldVersions(r.Context(), access.OwnerID, access.OwnerUsername, siteName, access.Site.ID); err != nil {
-		log.Printf("cleanup collaboration versions for %s/%s: %v", access.OwnerUsername, siteName, err)
-	}
 	setSiteETag(w, access.Site)
 	writeJSON(w, http.StatusOK, h.collaborationSiteResponse(
 		r, access.Site, access.OwnerUsername, access.Role, db.SiteAnalyticsSummary{}, nil,

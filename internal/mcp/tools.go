@@ -316,10 +316,11 @@ func toolList() []Tool {
 		{
 			Name:  "get_account",
 			Title: "Get the signed-in account",
-			Description: "Return the authenticated Simple Host account: its username, whether it is an admin, and the teams it belongs to. " +
+			Description: "Return the authenticated Simple Host account: its username, whether it is an admin, the teams it belongs to, and each namespace's usage against its quota. " +
 				"The username and each team's `name` are the `owner` values the other tools take — a site lives in one of those namespaces and nowhere else. " +
 				"Each team also has an `id` that never changes, which is what to record when binding a project to a namespace: a name can be released and registered by somebody else, an id cannot. " +
 				"Each site's address is the `url` that list_sites and deploy_site return; use that rather than composing one from a name. " +
+				"`usage` gives each of those namespaces' `sites` and stored `bytes` against `max_sites` and `max_bytes` (0 means unlimited); check it when a deploy is refused for quota. " +
 				"Call this when you need the owner name and do not already have it.",
 			InputSchema: noArgs(),
 			Annotations: readOnly(),
@@ -374,7 +375,8 @@ func toolList() []Tool {
 			Description: "Publish a website from files given inline, either creating the site or publishing a new version of one that already exists. " +
 				"Say which with intent: creating and updating are separate intentions, and by the time you call this you have already settled which one you mean — " +
 				"a create that finds the site already there is an error to report, not something to paper over. " +
-				"Earlier versions are retained and can be restored with rollback_site. " +
+				"Earlier versions are retained (the newest few; older ones are removed as new ones arrive) and can be restored with rollback_site. " +
+				"Each namespace has a quota of sites and stored bytes, and the server may scan uploads for malware; a refusal says which limit or file, and nothing is stored. " +
 				"This REPLACES the whole site: the files given are the complete new version, and anything not listed stops existing. " +
 				"To change one page of an existing site you must send every other file again unchanged, so read them first with list_site_files and read_site_file unless you hold the site's complete source. " +
 				"Call list_sites or get_site first to settle which namespace you are publishing into and whether the site exists there; " +

@@ -17,6 +17,7 @@ import (
 	"github.com/vsriram/simple-host/internal/auth"
 	db "github.com/vsriram/simple-host/internal/db"
 	"github.com/vsriram/simple-host/internal/safepath"
+	"github.com/vsriram/simple-host/internal/scan"
 	"github.com/vsriram/simple-host/internal/storage"
 	"github.com/vsriram/simple-host/internal/tarball"
 )
@@ -42,6 +43,19 @@ type SiteHandler struct {
 	audit audit.Recorder
 	// networkApprovals is NETWORK_ACCESS_APPROVALS (see access.go).
 	networkApprovals int
+	// quota and scanner are the upload limits (upload_limits.go): per-owner
+	// quotas with version retention, and the optional malware scan (nil
+	// when CLAMD_ADDR is unset).
+	quota   UploadQuota
+	scanner scan.Scanner
+}
+
+// WithUploadLimits sets the per-owner quota and the malware scanner (nil for
+// none) and returns h for chaining.
+func (h *SiteHandler) WithUploadLimits(quota UploadQuota, scanner scan.Scanner) *SiteHandler {
+	h.quota = quota
+	h.scanner = scanner
+	return h
 }
 
 // WithAudit attaches an audit recorder and returns h for chaining. Called
@@ -364,6 +378,9 @@ func (h *SiteHandler) createSiteForTarget(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		return
 	}
+	if !h.scanDeploy(w, r, target, siteName, "", files) {
+		return
+	}
 	unlock := h.mutations.lock(target.OwnerID, siteName)
 	defer unlock()
 	if _, err := db.GetSite(r.Context(), h.database, target.OwnerID, siteName); err == nil {
@@ -407,7 +424,8 @@ func (h *SiteHandler) createSiteForTarget(w http.ResponseWriter, r *http.Request
 
 	// The object goes up before the commit that makes it live, so a
 	// committed version always has its files; until then nothing refers to it.
-	if _, err := h.store.PutVersion(r.Context(), site.ID, versionNumber, files); err != nil {
+	put, err := h.store.PutVersion(r.Context(), site.ID, versionNumber, files)
+	if err != nil {
 		log.Printf("upload files for %s/%s v%d: %v", target.OwnerUsername, siteName, versionNumber, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -430,6 +448,10 @@ func (h *SiteHandler) createSiteForTarget(w http.ResponseWriter, r *http.Request
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+
+	if !h.enforceQuota(w, r, tx, target.OwnerID, version.ID, put.StoredBytes, 0, true) {
 		return
 	}
 
@@ -495,6 +517,9 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	if !h.scanDeploy(w, r, target, siteName, "", files) {
+		return
+	}
 	unlock := h.mutations.lock(target.OwnerID, siteName)
 	defer unlock()
 
@@ -540,7 +565,8 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := h.store.PutVersion(r.Context(), site.ID, versionNumber, files); err != nil {
+	put, err := h.store.PutVersion(r.Context(), site.ID, versionNumber, files)
+	if err != nil {
 		log.Printf("upload files for %s/%s v%d: %v", target.OwnerUsername, siteName, versionNumber, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -563,6 +589,16 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+
+	freed, err := pruneVersions(r.Context(), tx, h.quota, site.ID, versionNumber)
+	if err != nil {
+		log.Printf("prune versions for %s/%s: %v", target.OwnerUsername, siteName, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	if !h.enforceQuota(w, r, tx, target.OwnerID, version.ID, put.StoredBytes, freed, false) {
 		return
 	}
 
@@ -599,9 +635,6 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 	keepObject = true
 
 	site.ActiveVersion = versionNumber
-	if err := h.cleanupOldVersions(r.Context(), target.OwnerID, target.OwnerUsername, siteName, site.ID); err != nil {
-		log.Printf("cleanup versions for %s/%s: %v", target.OwnerUsername, siteName, err)
-	}
 
 	url := h.siteURL(r.Context(), target.OwnerUsername, siteName, site.ID)
 	setSiteETag(w, site)
@@ -1022,48 +1055,4 @@ func versionExists(versions []db.Version, versionNumber int) bool {
 	}
 
 	return false
-}
-
-func (h *SiteHandler) cleanupOldVersions(ctx context.Context, ownerID, username, siteName, siteID string) error {
-	tx, err := h.database.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := db.LockSiteCollaboration(ctx, tx, ownerID, siteName); err != nil {
-		return err
-	}
-	site, err := db.GetSite(ctx, tx, ownerID, siteName)
-	if err != nil {
-		return err
-	}
-	if site.ID != siteID {
-		return fmt.Errorf("site incarnation changed during version cleanup")
-	}
-	versions, err := db.ListVersions(ctx, tx, siteID)
-	if err != nil {
-		return err
-	}
-
-	if len(versions) <= 5 {
-		return tx.Commit()
-	}
-
-	for _, version := range versions[5:] {
-		if version.VersionNumber == site.ActiveVersion {
-			continue
-		}
-		key, err := storage.VersionKey(siteID, version.VersionNumber)
-		if err != nil {
-			return err
-		}
-		if err := db.RetireObjects(ctx, tx, key, storage.RetireGrace); err != nil {
-			return err
-		}
-		if err := db.DeleteVersion(ctx, tx, version.ID); err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
 }

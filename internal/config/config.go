@@ -150,6 +150,11 @@ type Config struct {
 	// admins must approve a request to open a site to the network, 1 (the
 	// default) or 2. The requester never counts.
 	NetworkAccessApprovals int
+
+	// Quota is the per-owner upload limits and Clamd the optional malware
+	// scan of uploads (uploads.go).
+	Quota QuotaConfig
+	Clamd ClamdConfig
 }
 
 // defaultOAuthRedirectHosts covers the AI apps a company is most likely to
@@ -454,6 +459,11 @@ func Load() (Config, error) {
 		MaxFileBytes: assetMaxFileBytes,
 		MaxSiteBytes: assetMaxSiteBytes,
 		MaxSiteCount: assetMaxSiteCount,
+	}
+
+	cfg.Quota, cfg.Clamd, err = loadUploadLimits()
+	if err != nil {
+		return Config{}, err
 	}
 
 	trusted, set := os.LookupEnv("TRUSTED_PROXY_CIDRS")

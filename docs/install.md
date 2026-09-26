@@ -409,11 +409,13 @@ dashboard's base-host mirror (`internal/handler/assets_admin.go`'s
 For both asset-delete call sites, the bucket object is not deleted inside
 that transaction: the transaction queues it for the sweep, which deletes it
 an hour later (`docs/storage.md`, Retention), so the database row, its
-audit row and the queued deletion commit or roll back together. Ten actions remain best-effort,
+audit row and the queued deletion commit or roll back together. Eleven actions remain best-effort,
 written through the older `Record` with no shared transaction: `sign_in`,
-`sign_out`, `session_revoke`, `key_mint`, `key_revoke`, `hand_off`, and the
+`sign_out`, `session_revoke`, `key_mint`, `key_revoke`, `hand_off`, the
 admin actions `admin_disable_user`, `admin_enable_user`,
-`admin_archive_versions`, `admin_export`. See
+`admin_archive_versions`, `admin_export`, and `upload_infected` (an upload
+the optional malware scan refused; nothing was stored, so there is no
+transaction to share). See
 `docs/security-review.md`'s S9a row for the same inventory.
 `state_write` coalesces repeated writes from the same actor
 and site into one row per five-minute window (`detail.count`), so autosave

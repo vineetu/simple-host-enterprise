@@ -15,6 +15,7 @@ import (
 	"github.com/vsriram/simple-host/internal/audit"
 	"github.com/vsriram/simple-host/internal/auth"
 	db "github.com/vsriram/simple-host/internal/db"
+	"github.com/vsriram/simple-host/internal/scan"
 	"github.com/vsriram/simple-host/internal/storage"
 )
 
@@ -35,12 +36,24 @@ const accessBase = "hosting.corp.test"
 
 func newAccessWorld(t *testing.T) *accessWorld {
 	t.Helper()
-	return newAccessWorldApprovals(t, 1)
+	return newAccessWorldFull(t, 1, UploadQuota{}, nil)
 }
 
 // newAccessWorldApprovals is newAccessWorld with NETWORK_ACCESS_APPROVALS
 // set to approvals, and a second admin, "ada".
 func newAccessWorldApprovals(t *testing.T, approvals int) *accessWorld {
+	t.Helper()
+	return newAccessWorldFull(t, approvals, UploadQuota{}, nil)
+}
+
+// newAccessWorldWith is newAccessWorld with upload limits (quota, and a
+// malware scanner or nil).
+func newAccessWorldWith(t *testing.T, quota UploadQuota, scanner scan.Scanner) *accessWorld {
+	t.Helper()
+	return newAccessWorldFull(t, 1, quota, scanner)
+}
+
+func newAccessWorldFull(t *testing.T, approvals int, quota UploadQuota, scanner scan.Scanner) *accessWorld {
 	t.Helper()
 	database := connectorTestDB(t)
 	base := "https://" + accessBase
@@ -69,12 +82,13 @@ func newAccessWorldApprovals(t *testing.T, approvals int) *accessWorld {
 	limits := NewAbuseLimits()
 	recorder := audit.NewDBRecorder(database)
 	mux := http.NewServeMux()
-	NewSiteHandler(database, store, base, hosts, limits).WithAudit(recorder).WithNetworkAccessApprovals(approvals).Register(mux, authMW, skillMW)
+	NewSiteHandler(database, store, base, hosts, limits).WithAudit(recorder).WithNetworkAccessApprovals(approvals).WithUploadLimits(quota, scanner).Register(mux, authMW, skillMW)
+	NewUserHandler(database, limits).WithQuota(quota).Register(mux, authMW, skillMW)
 	NewAdminHandler(database, base, hosts, CookiePolicy{Secure: true}, keys, time.Hour, recorder, limits).WithNetworkAccessApprovals(approvals).Register(mux, authMW, skillMW)
 	NewAuditHandler(database, audit.NewReader(database), "", limits).Register(mux, authMW, skillMW)
 	NewTeamHandler(database, limits).WithAudit(recorder).Register(mux, authMW, skillMW, hosts, base)
 	files := NewSiteFiles(store, database, CookiePolicy{Secure: true}, keys, time.Hour)
-	siteAPI := NewSiteAPIHandler(database, store, storage.AssetLimits{MaxFileBytes: 1 << 20, MaxSiteBytes: 8 << 20, MaxSiteCount: 100}, recorder, hosts, limits)
+	siteAPI := NewSiteAPIHandler(database, store, storage.AssetLimits{MaxFileBytes: 1 << 20, MaxSiteBytes: 8 << 20, MaxSiteCount: 100}, recorder, hosts, limits).WithUploadLimits(quota, scanner)
 	handoff := NewHandoffHandler(database, keys, hosts, recorder, limits)
 	gate := NewHostGate(hosts, files, database, keys, auth.NewNegativeSessionCache(database, time.Hour), handoff, siteAPI, authMW, base)
 

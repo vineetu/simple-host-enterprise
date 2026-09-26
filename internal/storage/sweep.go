@@ -97,7 +97,8 @@ func (s *Store) deleteRetired(ctx context.Context, key string) error {
 	return nil
 }
 
-// RunSweeper runs Sweep every few minutes until ctx ends.
+// RunSweeper runs Sweep, and FillVersionSizes, every few minutes until ctx
+// ends.
 func (s *Store) RunSweeper(ctx context.Context, database *sql.DB) {
 	ticker := time.NewTicker(sweepInterval)
 	defer ticker.Stop()
@@ -106,6 +107,15 @@ func (s *Store) RunSweeper(ctx context.Context, database *sql.DB) {
 			log.Printf("storage sweep: %v", err)
 		} else if n > 0 {
 			log.Printf("storage sweep: retired %d entr(ies)", n)
+		}
+		for ctx.Err() == nil {
+			n, err := s.FillVersionSizes(ctx, database)
+			if err != nil && ctx.Err() == nil {
+				log.Printf("storage: record version sizes: %v", err)
+			}
+			if err != nil || n < versionSizeBatch {
+				break
+			}
 		}
 		select {
 		case <-ctx.Done():

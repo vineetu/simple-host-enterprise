@@ -27,6 +27,13 @@ type DashboardHandler struct {
 	database    *sql.DB
 	signingKeys []auth.SigningKey
 	sessionIdle time.Duration
+	quota       UploadQuota
+}
+
+// WithQuota sets the per-owner limits the page shows usage against.
+func (h *DashboardHandler) WithQuota(quota UploadQuota) *DashboardHandler {
+	h.quota = quota
+	return h
 }
 
 func NewDashboardHandler(database *sql.DB, signingKeys []auth.SigningKey, sessionIdle time.Duration) *DashboardHandler {
@@ -67,6 +74,8 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+
+	usageHTML := h.usageHTML(r, user)
 
 	notice := ""
 	if r.URL.Query().Get("notice") == "username_suffixed" {
@@ -134,6 +143,7 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 <section>
   <h2 class="section-title">Your sites</h2>
   <p class="login-copy">Choose who can open each site, name its viewers, and manage the files it has uploaded. A new site opens only for you (or your team). Deploying and rolling back are done with the skill or MCP.</p>
+  ` + usageHTML + `
   <div id="site-list" class="rank-list" role="region" aria-label="Sites"></div>
 </section>
 </main>`)
@@ -152,6 +162,42 @@ func offboardScopeOption(isAdmin bool) string {
       <option value="offboard">Offboard (disable leavers)</option>`
 	}
 	return ""
+}
+
+// usageHTML is one line per namespace the person publishes in (their own,
+// then each team's): sites and stored bytes against the quota. Best effort:
+// a failed lookup leaves it out rather than failing the page.
+func (h *DashboardHandler) usageHTML(r *http.Request, user *db.User) string {
+	owners := []namespaceRef{{ID: user.ID, Name: user.Username}}
+	teams, err := db.ListTeamsForUser(r.Context(), h.database, user.ID)
+	if err != nil {
+		log.Printf("dashboard: list teams for %s: %v", user.Username, err)
+		return ""
+	}
+	for _, team := range teams {
+		owners = append(owners, namespaceRef{ID: team.ID, Name: team.Username})
+	}
+	usages, err := ownerUsages(r.Context(), h.database, h.quota, owners)
+	if err != nil {
+		log.Printf("dashboard: usage for %s: %v", user.Username, err)
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="rank-list" role="region" aria-label="Usage">`)
+	for _, u := range usages {
+		sites := formatCount(u.Sites) + " sites"
+		if u.MaxSites > 0 {
+			sites = formatCount(u.Sites) + " of " + formatCount(u.MaxSites) + " sites"
+		}
+		stored := formatBytes(uint64(u.Bytes)) + " stored"
+		if u.MaxBytes > 0 {
+			stored = formatBytes(uint64(u.Bytes)) + " of " + formatBytes(uint64(u.MaxBytes)) + " stored"
+		}
+		fmt.Fprintf(&b, `<div class="rank-row usage-row"><span class="rank-name">%s</span><span class="rank-metric">%s · %s</span></div>`,
+			html.EscapeString(u.Owner), html.EscapeString(sites), html.EscapeString(stored))
+	}
+	b.WriteString(`</div>`)
+	return b.String()
 }
 
 func adminBadge(isAdmin bool) string {

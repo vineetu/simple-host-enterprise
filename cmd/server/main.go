@@ -28,6 +28,7 @@ import (
 	"github.com/vsriram/simple-host/internal/migrate"
 	"github.com/vsriram/simple-host/internal/oidc"
 	"github.com/vsriram/simple-host/internal/reqlog"
+	"github.com/vsriram/simple-host/internal/scan"
 	"github.com/vsriram/simple-host/internal/search"
 	"github.com/vsriram/simple-host/internal/storage"
 )
@@ -199,8 +200,16 @@ func run() (runErr error) {
 	requestMetrics := metrics.New()
 	handler.RegisterHealthRoutes(mux, database, siteStore.Ping, requestMetrics.SetBucketOK)
 	publicSearchHandler.Register(mux, authMW, handler.CookieOriginCheck(hosts, cfg.PublicBaseURL))
-	handler.NewUserHandler(database, abuseLimits).Register(mux, authMW, skillVersionMW)
-	handler.NewSiteHandler(database, siteStore, cfg.PublicBaseURL, hosts, abuseLimits).WithAudit(auditRecorder).WithNetworkAccessApprovals(cfg.NetworkAccessApprovals).Register(mux, authMW, skillVersionMW)
+	// Upload limits: per-owner quotas, and the malware scan when CLAMD_ADDR
+	// is set (a configured scanner that is down refuses uploads).
+	quota := handler.UploadQuota{MaxSites: cfg.Quota.MaxSites, MaxBytes: cfg.Quota.MaxBytes, MaxVersions: cfg.Quota.MaxVersions}
+	var scanner scan.Scanner
+	if cfg.Clamd.Addr != "" {
+		scanner = scan.Clamd{Addr: cfg.Clamd.Addr, Timeout: cfg.Clamd.Timeout}
+		log.Printf("malware scan: uploads are scanned by clamd at %s", cfg.Clamd.Addr)
+	}
+	handler.NewUserHandler(database, abuseLimits).WithQuota(quota).Register(mux, authMW, skillVersionMW)
+	handler.NewSiteHandler(database, siteStore, cfg.PublicBaseURL, hosts, abuseLimits).WithAudit(auditRecorder).WithNetworkAccessApprovals(cfg.NetworkAccessApprovals).WithUploadLimits(quota, scanner).Register(mux, authMW, skillVersionMW)
 	handler.NewTeamHandler(database, abuseLimits).WithAudit(auditRecorder).Register(mux, authMW, skillVersionMW, hosts, cfg.PublicBaseURL)
 	// Held rather than registered inline: the classification worker starts
 	// after the routes are wired, and the handler is given it once it exists.
@@ -212,7 +221,7 @@ func run() (runErr error) {
 	handler.NewShowcaseHandler(database, hosts, signingKeys, cfg.Session.Idle).Register(mux)
 	handler.NewAuthHandler(database, oidcProvider, oidcClaims, signingKeys, cfg.Session.TTL, cfg.Session.Idle, auditRecorder, hosts, cfg.PublicBaseURL, abuseLimits).Register(mux, authMW)
 	handler.NewKeysHandler(database, auditRecorder, hosts, cfg.PublicBaseURL, abuseLimits).WithMaxKeyDays(int(cfg.APIKeyMaxDays)).Register(mux, authMW)
-	handler.NewDashboardHandler(database, signingKeys, cfg.Session.Idle).Register(mux, authMW)
+	handler.NewDashboardHandler(database, signingKeys, cfg.Session.Idle).WithQuota(quota).Register(mux, authMW)
 	handoffHandler := handler.NewHandoffHandler(database, signingKeys, hosts, auditRecorder, abuseLimits)
 	handoffHandler.Register(mux, authMW)
 	handler.RegisterUIRoutes(mux, cfg.PublicBaseURL)
@@ -224,7 +233,7 @@ func run() (runErr error) {
 		MaxFileBytes: cfg.Assets.MaxFileBytes,
 		MaxSiteBytes: cfg.Assets.MaxSiteBytes,
 		MaxSiteCount: cfg.Assets.MaxSiteCount,
-	}, auditRecorder, hosts, abuseLimits)
+	}, auditRecorder, hosts, abuseLimits).WithUploadLimits(quota, scanner)
 
 	// The negative session cache is hosted content's substitute for a
 	// per-request read of the sessions table: it refreshes every 60
