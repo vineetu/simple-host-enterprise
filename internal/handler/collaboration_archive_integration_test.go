@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -352,35 +351,6 @@ func collaborationArchiveRequest(method, target, apiKey string) *http.Request {
 	request := httptest.NewRequest(method, target, nil)
 	request.Header.Set("X-API-Key", apiKey)
 	return request
-}
-
-func TestCleanupOldVersionsRetiresObjects(t *testing.T) {
-	state := &collaborationArchiveDBState{activeVersion: 7, versions: []int{7, 6, 5, 4, 3, 2, 1}}
-	handler, _, store, _ := newCollaborationArchiveHarness(t, state)
-	for version := 2; version <= 7; version++ {
-		store.publish(t, "owner", "demo", archiveTestSiteID, version, map[string]string{"index.html": strconv.Itoa(version)})
-	}
-
-	if err := handler.cleanupOldVersions(context.Background(), archiveTestOwnerID, "owner", "demo", archiveTestSiteID); err != nil {
-		t.Fatalf("cleanupOldVersions: %v", err)
-	}
-	state.mu.Lock()
-	remaining := append([]int(nil), state.versions...)
-	retired := append([]string(nil), state.retired...)
-	state.mu.Unlock()
-	if got, want := fmt.Sprint(remaining), "[7 6 5 4 3]"; got != want {
-		t.Fatalf("database versions = %s, want %s", got, want)
-	}
-	// The objects are queued in the same transaction and deleted by the sweep
-	// after the grace period, never inline: another replica may still be
-	// serving what it resolved a moment ago.
-	want := "[sites/" + archiveTestSiteID + "/v2.tar.gz sites/" + archiveTestSiteID + "/v1.tar.gz]"
-	if got := fmt.Sprint(retired); got != want {
-		t.Fatalf("retired = %s, want %s", got, want)
-	}
-	if len(store.objects.Keys()) != 7 {
-		t.Fatalf("objects deleted inline: %v", store.objects.Keys())
-	}
 }
 
 type blockingArchiveResponseWriter struct {

@@ -124,7 +124,8 @@ func TestStoreVersionRoundTrip(t *testing.T) {
 		"empty.txt":          {},
 		"binary.bin":         {0x00, 0x01, 0xff, 0xfe, 0x00},
 	}
-	total, err := store.PutVersion(context.Background(), testSiteA, 3, files)
+	put, err := store.PutVersion(context.Background(), testSiteA, 3, files)
+	total := put.FileBytes
 	if err != nil {
 		t.Fatalf("PutVersion: %v", err)
 	}
@@ -137,6 +138,9 @@ func TestStoreVersionRoundTrip(t *testing.T) {
 	}
 	if keys := objects.Keys(); len(keys) != 1 || keys[0] != "sites/"+testSiteA+"/v3.tar.gz" {
 		t.Fatalf("bucket keys = %v", keys)
+	}
+	if listed, _ := objects.List(context.Background(), "sites/"+testSiteA+"/v3.tar.gz"); len(listed) != 1 || listed[0].Size != put.StoredBytes {
+		t.Fatalf("stored bytes = %d, bucket has %v", put.StoredBytes, listed)
 	}
 
 	lease := mustOpenVersion(t, store, testSiteA, 3)

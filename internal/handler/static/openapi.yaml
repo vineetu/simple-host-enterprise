@@ -223,6 +223,17 @@ paths:
                     type: string
                   is_admin:
                     type: boolean
+                  usage:
+                    type: array
+                    description: Each namespace's sites and stored bytes against its quota (own first, then each team's). A max of 0 is unlimited.
+                    items:
+                      type: object
+                      properties:
+                        owner: {type: string}
+                        sites: {type: integer}
+                        max_sites: {type: integer}
+                        bytes: {type: integer}
+                        max_bytes: {type: integer}
         '400':
           $ref: '#/components/responses/SkillVersionRequired'
         '401':

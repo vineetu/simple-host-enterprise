@@ -21,6 +21,13 @@ var invalidUsernameChars = regexp.MustCompile(`[^a-zA-Z0-9.-]+`)
 type UserHandler struct {
 	database *sql.DB
 	limits   *AbuseLimits
+	quota    UploadQuota
+}
+
+// WithQuota sets the per-owner limits GET /api/me reports usage against.
+func (h *UserHandler) WithQuota(quota UploadQuota) *UserHandler {
+	h.quota = quota
+	return h
 }
 
 type errorResponse struct {
@@ -55,8 +62,16 @@ func (h *UserHandler) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	memberships := make([]meTeam, 0, len(teams))
+	owners := []namespaceRef{{ID: user.ID, Name: user.Username}}
 	for _, team := range teams {
 		memberships = append(memberships, meTeam{ID: team.ID, Name: team.Username})
+		owners = append(owners, namespaceRef{ID: team.ID, Name: team.Username})
+	}
+	usage, err := ownerUsages(r.Context(), h.database, h.quota, owners)
+	if err != nil {
+		log.Printf("usage for %s: %v", user.Username, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
 	}
 
 	kind := user.Kind
@@ -70,6 +85,7 @@ func (h *UserHandler) me(w http.ResponseWriter, r *http.Request) {
 		Kind:     kind,
 		Email:    user.Email,
 		Teams:    memberships,
+		Usage:    usage,
 	})
 }
 
@@ -85,6 +101,9 @@ type meResponse struct {
 	// different id and the agent stops instead of publishing into a stranger's
 	// namespace. Without the id here that check cannot be made at all.
 	Teams []meTeam `json:"teams"`
+	// Usage is each namespace's sites and stored bytes against its quota:
+	// the caller's own first, then each team's.
+	Usage []ownerUsage `json:"usage"`
 }
 
 type meTeam struct {

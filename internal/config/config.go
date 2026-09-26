@@ -121,6 +121,11 @@ type Config struct {
 	// own machine, "scheme://host" for an app's own URL scheme, or "*" for
 	// any https host.
 	OAuthRedirectHosts []string
+
+	// Quota is the per-owner upload limits and Clamd the optional malware
+	// scan of uploads (uploads.go).
+	Quota QuotaConfig
+	Clamd ClamdConfig
 }
 
 // defaultOAuthRedirectHosts covers the AI apps a company is most likely to
@@ -399,6 +404,11 @@ func Load() (Config, error) {
 		MaxFileBytes: assetMaxFileBytes,
 		MaxSiteBytes: assetMaxSiteBytes,
 		MaxSiteCount: assetMaxSiteCount,
+	}
+
+	cfg.Quota, cfg.Clamd, err = loadUploadLimits()
+	if err != nil {
+		return Config{}, err
 	}
 
 	trusted, set := os.LookupEnv("TRUSTED_PROXY_CIDRS")

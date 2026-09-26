@@ -180,7 +180,14 @@ func outputSchemas() map[string]map[string]any {
 			"kind":     outEnum("Always person for a signed-in account.", "person", "team"),
 			"email":    outString("The account's email, when known."),
 			"teams":    outArray("The teams this account is in.", teamSchema()),
-		}, "id", "username", "is_admin", "kind", "teams"),
+			"usage": outArray("Each namespace's usage against its quota: the account's own first, then each team's.", outObject(map[string]any{
+				"owner":     outString("The namespace: the account's username or a team's name."),
+				"sites":     outInteger("How many sites it has."),
+				"max_sites": outInteger("The most it may have; 0 means unlimited."),
+				"bytes":     outInteger("Stored bytes: every retained version of its sites plus their uploaded files."),
+				"max_bytes": outInteger("The most it may store; 0 means unlimited."),
+			}, "owner", "sites", "max_sites", "bytes", "max_bytes")),
+		}, "id", "username", "is_admin", "kind", "teams", "usage"),
 
 		"list_sites":  listOf("Every site this account can act on.", collaborationSiteSchema()),
 		"get_site":    collaborationSiteSchema(),

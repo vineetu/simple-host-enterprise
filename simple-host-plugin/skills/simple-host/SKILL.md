@@ -280,7 +280,16 @@ configuration.
   bytes per path, and 255 bytes per component. Symlinks and special files fail.
 - The extension denylist is case-insensitive; it is not an allowlist. ZIP and DMG
   downloads inside a site are valid regular files.
-- The server retains the latest five site versions.
+- The server retains the latest five site versions unless the installation
+  sets another number; older ones are removed as new ones deploy.
+- Each namespace (the person's own, or a team's) has a quota: `GET /api/me`
+  (`get_account`) returns `usage` with `sites`, stored `bytes`, `max_sites`
+  and `max_bytes` (0 is unlimited). A refused deploy stores nothing:
+  `409` `site_limit` (too many sites) or `413` `storage_quota` (stored bytes)
+  means tell the user the numbers and let them choose what to delete; do not
+  retry. An installation may also scan uploads for malware: `422`
+  `malware_found` names the file and signature — report it, never work around
+  it; `503` `scanner_unavailable` means try once more later.
 - Viewing a site requires signing in, except a `network` site an admin has
   approved. Opening a site's address while signed out redirects through
   sign-in and back. The access level decides who can open it. `/showcase` and

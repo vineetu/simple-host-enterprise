@@ -125,7 +125,12 @@ Config names are documented in `docs/configuration.md`; schema in
 - **What.** A site is a tar.gz (or MCP file list) deployed into a namespace
   (a person or a team). Create/update are guarded by `If-Match` ETags;
   validation in `internal/tarball`. Each deploy is a new immutable version;
-  five versions are kept (older ones retired to the bucket sweep). Rollback
+  `QUOTA_MAX_VERSIONS` (5) are kept, the oldest pruned in the deploy's own
+  transaction (never the live one) and retired to the bucket sweep. Every
+  deploy is checked against the owner's quota (sites, stored bytes) under a
+  per-owner lock (409 `site_limit`, 413 `storage_quota`), and, with
+  `CLAMD_ADDR` set, every file is scanned before anything is stored (422
+  `malware_found`, 503 `scanner_unavailable`, fail closed). Rollback
   makes an earlier version live. Delete retires the whole site. Served at
   `<owner>.<base>/<site>/` (or the restricted host, section 8). The owner-scoped
   routes act on the caller's own namespace; the collaboration routes name the
@@ -152,12 +157,13 @@ Config names are documented in `docs/configuration.md`; schema in
   `skills/fix-paths-for-subpath-hosting/`, `skills/simple-host-builder/`.
 - **Pages.** `/dashboard` "Your sites".
 - **Go.** `internal/handler/site.go`, `collaboration.go`, `site_mutation.go`,
-  `serve.go`, `serve_self_traffic.go`, `host_gate.go`, `host.go`, `names.go`,
-  `security.go`; `internal/tarball/`; `internal/db/queries.go`,
-  `collaboration.go`.
-- **DB.** `sites`, `versions` (0001; 0012 `versions.uploaded_by`), 0018 owner
-  label uniqueness.
-- **Config.** `PUBLIC_BASE_URL`, `RESERVED_LABELS`.
+  `upload_limits.go`, `serve.go`, `serve_self_traffic.go`, `host_gate.go`, `host.go`, `names.go`,
+  `security.go`; `internal/tarball/`; `internal/scan/clamd.go`;
+  `internal/db/queries.go`, `collaboration.go`, `quota.go`.
+- **DB.** `sites`, `versions` (0001; 0012 `versions.uploaded_by`; 0037
+  `versions.size_bytes`), 0018 owner label uniqueness.
+- **Config.** `PUBLIC_BASE_URL`, `RESERVED_LABELS`, `QUOTA_MAX_SITES`,
+  `QUOTA_MAX_BYTES`, `QUOTA_MAX_VERSIONS`, `CLAMD_ADDR`, `CLAMD_TIMEOUT`.
 
 ## 6. Bucket storage, cache, retire sweep, migrate-storage and restore
 
@@ -167,7 +173,9 @@ Config names are documented in `docs/configuration.md`; schema in
   through a bounded pod-local cache. Optional SSE and client-side AES-GCM
   envelope. Unreferenced objects are queued in `storage_retired` in the same
   transaction and deleted by a sweeper after a one-hour grace (every 5 min,
-  `SKIP LOCKED`, safe on every replica). Operator subcommands:
+  `SKIP LOCKED`, safe on every replica). The same loop records the stored
+  size of any version that has none (`versions.size_bytes`, 0037) from the
+  bucket, for the owner quota. Operator subcommands:
   `simple-host migrate-storage` (one-time move off the old volume) and
   `simple-host restore`. A bucket fault does not fail `/readyz`
   (`simplehost_bucket_ok` instead).
@@ -176,8 +184,9 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Skill.** None.
 - **Go.** `internal/storage/` (`store.go`, `cache.go`, `sweep.go`,
   `objects.go`, `objects_s3.go`, `envelope.go`, `archive.go`, `keys.go`,
-  `migrate.go`); `internal/db/storage.go`; `cmd/server/subcommands.go`.
-- **DB.** `storage_retired` (0032).
+  `migrate.go`, `sizes.go`); `internal/db/storage.go`, `quota.go`;
+  `cmd/server/subcommands.go`.
+- **DB.** `storage_retired` (0032), `versions.size_bytes` (0037).
 - **Config.** `BACKUP_STORAGE_ENDPOINT`, `BACKUP_STORAGE_BUCKET`,
   `BACKUP_STORAGE_PREFIX`, `BACKUP_STORAGE_REGION`,
   `BACKUP_STORAGE_ACCESS_KEY_ID`, `BACKUP_STORAGE_SECRET_ACCESS_KEY`,
@@ -292,7 +301,9 @@ Config names are documented in `docs/configuration.md`; schema in
 
 - **What.** Pages upload files at runtime; each gets an id and is served back
   (inline for images/video/audio/PDF, attachment otherwise). Per-file,
-  per-site byte and count limits. Owners list and delete assets from the
+  per-site byte and count limits; asset bytes also count toward the owner's
+  `QUOTA_MAX_BYTES` (413 `storage_quota`), and with `CLAMD_ADDR` set each
+  upload is scanned before it is stored (422/503). Owners list and delete assets from the
   dashboard through base-host mirror routes.
 - **Status.** Built.
 - **Routes.** Host-gate: `GET|POST /api/sites/{site}/assets`,
@@ -304,11 +315,12 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Skill.** `references/state-and-ai.md` (Uploaded assets);
   `simple-host-builder` §3.
 - **Pages.** `/dashboard` assets panel.
-- **Go.** `internal/handler/site_api.go`, `assets_admin.go`, `host_gate.go`;
-  `internal/storage/assets.go`; `internal/db/assets.go`.
+- **Go.** `internal/handler/site_api.go`, `assets_admin.go`, `host_gate.go`,
+  `upload_limits.go`; `internal/storage/assets.go`; `internal/db/assets.go`,
+  `quota.go`; `internal/scan/clamd.go`.
 - **DB.** `site_assets` (0026).
 - **Config.** `ASSET_MAX_FILE_BYTES`, `ASSET_MAX_SITE_BYTES`,
-  `ASSET_MAX_SITE_COUNT`.
+  `ASSET_MAX_SITE_COUNT`, `QUOTA_MAX_BYTES`, `CLAMD_ADDR`, `CLAMD_TIMEOUT`.
 
 ## 12. Audit log, access log, export, retention
 
@@ -355,14 +367,17 @@ Config names are documented in `docs/configuration.md`; schema in
 - **What.** `/dashboard` on the base host: sign-in prompt when signed out;
   when signed in, API keys (mint/list/revoke), "Your sites" across the
   person's and their teams' namespaces with access level, viewers, assets,
-  visitor counts, and a link to sessions. Calls the JSON routes of sections
+  visitor counts, each namespace's usage against its quota (sites, stored
+  bytes; the same numbers `GET /api/me` returns as `usage`), and a link to
+  sessions. Calls the JSON routes of sections
   2, 5, 7, 8, 11 and 12 with the session cookie.
 - **Status.** Built.
 - **Routes.** `GET /dashboard`.
 - **MCP.** None.
 - **Skill.** `references/account-recovery.md` (Get a key).
-- **Go.** `internal/handler/dashboard.go`.
-- **DB.** Reads only. **Config.** `SESSION_IDLE`.
+- **Go.** `internal/handler/dashboard.go`, `upload_limits.go`.
+- **DB.** Reads only. **Config.** `SESSION_IDLE`, `QUOTA_MAX_SITES`,
+  `QUOTA_MAX_BYTES`.
 
 ## 15. Search, showcase, owner index
 

@@ -15,6 +15,7 @@ import (
 
 	"github.com/vsriram/simple-host/internal/audit"
 	db "github.com/vsriram/simple-host/internal/db"
+	"github.com/vsriram/simple-host/internal/scan"
 	"github.com/vsriram/simple-host/internal/storage"
 )
 
@@ -40,6 +41,18 @@ type SiteAPIHandler struct {
 	// process-local, best-effort, and keyed by site id, so two independent
 	// instances double-write at most once per site rather than disagreeing.
 	stateUsage *stateUsageMarker
+	// quota and scanner are the per-owner upload limits and the optional
+	// malware scan (upload_limits.go).
+	quota   UploadQuota
+	scanner scan.Scanner
+}
+
+// WithUploadLimits sets the per-owner quota and the malware scanner (nil for
+// none) and returns h for chaining.
+func (h *SiteAPIHandler) WithUploadLimits(quota UploadQuota, scanner scan.Scanner) *SiteAPIHandler {
+	h.quota = quota
+	h.scanner = scanner
+	return h
 }
 
 // NewSiteAPIHandler constructs the handler. recorder may be audit.NoOp{}
@@ -465,6 +478,12 @@ func (h *SiteAPIHandler) CreateAsset(w http.ResponseWriter, r *http.Request, cal
 		writeJSON(w, http.StatusRequestEntityTooLarge, errorResponse{Error: "asset exceeds the per-file size limit"})
 		return
 	}
+	if h.scanner != nil {
+		if refusal := h.scanAsset(r, call, fileHeader.Filename, file); refusal != nil {
+			refusal.write(w)
+			return
+		}
+	}
 	stored, err := h.store.CreateAsset(r.Context(), call.SiteID, fileHeader.Header.Get("Content-Type"), file, h.assetLimits)
 	if err != nil {
 		switch {
@@ -509,6 +528,18 @@ func (h *SiteAPIHandler) CreateAsset(w http.ResponseWriter, r *http.Request, cal
 		return
 	}
 	defer tx.Rollback()
+	if h.quota.MaxBytes > 0 {
+		refusal, err := h.checkAssetQuota(r.Context(), tx, call.Owner, stored.Size)
+		if err != nil {
+			log.Printf("check quota for %s/%s: %v", call.Owner, call.SiteName, err)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+			return
+		}
+		if refusal != nil {
+			refusal.write(w)
+			return
+		}
+	}
 	if _, err := db.CreateAssetWithinQuota(r.Context(), tx, stored.ID, call.SiteID, name, stored.ContentType, stored.Size, stored.SHA256[:], createdBy, h.assetLimits.MaxSiteCount, h.assetLimits.MaxSiteBytes); err != nil {
 		if errors.Is(err, db.ErrAssetQuotaExceeded) {
 			writeJSON(w, http.StatusRequestEntityTooLarge, errorResponse{Error: "site asset quota exceeded"})

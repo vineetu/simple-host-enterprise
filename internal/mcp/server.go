@@ -517,6 +517,18 @@ func codeHint(code string, tool Tool) string {
 		return "That name is too close to an existing account name — the two would share one web address. Ask the user for a clearly different name."
 	case "team_limit":
 		return "This account already belongs to the maximum number of teams and cannot create another. Do not retry; tell the user."
+	case "site_limit":
+		return "The namespace is at its site limit, so nothing was created. Do not retry. Tell the user; they can delete a site they no longer need, " +
+			"or update one of their existing sites instead. get_account shows each namespace's usage."
+	case "storage_quota":
+		return "The namespace's storage quota is full, so nothing was deployed. Do not retry the same upload. Tell the user the numbers in the message; " +
+			"deleting sites or uploaded files they no longer need frees space. get_account shows each namespace's usage."
+	case "malware_found":
+		return "The malware scan flagged the file named in the message, so nothing was stored. Tell the user which file and what was found. " +
+			"Do not retry, rename, re-encode or split the file to get it past the scan."
+	case "scanner_unavailable":
+		return "The server's malware scanner is not answering, so it refused the upload and stored nothing. Nothing in the arguments will fix it; " +
+			"wait and try once more later, and tell the user if it keeps failing."
 	case "skill_version_required":
 		return "This client is too old for the management API. Nothing in the arguments will fix it; tell the user the Simple Host plugin needs updating."
 	}

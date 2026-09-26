@@ -116,7 +116,12 @@ allowlist checks the sniffed bytes, never the declared type or the file
 extension. A site archive may not contain a top-level `_assets/` entry;
 naming an upload that way is refused at deploy time, before it ever reaches
 the asset store. Default limits are 25 MiB per file and 500 MiB / 5,000 files
-per site; an installation may raise or lower both.
+per site; an installation may raise or lower both. An upload also counts
+against the owner's storage quota (`413` with `code: "storage_quota"` when it
+is full), and an installation that scans uploads refuses an infected file with
+`422` (`malware_found`) or, when its scanner is down, `503`
+(`scanner_unavailable`). A page should show the `error` text to the visitor
+rather than retrying.
 
 An asset is served back with the stored content type and, for anything other
 than an image, video, audio clip, or PDF, `Content-Disposition: attachment` —
