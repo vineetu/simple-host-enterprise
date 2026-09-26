@@ -315,6 +315,25 @@ func (h *SiteHandler) newSiteNameAddressable(w http.ResponseWriter, r *http.Requ
 	return true
 }
 
+// CheckNewSiteName applies the rules a new site's name must pass at create
+// time (reserved, addressable, not another site's derived address) outside
+// an HTTP request, for operator commands that create sites (restore).
+// existing is the owner's current site names.
+func (m HostModel) CheckNewSiteName(owner, name string, existing []string) error {
+	if reservedSiteNames[name] {
+		return fmt.Errorf("site name %q is reserved", name)
+	}
+	if !m.ValidNewSiteName(owner, name) {
+		return fmt.Errorf("site name %q: use lowercase letters, numbers and hyphens, start and end with a letter or number, at most %d characters, not beginning with xn--", name, MaxSiteNameLen(owner))
+	}
+	for _, other := range existing {
+		if other != name && siteHostPart(other) == name {
+			return fmt.Errorf("site %q already has the address %q; pick another name", other, name)
+		}
+	}
+	return nil
+}
+
 func validateStoredUsername(w http.ResponseWriter, username string) bool {
 	if err := safepath.ValidateSegment(username); err != nil {
 		log.Printf("reject unsafe stored username %q: %v", username, err)

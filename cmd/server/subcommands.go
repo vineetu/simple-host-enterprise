@@ -144,6 +144,18 @@ func runMigrate(args []string) error {
 // its site_delete audit event. An object already swept from the bucket has
 // to be brought back from the bucket's own versioning first
 // (docs/storage.md).
+func checkRestoreSiteName(ctx context.Context, q db.Querier, baseURL, owner, site string) error {
+	hosts, err := handler.NewHostModel(baseURL)
+	if err != nil {
+		return err
+	}
+	existing, err := db.ListSiteNamesByOwnerUsername(ctx, q, owner)
+	if err != nil {
+		return err
+	}
+	return hosts.CheckNewSiteName(owner, site, existing)
+}
+
 func runRestore(args []string) error {
 	fs := flag.NewFlagSet("restore", flag.ContinueOnError)
 	fromSiteID := fs.String("from-site-id", "", "id of the site the version was deployed to")
@@ -190,6 +202,11 @@ func runRestore(args []string) error {
 	target, err := db.GetSite(ctx, tx, user.ID, *site)
 	created := false
 	if errors.Is(err, sql.ErrNoRows) {
+		// A new site gets the same name rules as a create through the API,
+		// so a restore never makes a site that has no address.
+		if err := checkRestoreSiteName(ctx, tx, cfg.PublicBaseURL, *owner, *site); err != nil {
+			return fmt.Errorf("-site: %w", err)
+		}
 		target, err = db.CreateSite(ctx, tx, user.ID, *site)
 		created = true
 	}
