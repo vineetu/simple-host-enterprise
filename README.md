@@ -105,7 +105,7 @@ encrypted before the object ever reaches the bucket.
 
 ```sh
 make test      # go test ./...
-make test-db   # the migration chain on a throwaway Postgres
+make test-db   # go test ./... on a throwaway Postgres, as CI runs it
 make vuln      # govulncheck
 ```
 

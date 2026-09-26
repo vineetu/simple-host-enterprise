@@ -37,7 +37,19 @@ func TestAccessLevelsMigrationKeepsExistingLinks(t *testing.T) {
 	if _, err := admin.Exec(`CREATE DATABASE ` + pq.QuoteIdentifier(name)); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = admin.Exec(`DROP DATABASE IF EXISTS ` + pq.QuoteIdentifier(name) + ` WITH (FORCE)`) })
+	// A fresh connection: the deferred admin.Close() above runs before
+	// t.Cleanup does, so reusing admin here silently dropped nothing.
+	t.Cleanup(func() {
+		c, err := sql.Open("postgres", dsn)
+		if err != nil {
+			t.Logf("cleanup: %v", err)
+			return
+		}
+		defer c.Close()
+		if _, err := c.Exec(`DROP DATABASE IF EXISTS ` + pq.QuoteIdentifier(name) + ` WITH (FORCE)`); err != nil {
+			t.Logf("cleanup: drop %s: %v", name, err)
+		}
+	})
 	parsed.Path = "/" + name
 	db, err := sql.Open("postgres", parsed.String())
 	if err != nil {

@@ -5,12 +5,24 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # A real Postgres, so the tests gated on MIGRATE_TEST_DSN run here rather
+    # than skipping. Same image `make test-db` uses.
+    services:
+      postgres:
+        image: postgres:16.11@sha256:468e1f126ca5af849799cda06ac9b03d8090aae9fa5163408b3e8da44fad0702
+        env: {POSTGRES_USER: test, POSTGRES_PASSWORD: test, POSTGRES_DB: test}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U test"
+          --health-interval 2s --health-timeout 5s --health-retries 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with: {go-version-file: go.mod}
       - run: go vet ./...
-      - run: go test ./...
+      - name: go test (with Postgres; fails if a DB test skips)
+        env: {MIGRATE_TEST_DSN: "postgres://test:test@localhost:5432/test?sslmode=disable"}
+        run: ./scripts/test-db.sh
       - run: ./scripts/check-features.sh
       - name: gofmt
         run: test -z "$(gofmt -l cmd internal)" || { gofmt -l cmd internal; exit 1; }
