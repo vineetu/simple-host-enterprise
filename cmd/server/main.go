@@ -136,6 +136,11 @@ func run() (runErr error) {
 	// only after runServersWithShutdownHook's http.Server.Shutdown calls
 	// have returned, per its own doc comment's ordering requirement.
 	auditRecorder := audit.NewDBRecorder(database)
+	// stdoutLog is the one JSON writer on stdout: the request log below and
+	// the audit stream (one "type":"audit" line per event, for a SIEM)
+	// share it so their lines never interleave.
+	stdoutLog := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	auditRecorder.SetStream(stdoutLog)
 	accessWriter := audit.NewAccessWriter(database)
 	resources.accessWriter = accessWriter
 
@@ -252,7 +257,7 @@ func run() (runErr error) {
 	// "<owner>--<site>.<base>" host instead. Anything else gets probes only.
 	// The request log wraps everything, so every response carries a request
 	// id and every request, including one the gate refuses, is on record.
-	requestLog := reqlog.Middleware(slog.New(slog.NewJSONHandler(os.Stdout, nil)), reqlog.ProbePaths)
+	requestLog := reqlog.Middleware(stdoutLog, reqlog.ProbePaths)
 	hostGate := handler.NewHostGate(hosts, siteFiles, database, signingKeys, negativeSessionCache, handoffHandler, siteAPIHandler, authMW, cfg.PublicBaseURL)
 	gated := hostGate(mux)
 	// The state tools reach the site API the way a page does: on the owner's

@@ -638,7 +638,14 @@ func (h *ConnectorHandler) decide(w http.ResponseWriter, r *http.Request) {
 	}
 
 	code := randomToken(prefixCode)
-	if err := db.InsertOAuthCode(r.Context(), h.database, db.HashAPIKey(code), db.OAuthCode{
+	tx, err := h.database.BeginTx(r.Context(), nil)
+	if err != nil {
+		log.Printf("oauth: begin code: %v", err)
+		writeConnectError(w, "Something went wrong. Try connecting again.")
+		return
+	}
+	defer tx.Rollback()
+	if err := db.InsertOAuthCode(r.Context(), tx, db.HashAPIKey(code), db.OAuthCode{
 		ClientID:      req.Client.ClientID,
 		UserID:        user.ID,
 		RedirectURI:   req.RedirectURI,
@@ -650,11 +657,19 @@ func (h *ConnectorHandler) decide(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, "Something went wrong. Try connecting again.")
 		return
 	}
-	h.audit.Record(r.Context(), audit.Event{
+	err = h.audit.RecordTx(r.Context(), tx, audit.Event{
 		ActorID: user.ID, Action: "connector_sign_in", RequestID: auditRequestID(r.Context()),
 		Detail: "app " + req.Client.Name,
 		Extra:  map[string]any{"client_id": req.Client.ClientID, "redirect_uri": req.RedirectURI},
 	})
+	if err == nil {
+		err = tx.Commit()
+	}
+	if err != nil {
+		log.Printf("oauth: record/commit code: %v", err)
+		writeConnectError(w, "Something went wrong. Try connecting again.")
+		return
+	}
 	http.Redirect(w, r, h.redirectWith(req.RedirectURI, map[string]string{"code": code, "state": req.State}), http.StatusSeeOther)
 }
 
@@ -958,20 +973,29 @@ func (h *ConnectorHandler) revoke(w http.ResponseWriter, r *http.Request) {
 	}
 	tokenHash := db.HashAPIKey(token)
 	if tok, err := db.GetOAuthToken(r.Context(), h.database, tokenHash, false); err == nil && tok.ClientID == client.ClientID {
-		if tok.Kind == "refresh" {
-			err = db.DeleteOAuthGrant(r.Context(), h.database, tok.GrantID)
-		} else {
-			err = db.DeleteOAuthToken(r.Context(), h.database, tokenHash)
+		tx, err := h.database.BeginTx(r.Context(), nil)
+		if err == nil {
+			defer tx.Rollback()
+			if tok.Kind == "refresh" {
+				err = db.DeleteOAuthGrant(r.Context(), tx, tok.GrantID)
+			} else {
+				err = db.DeleteOAuthToken(r.Context(), tx, tokenHash)
+			}
+		}
+		if err == nil {
+			err = h.audit.RecordTx(r.Context(), tx, audit.Event{
+				ActorID: tok.UserID, Action: "connector_revoke", RequestID: auditRequestID(r.Context()),
+				Detail: "app revoked its " + tok.Kind + " token", Extra: map[string]any{"client_id": tok.ClientID},
+			})
+		}
+		if err == nil {
+			err = tx.Commit()
 		}
 		if err != nil {
 			log.Printf("oauth: revoke: %v", err)
 			oauthError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "")
 			return
 		}
-		h.audit.Record(r.Context(), audit.Event{
-			ActorID: tok.UserID, Action: "connector_revoke", RequestID: auditRequestID(r.Context()),
-			Detail: "app revoked its " + tok.Kind + " token", Extra: map[string]any{"client_id": tok.ClientID},
-		})
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)

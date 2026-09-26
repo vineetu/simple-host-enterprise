@@ -84,7 +84,7 @@ branch.
 | # | Finding | Control | Status |
 |---|---|---|---|
 | S9 | No HTTP request log | Structured JSON request log on stdout, one line per request, with a generated id echoed as `X-Request-Id` | Built |
-| S9a | No action audit beyond a few ad hoc tables | `audit_events` (partitioned by month, coalescing upsert for repeated state writes, least-privilege grant with no `UPDATE`/`DELETE` for the app role) is wired into every mutation handler — `site.go`, `collaboration.go`, `viewers.go`, `team.go`, `admin.go`, `site_api.go`, `assets_admin.go`, `admin_export.go`; `cmd/server/main.go`'s `auditRecorder` is a real `audit.NewDBRecorder(database)`. These actions call `RecordTx` inside a shared transaction, so the mutation cannot commit without its audit row: `site_create`/`site_update`/`site_delete`/`site_rollback` (`site.go`), `site_access`/`network_access_requested`/`network_access_reverted` (`access.go`), `network_access_approved`/`network_access_declined`/`network_access_reverted` from the admin page (`access.go`), `state_restore` (`access.go`), `viewer_grant`/`viewer_revoke` (`viewers.go`), `team_create`/`team_delete`/`member_add`/`member_remove` (`team.go`), and `state_write`/`asset_create`/`asset_delete` (`site_api.go`, plus `asset_delete`'s second call site in `assets_admin.go`'s dashboard mirror — both now share the guarantee; the asset file on disk stays outside the transaction by design in both, since an orphaned or already-removed file is recoverable while the row and its audit commit together). Ten actions remain best-effort `Record` with no shared transaction: `sign_in`/`sign_out`/`session_revoke` (`auth.go`), `key_mint`/`key_revoke` (`keys.go`), `hand_off` (`handoff.go`), and `admin_disable_user`/`admin_enable_user`/`admin_archive_versions`/`admin_export` (`admin.go`, `admin_export.go`) — see accepted limitations | Built |
+| S9a | No action audit beyond a few ad hoc tables | `audit_events` (partitioned by month, coalescing upsert for repeated state writes, least-privilege grant with no `UPDATE`/`DELETE` for the app role) is wired into every mutation handler — `site.go`, `collaboration.go`, `viewers.go`, `team.go`, `admin.go`, `site_api.go`, `assets_admin.go`, `admin_export.go`; `cmd/server/main.go`'s `auditRecorder` is a real `audit.NewDBRecorder(database)`. These actions call `RecordTx` inside a shared transaction, so the mutation cannot commit without its audit row: `site_create`/`site_update`/`site_delete`/`site_rollback` (`site.go`), `site_access`/`network_access_requested`/`network_access_reverted` (`access.go`), `network_access_approved`/`network_access_declined`/`network_access_reverted` from the admin page (`access.go`), `state_restore` (`access.go`), `viewer_grant`/`viewer_revoke` (`viewers.go`), `team_create`/`team_delete`/`member_add`/`member_remove` (`team.go`), and `state_write`/`asset_create`/`asset_delete` (`site_api.go`, plus `asset_delete`'s second call site in `assets_admin.go`'s dashboard mirror — both now share the guarantee; the asset file on disk stays outside the transaction by design in both, since an orphaned or already-removed file is recoverable while the row and its audit commit together). `sign_in` and `session_revoke` (`auth.go`), `key_mint`/`key_revoke` (`keys.go`), and `connector_sign_in`/`connector_revoke` on the token revocation endpoint (`connector.go`) also commit in one transaction with their session, key, code or grant write. The few left on best-effort `Record` (retried, then logged loudly) are listed under accepted limitations. Every audit row is hash-chained and streamed to stdout — see (e) | Built |
 | S9b | No access log; who viewed a site was never recorded | `access_log` and its batching `AccessWriter` (`internal/audit/access_writer.go`) are wired into `serveSite`'s status recorder (`serve.go`), enqueuing one row per hosted-content response including the owner's and team members' own. Under the default `ACCESS_LOG_VISIBILITY=counts` an owner or team member reading `GET /api/access` gets views per day and distinct viewers, never who; only admins see rows with names (`internal/handler/audit_access.go`'s `listAccessCounts`) | Built |
 
 ### (d) Hardening beyond the audit
@@ -96,6 +96,65 @@ Controls added on top of the 21 findings above.
 | Host-bound session cookie | A hosted-content or restricted-site session cookie's signed payload now carries the host it was minted for (`internal/auth/session_cookie.go`'s `SignHostSession`); `VerifyHostedSession` refuses a payload whose host claim does not match the request's own classified host, and refuses a payload with no host claim at all outright. This closes the gap `test/pentest`'s `TestSessionFixationAcrossHosts` demonstrated directly — a captured cookie value, presented by a non-browser client, would otherwise authenticate on every host the same person had ever opened, since the underlying session row is shared by design. | Built |
 | Anonymous network access | A `network` site is open without sign-in only after an admin approves the owner's request (`/admin` "Access requests", `POST /api/admin/access-requests/{owner}/{site}/approve`); until then it keeps its level. With no valid host session, the host gate lets through only that site's pages and assets on its owner host and a `GET` of its saved data (`host_gate.go`'s `requireHostSessionOrNetwork`, and the anonymous branch of `serveSiteAPI`). It cannot write saved data, upload or delete assets, reach the management API, or open any other site. Every other owner-host protection (`nosniff`, CORP, no service workers) stays. The owner can drop the level at any time; an admin can revoke to `company`. Each step is audited | Built |
 | Streaming archive size checks | `internal/tarball`'s extraction now checks each entry's own declared size against the remaining per-file/aggregate budget *before* allocating or decompressing it (`checkDeclaredSize`), so a refused entry costs zero allocation instead of up to the full 500 MiB cap; an accepted entry is read once at its own declared size rather than `io.ReadAll`'s doubling growth. A one-byte probe after the declared bytes catches a declared-small/actual-large decompression bomb at the cost of one byte read, not the hidden payload's size. Found and fixed after `TestArchiveBombs` OOM-killed the pod at the documented per-file ceiling on a 1Gi memory limit | Built |
+
+### (e) Audit tamper evidence and the SIEM stream
+
+**Hash chain.** Every row inserted into `audit_events` gets a row in
+`audit_chain` (migration 0036): `hash = sha256(prev_hash ||
+audit_event_canonical(row))`, the first `prev_hash` being 32 zero bytes. An
+`AFTER INSERT` trigger computes it inside Postgres, under a row lock on the
+single-row `audit_chain_head`, so two replicas inserting at once are
+serialized and cannot fork the chain. The trigger is `SECURITY DEFINER`:
+the application role has no privilege on either chain table and extends
+the chain only by inserting an event. What it covers, and what it does not:
+
+- Rows written before migration 0036 are not chained.
+- `state_write` rows are upserted (one per person, site and five-minute
+  window, with `detail.count` bumped). The canonical form leaves the count
+  out, so the row is tamper-evident but the count is not. The trigger fires
+  only for rows actually inserted, never for the bump.
+- `access_log` is not chained: it is written in batches by an async writer
+  at page-view volume, and a global lock per view would serialize every
+  page view across replicas.
+- `simple-host prune` deletes the chain rows for the partitions it drops
+  (the chain's oldest rows, as a prefix). Verification starts at the first
+  remaining row and trusts its `prev_hash` as the anchor.
+- The owning database role can rewrite events and recompute the whole
+  chain. Against that, keep the `head SEQ:HASH` `audit-verify` prints
+  somewhere the database owner cannot edit (a ticket, the SIEM), and pass it
+  to the next run as `audit-verify -expect SEQ:HASH`: the chain must still
+  carry that hash at that seq. The SIEM stream below is a second,
+  independent copy of every event.
+- Performance: the head lock is held until the inserting transaction
+  commits. Audited mutations are low-volume, and `state_write` takes the
+  lock only on the first write of each window. Every code path records its
+  audit row last in its transaction (team deletion records its rows after
+  the deletes), so a transaction never holds the head lock while waiting
+  for another row lock.
+
+**Verifying.** `simple-host audit-verify` connects as the owning role (the
+same credentials `prune` uses), walks the chain in `seq` order, checks
+each `prev_hash` against the previous row's hash, recomputes each hash in
+SQL with the same `audit_event_canonical` function, and checks the last row
+against the head. It prints the first break (seq, event id, time, and
+whether the event is missing, changed, or chain rows were deleted) and
+exits non-zero; on success it prints the rows checked and the head as
+`SEQ:HASH`. To pass `-expect`, add it to the args list below
+(`['audit-verify','-expect','SEQ:HASH']`).
+Run it from the prune CronJob's pod template, which carries those
+credentials (the command follows the job's output, prints `audit chain OK`
+or `audit chain BROKEN at ...`, and deletes the job):
+
+```sh
+kubectl --context "$CTX" -n simple-host create job simple-host-audit-verify --from=cronjob/simple-host-prune --dry-run=client -o json | python3 -c "import json,sys; j=json.load(sys.stdin); j['spec']['template']['spec']['containers'][0]['args']=['audit-verify']; j['spec']['backoffLimit']=0; j['spec']['template']['spec']['restartPolicy']='Never'; print(json.dumps(j))" | kubectl --context "$CTX" -n simple-host create -f - && kubectl --context "$CTX" -n simple-host logs -f --pod-running-timeout=2m job/simple-host-audit-verify; kubectl --context "$CTX" -n simple-host delete job simple-host-audit-verify
+```
+
+**SIEM stream.** After an audit row is written, the server also writes the
+event to stdout as one JSON line with `"type":"audit"` (see "Streaming the
+audit log to a SIEM" in `docs/configuration.md`). For an event recorded
+inside a larger transaction the line is written before that transaction
+commits, so a rolled-back change can still appear in the stream: the
+database and its chain are authoritative.
 
 ## 3. What a penetration test should try
 
@@ -196,28 +255,25 @@ Stated once, not repeated per finding:
   human-readable on the row) carry most of the practical signal in the
   meantime. A fix needs either a join in `internal/db`'s query or a batch
   lookup in the handler.
-- **Every admin action still audits with `Record`, not `RecordTx`.** A
-  follow-up landed moving the site-facing API's `state_write`
-  (`PutState`/`PutStateVersioned`), `asset_create`, and `asset_delete`
-  (`internal/handler/site_api.go`), plus `asset_delete`'s second call site,
-  the dashboard's base-host mirror (`internal/handler/assets_admin.go`'s
-  `deleteCollaborationAsset`), onto `RecordTx` inside a transaction shared
-  with the database write — confirmed directly:
-  `grep -n "RecordTx(" internal/handler/site_api.go` hits all four call
-  sites (`PutState`, `PutStateVersioned`, `CreateAsset`, `DeleteAsset`),
-  and the same grep against `assets_admin.go` now hits
-  `deleteCollaborationAsset` too. In both files, the asset's file on disk
-  is deliberately kept outside the transaction: an orphaned or
-  already-removed file from a partial failure is recoverable, while the
-  row and its audit row now commit or roll back together. What did
-  **not** move: `admin_disable_user`/`admin_enable_user`/
-  `admin_archive_versions`/`admin_export`
-  (`admin.go`, `admin_export.go`) still call the older, best-effort
-  `Record`. `admin_disable_user`/`admin_enable_user` specifically cannot
-  move without a signature change to `db.SetUserDisabled`, which opens and
-  commits its own internal transaction with no way for the caller to
-  share it; the other three admin actions are disk/worker operations with
-  no database transaction of their own to share.
+- **A few audit writes are still best-effort.** Everything else commits
+  its audit row in the mutation's own transaction (`RecordTx`). These call
+  `Record`, which writes in its own transaction, ignores the request's
+  cancellation, retries twice (after 100 ms and 400 ms), and then logs
+  `AUDIT WRITE FAILED: action=... actor=... owner=... site=... team=...
+  request=...` (no secrets) and carries on:
+  - `sign_out` (`auth.go`) and `connector_revoke` after a reused refresh
+    token (`connector.go`): the revocation must stand even when the audit
+    sink is down, so it is not rolled back with a failed audit row.
+  - `admin_disable_user`/`admin_enable_user` (`admin.go`):
+    `db.SetUserDisabled` opens and commits its own transaction (the
+    last-admin lock and the credential revocations), with no way for the
+    caller to share it.
+  - `access_denied` (`host_gate.go`, `admin.go`), `sign_in_failed`
+    (`auth.go`) and `admin_export` (`admin_export.go`): refusals and a
+    read, with no write to tie the row to.
+  - `hand_off` (`handoff.go`): the one-time code is spent by
+    `db.RedeemHandoffCode` in its own statement before the session cookie
+    is issued; the session it derives from was itself audited at sign-in.
 - **`audit_events` and `access_log` carry no foreign keys on `actor_id`,
   `key_id`, `owner_id`, `site_id`, `team_id`, `user_id`, or `session_id`**
   (migration `0028_audit_events_drop_fks.sql`, dropping constraints

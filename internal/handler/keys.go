@@ -136,7 +136,14 @@ func (h *KeysHandler) mint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hash := db.HashAPIKey(plaintext)
-	key, err := db.CreateAPIKey(r.Context(), h.database, user.ID, req.Name, hash, db.KeyPrefix(hash), time.Now().AddDate(0, 0, days), req.Scope)
+	tx, err := h.database.BeginTx(r.Context(), nil)
+	if err != nil {
+		log.Printf("keys: begin mint for %s: %v", user.Username, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	defer tx.Rollback()
+	key, err := db.CreateAPIKey(r.Context(), tx, user.ID, req.Name, hash, db.KeyPrefix(hash), time.Now().AddDate(0, 0, days), req.Scope)
 	if err != nil {
 		if isUniqueViolation(err) {
 			// A hash collision on 256 random bits is not a real-world event;
@@ -148,7 +155,16 @@ func (h *KeysHandler) mint(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	h.audit.Record(r.Context(), audit.Event{ActorID: user.ID, Action: "key_mint", Detail: key.Prefix, Extra: map[string]any{"scope": key.Scope}, RequestID: auditRequestID(r.Context())})
+	if err := h.audit.RecordTx(r.Context(), tx, audit.Event{ActorID: user.ID, Action: "key_mint", Detail: key.Prefix, Extra: map[string]any{"scope": key.Scope}, RequestID: auditRequestID(r.Context())}); err != nil {
+		log.Printf("keys: record key_mint for %s: %v", user.Username, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		log.Printf("keys: commit mint for %s: %v", user.Username, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
 	writeJSON(w, http.StatusCreated, apiKeyResponse{
 		ID:        key.ID,
 		Name:      key.Name,
@@ -195,7 +211,14 @@ func (h *KeysHandler) revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	if err := db.RevokeAPIKey(r.Context(), h.database, user.ID, id); err != nil {
+	tx, err := h.database.BeginTx(r.Context(), nil)
+	if err != nil {
+		log.Printf("keys: begin revoke %s for %s: %v", id, user.Username, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	defer tx.Rollback()
+	if err := db.RevokeAPIKey(r.Context(), tx, user.ID, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, errorResponse{Error: "key not found"})
 			return
@@ -204,6 +227,14 @@ func (h *KeysHandler) revoke(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	h.audit.Record(r.Context(), audit.Event{ActorID: user.ID, Action: "key_revoke", Detail: id, RequestID: auditRequestID(r.Context())})
+	err = h.audit.RecordTx(r.Context(), tx, audit.Event{ActorID: user.ID, Action: "key_revoke", Detail: id, RequestID: auditRequestID(r.Context())})
+	if err == nil {
+		err = tx.Commit()
+	}
+	if err != nil {
+		log.Printf("keys: record/commit revoke %s for %s: %v", id, user.Username, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }

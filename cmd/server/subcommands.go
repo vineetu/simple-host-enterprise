@@ -3,11 +3,15 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/vsriram/simple-host/internal/audit"
@@ -31,11 +35,13 @@ func runSubcommand(name string, args []string) error {
 		return runMigrateStorage(args)
 	case "prune":
 		return runPrune(args)
+	case "audit-verify":
+		return runAuditVerify(args)
 	case "version":
 		fmt.Println(versionString())
 		return nil
 	default:
-		return fmt.Errorf("unknown subcommand %q (expected: migrate, restore, migrate-storage, prune, version)", name)
+		return fmt.Errorf("unknown subcommand %q (expected: migrate, restore, migrate-storage, prune, audit-verify, version)", name)
 	}
 }
 
@@ -211,7 +217,9 @@ func runRestore(args []string) error {
 	}
 	// Recorded in the same transaction, like every other change to what a
 	// site serves; an operator command has no signed-in actor.
-	if err := audit.NewDBRecorder(database).RecordTx(ctx, tx, audit.Event{
+	recorder := audit.NewDBRecorder(database)
+	recorder.SetStream(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	if err := recorder.RecordTx(ctx, tx, audit.Event{
 		ActorKind: "system", Action: "site_restore", OwnerID: user.ID, SiteID: target.ID,
 		Extra: map[string]any{
 			"from_site_id": *fromSiteID, "from_version": *version,
@@ -452,12 +460,65 @@ func runPrune(args []string) error {
 	for _, p := range result.Dropped {
 		log.Printf("dropped %s partition %s (covered up to %s)", p.Table, p.Partition, p.MonthEnd.Format("2006-01-02"))
 	}
-	log.Printf("prune: %d partition(s) dropped", len(result.Dropped))
+	log.Printf("prune: %d partition(s) dropped, %d audit chain row(s) trimmed", len(result.Dropped), result.ChainTrimmed)
 	sessions, err := db.PruneSessions(context.Background(), database, int(retention.AccessLogRetentionDays))
 	if err != nil {
 		return fmt.Errorf("prune sessions: %w", err)
 	}
 	log.Printf("prune: %d ended session(s) deleted", sessions)
+	return nil
+}
+
+// runAuditVerify walks the audit hash chain (migration 0036) and reports the
+// first break, exiting non-zero; on success it prints how many rows it
+// checked and the head hash, which is worth keeping outside the database to
+// compare the next run against. It connects the way prune does, as the
+// owning role: the application role cannot read the chain.
+func runAuditVerify(args []string) error {
+	fs := flag.NewFlagSet("audit-verify", flag.ContinueOnError)
+	expectFlag := fs.String("expect", "", "SEQ:HASH from an earlier run's output; the chain must still carry that hash at that seq")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	var expect audit.ChainExpectation
+	if *expectFlag != "" {
+		seq, hash, ok := strings.Cut(*expectFlag, ":")
+		n, err := strconv.ParseInt(seq, 10, 64)
+		raw, herr := hex.DecodeString(hash)
+		if !ok || err != nil || n < 1 || herr != nil || len(raw) != 32 {
+			return errors.New("-expect must be SEQ:HASH as audit-verify printed it")
+		}
+		expect = audit.ChainExpectation{Seq: n, Hash: raw}
+	}
+	dsn, err := config.LoadDatabase()
+	if err != nil {
+		return err
+	}
+	database, err := sql.Open("postgres", dsn)
+	if err != nil {
+		return fmt.Errorf("open postgres: %w", err)
+	}
+	defer database.Close()
+
+	report, err := audit.VerifyChain(context.Background(), database, expect)
+	if err != nil {
+		return fmt.Errorf("audit-verify: %w", err)
+	}
+	if report.Break != nil {
+		fmt.Printf("audit chain BROKEN at %s (%d row(s) checked before it)\n", report.Break, report.Rows)
+		return errors.New("audit chain verification failed")
+	}
+	if report.Rows == 0 {
+		if report.ExpectPruned {
+			fmt.Printf("note: seq %d has been pruned; -expect could not be checked\n", expect.Seq)
+		}
+		fmt.Println("audit chain OK: no chained events remain")
+		return nil
+	}
+	if report.ExpectPruned {
+		fmt.Printf("note: seq %d has been pruned; -expect could not be checked\n", expect.Seq)
+	}
+	fmt.Printf("audit chain OK: %d row(s) checked (seq %d to %d), head %d:%s\n", report.Rows, report.FirstSeq, report.HeadSeq, report.HeadSeq, report.HeadHash)
 	return nil
 }
 

@@ -338,7 +338,20 @@ func (h *AuthHandler) callback(w http.ResponseWriter, r *http.Request) {
 
 	ip := reqlog.ClientIP(r)
 	expiresAt := time.Now().Add(h.sessionTTL)
-	session, err := db.CreateSession(r.Context(), h.database, user.ID, expiresAt, ip, r.UserAgent())
+	tx, err := h.database.BeginTx(r.Context(), nil)
+	if err != nil {
+		log.Printf("auth: begin session for %s: %v", user.Username, err)
+		writeAuthError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	defer tx.Rollback()
+	session, err := db.CreateSession(r.Context(), tx, user.ID, expiresAt, ip, r.UserAgent())
+	if err == nil {
+		err = h.audit.RecordTx(r.Context(), tx, audit.Event{ActorID: user.ID, Action: "sign_in", Detail: "session " + session.ID, RequestID: auditRequestID(r.Context())})
+	}
+	if err == nil {
+		err = tx.Commit()
+	}
 	if err != nil {
 		log.Printf("auth: create session for %s: %v", user.Username, err)
 		writeAuthError(w, http.StatusInternalServerError, "internal server error")
@@ -359,7 +372,6 @@ func (h *AuthHandler) callback(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 		Expires:  expiresAt,
 	})
-	h.audit.Record(r.Context(), audit.Event{ActorID: user.ID, Action: "sign_in", Detail: "session " + session.ID, RequestID: auditRequestID(r.Context())})
 
 	target := state.To
 	if target == "" {
@@ -510,7 +522,14 @@ func (h *AuthHandler) revokeSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	if err := db.RevokeSession(r.Context(), h.database, user.ID, id); err != nil {
+	tx, err := h.database.BeginTx(r.Context(), nil)
+	if err != nil {
+		log.Printf("auth: begin revoke session %s: %v", id, err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+	if err := db.RevokeSession(r.Context(), tx, user.ID, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.Error(w, "session not found", http.StatusNotFound)
 			return
@@ -519,7 +538,15 @@ func (h *AuthHandler) revokeSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
-	h.audit.Record(r.Context(), audit.Event{ActorID: user.ID, Action: "session_revoke", Detail: "session " + id, RequestID: auditRequestID(r.Context())})
+	err = h.audit.RecordTx(r.Context(), tx, audit.Event{ActorID: user.ID, Action: "session_revoke", Detail: "session " + id, RequestID: auditRequestID(r.Context())})
+	if err == nil {
+		err = tx.Commit()
+	}
+	if err != nil {
+		log.Printf("auth: record/commit revoke session %s: %v", id, err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
 	http.Redirect(w, r, "/auth/sessions", http.StatusSeeOther)
 }
 

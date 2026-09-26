@@ -137,7 +137,7 @@ func ListSessionsForUser(ctx context.Context, db *sql.DB, userID string) ([]Sess
 // RevokeSession revokes one session, scoped to userID so a person can only
 // revoke their own. Returns sql.ErrNoRows if it doesn't exist, isn't theirs,
 // or is already revoked.
-func RevokeSession(ctx context.Context, db *sql.DB, userID, sessionID string) error {
+func RevokeSession(ctx context.Context, db Querier, userID, sessionID string) error {
 	const query = `
 		UPDATE sessions SET revoked_at = now()
 		WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL

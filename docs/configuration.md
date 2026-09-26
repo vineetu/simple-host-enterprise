@@ -153,6 +153,51 @@ owning role, never from the server's own connection pool.
 | `ACCESS_LOG_RETENTION_DAYS` | No | `90` | Must be a positive integer. Also how long `prune` keeps a session (and its IP and user agent) after it expired or was signed out. |
 | `ACCESS_LOG_VISIBILITY` | No | `counts` | Must be `counts`, `owner` or `admin`. `counts` (the default) answers a site's owner and team members on `GET /api/access` with views per day and the number of distinct viewers, never who; `owner` gives them each visit with the viewer's user id (IP and user agent stay admin-only); `admin` refuses every non-admin caller of that route outright. Admins always see full rows. Read by `handler.NewAuditHandler` (`cmd/server/main.go`); does not affect `GET /api/audit`, which is always scoped by caller identity rather than gated by this switch. |
 
+## Streaming the audit log to a SIEM
+
+Nothing to configure. After each audit row is written, the server writes
+the same event to stdout as one JSON line, alongside the request log's
+lines (the two share one writer, so lines never interleave):
+
+```json
+{"time":"...","level":"INFO","msg":"audit","type":"audit","at":"2026-09-26T10:00:00.123Z","action":"key_mint","actor_id":"...","actor_kind":"person","key_id":"","owner_id":"","site_id":"","team_id":"","ip":"10.0.0.9","user_agent":"...","request_id":"...","detail":{"note":"abc123"}}
+```
+
+`type` is always `"audit"` and the field names are stable; an empty string
+means the field does not apply. `at` is the server's clock at write time
+(the row's own `at` is the database's). A line is written only after the
+database write succeeded, but an event recorded inside a larger
+transaction is streamed before that transaction commits, so the database
+(and its hash chain, `simple-host audit-verify`) is authoritative. Every
+`state_write` is streamed, including the ones the database coalesces into
+one row per five-minute window.
+
+Forward it with whatever log shipper the cluster already runs (Fluent Bit,
+Vector, the OpenTelemetry Collector, the Datadog Agent, Splunk OTel, Elastic
+Agent): tail the `simple-host` pods' stdout (label `app=simple-host`),
+parse each line as JSON, and keep the lines where `type` is `audit`.
+Fluent Bit, after its `kubernetes` filter with `Merge_Log On`:
+
+```ini
+[FILTER]
+    Name   grep
+    Match  kube.*
+    Regex  type ^audit$
+```
+
+Vector, on a `kubernetes_logs` source named `k8s`:
+
+```toml
+[transforms.simple_host_audit]
+type = "remap"
+inputs = ["k8s"]
+drop_on_abort = true
+source = """
+. = object!(parse_json!(string!(.message)))
+if .type != "audit" { abort }
+"""
+```
+
 ## Site bucket (S3-compatible)
 
 The bucket is the site store: every site version and asset lives here, not on

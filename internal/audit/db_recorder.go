@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"log"
+	"log/slog"
 	"time"
 
 	dbstore "github.com/vsriram/simple-host/internal/db"
@@ -27,6 +28,12 @@ const coalesceWindow = 5 * time.Minute
 // actions already makes synchronously today.
 type DBRecorder struct {
 	db *sql.DB
+	// stream, when set, gets one JSON line per event written (see
+	// SetStream). nil writes nothing.
+	stream *slog.Logger
+	// retryDelays are the waits before Record's second and later
+	// attempts. A field so a test can shorten them.
+	retryDelays []time.Duration
 }
 
 // NewDBRecorder builds a Recorder backed by database. database must not be
@@ -35,21 +42,44 @@ func NewDBRecorder(database *sql.DB) *DBRecorder {
 	if database == nil {
 		panic("audit: NewDBRecorder requires a non-nil database")
 	}
-	return &DBRecorder{db: database}
+	return &DBRecorder{db: database, retryDelays: []time.Duration{100 * time.Millisecond, 400 * time.Millisecond}}
+}
+
+// SetStream makes the recorder also write every event it persists to
+// logger as one JSON line with "type":"audit" — the SIEM stream (see
+// docs/configuration.md). cmd/server passes the request log's own stdout
+// JSON logger, so the two share one writer and one lock and their lines
+// never interleave. It must be called before the recorder is used.
+func (r *DBRecorder) SetStream(logger *slog.Logger) {
+	r.stream = logger
 }
 
 // Record persists event outside any caller transaction, using its own
-// implicit one. This is what the existing call sites use (they call
-// Record, not RecordTx), and what a caller with no transaction to share
-// should keep using; a failure is logged, not returned, matching
-// audit.NoOp's shape so a sign-in or key mint is never blocked by the audit
-// sink being unavailable — the "must not block the request path" half of
-// the Recorder contract. RecordTx exists for the opposite guarantee.
+// implicit one, for a call site with no transaction to share (see
+// docs/security-review.md for which those are). A failure is retried and
+// then logged, not returned, so a sign-out or an access refusal is never
+// blocked by the audit sink being unavailable — the "must not block the
+// request path" half of the Recorder contract. RecordTx exists for the
+// opposite guarantee.
+//
+// The write ignores the request's cancellation (a client that hangs up
+// right after its sign-out must not take the audit row with it), bounded
+// by a timeout of its own.
 func (r *DBRecorder) Record(ctx context.Context, event Event) {
-	if err := r.write(ctx, r.db, event); err != nil {
-		log.Printf("audit: record %s failed (actor=%s owner=%s site=%s): %v",
-			event.Action, event.ActorID, event.OwnerID, event.SiteID, err)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	var err error
+	for attempt := 0; ; attempt++ {
+		if err = r.write(ctx, r.db, event); err == nil {
+			return
+		}
+		if attempt >= len(r.retryDelays) || ctx.Err() != nil {
+			break
+		}
+		time.Sleep(r.retryDelays[attempt])
 	}
+	log.Printf("AUDIT WRITE FAILED: action=%s actor=%s owner=%s site=%s team=%s request=%s: %v",
+		event.Action, event.ActorID, event.OwnerID, event.SiteID, event.TeamID, event.RequestID, err)
 }
 
 // RecordTx persists event inside tx, so a caller whose mutation and audit
@@ -68,6 +98,14 @@ func (r *DBRecorder) RecordTx(ctx context.Context, tx *sql.Tx, event Event) erro
 func (r *DBRecorder) write(ctx context.Context, q dbstore.Querier, event Event) error {
 	event = withRequestInfo(ctx, event)
 	now := time.Now()
+	if err := r.persist(ctx, q, event, now); err != nil {
+		return err
+	}
+	r.emit(event, now)
+	return nil
+}
+
+func (r *DBRecorder) persist(ctx context.Context, q dbstore.Querier, event Event, now time.Time) error {
 	if event.Action == "state_write" {
 		// The coalescing arbiter is (site_id, actor_id, at); Postgres never
 		// considers one NULL equal to another, so a state_write with either
@@ -111,4 +149,38 @@ func withRequestInfo(ctx context.Context, event Event) Event {
 		event.UserAgent = record.UserAgent
 	}
 	return event
+}
+
+// emit writes event to the SIEM stream, after the database write
+// succeeded. For RecordTx the caller's transaction can still roll back
+// after this, so a streamed line can describe a change that never
+// committed: the database (and its hash chain) is authoritative. "at" is
+// this server's clock; the row's own at is the database's.
+func (r *DBRecorder) emit(event Event, now time.Time) {
+	if r.stream == nil {
+		return
+	}
+	kind := event.ActorKind
+	if kind == "" {
+		kind = "person"
+	}
+	detail := event.detailJSON()
+	if detail == nil {
+		detail = map[string]any{}
+	}
+	r.stream.LogAttrs(context.Background(), slog.LevelInfo, "audit",
+		slog.String("type", "audit"),
+		slog.String("at", now.UTC().Format(time.RFC3339Nano)),
+		slog.String("action", event.Action),
+		slog.String("actor_id", event.ActorID),
+		slog.String("actor_kind", kind),
+		slog.String("key_id", event.KeyID),
+		slog.String("owner_id", event.OwnerID),
+		slog.String("site_id", event.SiteID),
+		slog.String("team_id", event.TeamID),
+		slog.String("ip", event.IP),
+		slog.String("user_agent", event.UserAgent),
+		slog.String("request_id", event.RequestID),
+		slog.Any("detail", detail),
+	)
 }
