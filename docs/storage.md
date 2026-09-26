@@ -21,7 +21,16 @@ sites down with it (they answer 503), not just deploys and sign-in.
 
 Each pod keeps a local cache of the versions it serves in an `emptyDir` at
 `CACHE_DIR`, emptied on start and bounded by `CACHE_MAX_BYTES` (versions
-being served are pinned, so the volume is sized at about 3x that). A pod
+being served are pinned, so the volume is sized at about 3x that). A cache
+miss streams the version's archive (or the asset) from the bucket to a file
+on that volume and unpacks it from there, so a fill does not hold the object
+in memory; the volume also needs room for one compressed archive per fill in
+progress. With `BACKUP_ENVELOPE_KEY` set, an object's body is one AES-GCM
+seal that can only be checked once it is read whole, so an enveloped fill
+buffers the object in memory (one copy, decrypted in place). A pod holds at
+most 1 GiB of such buffers at once, half the reference 2Gi memory limit:
+further enveloped fills wait for room (within the fill's two-minute limit)
+rather than run the pod out of memory. A pod
 holds nothing that is not in the bucket or the database, so the Deployment
 runs two replicas, one per node when there are several, with rolling
 updates and a PodDisruptionBudget. `/readyz` fails only on the database

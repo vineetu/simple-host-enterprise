@@ -173,12 +173,18 @@ spec:
             # the two concurrent upload slots abuse_limits.go allows; it
             # does not cover two simultaneous worst-case uploads landing in
             # the same GC window, which is a capacity-planning question for
-            # an installation's real traffic, not this limit's job.
+            # an installation's real traffic, not this limit's job. Cache
+            # fills stream to the cache volume; with the envelope on they
+            # buffer the object instead, capped at 1 GiB per pod in total
+            # (internal/storage/budget.go). A worst-case enveloped fill
+            # landing alongside two worst-case uploads exceeds 2Gi; raise
+            # the limit if real traffic has both.
             limits: { cpu: "1", memory: 2Gi }
       volumes:
         # Pod-local cache of site versions (CACHE_DIR), emptied on start.
         # CACHE_MAX_BYTES bounds unpinned entries only; versions being served
-        # stay pinned, hence the headroom.
+        # stay pinned, and a fill in progress downloads its compressed
+        # archive here first, hence the headroom.
         - name: cache
           emptyDir:
             sizeLimit: 3Gi

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"os"
@@ -161,6 +162,36 @@ func (c *cache) fill(ctx context.Context, name string, fill func(context.Context
 		return nil, err
 	}
 	return &cacheEntry{name: name, size: size, refs: 1, lastUsed: c.clock()}, nil
+}
+
+// download writes one object to a temporary file on the
+// cache volume and returns it open and rewound. The file is already unlinked
+// when download returns, so it needs no cleanup beyond Close; a process that
+// dies mid-download leaves nothing behind (openCache also clears the
+// directory on start). The volume needs headroom for one such file per
+// concurrent fill, on top of the unpacked entries.
+func (c *cache) download(ctx context.Context, objects Objects, key string, maxBytes int64) (*os.File, error) {
+	name, err := uniqueName(".download-")
+	if err != nil {
+		return nil, err
+	}
+	file, err := c.root.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.root.Remove(name); err != nil {
+		file.Close()
+		return nil, err
+	}
+	if _, err := objects.GetTo(ctx, key, maxBytes, file); err != nil {
+		file.Close()
+		return nil, err
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		file.Close()
+		return nil, err
+	}
+	return file, nil
 }
 
 func (c *cache) release(entry *cacheEntry) {

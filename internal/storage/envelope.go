@@ -97,7 +97,9 @@ func wrapObject(objectKey string, plaintext []byte, envelopeKey EnvelopeKey) ([]
 // object's metadata among the configured keys (by id, so a rotation in
 // progress unwraps objects wrapped under either the old or the new key), then
 // decrypts the data key and the body in turn. AES-GCM's tag makes both steps
-// fail closed on any corruption or tampering.
+// fail closed on any corruption or tampering. The body is decrypted in place,
+// so ciphertext is overwritten and must not be used afterwards: a large
+// object then needs one buffer, not two.
 func unwrapObject(objectKey string, ciphertext []byte, metadata map[string]string, keys []EnvelopeKey) ([]byte, error) {
 	keyID := metadata[metaEnvelopeKeyID]
 	var envelopeKey *EnvelopeKey
@@ -148,7 +150,7 @@ func unwrapObject(objectKey string, ciphertext []byte, metadata map[string]strin
 	default:
 		return nil, fmt.Errorf("unknown envelope format %q", metadata[metaEnvelopeFormat])
 	}
-	plaintext, err := dataGCM.Open(nil, dataNonce, ciphertext, associated)
+	plaintext, err := dataGCM.Open(ciphertext[:0], dataNonce, ciphertext, associated)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt object body (key id %q): %w", keyID, err)
 	}

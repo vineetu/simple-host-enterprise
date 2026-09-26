@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -23,6 +24,12 @@ func (g *gatedObjects) Get(ctx context.Context, key string, maxBytes int64) ([]b
 	g.once.Do(func() { close(g.started) })
 	<-g.release
 	return g.recordingObjects.Get(ctx, key, maxBytes)
+}
+
+func (g *gatedObjects) GetTo(ctx context.Context, key string, maxBytes int64, w io.Writer) (int64, error) {
+	g.once.Do(func() { close(g.started) })
+	<-g.release
+	return g.recordingObjects.GetTo(ctx, key, maxBytes, w)
 }
 
 func TestCacheConcurrentOpensShareOneFetch(t *testing.T) {

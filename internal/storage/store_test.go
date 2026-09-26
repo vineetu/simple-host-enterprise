@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -50,6 +51,13 @@ func (r *recordingObjects) Get(ctx context.Context, key string, maxBytes int64) 
 	r.gets[key]++
 	r.mu.Unlock()
 	return r.Objects.Get(ctx, key, maxBytes)
+}
+
+func (r *recordingObjects) GetTo(ctx context.Context, key string, maxBytes int64, w io.Writer) (int64, error) {
+	r.mu.Lock()
+	r.gets[key]++
+	r.mu.Unlock()
+	return r.Objects.GetTo(ctx, key, maxBytes, w)
 }
 
 func (r *recordingObjects) Put(ctx context.Context, key string, body []byte, contentType string) error {

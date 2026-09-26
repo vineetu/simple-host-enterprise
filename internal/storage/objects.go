@@ -32,6 +32,11 @@ type Objects interface {
 	Put(ctx context.Context, key string, body []byte, contentType string) error
 	// Get returns the whole object, refusing one larger than maxBytes.
 	Get(ctx context.Context, key string, maxBytes int64) ([]byte, error)
+	// GetTo writes the object to w, refusing one larger than maxBytes, and
+	// returns the bytes written. Cache fills use it so a large object goes
+	// to disk rather than into memory. On error w may hold a partial body,
+	// which the caller must discard.
+	GetTo(ctx context.Context, key string, maxBytes int64, w io.Writer) (int64, error)
 	// Delete removes one object. Deleting a missing key is not an error.
 	Delete(ctx context.Context, key string) error
 	List(ctx context.Context, prefix string) ([]ObjectInfo, error)
@@ -79,6 +84,26 @@ func (m *MemoryObjects) Get(_ context.Context, key string, maxBytes int64) ([]by
 		return nil, ErrObjectTooLarge
 	}
 	return bytes.Clone(body), nil
+}
+
+func (m *MemoryObjects) GetTo(_ context.Context, key string, maxBytes int64, w io.Writer) (int64, error) {
+	m.mu.Lock()
+	body, ok := m.objects[key]
+	fail := m.Fail
+	m.mu.Unlock()
+	if fail != nil {
+		return 0, fail
+	}
+	if !ok {
+		return 0, fmt.Errorf("%w: %s", ErrObjectNotFound, key)
+	}
+	if int64(len(body)) > maxBytes {
+		return 0, ErrObjectTooLarge
+	}
+	// Stored bodies are never modified in place (Put and Copy store clones),
+	// so writing from it outside the lock is safe and copies nothing.
+	n, err := w.Write(body)
+	return int64(n), err
 }
 
 func (m *MemoryObjects) Delete(_ context.Context, key string) error {
@@ -141,12 +166,30 @@ func (m *MemoryObjects) Keys() []string {
 
 // readBounded reads at most maxBytes from body, failing if there is more.
 func readBounded(body io.Reader, maxBytes int64) ([]byte, error) {
-	data, err := io.ReadAll(io.LimitReader(body, maxBytes+1))
-	if err != nil {
+	return readBoundedSized(body, maxBytes, -1)
+}
+
+// readBoundedSized is readBounded with the expected length (the response's
+// Content-Length, or -1 when unknown), so a known-size body is read into one
+// exact allocation instead of a buffer that doubles as it grows.
+func readBoundedSized(body io.Reader, maxBytes, expected int64) ([]byte, error) {
+	if expected < 0 || expected > maxBytes {
+		data, err := io.ReadAll(io.LimitReader(body, maxBytes+1))
+		if err != nil {
+			return nil, err
+		}
+		if int64(len(data)) > maxBytes {
+			return nil, ErrObjectTooLarge
+		}
+		return data, nil
+	}
+	data := make([]byte, expected)
+	if _, err := io.ReadFull(body, data); err != nil {
 		return nil, err
 	}
-	if int64(len(data)) > maxBytes {
-		return nil, ErrObjectTooLarge
+	var extra [1]byte
+	if n, _ := io.ReadFull(body, extra[:]); n != 0 {
+		return nil, errors.New("body is longer than its declared length")
 	}
 	return data, nil
 }

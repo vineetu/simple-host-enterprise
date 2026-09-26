@@ -289,29 +289,28 @@ func (s *Store) OpenAsset(ctx context.Context, siteID, id string, maxBytes int64
 	}
 	name := siteID + ".a." + id
 	entry, err := s.cache.acquire(ctx, name, func(ctx context.Context, temporary string) (int64, error) {
-		body, err := s.objects.Get(ctx, key, maxBytes)
-		if errors.Is(err, ErrObjectNotFound) {
-			return 0, ErrAssetNotFound
-		}
-		if err != nil {
-			return 0, err
-		}
-		if sum := sha256.Sum256(body); !bytes.Equal(sum[:], wantSHA256) {
-			return 0, fmt.Errorf("asset %s does not match its recorded sha256", key)
-		}
 		file, err := s.cache.root.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {
 			return 0, err
 		}
-		_, writeErr := file.Write(body)
+		// Streamed to the cache file while hashing, never held in memory;
+		// a failed fill's file is removed by the cache.
+		hasher := sha256.New()
+		written, getErr := s.objects.GetTo(ctx, key, maxBytes, io.MultiWriter(file, hasher))
 		closeErr := file.Close()
-		if writeErr != nil {
-			return 0, writeErr
+		if errors.Is(getErr, ErrObjectNotFound) {
+			return 0, ErrAssetNotFound
+		}
+		if getErr != nil {
+			return 0, getErr
 		}
 		if closeErr != nil {
 			return 0, closeErr
 		}
-		return int64(len(body)) + cacheBlockOverhead, nil
+		if !bytes.Equal(hasher.Sum(nil), wantSHA256) {
+			return 0, fmt.Errorf("asset %s does not match its recorded sha256", key)
+		}
+		return written + cacheBlockOverhead, nil
 	})
 	if err != nil {
 		return nil, err
