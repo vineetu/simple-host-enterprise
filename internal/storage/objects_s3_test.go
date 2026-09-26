@@ -92,6 +92,23 @@ func (f *fakeS3) GetObject(_ context.Context, in *s3.GetObjectInput, _ ...func(*
 	}, nil
 }
 
+func (f *fakeS3) HeadObject(_ context.Context, in *s3.HeadObjectInput, _ ...func(*s3.Options)) (*s3.HeadObjectOutput, error) {
+	if err := f.checkBucket(in.Bucket); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	obj, ok := f.objects[aws.ToString(in.Key)]
+	if !ok {
+		return nil, &types.NotFound{Message: aws.String("not found " + aws.ToString(in.Key))}
+	}
+	return &s3.HeadObjectOutput{
+		ContentLength: aws.Int64(int64(len(obj.body))),
+		ContentType:   aws.String(obj.contentType),
+		Metadata:      maps.Clone(obj.metadata),
+	}, nil
+}
+
 func (f *fakeS3) DeleteObject(_ context.Context, in *s3.DeleteObjectInput, _ ...func(*s3.Options)) (*s3.DeleteObjectOutput, error) {
 	if err := f.checkBucket(in.Bucket); err != nil {
 		return nil, err

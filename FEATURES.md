@@ -159,7 +159,7 @@ Config names are documented in `docs/configuration.md`; schema in
   label uniqueness.
 - **Config.** `PUBLIC_BASE_URL`, `RESERVED_LABELS`.
 
-## 6. Bucket storage, cache, retire sweep, migrate-storage and restore
+## 6. Bucket storage, cache, retire sweep, migrate-storage, restore and reencrypt
 
 - **What.** The S3-compatible bucket is the site store:
   `sites/<id>/v<N>.tar.gz` per version and `sites/<id>/assets/<id>` per asset,
@@ -168,21 +168,27 @@ Config names are documented in `docs/configuration.md`; schema in
   envelope. Unreferenced objects are queued in `storage_retired` in the same
   transaction and deleted by a sweeper after a one-hour grace (every 5 min,
   `SKIP LOCKED`, safe on every replica). Operator subcommands:
-  `simple-host migrate-storage` (one-time move off the old volume) and
-  `simple-host restore`. A bucket fault does not fail `/readyz`
+  `simple-host migrate-storage` (one-time move off the old volume),
+  `simple-host restore`, and `simple-host reencrypt` (rewrites every stored
+  object under the first `BACKUP_ENVELOPE_KEY` in the key-bound form, so old
+  keys can be removed and a plaintext install can adopt the envelope;
+  idempotent, verified read-back, rewrites a version only once a committed
+  row names it). A bucket fault does not fail `/readyz`
   (`simplehost_bucket_ok` instead).
 - **Status.** Built.
 - **Routes.** None of its own. **MCP.** None.
 - **Skill.** None.
 - **Go.** `internal/storage/` (`store.go`, `cache.go`, `sweep.go`,
   `objects.go`, `objects_s3.go`, `envelope.go`, `archive.go`, `keys.go`,
-  `migrate.go`); `internal/db/storage.go`; `cmd/server/subcommands.go`.
+  `migrate.go`, `reencrypt.go`); `internal/db/storage.go`,
+  `db.VersionExists`; `cmd/server/subcommands.go`.
 - **DB.** `storage_retired` (0032).
 - **Config.** `BACKUP_STORAGE_ENDPOINT`, `BACKUP_STORAGE_BUCKET`,
   `BACKUP_STORAGE_PREFIX`, `BACKUP_STORAGE_REGION`,
   `BACKUP_STORAGE_ACCESS_KEY_ID`, `BACKUP_STORAGE_SECRET_ACCESS_KEY`,
   `BACKUP_STORAGE_INSECURE_ALLOWED`, `BACKUP_SSE`, `BACKUP_SSE_KEY_ID`,
-  `BACKUP_ENVELOPE_KEY` (or `BACKUP_ENVELOPE_KEY_FILE`), `CACHE_DIR`,
+  `BACKUP_ENVELOPE_KEY` (or `BACKUP_ENVELOPE_KEY_FILE`),
+  `BACKUP_ENVELOPE_PLAINTEXT_ALLOWED`, `CACHE_DIR`,
   `CACHE_MAX_BYTES`. See `docs/storage.md`.
 
 ## 7. Access levels and network approval

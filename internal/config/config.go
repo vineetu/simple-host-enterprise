@@ -40,9 +40,9 @@ const (
 	// key material: 32 random bytes, used directly as an AES-256 key.
 	envelopeKeyLength = 32
 	// maxEnvelopeKeys: the first key wraps, every configured key unwraps.
-	// Stored objects are immutable and live as long as the version or asset
-	// they hold, so a retired key must stay configured for good; the limit
-	// leaves room for several rotations.
+	// A retired key stays configured until `simple-host reencrypt` has
+	// rewritten every object under the first key; the limit leaves room for
+	// rotations whose old keys have not been removed yet.
 	maxEnvelopeKeys = 8
 
 	// signingKeyLength is the fixed size of a SESSION_SIGNING_KEY entry: 32
@@ -788,8 +788,8 @@ func validateBackupSSE(b BackupConfig) error {
 }
 
 // parseEnvelopeKeys reads BACKUP_ENVELOPE_KEY: empty disables the client-side
-// envelope; otherwise 1 or 2 comma-separated "<id>:<base64 32 bytes>" entries,
-// the first of which wraps every new backup object while every entry is
+// envelope; otherwise 1 to maxEnvelopeKeys comma-separated
+// "<id>:<base64 32 bytes>" entries, the first of which wraps every new backup object while every entry is
 // tried, by id, to unwrap an existing one (the same rotation shape used
 // for SESSION_SIGNING_KEY).
 func parseEnvelopeKeys(raw string) ([]EnvelopeKey, error) {
