@@ -951,3 +951,25 @@ func TestParseKeysNeverEchoesKeyMaterial(t *testing.T) {
 		t.Fatalf("parseKeys error echoes the key: %v", err)
 	}
 }
+
+func TestLoadRefusesGoogleWithoutAllowedDomains(t *testing.T) {
+	for _, issuer := range []string{"https://accounts.google.com", "https://accounts.google.com/", " HTTPS://Accounts.Google.com "} {
+		completeEnv(t)
+		t.Setenv("OIDC_ISSUER", issuer)
+		t.Setenv("ALLOWED_EMAIL_DOMAINS", "")
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "ALLOWED_EMAIL_DOMAINS") {
+			t.Fatalf("issuer %q: Load() error = %v, want refusal naming ALLOWED_EMAIL_DOMAINS", issuer, err)
+		}
+		t.Setenv("ALLOWED_EMAIL_DOMAINS", "example.com")
+		if _, err := Load(); err != nil {
+			t.Fatalf("issuer %q with domains: %v", issuer, err)
+		}
+	}
+	// Other issuers are scoped by the issuer itself: empty is allowed.
+	completeEnv(t)
+	t.Setenv("OIDC_ISSUER", "https://example.okta.com")
+	t.Setenv("ALLOWED_EMAIL_DOMAINS", "")
+	if _, err := Load(); err != nil {
+		t.Fatalf("non-Google issuer with empty ALLOWED_EMAIL_DOMAINS: %v", err)
+	}
+}

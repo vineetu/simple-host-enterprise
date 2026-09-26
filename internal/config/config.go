@@ -511,6 +511,14 @@ func Load() (Config, error) {
 	if err := validateOIDCIssuer(cfg.OIDC.Issuer, cfg.OIDC.InsecureAllowed); err != nil {
 		return Config{}, fmt.Errorf("OIDC_ISSUER: %w", err)
 	}
+	// Google issues tokens for every Google account in the world, and its
+	// Workspace hd check only runs against this list, so an empty list
+	// there is an open door, not a default. Other issuers are scoped to
+	// one tenant by the issuer URL itself (Okta, single-tenant Entra ID);
+	// cmd/server logs advice for them instead of refusing.
+	if isGoogleIssuer(cfg.OIDC.Issuer) && len(cfg.OIDC.AllowedEmailDomains) == 0 {
+		return Config{}, errors.New("ALLOWED_EMAIL_DOMAINS must be set when OIDC_ISSUER is Google: without it any Google account can sign in")
+	}
 	if len(cfg.OIDC.AdminClaim) > 0 != (len(cfg.OIDC.AdminValue) > 0) {
 		return Config{}, errors.New("OIDC_ADMIN_CLAIM and OIDC_ADMIN_VALUE must be set together")
 	}
@@ -578,6 +586,10 @@ func parseTrustedProxies(raw string) ([]netip.Prefix, error) {
 		out = append(out, netip.PrefixFrom(addr.Unmap(), addr.Unmap().BitLen()))
 	}
 	return out, nil
+}
+
+func isGoogleIssuer(issuer string) bool {
+	return strings.TrimRight(strings.ToLower(strings.TrimSpace(issuer)), "/") == "https://accounts.google.com"
 }
 
 // validateOIDCIssuer refuses Entra ID's multi-tenant endpoints: with

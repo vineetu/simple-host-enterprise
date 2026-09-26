@@ -173,6 +173,9 @@ func run() (runErr error) {
 			log.Printf("ADMIN_EMAILS: updated admin status for %d account(s)", changed)
 		}
 	}
+	if len(cfg.OIDC.AllowedEmailDomains) == 0 {
+		log.Printf("ALLOWED_EMAIL_DOMAINS is empty: anyone %s issues a verified-email token for can sign in; set it unless the issuer is already limited to your company's own tenant", cfg.OIDC.Issuer)
+	}
 	oidcClaims := handler.OIDCClaimConfig{
 		Issuer:              cfg.OIDC.Issuer,
 		EmailClaim:          cfg.OIDC.EmailClaim,

@@ -222,7 +222,7 @@ lines (kustomize reads them as env files).
 | `OIDC_ISSUER`, `OIDC_CLIENT_ID` | From HUMAN STEP A |
 | `OIDC_SCOPES` | Leave at `openid email profile` unless the provider notes say otherwise |
 | `ADMIN_EMAILS` | Step 0 answer, comma-separated |
-| `ALLOWED_EMAIL_DOMAINS` | Step 0 answer, comma-separated. Never leave empty on Google: empty means anyone with a Google account can sign in |
+| `ALLOWED_EMAIL_DOMAINS` | Step 0 answer, comma-separated. Required with Google (the server refuses to start without it: empty would let any Google account sign in). With another provider, empty means whoever the provider issues a token for, and the server logs a reminder at startup |
 | `TRUSTED_PROXY_CIDRS` | The range the ingress controller's pods get their addresses from, so rate limits and logs see each person's address instead of the ingress's. Read the pod IPs with `kubectl --context "$CTX" -n <ingress-namespace> get pod -o wide` and use the pod network range they fall in (for example `192.168.0.0/16`). A node's `.spec.podCIDR` is not always that range: CNIs such as Cilium in cluster-pool mode assign pod IPs from their own pool |
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` | From section 2 |
 | `DB_SSLMODE`, `DB_SSL_ROOT_CERT` | Leave as `verify-full` and `/etc/simple-host/db-ca/ca.crt` |
@@ -231,6 +231,21 @@ lines (kustomize reads them as env files).
 
 Never set `DB_INSECURE_ALLOWED`, `BACKUP_STORAGE_INSECURE_ALLOWED` or
 `OIDC_INSECURE_ALLOWED` on a real install.
+
+### Internal-only installs
+
+Nothing in the package checks where the install is reachable from. If it
+sits on an internal-only ingress, the cloud AI apps (ChatGPT, Claude on the
+web) cannot reach its `/mcp` at all, since their servers call it from the
+internet. Say so in config too: set `OAUTH_REDIRECT_HOSTS` to only the apps
+you use inside the network, for example `localhost` (command-line agents on
+the person's own machine) plus `vscode.dev` or `cursor://anysphere.cursor-mcp`
+if those are in use. The default list includes `chatgpt.com` and
+`claude.ai`; an app whose redirect host is not listed can register but can
+never finish connecting. The certificate in "done" (top of this file) still has to be
+publicly trusted (a DNS-01 issuer works for a name only reachable inside),
+and section 8's check runs from any machine on the network that is not in
+the cluster.
 
 ### Sessions and leavers
 
