@@ -4,6 +4,60 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## v1.2.1 — 2026-09-26
+
+Schema 0040. Migration 0040 only adds a read-only function and is marked
+backward-compatible, so rolling back to v1.2.0 is safe. Skills are at 0.12.1
+(0.11.0 still works).
+
+### Sign-in
+- With `OIDC_ISSUER=https://accounts.google.com`, the server refuses to
+  start while `ALLOWED_EMAIL_DOMAINS` is empty: any Google account could
+  otherwise sign in. Set it before upgrading a Google install. Other issuers still start with it empty (an Okta org or
+  a single-tenant Entra ID issuer is already your own) and log a reminder.
+- INSTALL.md, "Internal-only installs": how to narrow `OAUTH_REDIRECT_HOSTS`
+  (whose default admits `chatgpt.com` and `claude.ai`) when the install is
+  not reachable from the internet.
+
+### Keys
+- `GET /api/audit` and `GET /api/access` give the company-wide view only to
+  an admin's browser session. An admin's API key (any scope) or connected
+  app now sees what anyone else sees: their own namespace and their teams'.
+- Skills 0.12.1 ask for a **Publish** key by default, and for **Full** only
+  when the user wants a management action a publish key cannot do.
+
+### Audit
+- Each stdout audit line now carries its row's chain `seq` and `hash`, and
+  is written only after the transaction that recorded it commits, so the
+  SIEM never receives a rolled-back event and holds an anchor for every
+  event it received. `audit-verify -expect SEQ:HASH` with any SIEM line's
+  values proves the database still agrees; a database owner who rewrites
+  rows and recomputes the chain is caught that way (docs/configuration.md).
+  Migration 0040 adds `audit_chain_entry`, which lets the server's role
+  read one event's seq and hash and nothing else of the chain.
+- `audit-verify` recomputes each event's canonical form and SHA-256 in Go
+  instead of calling the database's `audit_event_canonical`, so redefining
+  that function no longer hides a rewritten row.
+
+### Uploads and serving
+- A deploy is refused if it contains Windows or other executables,
+  installers, packages or disk images, in addition to the source scripts
+  refused before: `.exe .dll .msi .msix .appx .scr .com .pif .cpl .hta .vbs
+  .vbe .jse .wsf .wsh .lnk .reg .jar .apk .aab .pkg .deb .rpm .iso .img`.
+  `.js`, ZIP and DMG are still served. The list is in
+  `docs/configuration.md`; `CLAMD_ADDR` is the scan for the bytes.
+- Cache fills no longer read a whole version into memory: a plain object
+  streams from the bucket to a temporary file on the cache volume. An
+  envelope-encrypted object is still read whole (its AES-GCM tag covers the
+  whole body) but decrypted in place, and at most 1 GiB of such bodies are
+  held at once per pod; further fills wait. Leave room on the cache volume
+  for one compressed archive per fill in progress (docs/storage.md).
+
+### CI
+- CI runs the whole test suite against a real Postgres, including the
+  migration, grants, audit trigger and least-privilege tests, and fails if
+  any of them skip. `make test-db` runs the same thing locally.
+
 ## v1.2.0 — 2026-09-26
 
 Schema 0039. Migrations 0035–0039 are additive and marked
