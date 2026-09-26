@@ -846,6 +846,17 @@ func GetMaxVersionNumber(ctx context.Context, db Querier, siteID string) (int, e
 	return maxVersion, err
 }
 
+// VersionExists reports whether a committed versions row names siteID's
+// version. `simple-host reencrypt` rewrites a version object only then: until
+// its deploy commits, the same number can be allocated again and its object
+// overwritten.
+func VersionExists(ctx context.Context, db Querier, siteID string, versionNumber int) (bool, error) {
+	const query = `SELECT EXISTS (SELECT 1 FROM versions WHERE site_id = $1 AND version_number = $2)`
+	var exists bool
+	err := db.QueryRowContext(ctx, query, siteID, versionNumber).Scan(&exists)
+	return exists, err
+}
+
 const listVersionsQuery = `
 	SELECT v.id, v.site_id, v.version_number, v.s3_prefix, v.status,
 		v.uploaded_by, uploader.username, v.created_at

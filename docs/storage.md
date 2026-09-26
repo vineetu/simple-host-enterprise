@@ -120,20 +120,108 @@ Since v1.1.3 each enveloped object is also bound to its own object key
 another site's key does not decrypt, so someone who can write to the bucket
 cannot swap one site's content in for another's. Objects written by v1.1.0
 to v1.1.2 carry no format field and are still read (the server logs this
-once per start); they stay in the older form until rewritten, and every new
-deploy, upload and restore writes the bound form. Assets are also checked
+once per start); they stay in the older form until `simple-host reencrypt`
+rewrites them (below), and every new deploy, upload and restore writes the
+bound form. Assets are also checked
 against the SHA-256 their row recorded before they are served.
 
 With the envelope on, an object without it is refused: only someone with
 bucket access could have put it there. An install that added
 `BACKUP_ENVELOPE_KEY` after it already held sites sets
 `BACKUP_ENVELOPE_PLAINTEXT_ALLOWED=true` so those older, unenveloped objects
-stay readable.
+stay readable, then encrypts them with `simple-host reencrypt` and turns the
+allowance off again (see "Adopting the envelope on an existing install").
 
-Rotating the envelope key: add the new key second, deploy, swap the order so
-the new key wraps new objects, deploy. **Never remove the old key.** Objects
-are immutable and long-lived; removing a key makes every object wrapped
-under it unreadable.
+### Rotating the envelope key
+
+Every object stays wrapped under the key that was first when it was
+written, so an old key has to stay in `BACKUP_ENVELOPE_KEY` until
+`simple-host reencrypt` has rewritten every object under the new one. The
+command reads each object with whichever configured key it names, writes it
+back under the first key in the bound form (the same write a deploy makes),
+reads it back and compares the plaintext's SHA-256 before counting it. An
+object already under the first key in the bound form is recognised from its
+metadata alone and left alone, so the command is safe to re-run and to stop
+at any point; it runs next to the live servers.
+
+1. Generate the new key, with an id that is not in use yet (`k2` here),
+   and **escrow it in your organisation's secret store before first use**:
+
+   ```sh
+   echo "k2:$(openssl rand -base64 32)"
+   ```
+
+2. Add it **second** in `BACKUP_ENVELOPE_KEY` in the overlay's
+   `secrets.env` (`k1:<old>,k2:<new>`), re-apply the overlay
+   (`kustomize build deploy/overlays/<overlay> | kubectl apply -f -`), then restart and wait:
+
+   ```sh
+   kubectl -n simple-host rollout restart deploy/simple-host && kubectl -n simple-host rollout status deploy/simple-host
+   ```
+
+   Every pod can now read objects under either key. (Putting it first
+   straight away would let an updated pod write objects that a pod still
+   on the old configuration cannot read during the rollout.)
+3. Move it **first** (`k2:<new>,k1:<old>`), re-apply, restart and wait
+   again. New deploys and uploads are now wrapped under `k2`.
+4. See what would change, then re-encrypt:
+
+   ```sh
+   kubectl -n simple-host exec deploy/simple-host -- /simple-host reencrypt -dry-run
+   ```
+
+   ```sh
+   kubectl -n simple-host exec deploy/simple-host -- /simple-host reencrypt
+   ```
+
+   It prints `reencrypt: N scanned, M rewritten, K already current, S
+   skipped, E failed` every 100 objects and once more at the end.
+   `-concurrency` (default 4) sets how many objects are worked at once;
+   each is held in memory while it is rewritten, so lower it if the pod is
+   short of memory. If the session drops, run it again: it carries on
+   where it stopped.
+5. Run it a second time. It must end with `0 rewritten` and `0 failed`.
+6. Remove the old key (`k2:<new>` alone), re-apply, restart and wait. Keep
+   the old key in escrow until the bucket's lifecycle rule has expired the
+   noncurrent versions written before step 4 (30 days with the rule
+   above): they are still wrapped under it, and recovering one through
+   bucket versioning needs it back in `BACKUP_ENVELOPE_KEY`.
+
+**Skipped** objects are ones the server never reads: version archives no
+committed version names (a deploy in flight, a failed deploy's leftover, or
+a version or site queued for deletion, which the sweeper deletes within the
+hour without decrypting it), and anything under `sites/` the store does not
+write. Each is listed with its reason. A deploy in flight at the time is
+written under the new key anyway.
+
+**Failed** objects are listed with the error and left exactly as they were;
+the command exits non-zero. Do not remove any key until a run reports 0
+failed. The usual causes: an object under a key id that is no longer
+configured (put that key back, anywhere after the first, and re-run); a
+plaintext object while `BACKUP_ENVELOPE_PLAINTEXT_ALLOWED` is off (see the
+next section, or find out who put it there); an object that does not
+decrypt under its key, which means it was corrupted or tampered with in the
+bucket. For that one, recover an intact noncurrent version with the
+bucket's versioning (as in "Restoring a version" below) and re-run, or, if
+its site no longer needs it, deploy a new version so it is retired.
+
+### Adopting the envelope on an existing install
+
+The same command encrypts an install whose objects were written without the
+envelope:
+
+1. Generate and escrow a key as in step 1 above (`k1:...`).
+2. Set `BACKUP_ENVELOPE_KEY=k1:<key>` and
+   `BACKUP_ENVELOPE_PLAINTEXT_ALLOWED=true`, re-apply, restart and wait.
+   New writes are enveloped; the older plaintext objects stay readable.
+3. Run `reencrypt` as in steps 4 and 5 until a second run shows
+   `0 rewritten` and `0 failed`.
+4. Set `BACKUP_ENVELOPE_PLAINTEXT_ALLOWED=false` (or remove it), re-apply,
+   restart and wait. From now on a plaintext object in the bucket is
+   refused.
+
+The plaintext copies survive as noncurrent versions until the lifecycle rule
+expires them.
 
 ## Migrating from a PVC install
 

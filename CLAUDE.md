@@ -42,7 +42,7 @@ anything: they say what exists and what is deliberately unfinished.
 
 - `cmd/server/main.go` wires config, database, storage, handlers, the host
   gate, the request log, and the servers. `subcommands.go` is `migrate`,
-  `restore`, `migrate-storage`, `prune`, and `audit-verify`.
+  `restore`, `migrate-storage`, `reencrypt`, `prune`, and `audit-verify`.
 - `internal/config` reads the environment. Required values have no default;
   the database DSN and the bucket endpoint are additionally refused if their
   TLS is weaker than required, unless the local-evaluation

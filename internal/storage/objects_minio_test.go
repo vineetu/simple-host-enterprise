@@ -191,3 +191,28 @@ func TestMinIOStoreRoundTrip(t *testing.T) {
 		t.Fatalf("Usage = %v, %v", usage, err)
 	}
 }
+
+// TestMinIOReencrypt proves the HEAD-based "already current" check and the
+// rewrite against a real S3 API (metadata casing, HeadObject errors).
+func TestMinIOReencrypt(t *testing.T) {
+	oldKey, newKey := testKey("old", 0x7c), testKey("new", 0x7d)
+	objects := minioObjects(t, []EnvelopeKey{oldKey})
+	ctx := context.Background()
+	key, _ := VersionKey(testSiteA, 1)
+	body := []byte("minio reencrypt")
+	if err := objects.Put(ctx, key, body, "application/gzip"); err != nil {
+		t.Fatal(err)
+	}
+	objects.envelopeKeys = []EnvelopeKey{newKey, oldKey}
+	opts := ReencryptOptions{VersionCommitted: func(context.Context, string, int) (bool, error) { return true, nil }}
+	for i, want := range []ReencryptStats{{Scanned: 1, Rewritten: 1}, {Scanned: 1, Current: 1}} {
+		stats, err := objects.Reencrypt(ctx, opts)
+		if err != nil || stats != want {
+			t.Fatalf("run %d = %v, %v; want %v", i+1, stats, err, want)
+		}
+	}
+	objects.envelopeKeys = []EnvelopeKey{newKey}
+	if got, err := objects.Get(ctx, key, 1<<20); err != nil || !bytes.Equal(got, body) {
+		t.Fatalf("Get with the new key alone = %q, %v", got, err)
+	}
+}

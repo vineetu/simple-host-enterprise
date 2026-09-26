@@ -10,8 +10,10 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/vsriram/simple-host/internal/audit"
@@ -33,6 +35,8 @@ func runSubcommand(name string, args []string) error {
 		return runRestore(args)
 	case "migrate-storage":
 		return runMigrateStorage(args)
+	case "reencrypt":
+		return runReencrypt(args)
 	case "prune":
 		return runPrune(args)
 	case "audit-verify":
@@ -41,7 +45,7 @@ func runSubcommand(name string, args []string) error {
 		fmt.Println(versionString())
 		return nil
 	default:
-		return fmt.Errorf("unknown subcommand %q (expected: migrate, restore, migrate-storage, prune, audit-verify, version)", name)
+		return fmt.Errorf("unknown subcommand %q (expected: migrate, restore, migrate-storage, reencrypt, prune, audit-verify, version)", name)
 	}
 }
 
@@ -368,6 +372,55 @@ func migrateVersion(ctx context.Context, objects storage.Objects, siteDir *os.Ro
 		return 0, err
 	}
 	return storage.UploadVersionArchive(ctx, objects, siteID, version, archive)
+}
+
+// runReencrypt rewrites every stored object under the first
+// BACKUP_ENVELOPE_KEY entry in the key-bound envelope form, so the keys after
+// it can be removed, and encrypts objects written before the envelope was on
+// (docs/storage.md, "Rotating the envelope key"). It is safe to re-run and
+// to run next to the servers; see storage.S3Objects.Reencrypt. Any object
+// that could not be rewritten makes it exit non-zero.
+func runReencrypt(args []string) error {
+	fs := flag.NewFlagSet("reencrypt", flag.ContinueOnError)
+	dryRun := fs.Bool("dry-run", false, "only report what would be rewritten (every such object is still read and decrypted)")
+	concurrency := fs.Int("concurrency", 4, "objects worked at once")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *concurrency < 1 || *concurrency > 64 {
+		return errors.New("-concurrency must be between 1 and 64")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if len(cfg.Backup.EnvelopeKeys) == 0 {
+		return storage.ErrNoEnvelopeKey
+	}
+	database, objects, err := openDatabaseAndObjects(cfg)
+	if err != nil {
+		return err
+	}
+	defer database.Close()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	stats, err := objects.Reencrypt(ctx, storage.ReencryptOptions{
+		DryRun:      *dryRun,
+		Concurrency: *concurrency,
+		VersionCommitted: func(ctx context.Context, siteID string, version int) (bool, error) {
+			return db.VersionExists(ctx, database, siteID, version)
+		},
+		Logf: log.Printf,
+	})
+	log.Printf("reencrypt: done%s: %s", dryRunSuffix(*dryRun), stats)
+	if err != nil {
+		return err
+	}
+	if stats.Failed > 0 {
+		return fmt.Errorf("%d object(s) could not be re-encrypted; they are unchanged and still need their old key (or BACKUP_ENVELOPE_PLAINTEXT_ALLOWED): fix and re-run", stats.Failed)
+	}
+	return nil
 }
 
 func dryRunSuffix(dryRun bool) string {

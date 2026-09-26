@@ -58,7 +58,9 @@ accounts (`admin@example.com` / `person@example.com`) to sign in with; see
   `simple-host restore` copies a stored version of any site, live or
   deleted, into a site as its next version; `simple-host migrate-storage`
   moves an older install's site volume into the bucket
-  (`docs/storage.md`); `simple-host prune` drops
+  (`docs/storage.md`); `simple-host reencrypt` rewrites every stored
+  object under the current envelope key, so old keys can be removed;
+  `simple-host prune` drops
   expired audit/access-log partitions on a monthly `CronJob`
   (`deploy/base/cronjob-prune.yaml`), under the database's owning
   credential rather than the application's own role.

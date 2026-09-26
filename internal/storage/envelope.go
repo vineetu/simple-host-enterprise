@@ -16,11 +16,11 @@ var legacyEnvelopeOnce sync.Once
 // envelope. The first configured key wraps every new object; every
 // configured key is tried, by id, to unwrap an existing one.
 //
-// Objects are immutable and kept for as long as the version or asset they
-// hold is retained, so an object wrapped under a key needs that key for as
-// long as the object exists. Rotation is therefore: add the new key second,
-// deploy, swap the order, deploy — and keep the old key configured. Removing
-// a key makes every object still wrapped under it unreadable.
+// An object wrapped under a key needs that key for as long as the object
+// exists. Rotation is therefore: put the new key first (keeping the old ones
+// after it), deploy, run `simple-host reencrypt` (S3Objects.Reencrypt) until
+// it reports no failures, and only then remove the old keys. Removing a key
+// any earlier makes every object still wrapped under it unreadable.
 type EnvelopeKey struct {
 	ID  string
 	Key []byte
