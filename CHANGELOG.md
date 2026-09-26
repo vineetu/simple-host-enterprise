@@ -66,7 +66,9 @@ works).
   `413`), `QUOTA_MAX_VERSIONS` (default 5 per site, as before; older
   versions go to the retire queue). The dashboard shows usage against them.
   Existing versions' sizes are filled in from the bucket in the background
-  (`versions.size_bytes`, 0037).
+  (`versions.size_bytes`, 0037); until that fill finishes on a large
+  install, a version whose size is not yet recorded does not count toward
+  `QUOTA_MAX_BYTES`.
 - Optional malware scan: with `CLAMD_ADDR` set, every file of a deploy and
   every uploaded asset is streamed to clamd before anything is stored; an
   infected upload is refused with `422`, and an unreachable scanner refuses
