@@ -121,7 +121,9 @@ func run() (runErr error) {
 	}
 	handler.SetExtraReservedLabels(cfg.ReservedLabels)
 	cookiePolicy := handler.CookiePolicy{Secure: cfg.SecureMode}
-	abuseLimits := handler.NewAbuseLimits()
+	// Sign-in, hand-off, key mint and the connector token/registration
+	// limits are counted in Postgres so every replica shares one budget.
+	abuseLimits := handler.NewAbuseLimits().WithSharedStore(database)
 	publicSearchHandler, err := newPublicSearchHandler(database, cookiePolicy, abuseLimits)
 	if err != nil {
 		return fmt.Errorf("create public search handler: %w", err)

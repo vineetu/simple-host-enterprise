@@ -427,16 +427,20 @@ Config names are documented in `docs/configuration.md`; schema in
 - **What.** `/healthz` (liveness) and `/readyz` (database and schema; bucket is
   reported, not gating) on every host. `/metrics` on its own port, never on
   the Service or Ingress: request counts and latency, `simplehost_bucket_ok`,
-  DB pool, build info. Structured request log. Process-wide rate limits and
-  concurrency slots. Per-site daily views (bot traffic split out; deploy-check
+  DB pool, build info. Structured request log. Rate limits and concurrency
+  slots: sign-in, session hand-off, API key mint and the connector's token
+  and registration limits are counted in Postgres and shared by every
+  replica; every other limit is per pod in memory (`docs/install.md`,
+  "Rate limits and replicas"). Per-site daily views (bot traffic split out; deploy-check
   traffic via `CheckHeader` not counted as human) and file downloads.
 - **Status.** Built.
 - **Routes.** `GET /healthz`, `GET /readyz`, `GET /metrics` (metrics port).
 - **MCP.** None.
 - **Go.** `internal/handler/health.go`, `abuse_limits.go`, `client_kind.go`,
   `download_recorder.go`; `internal/metrics/`; `internal/reqlog/`;
-  `internal/ratelimit/`.
-- **DB.** `site_daily_analytics` (0003, 0013), `site_file_downloads` (0009).
+  `internal/ratelimit/` (`limiter.go` per pod, `shared.go` shared).
+- **DB.** `site_daily_analytics` (0003, 0013), `site_file_downloads` (0009),
+  `rate_limit_counters` (0039).
 - **Config.** `METRICS_PORT`, `PORT`, `HTTPS_REDIRECT_PORT`, `SECURE_MODE`,
   `TRUSTED_PROXY_CIDRS`.
 

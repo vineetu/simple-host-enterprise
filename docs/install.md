@@ -561,6 +561,42 @@ rollback is refused, either roll forward (fix and ship a new image), or
 restore the database with your managed PITR to a time before the upgrade,
 which loses every write since then.
 
+### Rate limits and replicas
+
+Every limit is keyed per caller (`docs/security-review.md`, S15). The
+security-relevant ones are counted in Postgres (table
+`rate_limit_counters`, migration 0039), so they hold across any number of
+replicas; the rest are counted in each pod's memory, so N replicas allow
+N times their budget.
+
+| Limit | Routes | Budget | Counted |
+|---|---|---|---|
+| `auth-client` | `/auth/login`, `/auth/callback`, `/auth/handoff`, the host gate's `/auth/session`, `GET /oauth/authorize` | 20 per 100 s per address (per user once signed in) | Shared |
+| `api-key-mint` | `POST /api/keys` | 30 per 300 s per user | Shared |
+| `oauth-register` | `POST /oauth/register` | 30 per 300 s per address | Shared |
+| `oauth-token` | `POST /oauth/token`, `POST /oauth/revoke` | 120 per 60 s per address | Shared |
+| state, management, admin, search | the site-facing state API, management and admin routes, search | as in `internal/handler/abuse_limits.go` | Per pod |
+
+Shared limits are the ones a guessing or minting attacker would spread
+over replicas: sign-in, session hand-off, API key mint, and the
+connector's token and registration endpoints. Each is a fixed window
+derived from the in-memory token bucket it replaces (limit = burst,
+window = burst / refill rate: the same long-run rate and burst), one
+database statement per request, with `Retry-After` set to the end of the
+window. The window is computed by the database, so pods with skewed clocks
+agree. Keys are SHA-256 digests; no address, user id or email is stored.
+Rows are deleted by the server itself, at most once a minute per pod, an
+hour after their window started — nothing to schedule.
+
+The per-pod limits are abuse and cost guards (state reads and writes,
+management calls, search) where a larger budget with more replicas is
+acceptable and a database round trip on every request is not worth it.
+If the database cannot answer a shared check within a second, that
+request is counted against the pod's in-memory limit instead (logged at
+most once a minute): sign-in is neither locked out nor left unlimited
+during a database blip. During a rolling upgrade from v1.1.x, old pods
+still count in memory until they are replaced.
+
 ### If you use a private registry
 
 Put the pull secret on the **ServiceAccount**, not the Deployment. Two
@@ -634,10 +670,11 @@ cluster, where the image is loaded into the node and never pulled at all.
 - **`make smoke` or a manual pen-test run starts failing with `429`s, or
   "gave no redirect to the identity provider," after several back-to-back
   runs from the same machine in a short window.** Not a regression:
-  `/auth/*` is rate-limited by peer address (Burst 20, refill 0.2/s), and
-  each sign-in-driven check in the smoke and pen-test suites uses several
-  requests against it. Wait two to three minutes between runs, or space
-  out individual `go test -run` invocations.
+  `/auth/*` is rate-limited by client address (20 requests per 100-second
+  window, shared by every replica), and each sign-in-driven check in the
+  smoke and pen-test suites uses several requests against it. Wait two to
+  three minutes between runs, or space out individual `go test -run`
+  invocations.
 - **`/readyz` reports `503` forever after you change a migration that
   drops a column or trigger.** The readiness probe
   (`internal/handler/health.go`) checks for specific schema objects by
