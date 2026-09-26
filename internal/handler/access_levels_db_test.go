@@ -35,6 +35,13 @@ const accessBase = "hosting.corp.test"
 
 func newAccessWorld(t *testing.T) *accessWorld {
 	t.Helper()
+	return newAccessWorldApprovals(t, 1)
+}
+
+// newAccessWorldApprovals is newAccessWorld with NETWORK_ACCESS_APPROVALS
+// set to approvals, and a second admin, "ada".
+func newAccessWorldApprovals(t *testing.T, approvals int) *accessWorld {
+	t.Helper()
 	database := connectorTestDB(t)
 	base := "https://" + accessBase
 	store, err := storage.New(storage.Options{
@@ -62,8 +69,8 @@ func newAccessWorld(t *testing.T) *accessWorld {
 	limits := NewAbuseLimits()
 	recorder := audit.NewDBRecorder(database)
 	mux := http.NewServeMux()
-	NewSiteHandler(database, store, base, hosts, limits).WithAudit(recorder).Register(mux, authMW, skillMW)
-	NewAdminHandler(database, base, hosts, CookiePolicy{Secure: true}, keys, time.Hour, recorder, limits).Register(mux, authMW, skillMW)
+	NewSiteHandler(database, store, base, hosts, limits).WithAudit(recorder).WithNetworkAccessApprovals(approvals).Register(mux, authMW, skillMW)
+	NewAdminHandler(database, base, hosts, CookiePolicy{Secure: true}, keys, time.Hour, recorder, limits).WithNetworkAccessApprovals(approvals).Register(mux, authMW, skillMW)
 	NewAuditHandler(database, audit.NewReader(database), "", limits).Register(mux, authMW, skillMW)
 	NewTeamHandler(database, limits).WithAudit(recorder).Register(mux, authMW, skillMW, hosts, base)
 	files := NewSiteFiles(store, database, CookiePolicy{Secure: true}, keys, time.Hour)
@@ -72,8 +79,8 @@ func newAccessWorld(t *testing.T) *accessWorld {
 	gate := NewHostGate(hosts, files, database, keys, auth.NewNegativeSessionCache(database, time.Hour), handoff, siteAPI, authMW, base)
 
 	w := &accessWorld{t: t, database: database, app: gate(mux), keys: keys, apiKeys: map[string]string{}, users: map[string]string{}}
-	for _, name := range []string{"alice", "vera", "olly", "mo", "root"} {
-		user, err := db.CreateOIDCUser(context.Background(), database, name, "sub-"+name, name+"@example.com", name == "root")
+	for _, name := range []string{"alice", "vera", "olly", "mo", "root", "ada"} {
+		user, err := db.CreateOIDCUser(context.Background(), database, name, "sub-"+name, name+"@example.com", name == "root" || name == "ada")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -129,8 +136,13 @@ func (w *accessWorld) cookie(user, host string) *http.Cookie {
 
 // admin calls an admin route on the base host with root's browser session.
 func (w *accessWorld) admin(method, path string) *httptest.ResponseRecorder {
+	return w.adminAs("root", method, path)
+}
+
+// adminAs calls an admin route on the base host with user's browser session.
+func (w *accessWorld) adminAs(user, method, path string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(method, "https://"+accessBase+path, nil)
-	r.AddCookie(w.cookie("root", ""))
+	r.AddCookie(w.cookie(user, ""))
 	r.Header.Set("Origin", "https://"+accessBase)
 	r.Header.Set("X-Simple-Host-Client", "control-ui")
 	return w.do(r)

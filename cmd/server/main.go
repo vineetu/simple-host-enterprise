@@ -200,13 +200,13 @@ func run() (runErr error) {
 	handler.RegisterHealthRoutes(mux, database, siteStore.Ping, requestMetrics.SetBucketOK)
 	publicSearchHandler.Register(mux, authMW, handler.CookieOriginCheck(hosts, cfg.PublicBaseURL))
 	handler.NewUserHandler(database, abuseLimits).Register(mux, authMW, skillVersionMW)
-	handler.NewSiteHandler(database, siteStore, cfg.PublicBaseURL, hosts, abuseLimits).WithAudit(auditRecorder).Register(mux, authMW, skillVersionMW)
+	handler.NewSiteHandler(database, siteStore, cfg.PublicBaseURL, hosts, abuseLimits).WithAudit(auditRecorder).WithNetworkAccessApprovals(cfg.NetworkAccessApprovals).Register(mux, authMW, skillVersionMW)
 	handler.NewTeamHandler(database, abuseLimits).WithAudit(auditRecorder).Register(mux, authMW, skillVersionMW, hosts, cfg.PublicBaseURL)
 	// Held rather than registered inline: the classification worker starts
 	// after the routes are wired, and the handler is given it once it exists.
 	// The route closures capture this pointer, so attaching later is enough.
 	auditReader := audit.NewReader(database)
-	adminHandler := handler.NewAdminHandler(database, cfg.PublicBaseURL, hosts, cookiePolicy, signingKeys, cfg.Session.Idle, auditRecorder, abuseLimits).WithStore(siteStore).WithAuditReader(auditReader)
+	adminHandler := handler.NewAdminHandler(database, cfg.PublicBaseURL, hosts, cookiePolicy, signingKeys, cfg.Session.Idle, auditRecorder, abuseLimits).WithStore(siteStore).WithAuditReader(auditReader).WithNetworkAccessApprovals(cfg.NetworkAccessApprovals)
 	adminHandler.Register(mux, authMW, skillVersionMW)
 	handler.NewAuditHandler(database, auditReader, cfg.Audit.AccessLogVisibility, abuseLimits).Register(mux, authMW, skillVersionMW)
 	handler.NewShowcaseHandler(database, hosts, signingKeys, cfg.Session.Idle).Register(mux)

@@ -52,6 +52,10 @@ type networkRequestResponse struct {
 	Status      string    `json:"status"`
 	Reason      string    `json:"reason"`
 	RequestedAt time.Time `json:"requested_at"`
+	// Approvals is how many admins have approved so far, of
+	// ApprovalsRequired (NETWORK_ACCESS_APPROVALS).
+	Approvals         int `json:"approvals"`
+	ApprovalsRequired int `json:"approvals_required"`
 }
 
 type collaborationVersionResponse struct {
@@ -158,7 +162,10 @@ func (h *SiteHandler) collaborationSiteResponse(r *http.Request, site db.Site, o
 	base := toSiteResponse(site, h.siteURL(r.Context(), ownerUsername, site.Name, site.ID), "", summary, downloads)
 	var pending *networkRequestResponse
 	if site.NetworkRequestedAt != nil {
-		pending = &networkRequestResponse{Status: "pending", Reason: site.NetworkRequestReason, RequestedAt: *site.NetworkRequestedAt}
+		pending = &networkRequestResponse{
+			Status: "pending", Reason: site.NetworkRequestReason, RequestedAt: *site.NetworkRequestedAt,
+			Approvals: site.NetworkApprovals, ApprovalsRequired: requiredNetworkApprovals(h.networkApprovals),
+		}
 	}
 	return collaborationSiteResponse{
 		ID:             site.ID,

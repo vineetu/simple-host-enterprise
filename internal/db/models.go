@@ -52,12 +52,14 @@ type Site struct {
 	UsesVersionedState bool
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
-	// Access, NetworkRequestedAt and NetworkRequestReason are filled only by
-	// the queries that report a site to its owner (ResolveSiteAccess,
+	// Access, NetworkRequestedAt, NetworkRequestReason and NetworkApprovals
+	// (admins who have approved the pending request so far) are filled only
+	// by the queries that report a site to its owner (ResolveSiteAccess,
 	// ListAccessibleSites); see site_access.go.
 	Access               string
 	NetworkRequestedAt   *time.Time
 	NetworkRequestReason string
+	NetworkApprovals     int
 }
 
 type Version struct {

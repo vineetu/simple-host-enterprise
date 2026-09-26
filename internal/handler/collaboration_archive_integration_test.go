@@ -75,7 +75,7 @@ func (s *collaborationArchiveDBState) query(query string, args []driver.NamedVal
 		role := "owner"
 		if actorID == archiveTestMemberID {
 			if !s.memberAllowed {
-				return emptyCollaborationArchiveRows(15), nil
+				return emptyCollaborationArchiveRows(16), nil
 			}
 			role = "member"
 			s.memberResolveCount++
@@ -83,13 +83,13 @@ func (s *collaborationArchiveDBState) query(query string, args []driver.NamedVal
 				s.memberAllowed = false
 			}
 		} else if actorID != archiveTestOwnerID {
-			return emptyCollaborationArchiveRows(15), nil
+			return emptyCollaborationArchiveRows(16), nil
 		}
 		return &collaborationArchiveRows{
-			columns: numberedColumns(15),
+			columns: numberedColumns(16),
 			values: [][]driver.Value{{
 				archiveTestSiteID, archiveTestOwnerID, "demo", int64(activeVersion), true, false, false,
-				createdAt, createdAt, "owner", actorID, role, "company", nil, "",
+				createdAt, createdAt, "owner", actorID, role, "company", nil, "", int64(0),
 			}},
 		}, nil
 

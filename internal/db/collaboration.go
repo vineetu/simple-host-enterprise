@@ -78,7 +78,9 @@ const resolveSiteAccessQuery = `
 		END,
 		s.access,
 		s.network_requested_at,
-		COALESCE(s.network_request_reason, '')
+		COALESCE(s.network_request_reason, ''),
+		(SELECT count(*) FROM network_access_approvals a
+		 WHERE a.site_id = s.id AND a.requested_at = s.network_requested_at)
 	FROM sites s
 	INNER JOIN users owner ON owner.id = s.user_id
 	LEFT JOIN team_members tm
@@ -113,6 +115,7 @@ func ResolveSiteAccess(ctx context.Context, q Querier, actorID, ownerUsername, s
 		&access.Site.Access,
 		&access.Site.NetworkRequestedAt,
 		&access.Site.NetworkRequestReason,
+		&access.Site.NetworkApprovals,
 	)
 	if err != nil {
 		return SiteAccess{}, err
@@ -142,7 +145,9 @@ const listAccessibleSitesQuery = `
 		END,
 		s.access,
 		s.network_requested_at,
-		COALESCE(s.network_request_reason, '')
+		COALESCE(s.network_request_reason, ''),
+		(SELECT count(*) FROM network_access_approvals a
+		 WHERE a.site_id = s.id AND a.requested_at = s.network_requested_at)
 	FROM sites s
 	INNER JOIN users owner ON owner.id = s.user_id
 	LEFT JOIN team_members tm
@@ -184,6 +189,7 @@ func ListAccessibleSites(ctx context.Context, q Querier, actorID string) ([]Acce
 			&accessible.Site.Access,
 			&accessible.Site.NetworkRequestedAt,
 			&accessible.Site.NetworkRequestReason,
+			&accessible.Site.NetworkApprovals,
 		); err != nil {
 			return nil, err
 		}

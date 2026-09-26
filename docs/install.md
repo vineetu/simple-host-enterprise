@@ -306,7 +306,8 @@ site), body `{"level": "..."}`:
 `network` is a request: it needs a `reason`, returns `202`, and the site
 keeps its level until an admin approves it under "Access requests" on
 `/admin` (or `POST /api/admin/access-requests/{owner}/{sitename}/approve`,
-`/decline`, `/revoke`). Anonymous visitors to a network site can read its
+`/decline`, `/revoke`). Nobody approves their own request; set
+`NETWORK_ACCESS_APPROVALS=2` to require two different admins. Anonymous visitors to a network site can read its
 pages, assets and saved data and change nothing; a signed-in person adds
 `?signin` to the address to use their own rights. The owner can move a site
 to any lower level at any time; that ends its network approval.
@@ -395,7 +396,8 @@ These actions write it inside the same database transaction as the
 change it records (`internal/audit`'s `RecordTx`), so a mutation in this
 group without its audit row cannot commit: `site_create`, `site_update`,
 `site_delete`, `site_rollback`, `site_access`, `network_access_requested`,
-`network_access_approved`, `network_access_declined`,
+`network_access_approval_added`, `network_access_approved`,
+`network_access_declined`,
 `network_access_reverted`, `state_restore`, `viewer_grant`,
 `viewer_revoke`, `team_create`,
 `team_delete`, `member_add`, `member_remove`, `state_write`,

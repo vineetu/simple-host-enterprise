@@ -347,7 +347,7 @@ func toolList() []Tool {
 		{
 			Name:  "get_site",
 			Title: "Get one site",
-			Description: "Fetch one site's current state: its live version number, its `access` level (who can open it), any pending `network_request` awaiting an admin, its address, and the ETag needed to change it safely. " +
+			Description: "Fetch one site's current state: its live version number, its `access` level (who can open it), any pending `network_request` awaiting an admin (with `approvals` so far of `approvals_required`), its address, and the ETag needed to change it safely. " +
 				"`url` is absolute and `public_path` is the address to hand out; it may be absolute rather than a path, so use it exactly as returned. " +
 				"Call this before deploy_site or rollback_site on an existing site, and pass the returned etag to that call. " +
 				"To see the live files before changing them, pass `active_version` to list_site_files and read_site_file.",
@@ -501,7 +501,7 @@ func toolList() []Tool {
 				"`specific` — plus the people or teams named with grant_site_viewer; the site moves to its own address, so call get_site afterwards for the new url. " +
 				"`company` — anyone signed in with the link; not listed. " +
 				"`listed` — company, and shown in the company showcase and search. " +
-				"`network` — anyone who can reach the server, no sign-in; this is only a REQUEST, it needs `reason`, and an admin must approve it. Until then the site keeps its current level and get_site shows the pending request. " +
+				"`network` — anyone who can reach the server, no sign-in; this is only a REQUEST, it needs `reason`, and an admin must approve it (two different admins where the server requires two; the person who asked never counts). Until then the site keeps its current level and get_site shows the pending request with `approvals` of `approvals_required`. " +
 				"Anonymous visitors to a network site can read its pages and saved data but cannot change anything. " +
 				"Never request `network` unless the user explicitly asked for anyone without a company sign-in to open the site. " +
 				"Moving to any other level takes effect at once, withdraws a pending network request, and takes a network site off the network. " +

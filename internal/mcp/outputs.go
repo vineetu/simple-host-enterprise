@@ -117,10 +117,12 @@ func collaborationSiteSchema() map[string]any {
 	delete(props, "user_id")
 	delete(props, "note")
 	props["network_request"] = outObject(map[string]any{
-		"status":       outEnum("Always pending: an admin has not decided yet.", "pending"),
-		"reason":       outString("The reason given with the request."),
-		"requested_at": outString("When it was requested."),
-	}, "status", "reason", "requested_at")
+		"status":             outEnum("Always pending: an admin has not decided yet.", "pending"),
+		"reason":             outString("The reason given with the request."),
+		"requested_at":       outString("When it was requested."),
+		"approvals":          outInteger("How many admins have approved it so far."),
+		"approvals_required": outInteger("How many different admins must approve it (1 or 2) before the site opens to the network."),
+	}, "status", "reason", "requested_at", "approvals", "approvals_required")
 	return outObject(props, "id", "name", "owner_username", "owner_id", "access_role", "access", "active_version",
 		"public", "public_path", "url", "etag", "created_at", "updated_at", "analytics")
 }
