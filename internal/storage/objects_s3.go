@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"strings"
 
@@ -65,6 +66,8 @@ type S3Objects struct {
 	envelopeKeys []EnvelopeKey
 	// plaintextAllowed: see S3Config.PlaintextAllowed.
 	plaintextAllowed bool
+	// fillBudget bounds the enveloped bodies GetTo holds in memory at once.
+	fillBudget *memoryBudget
 }
 
 // NewS3Objects constructs the client for the configured endpoint. The endpoint
@@ -122,6 +125,7 @@ func newS3Objects(client s3API, bucket, prefix string, sse types.ServerSideEncry
 		sse:          sse,
 		sseKMSKeyID:  sseKMSKeyID,
 		envelopeKeys: envelopeKeys,
+		fillBudget:   newMemoryBudget(envelopeFillBudget),
 	}
 }
 
@@ -182,6 +186,73 @@ func (o *S3Objects) Put(ctx context.Context, key string, body []byte, contentTyp
 }
 
 func (o *S3Objects) Get(ctx context.Context, key string, maxBytes int64) ([]byte, error) {
+	out, err := o.getObject(ctx, key, maxBytes)
+	if err != nil {
+		return nil, err
+	}
+	defer out.Body.Close()
+	return o.readWhole(key, out, maxBytes)
+}
+
+// GetTo streams a plain object straight into w, so a cache fill holds no more
+// than a copy buffer of it. An enveloped object cannot be streamed: its body
+// is one AES-GCM seal whose tag is checked only once the whole body is read,
+// so it is buffered (and decrypted in place, one buffer per object). Those
+// buffers are bounded by fillBudget: a fill waits, as long as ctx allows,
+// until the bodies already being decrypted fit alongside its own.
+func (o *S3Objects) GetTo(ctx context.Context, key string, maxBytes int64, w io.Writer) (int64, error) {
+	out, err := o.getObject(ctx, key, maxBytes)
+	if err != nil {
+		return 0, err
+	}
+	if !isEnveloped(out.Metadata) {
+		defer out.Body.Close()
+		if err := o.checkPlaintext(key); err != nil {
+			return 0, err
+		}
+		written, err := io.Copy(w, io.LimitReader(out.Body, maxBytes+1))
+		if err != nil {
+			return written, fmt.Errorf("read %s: %w", key, err)
+		}
+		if written > maxBytes {
+			return written, ErrObjectTooLarge
+		}
+		return written, nil
+	}
+
+	weight := maxBytes + envelopeOverhead
+	if out.ContentLength != nil && *out.ContentLength >= 0 {
+		weight = *out.ContentLength
+	}
+	if !o.fillBudget.tryAcquire(weight) {
+		// Do not hold the response open while waiting: an idle connection
+		// can be dropped by the bucket. Wait, then fetch again.
+		out.Body.Close()
+		if err := o.fillBudget.acquire(ctx, weight); err != nil {
+			return 0, err
+		}
+		defer o.fillBudget.release(weight)
+		if out, err = o.getObject(ctx, key, maxBytes); err != nil {
+			return 0, err
+		}
+		if out.ContentLength != nil && *out.ContentLength > weight {
+			// Replaced by something bigger while this fill waited.
+			out.Body.Close()
+			return 0, fmt.Errorf("get %s: object changed while waiting to read it", key)
+		}
+	} else {
+		defer o.fillBudget.release(weight)
+	}
+	defer out.Body.Close()
+	body, err := o.readWhole(key, out, maxBytes)
+	if err != nil {
+		return 0, err
+	}
+	written, err := w.Write(body)
+	return int64(written), err
+}
+
+func (o *S3Objects) getObject(ctx context.Context, key string, maxBytes int64) (*s3.GetObjectOutput, error) {
 	out, err := o.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(o.bucket), Key: o.key(key)})
 	if err != nil {
 		if isNotFound(err) {
@@ -189,11 +260,29 @@ func (o *S3Objects) Get(ctx context.Context, key string, maxBytes int64) ([]byte
 		}
 		return nil, fmt.Errorf("get %s: %w", key, err)
 	}
-	defer out.Body.Close()
 	if out.ContentLength != nil && *out.ContentLength > maxBytes+envelopeOverhead {
+		out.Body.Close()
 		return nil, ErrObjectTooLarge
 	}
-	body, err := readBounded(out.Body, maxBytes+envelopeOverhead)
+	return out, nil
+}
+
+// checkPlaintext refuses a plain object when the envelope is configured,
+// unless objects written before it are explicitly allowed.
+func (o *S3Objects) checkPlaintext(key string) error {
+	if len(o.envelopeKeys) > 0 && !o.plaintextAllowed {
+		return fmt.Errorf("get %s: object is not envelope-encrypted but BACKUP_ENVELOPE_KEY is set (BACKUP_ENVELOPE_PLAINTEXT_ALLOWED=true reads objects written before the key was added)", key)
+	}
+	return nil
+}
+
+// readWhole reads out's body into memory, unwrapping the envelope if present.
+func (o *S3Objects) readWhole(key string, out *s3.GetObjectOutput, maxBytes int64) ([]byte, error) {
+	expected := int64(-1)
+	if out.ContentLength != nil {
+		expected = *out.ContentLength
+	}
+	body, err := readBoundedSized(out.Body, maxBytes+envelopeOverhead, expected)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", key, err)
 	}
@@ -202,8 +291,8 @@ func (o *S3Objects) Get(ctx context.Context, key string, maxBytes int64) ([]byte
 		if err != nil {
 			return nil, fmt.Errorf("unwrap %s: %w", key, err)
 		}
-	} else if len(o.envelopeKeys) > 0 && !o.plaintextAllowed {
-		return nil, fmt.Errorf("get %s: object is not envelope-encrypted but BACKUP_ENVELOPE_KEY is set (BACKUP_ENVELOPE_PLAINTEXT_ALLOWED=true reads objects written before the key was added)", key)
+	} else if err := o.checkPlaintext(key); err != nil {
+		return nil, err
 	}
 	if int64(len(body)) > maxBytes {
 		return nil, ErrObjectTooLarge

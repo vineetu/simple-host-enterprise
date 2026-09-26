@@ -1,7 +1,7 @@
 package storage
 
 import (
-	"bytes"
+	"bufio"
 	"context"
 	"database/sql"
 	"errors"
@@ -150,13 +150,16 @@ func (s *Store) OpenVersion(ctx context.Context, siteID string, version int) (*V
 	}
 	name := siteID + ".v" + strconv.Itoa(version)
 	entry, err := s.cache.acquire(ctx, name, func(ctx context.Context, temporary string) (int64, error) {
-		body, err := s.objects.Get(ctx, key, maxVersionObjectBytes)
+		// The archive goes to a file on the cache volume first, not into
+		// memory: a version object can be up to maxVersionObjectBytes.
+		archive, err := s.cache.download(ctx, s.objects, key, maxVersionObjectBytes)
 		if errors.Is(err, ErrObjectNotFound) {
 			return 0, fmt.Errorf("%w: %w", fs.ErrNotExist, err)
 		}
 		if err != nil {
 			return 0, err
 		}
+		defer archive.Close()
 		if err := s.cache.root.Mkdir(temporary, 0o755); err != nil {
 			return 0, err
 		}
@@ -164,7 +167,7 @@ func (s *Store) OpenVersion(ctx context.Context, siteID string, version int) (*V
 		if err != nil {
 			return 0, err
 		}
-		totals, err := scanVersionArchive(bytes.NewReader(body), destination)
+		totals, err := scanVersionArchive(bufio.NewReader(archive), destination)
 		closeErr := destination.Close()
 		if err != nil {
 			return 0, fmt.Errorf("unpack %s: %w", key, err)
