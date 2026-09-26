@@ -134,6 +134,7 @@ func TestNetworkAccessRequestFlow(t *testing.T) {
 	database := assetsTestDB(t)
 	ctx := context.Background()
 	ownerID, siteID := mustCreateUserAndSite(t, database, "alice", "demo")
+	adminID, _ := mustCreateUserAndSite(t, database, "root", "unused")
 	mustSetAccess(t, database, siteID, AccessCompany)
 
 	tx, _ := database.Begin()
@@ -165,7 +166,7 @@ func TestNetworkAccessRequestFlow(t *testing.T) {
 	if err := inTx(t, database, func(tx *sql.Tx) error { return RequestNetworkAccess(ctx, tx, siteID, ownerID, "again") }); err != nil {
 		t.Fatal(err)
 	}
-	if err := inTx(t, database, func(tx *sql.Tx) error { _, err := ApproveNetworkAccess(ctx, tx, siteID); return err }); err != nil {
+	if err := inTx(t, database, func(tx *sql.Tx) error { _, err := ApproveNetworkAccess(ctx, tx, siteID, adminID, 1); return err }); err != nil {
 		t.Fatal(err)
 	}
 	if open, _ := NetworkOpen(ctx, database, siteID); !open {
@@ -180,7 +181,7 @@ func TestNetworkAccessRequestFlow(t *testing.T) {
 	if open, _ := NetworkOpen(ctx, database, siteID); open {
 		t.Fatal("lowering the level did not revoke network access")
 	}
-	if err := inTx(t, database, func(tx *sql.Tx) error { _, err := ApproveNetworkAccess(ctx, tx, siteID); return err }); !errors.Is(err, ErrNoPendingRequest) {
+	if err := inTx(t, database, func(tx *sql.Tx) error { _, err := ApproveNetworkAccess(ctx, tx, siteID, adminID, 1); return err }); !errors.Is(err, ErrNoPendingRequest) {
 		t.Fatalf("approve after lowering = %v, want ErrNoPendingRequest", err)
 	}
 }

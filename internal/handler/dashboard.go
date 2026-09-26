@@ -272,6 +272,13 @@ const dashboardSitesScript = `<script>
     return level || '';
   }
 
+  // approvalProgress is " (1 of 2 approvals)" while a request needs more
+  // than one admin, and nothing otherwise.
+  function approvalProgress(req) {
+    if (!req || !(req.approvals_required > 1)) return '';
+    return ' (' + (req.approvals || 0) + ' of ' + req.approvals_required + ' approvals)';
+  }
+
   function renderSites(sites) {
     if (!sites || !sites.length) { container.innerHTML = '<div class="rank-empty">No sites yet.</div>'; return; }
     container.innerHTML = '';
@@ -281,7 +288,7 @@ const dashboardSitesScript = `<script>
       row.className = 'rank-row site-row';
       row.innerHTML = '<span class="rank-name">' + esc(site.owner_username) + '/' + esc(site.name) +
         ' <span class="rank-sub">' + esc(site.access_role) + ' · ' + esc(levelLabel(site.access)) +
-        (site.network_request ? ' · network access requested' : '') + '</span></span>' +
+        (site.network_request ? ' · network access requested' + approvalProgress(site.network_request) : '') + '</span></span>' +
         (canManage ? '<button type="button" class="btn-reject manage-toggle">Manage</button>' : '');
       var panel = document.createElement('div');
       panel.className = 'site-panel';
@@ -308,7 +315,7 @@ const dashboardSitesScript = `<script>
       '<div class="site-subsection"><h4>Who can open it</h4>' +
       '<div class="add-row"><select class="access-select">' + options + '</select>' +
       '<button type="button" class="btn-login access-button">Save</button></div>' +
-      '<p class="share-help access-status">' + (site.network_request ? 'Network access requested; waiting for an admin. The site keeps its current level until then.' : '') + '</p></div>' +
+      '<p class="share-help access-status">' + (site.network_request ? 'Network access requested; waiting for ' + (site.network_request.approvals_required > 1 ? 'two admins' + approvalProgress(site.network_request) : 'an admin') + '. The site keeps its current level until then.' : '') + '</p></div>' +
       '<div class="site-subsection"><h4>Viewers</h4>' +
       '<p class="share-help">Named viewers can open the site while it is set to specific people or teams, at its own address. Adding one sets that level.</p>' +
       '<div class="viewer-list" aria-live="polite"></div>' +

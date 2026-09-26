@@ -52,7 +52,11 @@ const requiredSchemaProbe = `
 			('site_state_history', 'state_version', 'int8', 'NO'),
 			('site_state_history', 'state', 'jsonb', 'NO'),
 			('site_state_history', 'written_by', 'uuid', 'YES'),
-			('site_state_history', 'created_at', 'timestamptz', 'NO')
+			('site_state_history', 'created_at', 'timestamptz', 'NO'),
+			('network_access_approvals', 'site_id', 'uuid', 'NO'),
+			('network_access_approvals', 'requested_at', 'timestamptz', 'NO'),
+			('network_access_approvals', 'admin_id', 'uuid', 'NO'),
+			('network_access_approvals', 'approved_at', 'timestamptz', 'NO')
 	),
 	expected_download_columns (column_name, udt_name) AS (
 		VALUES

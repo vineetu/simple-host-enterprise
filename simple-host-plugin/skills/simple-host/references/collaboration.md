@@ -229,7 +229,9 @@ Never request `network` unless the user explicitly asks for people without a
 company sign-in to open the site. It needs a `reason` in the user's words (at
 most 500 characters) and returns `202`: an admin must approve it, and until then
 the site keeps its current level and `get_site` shows `network_request` as
-`pending`. Tell the user that. Anonymous visitors to a network site can read its
+`pending`, with `approvals` so far of `approvals_required` (1, or 2 where the
+server requires two different admins; the person who asked never counts).
+Tell the user that. Anonymous visitors to a network site can read its
 pages and saved data but cannot change anything. Moving to any lower level
 takes it off the network at once; going back needs a new request.
 

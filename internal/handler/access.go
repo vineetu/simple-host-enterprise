@@ -20,7 +20,31 @@ import (
 
 // Access levels (db.Access*): who can open a site. The owner (or a member of
 // the owning team) sets any level but network directly; network is a
-// request that an admin approves or declines on /admin.
+// request that admins approve or decline on /admin.
+
+// requiredNetworkApprovals is how many different admins must approve a
+// network-access request (NETWORK_ACCESS_APPROVALS): 1 unless set to 2.
+func requiredNetworkApprovals(n int) int {
+	if n == 2 {
+		return 2
+	}
+	return 1
+}
+
+// WithNetworkAccessApprovals sets NETWORK_ACCESS_APPROVALS, which the
+// owner's view of a pending request reports. Unset means 1.
+func (h *SiteHandler) WithNetworkAccessApprovals(n int) *SiteHandler {
+	h.networkApprovals = requiredNetworkApprovals(n)
+	return h
+}
+
+// WithNetworkAccessApprovals sets NETWORK_ACCESS_APPROVALS: how many
+// different admins, none of them the requester, must approve a request
+// before the site opens to the network. Unset means 1.
+func (h *AdminHandler) WithNetworkAccessApprovals(n int) *AdminHandler {
+	h.networkApprovals = requiredNetworkApprovals(n)
+	return h
+}
 
 type siteAccessRequest struct {
 	Level  string `json:"level"`
@@ -117,6 +141,9 @@ func (h *SiteHandler) setSiteAccessForTarget(w http.ResponseWriter, r *http.Requ
 		event.Action, event.Extra = "network_access_requested", map[string]any{"reason": reason}
 		status = http.StatusAccepted
 		note = "Network access requested. An admin must approve it; until then the site keeps its current access level."
+		if requiredNetworkApprovals(h.networkApprovals) == 2 {
+			note = "Network access requested. Two admins must approve it; until then the site keeps its current access level."
+		}
 	} else {
 		previous, err := db.SetSiteAccess(r.Context(), tx, site.ID, req.Level)
 		if err != nil {
@@ -339,8 +366,13 @@ func (h *AdminHandler) revokeNetworkAccess(w http.ResponseWriter, r *http.Reques
 // decideNetworkAccess approves or declines a pending request, or takes an
 // approved site back off the network (to company, where a shared link keeps
 // working for signed-in people). Each writes its audit row in the same
-// transaction.
+// transaction. With NETWORK_ACCESS_APPROVALS=2 an approval that is not yet
+// the second is recorded and audited as network_access_approval_added; the
+// one that opens the site is network_access_approved. The requester can
+// never approve their own request.
 func (h *AdminHandler) decideNetworkAccess(w http.ResponseWriter, r *http.Request, action string) {
+	actor := auth.GetUser(r.Context())
+	required := requiredNetworkApprovals(h.networkApprovals)
 	ownerUsername, siteName, ok := validatedCollaborationPath(w, r)
 	if !ok {
 		return
@@ -376,9 +408,21 @@ func (h *AdminHandler) decideNetworkAccess(w http.ResponseWriter, r *http.Reques
 	extra := map[string]any{}
 	switch action {
 	case "network_access_approved":
-		var previous string
-		previous, err = db.ApproveNetworkAccess(r.Context(), tx, site.ID)
-		extra["from"] = previous
+		var approval db.NetworkApproval
+		approval, err = db.ApproveNetworkAccess(r.Context(), tx, site.ID, actor.ID, required)
+		if err == nil {
+			extra["approval"], extra["required"] = approval.Approvals, required
+			switch {
+			case approval.Approved:
+				extra["from"] = approval.Previous
+			case approval.Duplicate:
+				// Nothing changed: this admin's approval is already counted.
+				h.respondAdmin(w, r, http.StatusOK, fmt.Sprintf("already approved (%d of %d): %s/%s", approval.Approvals, required, ownerUsername, siteName))
+				return
+			default:
+				action = "network_access_approval_added"
+			}
+		}
 	case "network_access_declined":
 		err = db.DeclineNetworkAccess(r.Context(), tx, site.ID)
 	case "network_access_reverted":
@@ -398,11 +442,14 @@ func (h *AdminHandler) decideNetworkAccess(w http.ResponseWriter, r *http.Reques
 			h.respondAdmin(w, r, http.StatusConflict, "no pending request for this site")
 			return
 		}
+		if errors.Is(err, db.ErrSelfApproval) {
+			h.respondAdmin(w, r, http.StatusForbidden, "you made this request; another admin must approve it")
+			return
+		}
 		log.Printf("admin: %s %s/%s: %v", action, ownerUsername, siteName, err)
 		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	actor := auth.GetUser(r.Context())
 	actorKind, keyID := auditActorKind(r.Context())
 	if err := h.audit.RecordTx(r.Context(), tx, audit.Event{
 		ActorID: actor.ID, ActorKind: actorKind, KeyID: keyID,
@@ -417,7 +464,11 @@ func (h *AdminHandler) decideNetworkAccess(w http.ResponseWriter, r *http.Reques
 		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	h.respondAdmin(w, r, http.StatusOK, fmt.Sprintf("%s: %s/%s", strings.TrimPrefix(action, "network_access_"), ownerUsername, siteName))
+	status := strings.TrimPrefix(action, "network_access_")
+	if action == "network_access_approval_added" {
+		status = fmt.Sprintf("approval %d of %d", extra["approval"], required)
+	}
+	h.respondAdmin(w, r, http.StatusOK, fmt.Sprintf("%s: %s/%s", status, ownerUsername, siteName))
 }
 
 // accessLevelLabel is a level's short name on the admin page.
@@ -440,8 +491,11 @@ func accessLevelLabel(level string) string {
 // renderAccessRequests is the admin page's "Access requests" section: every
 // pending request to open a site to the network, with approve and decline,
 // and every site already open, with revoke. Nothing is rendered when there
-// is neither.
-func (h *AdminHandler) renderAccessRequests(r *http.Request, b *strings.Builder) {
+// is neither. A pending request shows who has approved it so far when two
+// approvals are required; viewer (the admin looking) gets no approve button
+// on a request they made or have already approved.
+func (h *AdminHandler) renderAccessRequests(r *http.Request, b *strings.Builder, viewer *db.User) {
+	required := requiredNetworkApprovals(h.networkApprovals)
 	entries, err := db.ListNetworkAccess(r.Context(), h.database)
 	if err != nil {
 		log.Printf("admin: list access requests: %v", err)
@@ -459,8 +513,27 @@ func (h *AdminHandler) renderAccessRequests(r *http.Request, b *strings.Builder)
 		var detail, actions string
 		if e.RequestedAt != nil {
 			detail = fmt.Sprintf("requested by %s · now %s · %s", html.EscapeString(e.RequestedBy), html.EscapeString(accessLevelLabel(e.Access)), localTimeHTML(*e.RequestedAt, "datetime"))
-			actions = fmt.Sprintf(`<form method="POST" action="%s/approve"><button type="submit" class="btn-reset">Approve</button></form><form method="POST" action="%s/decline"><button type="submit" class="btn-reject">Decline</button></form>`,
-				html.EscapeString(base), html.EscapeString(base))
+			approvedByViewer := false
+			if required > 1 {
+				names := make([]string, 0, len(e.ApprovedBy))
+				for _, a := range e.ApprovedBy {
+					names = append(names, html.EscapeString(a.Name))
+					approvedByViewer = approvedByViewer || (viewer != nil && a.AdminID == viewer.ID)
+				}
+				progress := fmt.Sprintf("%d of %d approvals", len(e.ApprovedBy), required)
+				if len(names) > 0 {
+					progress += ": " + strings.Join(names, ", ")
+				}
+				detail += " · " + progress
+			}
+			approve := fmt.Sprintf(`<form method="POST" action="%s/approve"><button type="submit" class="btn-reset">Approve</button></form>`, html.EscapeString(base))
+			switch {
+			case viewer != nil && e.RequestedByID == viewer.ID:
+				approve = `<span class="rank-sub">your request</span>`
+			case approvedByViewer:
+				approve = `<span class="rank-sub">you approved</span>`
+			}
+			actions = approve + fmt.Sprintf(`<form method="POST" action="%s/decline"><button type="submit" class="btn-reject">Decline</button></form>`, html.EscapeString(base))
 		} else {
 			detail = "open to the network"
 			actions = fmt.Sprintf(`<form method="POST" action="%s/revoke" onsubmit="return confirm('Take this site off the network? Signed-in people keep access.');"><button type="submit" class="btn-reject">Revoke</button></form>`,

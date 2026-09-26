@@ -88,6 +88,7 @@ func completeEnv(t *testing.T) {
 	t.Setenv("BACKUP_ENVELOPE_KEY_FILE", "")
 	t.Setenv("TRUSTED_PROXY_CIDRS", "")
 	t.Setenv("API_KEY_MAX_DAYS", "")
+	t.Setenv("NETWORK_ACCESS_APPROVALS", "")
 }
 
 func TestLoadCompleteConfiguration(t *testing.T) {
@@ -862,6 +863,27 @@ func TestTrustedProxiesAndAPIKeyMaxDays(t *testing.T) {
 		t.Setenv("API_KEY_MAX_DAYS", bad)
 		if _, err := Load(); err == nil {
 			t.Fatalf("API_KEY_MAX_DAYS=%s accepted", bad)
+		}
+	}
+}
+
+func TestNetworkAccessApprovals(t *testing.T) {
+	completeEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.NetworkAccessApprovals != 1 {
+		t.Fatalf("NetworkAccessApprovals = %d, want the default 1", cfg.NetworkAccessApprovals)
+	}
+	t.Setenv("NETWORK_ACCESS_APPROVALS", "2")
+	if cfg, err = Load(); err != nil || cfg.NetworkAccessApprovals != 2 {
+		t.Fatalf("NETWORK_ACCESS_APPROVALS=2: %d, %v", cfg.NetworkAccessApprovals, err)
+	}
+	for _, bad := range []string{"0", "3", "-1", "two"} {
+		t.Setenv("NETWORK_ACCESS_APPROVALS", bad)
+		if _, err := Load(); err == nil {
+			t.Fatalf("NETWORK_ACCESS_APPROVALS=%s accepted", bad)
 		}
 	}
 }

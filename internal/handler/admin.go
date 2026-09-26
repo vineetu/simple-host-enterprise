@@ -32,6 +32,8 @@ type AdminHandler struct {
 	// auditReader backs GET /api/admin/export. Optional:
 	// nil leaves the endpoint returning 503.
 	auditReader *audit.Reader
+	// networkApprovals is NETWORK_ACCESS_APPROVALS (see access.go).
+	networkApprovals int
 }
 
 // WithAuditReader attaches the reader GET /api/admin/export streams from.
@@ -379,7 +381,7 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 		"sites": string(sitesMetric),
 	})
 
-	h.renderAccessRequests(r, &b)
+	h.renderAccessRequests(r, &b, user)
 
 	if len(users) == 0 {
 		b.WriteString(`<div class="empty">No users yet.</div>`)

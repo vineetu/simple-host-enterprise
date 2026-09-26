@@ -121,6 +121,10 @@ type Config struct {
 	// own machine, "scheme://host" for an app's own URL scheme, or "*" for
 	// any https host.
 	OAuthRedirectHosts []string
+	// NetworkAccessApprovals is NETWORK_ACCESS_APPROVALS: how many different
+	// admins must approve a request to open a site to the network, 1 (the
+	// default) or 2. The requester never counts.
+	NetworkAccessApprovals int
 }
 
 // defaultOAuthRedirectHosts covers the AI apps a company is most likely to
@@ -418,6 +422,17 @@ func Load() (Config, error) {
 	if cfg.APIKeyMaxDays < 1 || cfg.APIKeyMaxDays > maxAPIKeyDays {
 		return Config{}, fmt.Errorf("API_KEY_MAX_DAYS must be between 1 and %d, got %d", maxAPIKeyDays, cfg.APIKeyMaxDays)
 	}
+
+	// NETWORK_ACCESS_APPROVALS: one admin (the default) or two different
+	// admins approve a request for network access. Nothing else is accepted.
+	approvals, err := int64Env("NETWORK_ACCESS_APPROVALS", 1)
+	if err != nil {
+		return Config{}, err
+	}
+	if approvals != 1 && approvals != 2 {
+		return Config{}, fmt.Errorf("NETWORK_ACCESS_APPROVALS must be 1 or 2, got %d", approvals)
+	}
+	cfg.NetworkAccessApprovals = int(approvals)
 
 	auditCfg, err := LoadAuditRetention()
 	if err != nil {

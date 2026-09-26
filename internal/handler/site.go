@@ -40,6 +40,8 @@ type SiteHandler struct {
 	// keeps compiling unchanged, the same shape AdminHandler.WithStore
 	// already uses.
 	audit audit.Recorder
+	// networkApprovals is NETWORK_ACCESS_APPROVALS (see access.go).
+	networkApprovals int
 }
 
 // WithAudit attaches an audit recorder and returns h for chaining. Called

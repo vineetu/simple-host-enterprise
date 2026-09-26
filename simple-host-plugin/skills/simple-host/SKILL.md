@@ -236,7 +236,8 @@ Typical combinations:
     Never request `network` unless the user explicitly asks for people without
     a company sign-in to open the site. It needs a `reason`; tell the user an
     admin must approve it and the site keeps its level until then (`get_site`
-    shows the pending `network_request`).
+    shows the pending `network_request`, with `approvals` so far of
+    `approvals_required`: some servers require two different admins).
 
 Do not upload source trees for projects with build systems. Do not string-rewrite
 a framework bundle to repair its paths; rebuild with framework-native

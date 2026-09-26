@@ -193,7 +193,14 @@ Config names are documented in `docs/configuration.md`; schema in
   and search), `network` (anyone, no sign-in). `network` is a request with a
   reason (202) that an admin approves, declines or revokes on `/admin`;
   anonymous visitors to an approved site can read pages, assets and saved data
-  and write nothing. `sites.public` mirrors `listed`/`network`.
+  and write nothing. `sites.public` mirrors `listed`/`network`. The requester
+  (for a team site, the member who asked) can never approve their own
+  request. With `NETWORK_ACCESS_APPROVALS=2` two different admins must
+  approve: the first is recorded and audited as
+  `network_access_approval_added` ("1 of 2 approvals" on `/admin`,
+  `network_request.approvals`/`approvals_required` for the owner), the second
+  opens the site (`network_access_approved`) in the same locked transaction;
+  a decline, a level change or a new request clears partial approvals.
 - **Status.** Built.
 - **Routes.** `POST /api/sites/{sitename}/access`,
   `POST /api/collaboration/sites/{owner}/{sitename}/access`,
@@ -206,10 +213,11 @@ Config names are documented in `docs/configuration.md`; schema in
   `simple-host-builder` §4.
 - **Pages.** `/dashboard` access control per site; `/admin` "Access requests".
 - **Go.** `internal/handler/access.go`, `host_gate.go`
-  (`requireHostSessionOrNetwork`, `serveSiteAPI`); `internal/db/site_access.go`.
-- **DB.** `sites.access`, `sites.network_requested_*` (0033); `sites.public`
-  (0006).
-- **Config.** None.
+  (`requireHostSessionOrNetwork`, `serveSiteAPI`), `collaboration.go`
+  (`network_request`); `internal/db/site_access.go`.
+- **DB.** `sites.access`, `sites.network_requested_*` (0033);
+  `network_access_approvals` (0038); `sites.public` (0006).
+- **Config.** `NETWORK_ACCESS_APPROVALS` (1 or 2, default 1).
 
 ## 8. Named viewers (restricted sites)
 
