@@ -243,3 +243,68 @@ func TestOffboardByEmail(t *testing.T) {
 		t.Errorf("non-admin offboard key = %d, want 403", code)
 	}
 }
+
+// TestOffboardByEmailDoesNotDeadlock: two accounts share an address, and an
+// ordinary transaction holds the second account's row while it writes an
+// audit row. Offboarding must not take the audit chain's head lock before it
+// has every account's row lock, or the two deadlock.
+func TestOffboardByEmailDoesNotDeadlock(t *testing.T) {
+	w := newAccessWorld(t)
+	ctx := context.Background()
+	w.addKey("root-offboard", "root", db.APIKeyScopeOffboard)
+	var ids []string
+	for _, name := range []string{"dup-a", "dup-b"} {
+		user, err := db.CreateOIDCUser(ctx, w.database, name, "sub-"+name, "shared@example.com", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, user.ID)
+	}
+	other, err := w.database.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Rollback()
+	if _, err := other.ExecContext(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, ids[1]); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan int, 1)
+	go func() {
+		r := httptest.NewRequest(http.MethodPost, "https://"+accessBase+"/api/admin/users/disable", strings.NewReader(`{"email":"shared@example.com"}`))
+		r.Header.Set("X-API-Key", w.apiKeys["root-offboard"])
+		r.Header.Set("Content-Type", "application/json")
+		done <- w.do(r).Code
+	}()
+	// Wait until the offboarding transaction is blocked on dup-b's row.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting int
+		_ = w.database.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&waiting)
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("offboarding never waited on the held row")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := audit.NewDBRecorder(w.database).RecordTx(ctx, other, audit.Event{ActorID: w.users["alice"], Action: "test_event"}); err != nil {
+		t.Fatalf("audit write in the other transaction: %v", err)
+	}
+	if err := other.Commit(); err != nil {
+		t.Fatalf("other transaction: %v", err)
+	}
+	select {
+	case code := <-done:
+		if code != http.StatusOK {
+			t.Fatalf("offboard = %d, want 200", code)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("offboard never finished")
+	}
+	var disabled int
+	if err := w.database.QueryRow(`SELECT count(*) FROM users WHERE id = ANY($1::uuid[]) AND disabled_at IS NOT NULL`, "{"+ids[0]+","+ids[1]+"}").Scan(&disabled); err != nil || disabled != 2 {
+		t.Fatalf("disabled = %d (%v), want 2", disabled, err)
+	}
+}

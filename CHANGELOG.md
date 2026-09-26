@@ -46,6 +46,10 @@ works).
   [-expect SEQ:HASH]` walks the chain and reports the first break.
   `simple-host prune` trims the chain with the partitions it drops. The
   access log is not chained (docs/security-review.md, 2(e)).
+- In a rollout where v1.1.3 and v1.2 pods (or a v1.1.3 `prune` job) run side
+  by side, run `audit-verify` only after the first v1.2 `prune` has run:
+  v1.1.3's `prune` drops audit partitions without trimming the chain, which
+  `audit-verify` would report as a break until v1.2's `prune` trims it.
 - Every audit event is also written to stdout as one JSON line with
   `"type":"audit"`, for any cluster log shipper to forward to a SIEM
   (docs/configuration.md, "Streaming the audit log to a SIEM").

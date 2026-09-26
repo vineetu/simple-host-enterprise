@@ -744,16 +744,17 @@ func (h *AdminHandler) disableUserByEmail(w http.ResponseWriter, r *http.Request
 		return
 	}
 	usernames := make([]string, 0, len(people))
-	changed := 0
+	var events []audit.Event
+	// Every account is disabled first and the audit rows written last: an
+	// audit insert takes the chain head lock (migration 0036) until commit,
+	// so taking another user's row lock after one would deadlock against an
+	// ordinary transaction that holds that row and waits for the head.
 	for _, p := range people {
 		usernames = append(usernames, p.Username)
 		if p.Disabled {
 			continue
 		}
 		err := db.SetUserDisabledTx(r.Context(), tx, p.ID, true)
-		if err == nil {
-			err = h.audit.RecordTx(r.Context(), tx, h.userAuditEvent(r, "admin_disable_user", p.ID, p.Username, map[string]any{"by": "email"}))
-		}
 		if errors.Is(err, db.ErrLastAdmin) {
 			writeJSON(w, http.StatusConflict, errorResponse{Error: "cannot disable the last enabled admin"})
 			return
@@ -763,8 +764,16 @@ func (h *AdminHandler) disableUserByEmail(w http.ResponseWriter, r *http.Request
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 			return
 		}
-		changed++
+		events = append(events, h.userAuditEvent(r, "admin_disable_user", p.ID, p.Username, map[string]any{"by": "email"}))
 	}
+	for _, event := range events {
+		if err := h.audit.RecordTx(r.Context(), tx, event); err != nil {
+			log.Printf("admin: offboard: record %s: %v", event.Detail, err)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+			return
+		}
+	}
+	changed := len(events)
 	if err := tx.Commit(); err != nil {
 		log.Printf("admin: offboard: commit: %v", err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})

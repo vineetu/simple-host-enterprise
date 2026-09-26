@@ -160,5 +160,6 @@ CREATE TRIGGER audit_events_chain
 
 REVOKE ALL ON TABLE audit_chain, audit_chain_head FROM PUBLIC;
 REVOKE ALL ON FUNCTION audit_chain_append() FROM PUBLIC;
+REVOKE ALL ON FUNCTION audit_event_canonical FROM PUBLIC;
 
 COMMIT;
