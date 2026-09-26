@@ -4,7 +4,42 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
-## Unreleased
+## v1.3.1 — 2026-09-26
+
+No schema change (still 0042); rolling back to v1.3.0 is safe. Skills are at
+0.13.1 (0.11.0 still works).
+
+### Operations
+- `simple-host restore` into a site that does not exist yet applies the same
+  name rules as creating a site through the API (lowercase letters, numbers
+  and hyphens, at most 63 characters, not `xn--`, not reserved, not another
+  site's derived address), so a restore never creates a site with no address.
+  Restoring into an existing site is unchanged.
+
+### Skills and served text
+- Skills 0.13.1 correct stale text: a `428` means send `If-Match` on the
+  owner-qualified routes; `/api/me`'s `usage` is one entry per namespace;
+  the 10-team limit applies to creating a team, and a team holds at most 50
+  members; team member search marks existing members `already_member`; an
+  asset is served at the `url` its upload returns; a `403` with `scope`
+  means the key's scope does not allow the call; a framework's base path is
+  relative (`./`), never `/<site>/`.
+- MCP tool text no longer mentions publishing to a site shared with you
+  (viewers never publish) and says when `etag` is required.
+- `openapi.yaml`: redirect codes, which rate limits are shared across
+  replicas, the full upload denylist, two-admin approval, API key scopes,
+  the `url` field on a site, and `/api/search` requiring sign-in, all as the
+  server behaves.
+- The home page, capabilities page and empty showcase no longer say sites
+  are unlisted by default, served from a subpath, or keep exactly five
+  versions.
+
+### Docs
+- Install, configuration, storage, security review and feature docs brought
+  in line with v1.3.0: audit writes that are transactional, envelope key
+  rotation order, `OWNER_CERTS=manual` steps, `BACKUP_STORAGE_REGION`
+  (optional), the `--` rule (account and team names only), site hosts in
+  the threat model, and every subcommand. `docs/page/` is marked historical.
 
 ### Local evaluation
 - `make local` no longer stalls on MinIO. MinIO stopped publishing community

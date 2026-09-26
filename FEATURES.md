@@ -74,8 +74,8 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Status.** Built.
 - **Routes.** `GET /api/keys`, `POST /api/keys`, `DELETE /api/keys/{id}`.
 - **MCP.** None (by design).
-- **Skill.** `references/account-recovery.md` (Get a key; Revoked, lost, or
-  extra keys).
+- **Skill.** `references/account-recovery.md` (Get a key; Key scopes;
+  Revoked, lost, or extra keys).
 - **Pages.** `/dashboard` "API keys" panel.
 - **Go.** `internal/handler/keys.go`, `dashboard.go`; `internal/db/api_keys.go`;
   `internal/auth/middleware.go`, `scope.go`.
@@ -278,8 +278,8 @@ Config names are documented in `docs/configuration.md`; schema in
 - **What.** At level `specific` a site lists named viewers (people or teams);
   it is served on its own host like every site, and only
   listed viewers (and the owner or team) can open it. Viewers
-  read, never write. Removing the last viewer leaves the level, narrowing the
-  site to its owner.
+  read, never write. Removing the last viewer keeps the level at `specific`,
+  narrowing the site to its owner.
 - **Status.** Built.
 - **Routes.** `GET /api/collaboration/sites/{owner}/{sitename}/viewers`,
   `POST /api/collaboration/sites/{owner}/{sitename}/viewers`,
@@ -544,8 +544,9 @@ Config names are documented in `docs/configuration.md`; schema in
   binary unless every newer migration is marked backward-compatible.
   `simple-host migrate` applies the schema and sets the least-privilege
   `simplehost_app` role's password; the server connects as that role.
-- **Subcommands.** `migrate`, `restore`, `migrate-storage`, `prune`,
-  `owner-hosts` (section 19), `version`.
+- **Subcommands.** No argument runs the server. Others: `migrate`, `restore`, `migrate-storage`,
+  `reencrypt` (section 6), `prune`, `audit-verify` (section 12), `owner-hosts`
+  (section 19), `version`.
 - **Go.** `internal/config/config.go`; `internal/migrate/`;
   `cmd/server/main.go`, `subcommands.go`.
 - **DB.** `simplehost_app` grants (0020); every migration.

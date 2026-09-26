@@ -406,6 +406,7 @@ target site as its next version, creating the target site if needed:
 kubectl -n simple-host exec deploy/simple-host -- /simple-host restore -from-site-id <uuid> -version <n> -owner <username> -site <name> -set-current=true
 ```
 
+`-owner` is the account's username; for a team, its full `team-<name>`.
 `-set-current=false` adds the version without making it live. A deleted
 site's id is in the audit log (its `site_delete` event). If the object has
 already been swept, first bring back its noncurrent version with the

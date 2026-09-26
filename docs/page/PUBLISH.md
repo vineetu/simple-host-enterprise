@@ -1,5 +1,13 @@
 # Publishing the `/enterprise` page
 
+> **Historical.** This page and its two HTML files were written before
+> v1.1 and are only partly updated: they still describe a volume for site
+> files (sites now live in the bucket), a sub-path address
+> (`/enterprise/`; since v1.3 a site is served at `<site>.<owner>.<base>/`),
+> a repository with no public link, and a
+> removed AI-gateway seam. Kept for history; do not publish them as they
+> are. `README.md` and `docs/` describe the package.
+
 This page is not part of the package and is not a route the server serves.
 It is a static site, published like any other Simple Host site, under your
 own account on the existing playground instance. This file is commands

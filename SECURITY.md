@@ -21,7 +21,7 @@ pin the release image by digest, and upgrade to take a fix.
 
 In scope: the code in this repository and the release image built from it,
 including the server, its management API and MCP endpoint, sign-in and
-session handling, site isolation between owners and hosts, archive and asset
+session handling, isolation between sites and between owners, archive and asset
 handling, the schema and its migrations, and the manifests under `deploy/`.
 
 Out of scope: vulnerabilities in your cluster, ingress controller, identity

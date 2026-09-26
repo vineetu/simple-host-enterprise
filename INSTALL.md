@@ -492,7 +492,7 @@ Every site is served at the root of its own host, `<site>.<owner>.<base>`
 
 **Template annotations.** Every annotation on the install's own Ingress
 (`OWNER_INGRESS_TEMPLATE`, default `simple-host`) except `cert-manager.io/*`
-is copied onto each owner's Ingress, so keep base-host-only settings (a
+and `kubectl.kubernetes.io/*` is copied onto each owner's Ingress, so keep base-host-only settings (a
 `configuration-snippet`, an `auth-url`) off it.
 
 **Ingress controller.** Automatic owner certificates are tested with an
@@ -543,7 +543,8 @@ patches:
 
 **Issuing owner certificates yourself.** If the platform team will not let
 a pod create Ingresses, delete `- ../../components/owner-hosts` from
-`components:` and set `OWNER_CERTS=manual` in `config.env`. Every owner is
+`components:`, set `OWNER_CERTS=manual` in `config.env`, and delete its
+`OWNER_CERT_ISSUER` line (`make preflight` refuses the placeholder). Every owner is
 then treated as ready, so each owner's certificate and ingress host rule
 must exist before that owner publishes a first site. For owner `alice`
 (copy the class and controller annotations from `ingress-patch.yaml`):
@@ -751,9 +752,10 @@ of `docs/configuration.md`.
 - **Config changes**: edit `config.env` or `secrets.env`, re-apply, then
   `kubectl --context "$CTX" -n simple-host rollout restart deploy/simple-host`.
 - **Secret rotation**: `SESSION_SIGNING_KEY` rotates by adding a second
-  key (`docs/configuration.md`). `BACKUP_ENVELOPE_KEY` rotates by putting the
-  new key first, deploying, running `simple-host reencrypt`, then removing
-  the old key (`docs/storage.md`, "Rotating the envelope key"). Entra client
+  key (`docs/configuration.md`). `BACKUP_ENVELOPE_KEY` rotates by adding the
+  new key second, deploying, moving it first, deploying, running
+  `simple-host reencrypt`, then removing the old key (`docs/storage.md`,
+  "Rotating the envelope key"). Entra client
   secrets expire; note the date for the human.
 - **Audit**: every committed audit event is also one JSON line on the pod's
   stdout with `"type":"audit"` and its hash-chain `seq` and `hash`; point the cluster's log shipper at it to feed a

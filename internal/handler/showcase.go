@@ -202,7 +202,7 @@ func (h *ShowcaseHandler) page(w http.ResponseWriter, r *http.Request) {
 	b.WriteString(`</div>`)
 
 	if len(entries) == 0 {
-		b.WriteString(`<div class="empty">No public sites yet. Sites are unlisted by default — ask their owners to opt into the showcase via the simple-host skill.</div>`)
+		b.WriteString(`<div class="empty">No listed sites yet. A new site opens only for its owner or team; its owner can list it here from its access setting on the dashboard.</div>`)
 	} else {
 		b.WriteString(`<div class="sites" id="showcase-sites">`)
 

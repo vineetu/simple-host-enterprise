@@ -7,8 +7,11 @@ info:
     `todo.alice.example.com/`). The owner host `<owner>.<base>/` serves the
     person's or team's index page. Until the owner's certificate is ready it
     also serves their sites at `<owner>.<base>/<sitename>/`; after that,
-    those addresses redirect to each site's own host. Always use the `url`
-    from the latest response rather than composing an address. Uploads may
+    those addresses, and `/api/sites/<sitename>/...` on the owner host,
+    redirect to each site's own host with path and query kept (`301` for GET
+    and HEAD, `308` otherwise). v1.2 addresses of the form
+    `<owner>--<sitename>.<base>` only redirect. Always use the `url` from the
+    latest response rather than composing an address. Uploads may
     be gzip-compressed tar or ZIP archives; nested regular-file downloads such
     as ZIP and DMG artifacts are supported.
 
@@ -32,8 +35,10 @@ info:
     or uploaded files.
 
     Rate-limited operations return `429` with an integer-seconds
-    `Retry-After` header. These limits are process-local and reset when the
-    service process restarts.
+    `Retry-After` header. Sign-in, the session hand-off, API key minting and
+    the connector's token and client registration limits are counted in
+    Postgres across all replicas; every other limit is per process and
+    resets when the process restarts.
 
     API-key-authenticated management requests must identify either a supported
     agent skill with `X-Skill-Version: <major.minor.patch>` or an intentional
@@ -288,14 +293,18 @@ paths:
         regular files or directories with canonical, confined paths. Symlinks
         and special files are rejected.
 
-        Extensions use a denylist, not an allowlist: `.sh`, `.bash`, `.zsh`,
-        `.fish`, `.bat`, `.cmd`, `.ps1`, `.py`, `.pyc`, `.rb`, `.pl`, `.go`,
-        `.php`, and `.exe` are rejected case-insensitively. Other regular files,
+        Extensions use a denylist, not an allowlist: source scripts (`.sh`,
+        `.bash`, `.zsh`, `.fish`, `.bat`, `.cmd`, `.ps1`, `.py`, `.pyc`, `.rb`,
+        `.pl`, `.go`, `.php`) and executables, installers, packages and disk
+        images (`.exe`, `.dll`, `.msi`, `.msix`, `.appx`, `.scr`, `.com`,
+        `.pif`, `.cpl`, `.hta`, `.vbs`, `.vbe`, `.jse`, `.wsf`, `.wsh`, `.lnk`,
+        `.reg`, `.jar`, `.apk`, `.aab`, `.pkg`, `.deb`, `.rpm`, `.iso`, `.img`)
+        are rejected case-insensitively. Other regular files,
         including nested ZIP and DMG downloads, are supported, except entries
         whose basename is `.DS_Store` or starts with `._`; those macOS metadata
         files are omitted. The response's `url` is the site's address: the
-        root of its own host `<sitename>.<owner>.<base>/`, or for a short while
-        after an owner's first site `<owner>.<base>/<sitename>/`. Use it as
+        root of its own host `<sitename>.<owner>.<base>/`, or, until the
+        owner's certificate is ready, `<owner>.<base>/<sitename>/`. Use it as
         returned rather than composing it by hand, and take it from the latest
         response. A new site's access level is `only_me`.
 
@@ -358,7 +367,7 @@ paths:
 
     put:
       summary: Update an existing site
-      description: Upload a new gzip-compressed tar or ZIP version using the same archive safety, type, path, denylist, and size/count limits as site creation. Creates a new version number. Versions beyond the newest 5 are automatically cleaned up. `If-Match` is optional here, since only the owner deploys a site in their own namespace; team sites use the owner-qualified route, where it is required.
+      description: Upload a new gzip-compressed tar or ZIP version using the same archive safety, type, path, denylist, and size/count limits as site creation. Creates a new version number. Versions beyond the newest 5 (`QUOTA_MAX_VERSIONS`) are automatically cleaned up. `If-Match` is optional here, since only the owner deploys a site in their own namespace; team sites use the owner-qualified route, where it is required.
       tags: [Sites]
       security:
         - apiKey: []
@@ -422,7 +431,7 @@ paths:
 
     delete:
       summary: Delete a site
-      description: Deletes the site and all its versions from disk and database.
+      description: Deletes the site and all its versions from storage and the database.
       tags: [Sites]
       security:
         - apiKey: []
@@ -494,7 +503,7 @@ paths:
   /api/sites/{sitename}/rollback:
     post:
       summary: Rollback to a previous version
-      description: Rollback a site to a specific version. The version must exist on disk and in the database. `If-Match` is optional on this route.
+      description: Rollback a site to a specific version. The version must still be retained. `If-Match` is optional on this route.
       tags: [Sites]
       security:
         - apiKey: []
@@ -1150,7 +1159,7 @@ paths:
   /api/admin/access-requests/{owner}/{sitename}/approve:
     post:
       summary: Approve a network access request
-      description: Admin only, browser session only (never an API key). Opens the site to anyone who can reach the server. Audited as `network_access_approved`. `409` when nothing is pending.
+      description: Admin only, browser session only (never an API key). Opens the site to anyone who can reach the server. With `NETWORK_ACCESS_APPROVALS=2` the first approval is only recorded (audited as `network_access_approval_added`) and a second admin's opens the site; the requester never approves their own request. Audited as `network_access_approved`. `409` when nothing is pending.
       tags: [Admin]
       parameters:
         - $ref: '#/components/parameters/owner'
@@ -1433,7 +1442,8 @@ paths:
       summary: Search public sites
       description: |
         Searches the bounded plain-text index of active HTML pages. The live
-        query admits only sites whose current `public` flag is true and whose
+        query admits only sites whose current `public` flag is true (access
+        level `listed` or `network`) and whose
         indexed version is still the site's active version, then returns at
         most one best-matching page per site. Ranking is lexical; recorded
         clicks do not affect ranking.
@@ -1444,7 +1454,9 @@ paths:
         as `query`. `result_count` is the number of results in this response,
         not a total-hit count.
 
-        This endpoint is unauthenticated. A valid request reuses exactly one
+        Needs a signed-in session or a `full` API key; otherwise `401`. The
+        search cookie below is for rate limiting and telemetry, not sign-in.
+        A valid request reuses exactly one
         valid `simple_host_search_session` cookie or creates a 32-random-byte
         base64url cookie. The cookie is HttpOnly, SameSite=Lax, scoped to `/`,
         and retained for 180 days; production also marks it Secure. Only its
@@ -1458,7 +1470,6 @@ paths:
         no-store`; `HEAD` is rejected before cookie, rate, search, or telemetry
         side effects.
       tags: [Search]
-      security: []
       parameters:
         - name: q
           in: query
@@ -1558,8 +1569,8 @@ paths:
         `impression_id` field whose value is an RFC 4122 version-4 UUID; the
         request body is limited to 16 KiB.
 
-        This endpoint is unauthenticated but requires the existing anonymous
-        search cookie to match the session that received the impression. It
+        Needs a signed-in session or a `full` API key; otherwise `401`. It
+        also requires the existing search cookie to match the session that received the impression. It
         never creates or replaces that cookie. Validly shaped requests return
         `204` without revealing whether the cookie or impression was missing,
         mismatched, already recorded, dropped by the 16-write concurrency gate,
@@ -1570,7 +1581,6 @@ paths:
         1/second. Those rate limits return `429` with `Retry-After`. Every
         response is `Cache-Control: no-store`.
       tags: [Search]
-      security: []
       parameters:
         - name: simple_host_search_session
           in: cookie
@@ -1834,6 +1844,18 @@ components:
       type: apiKey
       in: header
       name: X-API-Key
+      description: |
+        An API key, for CI and other automation; agents normally connect
+        through `/mcp` with the company sign-in instead. Each key has a scope
+        chosen when it is created and an expiry (at most 365 days).
+        `publish` (the default) deploys, updates and rolls back sites, reads
+        versions, saved data and assets, and calls `/api/me` and `/mcp`.
+        `full` adds everything else the person can do (deleting sites, access
+        levels, viewers, teams, the audit and access logs, search), except
+        administration. `offboard` (admins only) calls
+        `POST /api/admin/users/disable` and nothing else. No key reaches any
+        other `/api/admin/*` route. OAuth connector tokens work only on
+        `/mcp`.
 
   parameters:
     SkillVersion:
@@ -1928,6 +1950,10 @@ components:
         updated_at:
           type: string
           format: date-time
+        url:
+          type: string
+          description: The site's address. Use it as given.
+          example: https://my-cool-site.alice-smith.simple-host.example.com/
         analytics:
           $ref: '#/components/schemas/SiteAnalytics'
 
@@ -1968,6 +1994,12 @@ components:
             requested_at:
               type: string
               format: date-time
+            approvals:
+              type: integer
+              description: Admin approvals so far.
+            approvals_required:
+              type: integer
+              description: Approvals needed (`NETWORK_ACCESS_APPROVALS`, 1 or 2).
         public_path:
           type: string
           example: https://my-cool-site.alice-smith.simple-host.example.com/

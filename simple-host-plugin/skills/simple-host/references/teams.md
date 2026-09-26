@@ -81,7 +81,8 @@ untouched by this rule. A name is also refused if it is reserved, or if it is a
 different spelling of a name already in use — say which name it collided with
 rather than retrying variations.
 
-A person may be a member of at most 10 teams.
+A person who already belongs to 10 teams cannot create another (`409`
+`team_limit`). A team has at most 50 members (`409` `member_limit`).
 
 ### List
 
@@ -103,7 +104,7 @@ DELETE /api/teams/<team>/members/<username>
 POST /api/teams/<team>/leave
 ```
 
-Candidates are existing registered people who are not already members; the search
+Candidates are registered people, each marked `already_member`; the search
 never returns teams. Add in one bounded batch, at most 50. Removal takes any
 other member. Removing yourself is the same as `leave`, which answers the
 remaining members, or `team_deleted: true` and `sites_deleted` when you were the

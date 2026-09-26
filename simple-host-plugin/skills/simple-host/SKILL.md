@@ -265,8 +265,9 @@ configuration.
 - `412 Precondition Failed` means another actor changed the site. Stop, show the
   conflict, and reconcile intentionally. Never fetch a fresh ETag immediately
   before upload merely to force stale work through.
-- `428 Precondition Required` on an owner-inferred legacy update means switch to
-  the collaboration workflow.
+- `428 Precondition Required` means the owner-qualified route needs `If-Match`:
+  capture the ETag with `GET /api/collaboration/sites/<owner>/<sitename>`
+  first.
 - The downloadable ZIP is the exact retained deployed artifact, not reconstructed
   framework source. Do not claim otherwise.
 - Keep deployed HTML, CSS, and JavaScript readable and stable where the toolchain
@@ -295,8 +296,8 @@ configuration.
 - The server retains the latest five site versions unless the installation
   sets another number; older ones are removed as new ones deploy.
 - Each namespace (the person's own, or a team's) has a quota: `GET /api/me`
-  (`get_account`) returns `usage` with `sites`, stored `bytes`, `max_sites`
-  and `max_bytes` (0 is unlimited). A refused deploy stores nothing:
+  (`get_account`) returns `usage`, one entry per namespace with `owner`,
+  `sites`, stored `bytes`, `max_sites` and `max_bytes` (0 is unlimited). A refused deploy stores nothing:
   `409` `site_limit` (too many sites) or `413` `storage_quota` (stored bytes)
   means tell the user the numbers and let them choose what to delete; do not
   retry. An installation may also scan uploads for malware: `422`

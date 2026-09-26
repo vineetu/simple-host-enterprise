@@ -1269,7 +1269,7 @@ Before changing anything, tell me conversationally in one or two sentences that 
           <p>
             No. Accounts come from your company sign-in, and only you, or the members
             of the team that owns it, can change a site. Every deploy is backed up
-            to S3 with the last five versions retained, so any change is one revert
+            to S3 with the last five versions retained by default, so any change is one revert
             away, and access logs are available to security on request.
           </p>
         </details>
@@ -1296,7 +1296,8 @@ Before changing anything, tell me conversationally in one or two sentences that 
           <summary>Do I need to register first?</summary>
           <p>
             No. Accounts come from your company sign-in. The first time your agent
-            needs access, it sends you a link to sign in and create an API key.
+            needs access, it asks you to sign in: through the Simple Host connector,
+            or with a link where you create an API key.
           </p>
         </details>
         <details>
@@ -1309,9 +1310,11 @@ Before changing anything, tell me conversationally in one or two sentences that 
         <details>
           <summary>What if my existing site uses absolute paths?</summary>
           <p>
-            Simple Host serves sites from a relative subpath. The deploy skill handles
-            the right base-path build for supported frameworks and can fix plain HTML
-            paths when needed.
+            Each site is served at the root of its own address, but may be served
+            from a subpath of your address while that address is being set up. The
+            deploy skill uses relative paths, which work at both, handles the right
+            base-path build for supported frameworks, and can fix plain HTML paths
+            when needed.
           </p>
         </details>
         <details>

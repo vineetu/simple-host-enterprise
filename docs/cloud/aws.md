@@ -24,7 +24,8 @@ alb.ingress.kubernetes.io/ssl-redirect: "443"
   controller defaults to `internal`.
 - An ALB does not cap the request body, so there is no body-size setting.
 - Alternative: an ingress controller behind an NLB. ingress-nginx is retired upstream
-  (maintenance ended March 2026), so prefer the ALB.
+  (maintenance ended March 2026), so prefer the ALB. With the ALB, owner certificates
+  are manual; an in-cluster controller makes them automatic (section 2).
 
 ## 2. DNS & wildcard certificate
 

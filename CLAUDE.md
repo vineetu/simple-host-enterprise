@@ -42,7 +42,8 @@ anything: they say what exists and what is deliberately unfinished.
 
 - `cmd/server/main.go` wires config, database, storage, handlers, the host
   gate, the request log, and the servers. `subcommands.go` is `migrate`,
-  `restore`, `migrate-storage`, `reencrypt`, `prune`, and `audit-verify`.
+  `restore`, `migrate-storage`, `reencrypt`, `prune`, `audit-verify`, and
+  `owner-hosts` (the per-owner certificate reconciler in `internal/ownerhosts`).
 - `internal/config` reads the environment. Required values have no default;
   the database DSN and the bucket endpoint are additionally refused if their
   TLS is weaker than required, unless the local-evaluation
@@ -59,7 +60,7 @@ anything: they say what exists and what is deliberately unfinished.
   0020 creates `simplehost_app`, the least-privilege role the server
   connects as; `migrate` sets its password from `DB_APP_PASSWORD` every run.
 - `internal/handler/host_gate.go` decides per hostname what the router may
-  answer; `serve.go` serves site files; `site.go` is the management API.
+  answer (site host, owner host, fallback path, redirects); `serve.go` serves site files; `site.go` is the management API.
 - `internal/storage/store.go` is the site store: bucket objects, the live
   version the database resolves, and the pod-local cache; `objects_s3.go`
   is the S3 client (server-side-encryption header, optional client-side

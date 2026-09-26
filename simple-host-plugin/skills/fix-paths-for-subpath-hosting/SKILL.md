@@ -28,7 +28,7 @@ Before doing anything else, check for these signals at the project root:
 | `angular.json` exists | Angular | Use simple-host skill's "Angular" section |
 | `package.json` has `gatsby` | Gatsby | Use simple-host skill's "Gatsby" section |
 | `package.json` has `@vue/cli-service` | Vue CLI (legacy) | Use simple-host skill's "Vue CLI" section |
-| Anything else with a `package.json` and a build script | Unrecognized framework | Search that framework's docs for "base path" / "subpath" / "public path" / "path prefix" — apply that config, rebuild, re-upload. **Do not** mechanically rewrite output. |
+| Anything else with a `package.json` and a build script | Unrecognized framework | Search that framework's docs for a relative base (`./`) setting ("base", "public path", "relative URLs") — apply it, rebuild, re-upload. If it only supports an absolute base, use `/`, never `/<site>/`. **Do not** mechanically rewrite output. |
 | **No `package.json`, OR `package.json` without a recognized framework dep AND without a build script** | Plain HTML | Continue with the mechanical rewrite below |
 
 If a framework is detected, **stop here** and tell the user (or the calling agent) to use the simple-host skill's framework-specific section. That skill has the correct build flag, output directory, and pre-flight checks for every framework above. Trying to mechanically fix paths in a built bundle will silently break dynamic imports, code splitting, and asset loaders even if the static asset references look right at first glance.
@@ -154,7 +154,7 @@ Service workers and web workers run in their own context — use their own files
 // At the top of the shared JS file:
 const scriptUrl = document.currentScript?.src || '';
 // Remove the filename and its parent directory to get the site root
-// e.g., "https://owner.host/mysite/shared/nav.js" -> "https://owner.host/mysite/"
+// e.g., "https://mysite.owner.host/shared/nav.js" -> "https://mysite.owner.host/"
 const siteRoot = scriptUrl.replace(/\/[^/]+\/[^/]+$/, '/');
 
 // Then use siteRoot for all dynamic paths:

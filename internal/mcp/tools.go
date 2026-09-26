@@ -79,7 +79,7 @@ const (
 	teamArgDesc = "Team name as it appears in the URL, e.g. `team-acme` — every team name begins with `team-`. Get it from list_teams; a team you are not in is indistinguishable from one that does not exist, so do not guess."
 
 	etagArgDesc = "The site's ETag as it was when you started editing — capture it with get_site before making any change and keep it with the working copy. " +
-		"Required when anyone else can deploy the site (a team owns it), optional otherwise. " +
+		"Required whenever owner is given, except when creating a site; optional only when owner is omitted for a site in your own account. " +
 		"Do NOT refresh it just before deploying: a fresh ETag hides a change somebody else made instead of catching it, which is the one thing it exists to do."
 )
 
@@ -294,7 +294,7 @@ func deploySiteSchema() map[string]any {
 				"Required whenever owner is given. Settle it with get_site or list_sites before calling — do not send `create` speculatively and read the failure, " +
 				"because a create that lands in the wrong namespace is a second site nobody is looking at.",
 		},
-		"owner": str(ownerArgDesc + " Required to publish into a team's namespace or to a site shared with you."),
+		"owner": str(ownerArgDesc + " Required to publish into a team's namespace."),
 		"etag":  str(etagArgDesc),
 	}, "site", "files")
 	schema["dependentRequired"] = map[string]any{"owner": []string{"intent"}}
@@ -365,7 +365,7 @@ func toolList() []Tool {
 					return upstream{}, err
 				}
 				if collaboration == "" {
-					return upstream{}, fmt.Errorf("owner is required; call get_account for your own username, list_teams for a team's name, or list_sites for the owner of a site shared with you")
+					return upstream{}, fmt.Errorf("owner is required; call get_account for your own username or list_teams for a team's name")
 				}
 				return upstream{Method: "GET", Path: collaboration}, nil
 			},
@@ -810,7 +810,7 @@ func toolList() []Tool {
 			Name:  "create_team",
 			Title: "Create a team",
 			Description: "Create a team. A team is a namespace that owns sites exactly as a person does, but it is not a person: it has no API key, and its members act with their own. " +
-				"You become its first member. There is one role and no other: everybody in a team may publish, roll back, relist and delete any of the team's sites, add and remove members, leave, and delete the team. " +
+				"You become its first member. There is one role and no other: everybody in a team may publish, roll back, set who can open and delete any of the team's sites, add and remove members, leave, and delete the team. " +
 				"Call this ONLY when the user asks for a team. Creating one is never a step on the way to publishing something, and never the answer to a deploy that failed.",
 			InputSchema: object(map[string]any{
 				"name": str("The team's name, e.g. `acme` — lowercase letters, numbers and hyphens, no dots. Every team name begins with `team-`: `acme` and `team-acme` both create `team-acme`, and the `name` in the response is the one to use from then on. " +
@@ -999,7 +999,7 @@ func collaborationSuffix(args map[string]any, suffix, method string, body []byte
 		return upstream{}, err
 	}
 	if collaboration == "" {
-		return upstream{}, fmt.Errorf("owner is required; call get_account for your own username, list_teams for a team's name, or list_sites for the owner of a site shared with you")
+		return upstream{}, fmt.Errorf("owner is required; call get_account for your own username or list_teams for a team's name")
 	}
 	up := upstream{Method: method, Path: collaboration}
 	if body != nil {

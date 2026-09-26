@@ -65,14 +65,17 @@ accounts (`admin@example.com` / `person@example.com`) to sign in with; see
   `simple-host prune` drops
   expired audit/access-log partitions on a monthly `CronJob`
   (`deploy/base/cronjob-prune.yaml`), under the database's owning
-  credential rather than the application's own role.
+  credential rather than the application's own role;
+  `simple-host audit-verify` checks the audit log's hash chain;
+  `simple-host owner-hosts` is the reconciler that gets each owner's
+  certificate issued (`deploy/components/owner-hosts`).
 - `internal/` — one package per concern. `handler` is the HTTP surface,
   `db` the queries, `storage` the bucket-backed site store and its cache, `migrate`
   the embedded schema, `oidc` sign-in, `audit` the action/access log sink
   (recorder, batching access writer, reader, and retention pruning),
   `reqlog` the request log, `mcp` the tool adapter.
 - `deploy/base` — the application's manifests, including the `prune`
-  CronJob. `deploy/components` add an
+  CronJob. `deploy/components` add the owner-hosts reconciler, an
   in-cluster Postgres (evaluation only), MinIO, or Dex. `deploy/overlays` are environments:
   `local` is complete, `byo` / `staging` / `production` are templates for
   managed services.
@@ -119,9 +122,12 @@ make vuln      # govulncheck
 - `docs/configuration.md` — every environment variable, its default, and
   the refusal it triggers when set wrong.
 - `docs/security-review.md` — threat model, controls matrix, pen-test list.
-- `docs/site-isolation.md` — why sites under one owner share an origin, and the recorded path to per-page isolation if it is ever needed
+- `docs/site-isolation.md` — every site on its own origin
+  (`<site>.<owner>.<base>`), the fallback until an owner's certificate is
+  ready, and the redirects.
+- `docs/storage.md` — the bucket, the cache, encryption and key rotation.
 - `docs/cloud/` — per-cloud checklists for the platform pieces a real
-  install needs (AWS, GCP, Azure, Oracle Cloud).
+  install needs (AWS, GCP, Azure, Oracle Cloud, UpCloud).
 - `CHANGELOG.md` — the releases.
 
 ## Licence

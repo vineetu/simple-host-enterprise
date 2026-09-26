@@ -343,7 +343,8 @@ patches:
 
 **Issuing owner certificates yourself.** If the platform team will not let
 a pod create Ingresses, delete `- ../../components/owner-hosts` from
-`components:` and set `OWNER_CERTS=manual` in `config.env`. Every owner is
+`components:`, set `OWNER_CERTS=manual` in `config.env`, and delete its
+`OWNER_CERT_ISSUER` line (`make preflight` refuses the placeholder). Every owner is
 then treated as ready, so each owner's certificate and ingress host rule
 must exist before that owner publishes a first site. For owner `alice`
 (copy the class and controller annotations from `ingress-patch.yaml`):
@@ -525,7 +526,9 @@ group without its audit row cannot commit: `site_create`, `site_update`,
 `network_access_declined`,
 `network_access_reverted`, `state_restore`, `viewer_grant`,
 `viewer_revoke`, `team_create`,
-`team_delete`, `member_add`, `member_remove`, `state_write`,
+`team_delete`, `member_add`, `member_remove`, `sign_in`, `session_revoke`,
+`key_mint`, `key_revoke`, `connector_sign_in`, `connector_revoke`,
+`admin_disable_user`, `admin_enable_user`, `state_write`,
 `asset_create`, and `asset_delete` — the last three from the site-facing
 API (`internal/handler/site_api.go`'s `PutState`/`PutStateVersioned`/
 `CreateAsset`/`DeleteAsset`) and, for `asset_delete`, also from the
@@ -534,14 +537,12 @@ dashboard's base-host mirror (`internal/handler/assets_admin.go`'s
 For both asset-delete call sites, the bucket object is not deleted inside
 that transaction: the transaction queues it for the sweep, which deletes it
 an hour later (`docs/storage.md`, Retention), so the database row, its
-audit row and the queued deletion commit or roll back together. Eleven actions remain best-effort,
-written through the older `Record` with no shared transaction: `sign_in`,
-`sign_out`, `session_revoke`, `key_mint`, `key_revoke`, `hand_off`, the
-admin actions `admin_disable_user`, `admin_enable_user`,
-`admin_archive_versions`, `admin_export`, and `upload_infected` (an upload
-the optional malware scan refused; nothing was stored, so there is no
-transaction to share). See
-`docs/security-review.md`'s S9a row for the same inventory.
+audit row and the queued deletion commit or roll back together. A few
+actions remain best-effort, written through `Record` in a transaction of
+their own: `sign_out`, `connector_revoke` after a reused refresh token,
+`hand_off`, `admin_export`, the refusals `access_denied` and
+`sign_in_failed`, and `upload_infected` (an upload the optional malware
+scan refused; nothing was stored, so there is no transaction to share).
 `state_write` coalesces repeated writes from the same actor
 and site into one row per five-minute window (`detail.count`), so autosave
 at page frequency does not bury every other action; every other action is
@@ -618,14 +619,11 @@ a Job's pod template is immutable once the object exists, so the `-dry-run`
 flag has to be patched into the rendered JSON before it is ever created.
 `scripts/smoke.sh` does exactly this.
 
-Two known gaps, both flagged rather than silently left: `/api/audit`'s
+One known gap, flagged rather than silently left: `/api/audit`'s
 `actor_id`/`owner_id`/`site_id` fields are not resolved back to
 usernames/site names, so the dashboard's Activity tab shows raw ids for
 those columns (the action, timestamp, and `via_site_label`/`via_site_name`
-carry most of the practical signal); and `admin_disable_user`/
-`admin_enable_user` still audit with a plain, non-transactional write
-(`db.SetUserDisabled` opens its own internal transaction with no way for
-the caller to share it), unlike every other action above. There is no site-transfer feature and
+carry most of the practical signal). There is no site-transfer feature and
 no per-site write-mode setting, so neither has an audit action.
 
 ## 9. Backup and restore
@@ -732,7 +730,8 @@ still count in memory until they are replaced.
 ### If you use a private registry
 
 Put the pull secret on the **ServiceAccount**, not the Deployment. Two
-workloads run this image: the server and the `prune` CronJob. Kubernetes
+workloads run this image as the `simple-host` ServiceAccount: the server
+and the `prune` CronJob. Kubernetes
 applies a ServiceAccount's `imagePullSecrets` to every pod that uses it, so
 one patch covers both. The owner-hosts reconciler runs as its own
 ServiceAccount, `simple-host-owner-hosts`; patch it the same way (section

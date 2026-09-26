@@ -181,8 +181,10 @@ immediately. Search returns at most one best active page per site.
 
 - `400 skill_version_required`: stop, update with permission, reload the skill,
   and restart at access resolution.
-- `401`: the key is missing/invalid; follow account recovery rather than
-  repeatedly registering.
+- `401`: the key is missing, invalid, expired or revoked; follow account
+  recovery rather than retrying.
+- `403` with a `scope` field: the key's scope does not allow the call; see
+  account recovery.
 - `403`: the actor lacks the required role in that namespace. With
   `code: "no_access"`, stop and report it; do not retry without the owner and do
   not create the site somewhere you can write.

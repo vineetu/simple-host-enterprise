@@ -101,7 +101,9 @@ artifact.
 - **2026-09-23 — Identity is the customer's OIDC provider**, with admin following
   `ADMIN_EMAILS` / `OIDC_ADMIN_CLAIM` on a real signed-in person. No admin key exists.
 - **2026-09-25 — Five access levels per site, only-me by default** (`sites.access`, migration
-  0033). `only_me` (owner or team), `specific` (named people or teams, on the site's own host),
+  0033). `only_me` (owner or team), `specific` (named people or teams, on the site's own
+  host, then `<owner>--<site>.<base>` — *superseded by "Every site gets its own origin"
+  below; that host now only redirects*),
   `company` (anyone signed in with the link), `listed` (company, plus showcase and search),
   `network` (anyone who can reach the server, no sign-in). Existing sites moved to the level
   that matched what they had, so no shared link broke.

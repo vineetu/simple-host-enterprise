@@ -3,10 +3,12 @@
 - `install.md` — installing on a local cluster, then on a real one.
 - `cloud/` — per-cloud notes for managed Kubernetes, Postgres and buckets.
 - `configuration.md` — every environment variable the server reads.
+- `storage.md` — the bucket, the pod cache, encryption and key rotation.
 - `security-review.md` — the controls, the pen-test list and what was run,
   and the accepted limitations.
 - `site-isolation.md` — every site on its own origin (`<site>.<owner>.<base>`),
   the fallback until an owner's certificate is ready, and the redirects.
+- `page/` — historical: an early marketing page, kept for history, not current.
 
 The top-level `README.md` says how to run the package locally, `CLAUDE.md`
 and `AGENTS.md` carry the working rules, and `SCRUB.md` is the checklist that

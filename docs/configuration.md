@@ -3,9 +3,10 @@
 Every variable `internal/config/config.go` reads.
 Everything under "Public address" through "Retention" is read by
 `config.Load()` (the server) or `config.LoadDatabase()` /
-`config.LoadAppRolePassword()` / `config.LoadAuditRetention()` (the
-`migrate` and `prune` subcommands, which each need only a narrower slice of
-the same environment). Nothing that identifies a particular installation
+`config.LoadAppRolePassword()` / `config.LoadAuditRetention()` /
+`config.LoadOwnerHosts()` (the `migrate`, `prune` and `owner-hosts`
+subcommands, which each need only a narrower slice of the same
+environment). Nothing that identifies a particular installation
 has a default: leave any of the required rows below unset and the process
 refuses to start, reporting every missing name at once in a single
 `missing required configuration: ...` error, not one restart per gap.
@@ -49,13 +50,13 @@ shell.
 | `HTTPS_REDIRECT_PORT` | No | `8081` | Must differ from `PORT` when `SECURE_MODE=true`. |
 | `CACHE_DIR` | No | `/var/cache/simple-host` | none. Pod-local cache of site versions, emptied on start; the Deployment mounts an `emptyDir` here (docs/storage.md). |
 | `CACHE_MAX_BYTES` | No | `1073741824` (1 GiB) | Must parse as a positive integer. Bounds unpinned cache entries; versions being served are pinned and can exceed it, and a fill in progress downloads its compressed archive to the same volume, so size the volume at about 3x. |
-| `METRICS_PORT` | No | `9090` | Port of the separate `/metrics` listener; not exposed by the Service or Ingress (`docs/install.md` section 12). |
+| `METRICS_PORT` | No | `9090` | Must differ from `PORT` (and, when `SECURE_MODE=true`, from `HTTPS_REDIRECT_PORT`). Port of the separate `/metrics` listener; not exposed by the Service or Ingress (`docs/install.md` section 12). |
 | `TRUSTED_PROXY_CIDRS` | No | private ranges: `10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,fc00::/7` | Comma-separated CIDRs (a bare address counts as one host) of the proxies in front of the server — typically the ingress controller's pod range. When a request's TCP peer is inside this set, the client address is taken from `X-Forwarded-For`, read right to left, as the first address that is not itself a trusted proxy; anything further left was written by the client and is ignored. The default covers an ingress controller or load balancer on a private address; set it explicitly (an empty value trusts nothing) if your proxies sit elsewhere, or if clients can reach the pod directly from a private network. That client address is the one used everywhere: rate limits, the request log, `access_log.ip`, `sessions.ip` and audit rows. A malformed entry is refused at startup. Rate limits on a route that has already signed the caller in are keyed by the person, not the address. |
 | `OWNER_CERTS` | No | `auto` | Must be `auto` or `manual`; anything else is refused at startup. `auto`: an owner's sites move to their own `<site>.<owner>.<base>` hosts once the owner-hosts reconciler (`deploy/components/owner-hosts`) records that owner's `*.<owner>.<base>` certificate as ready, and are served at `<owner>.<base>/<site>/` until then (indefinitely if the reconciler is not deployed). `manual`: leave the component out; every owner is treated as ready, and you provide each owner's certificate and ingress host rule before their first site (`INSTALL.md`, "Site addresses"). |
 | `OWNER_CERT_ISSUER` | Yes for the reconciler | none | Read by the owner-hosts reconciler only (`simple-host owner-hosts`), which refuses to start without it. The cert-manager ClusterIssuer that signs every `*.<owner>.<base>` certificate: an internal CA issuer (recommended, no rate limits) or an ACME issuer with DNS-01. |
 | `OWNER_INGRESS_TEMPLATE` | No | `simple-host` | Reconciler only. The name of the install's own Ingress in the same namespace; each owner's Ingress copies its ingress class, controller annotations (body size, timeouts; not `cert-manager.io/` ones) and backend. |
 | `OWNER_HOSTS_INTERVAL` | No | `15s` | Reconciler only. A positive Go duration; a malformed or non-positive value is refused at startup. How often the reconciler applies owner Ingresses and records certificate readiness. The server's own refresh of that readiness is fixed at 15 s per replica. |
-| `RESERVED_LABELS` | No | none (empty) | Comma-separated; extends the built-in reserved-label set (`www`, `api`, `admin`, `sites`, `mcp`, `docs`, `auth`, `login`, `mail`, `cdn`, `status`, `app`, and the rest — `internal/handler/names.go`) with installation-specific hostnames that must never belong to an account or a site. Checked at account and site creation, and any label containing `--` anywhere is refused outright, independent of this list, since that shape is reserved for the v1.2 site hosts (`<owner>--<site>.<base>`, design 5.2a), which now redirect to the site's current address. |
+| `RESERVED_LABELS` | No | none (empty) | Comma-separated; extends the built-in reserved-label set (`www`, `api`, `admin`, `sites`, `mcp`, `docs`, `auth`, `login`, `mail`, `cdn`, `status`, `app`, and the rest — `internal/handler/names.go`) with installation-specific hostnames that must never belong to an account or a team. Checked when an account or team name is created, where any label containing `--` is also refused, independent of this list, since that shape is reserved for the v1.2 site hosts (`<owner>--<site>.<base>`, design 5.2a), which now only redirect. Site names are not checked against this list: a site's host sits under its owner's label (`<site>.<owner>.<base>`), so it cannot collide with a base-level hostname. |
 
 ## Identity (OIDC)
 
@@ -287,7 +288,7 @@ layout and versioning: `docs/storage.md`.
 | Variable | Required | Default | Refusal it triggers when set wrong |
 |---|---|---|---|
 | `BACKUP_STORAGE_ENDPOINT` | Yes | none | Must be an absolute URL with a host; scheme must be `http` or `https`; `http` is refused unless `BACKUP_STORAGE_INSECURE_ALLOWED=true`. |
-| `BACKUP_STORAGE_REGION` | Yes | none | — |
+| `BACKUP_STORAGE_REGION` | No | `us-east-1` | A placeholder; most S3-compatible stores ignore it. Set it when your provider cares. |
 | `BACKUP_STORAGE_BUCKET` | Yes | none | — |
 | `BACKUP_STORAGE_PREFIX` | No | `backups/` | — |
 | `BACKUP_STORAGE_ACCESS_KEY_ID` | No | none | Must be set together with `BACKUP_STORAGE_SECRET_ACCESS_KEY` — exactly one of the pair is refused. Leave both unset to use the SDK's default credential chain (a platform's workload identity). |
@@ -307,7 +308,7 @@ equivalent here; do not set them.
 |---|---|
 | `ADMIN_API_KEY` | Removed. There is no synthetic admin principal; admin status follows `ADMIN_EMAILS`/`OIDC_ADMIN_CLAIM` on a real signed-in person. |
 | `AWS_SECRET_NAME` | The Secrets Manager config loader was removed; every secret is a Kubernetes Secret, materialized directly or through your External Secrets Operator integration. |
-| `SUBDOMAIN_CUTOVER`, `OWNER_HOST_MANAGEMENT` | The subdomain-only serving shape is the only shape; there is no legacy path or cutover flag to flip. |
+| `SUBDOMAIN_CUTOVER`, `OWNER_HOST_MANAGEMENT` | Removed. There is no cutover flag: where an owner's sites are served is chosen per owner by certificate readiness (`OWNER_CERTS`). |
 
 ## Where these are set in the shipped overlays
 
