@@ -4,6 +4,92 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## v1.2.0 — 2026-09-26
+
+Schema 0039. Migrations 0035–0039 are additive and marked
+backward-compatible, so rolling back to v1.1.3 is safe; on v1.1.3 every API
+key acts with its old, unscoped reach, the audit chain keeps growing but is
+not trimmed by v1.1.3's `prune`, and quotas, two-admin approval and the
+shared rate limits are not enforced. Skills are at 0.12.0 (0.11.0 still
+works).
+
+### Sessions and leavers
+- New defaults: `SESSION_TTL=8h`, `SESSION_IDLE=30m` (were `12h`/`1h`).
+  Hard caps: `SESSION_TTL` at most `24h`, `SESSION_IDLE` at most `8h` and
+  never longer than `SESSION_TTL`; out of range refuses startup. Set them to
+  match your IdP's session policy.
+- The OAuth connector's token lifetimes are configurable:
+  `OAUTH_ACCESS_TTL` (default `1h`, at most `24h`) and `OAUTH_REFRESH_TTL`
+  (default `720h`, at most `2160h`). The refresh lifetime now counts from the
+  sign-in that connected the app; rotating the refresh token no longer
+  extends it, so a connected app re-authenticates at the IdP at least that
+  often.
+- Offboarding: `POST /api/admin/users/disable` with `{"email": ...}`
+  disables a person (sessions, API keys and connected apps end at once) for
+  HR automation, callable by an admin's session or by an `offboard`-scoped
+  key. Audited. INSTALL.md, "Sessions and leavers": disable in the IdP
+  **and** in Simple Host.
+
+### Scoped tokens
+- API keys carry a scope chosen at mint: `publish` (default: deploy,
+  update, roll back, versions, saved data, assets, `/api/me`, `/mcp`),
+  `full` (everything the person can do except administration) or `offboard`
+  (admins only; the disable route and nothing else). The dashboard shows
+  each key's scope. Keys that existed before v1.2 became `full`; no key of
+  any scope reaches `/api/admin/*` except `offboard` on its one route.
+- OAuth connector tokens (`Authorization: Bearer`) work only on `/mcp` and
+  the calls it makes for its tools; direct REST calls with them are refused.
+
+### Audit
+- `audit_events` is hash-chained inside Postgres (`audit_chain`, 0036), under
+  a lock so replicas cannot fork it. `simple-host audit-verify
+  [-expect SEQ:HASH]` walks the chain and reports the first break.
+  `simple-host prune` trims the chain with the partitions it drops. The
+  access log is not chained (docs/security-review.md, 2(e)).
+- Every audit event is also written to stdout as one JSON line with
+  `"type":"audit"`, for any cluster log shipper to forward to a SIEM
+  (docs/configuration.md, "Streaming the audit log to a SIEM").
+- Sign-in, session revoke, API key mint and revoke, and the connector's
+  sign-in and revoke now commit their audit row in the same transaction as
+  the change. The remaining best-effort writes retry, survive a client
+  disconnect, and log `AUDIT WRITE FAILED` if they still fail; they are
+  listed in docs/security-review.md.
+
+### Uploads
+- Per-owner quotas (a person's or a team's namespace), checked in the deploy
+  and asset-upload transactions: `QUOTA_MAX_SITES` (default 1000, `409`),
+  `QUOTA_MAX_BYTES` (default 10 GiB across every kept version and asset,
+  `413`), `QUOTA_MAX_VERSIONS` (default 5 per site, as before; older
+  versions go to the retire queue). The dashboard shows usage against them.
+  Existing versions' sizes are filled in from the bucket in the background
+  (`versions.size_bytes`, 0037).
+- Optional malware scan: with `CLAMD_ADDR` set, every file of a deploy and
+  every uploaded asset is streamed to clamd before anything is stored; an
+  infected upload is refused with `422`, and an unreachable scanner refuses
+  uploads with `503`. Unset, nothing is scanned.
+
+### Storage
+- `simple-host reencrypt` rewrites every stored object under the first
+  `BACKUP_ENVELOPE_KEY` in the key-bound form: idempotent, resumable,
+  verified by reading back, with progress output. Old envelope keys can be
+  removed after a clean run; it also moves a plaintext install onto the
+  envelope. Procedure: docs/storage.md, "Rotating the envelope key".
+
+### Access
+- `NETWORK_ACCESS_APPROVALS` (default `1`; `2` = two different admins must
+  approve a network access request). In every mode the requester can never
+  approve their own request, even as an admin. `/admin` and the owner's
+  view show approvals so far; each approval is audited
+  (`network_access_approvals`, 0038).
+
+### Rate limits
+- Sign-in, the OIDC callback, session hand-off, API key mint and the
+  connector's token and registration endpoints are counted in Postgres
+  (`rate_limit_counters`, 0039, hashed keys), so every replica shares one
+  budget; they fall back to the per-pod limit if the database does not
+  answer. Every other limit stays per pod (docs/install.md, "Rate limits and
+  replicas").
+
 ## v1.1.3 — 2026-09-26
 
 Schema 0034, marked backward-compatible: it drops the unused tables

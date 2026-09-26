@@ -603,9 +603,18 @@ of `docs/configuration.md`.
   (`/metrics`), not on the Service or Ingress; it lists what to watch.
 - **Config changes**: edit `config.env` or `secrets.env`, re-apply, then
   `kubectl --context "$CTX" -n simple-host rollout restart deploy/simple-host`.
-- **Secret rotation**: `SESSION_SIGNING_KEY` and `BACKUP_ENVELOPE_KEY` rotate
-  by adding a second key; see `docs/configuration.md`. Entra client secrets
-  expire; note the date for the human.
+- **Secret rotation**: `SESSION_SIGNING_KEY` rotates by adding a second
+  key (`docs/configuration.md`). `BACKUP_ENVELOPE_KEY` rotates by putting the
+  new key first, deploying, running `simple-host reencrypt`, then removing
+  the old key (`docs/storage.md`, "Rotating the envelope key"). Entra client
+  secrets expire; note the date for the human.
+- **Audit**: every audit event is also one JSON line on the pod's stdout
+  with `"type":"audit"`; point the cluster's log shipper at it to feed a
+  SIEM (`docs/configuration.md`, "Streaming the audit log to a SIEM").
+  `simple-host audit-verify` checks the audit hash chain
+  (`docs/security-review.md`, 2(e)).
+- **Uploads**: per-owner quotas default to 1000 sites and 10 GiB; set
+  `CLAMD_ADDR` to scan uploads with clamd (`docs/configuration.md`).
 - **Keep** `deploy/overlays/byo/config.env`, `secrets.env`, and `db-ca.crt`
   somewhere the platform team can find them (their secret store), or move
   to External Secrets as `docs/configuration.md` describes. They are not in

@@ -119,3 +119,11 @@ artifact.
   leaves, the team and its sites are deleted, after the team's name is typed back; a team left
   with only disabled accounts is deleted by an admin. No roles and no directory-group sync:
   simple beats configurable here, and a fork that needs roles can add them.
+- **2026-09-26 — Enterprise controls in v1.2, each the smallest thing that works.** An owner's
+  sites sharing one origin, and arbitrary JavaScript under the company domain, are features and
+  stay. Added: sessions and connector tokens with enterprise defaults and hard caps (match the
+  IdP; disable leavers in the IdP and in Simple Host, by hand or by an `offboard` key); API keys
+  scoped `publish` by default; connector tokens only on `/mcp`; a hash-chained audit log streamed
+  to stdout for any SIEM (no webhook); per-owner upload quotas and an optional clamd scan;
+  envelope key rotation by `reencrypt`; optional two-admin network approval; security-relevant
+  rate limits shared across replicas in Postgres. No new master keys.
