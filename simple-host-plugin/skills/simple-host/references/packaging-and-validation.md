@@ -28,9 +28,13 @@ never an address you assembled.
 - Warn if `node_modules/` is present; this usually means the source tree was
   selected instead of build output.
 - Reject `.env` files and other secret-bearing local configuration.
-- Reject the case-insensitive extension denylist: `.sh`, `.bash`, `.zsh`,
-  `.fish`, `.bat`, `.cmd`, `.ps1`, `.py`, `.pyc`, `.rb`, `.pl`, `.go`, `.php`,
-  `.exe`. This is not an allowlist: regular ZIP and DMG downloads are allowed.
+- Reject the case-insensitive extension denylist: source scripts `.sh`,
+  `.bash`, `.zsh`, `.fish`, `.bat`, `.cmd`, `.ps1`, `.py`, `.pyc`, `.rb`,
+  `.pl`, `.go`, `.php`; Windows executables and script hosts `.exe`, `.dll`,
+  `.msi`, `.msix`, `.appx`, `.scr`, `.com`, `.pif`, `.cpl`, `.hta`, `.vbs`,
+  `.vbe`, `.jse`, `.wsf`, `.wsh`, `.lnk`, `.reg`; other packages and disk
+  images `.jar`, `.apk`, `.aab`, `.pkg`, `.deb`, `.rpm`, `.iso`, `.img`. This
+  is not an allowlist: `.js`, and regular ZIP and DMG downloads, are allowed.
 - Exclude `.DS_Store` and AppleDouble `._*` metadata entries.
 - Exclude the project's `simple-host.json` marker. For a raw HTML site the
   packaging root is the published directory, so the commands below would

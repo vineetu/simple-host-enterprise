@@ -1,6 +1,6 @@
 {
   "name": "simple-host",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "description": "Deploy and collaborate on static sites in Simple Host, plus guidance for shared state and uploaded files.",
   "author": {
     "name": "Simple Host"

@@ -40,7 +40,13 @@ more — do not explain the failure in detail, do not paste diagnostics, and do
 not send the user elsewhere:
 
 > Simple Host needs a sign-in. Open this page, sign in with your work account,
-> then open **API keys** and create one with scope **Full** — about a minute: `{{BASE_URL}}/auth/login`
+> then open **API keys** and create one with scope **Publish** — about a minute: `{{BASE_URL}}/auth/login`
+
+Ask for **Full** instead only when the user has asked you to do something a
+publish key cannot (see "Key scopes" below: delete a site, change who can
+open it, manage viewers or teams, read the audit log). Deploying and
+updating sites needs only Publish, and a publish key that leaks can do far
+less.
 
 Point the user at their platform team only if they tell you the sign-in page
 itself would not let them in (their account is disabled, their email domain
@@ -113,16 +119,17 @@ Every key has a scope, chosen when it is created:
   MCP. Enough for a CI job that publishes a site, and nothing more: it cannot
   delete a site, change who can open it, manage viewers or teams, or read the
   audit log.
-- **Full**: everything the person can do, except administration. What you
-  need to work on their behalf with this skill.
+- **Full**: everything the person can do, except administration. Ask for it
+  only when the user wants one of the management actions above.
 - **Offboard**: only for an admin's HR automation; it can disable a leaver
   and nothing else. Never ask for one.
 
 A `403` whose JSON body has a `scope` field means the key's scope does not
 allow that call. It is not revoked and not a permission problem on the
-site: tell the user the key is a publish key and ask them to create a Full
-one and paste it back, exactly as in "Get a key" above. Do not retry the
-call with the same key.
+site: tell the user the key is a publish key and that this action needs a
+Full one, and ask them to create a Full one and paste it back, as in "Get a
+key" above, only if they want the action done. Do not retry the call with
+the same key.
 
 ## Revoked, lost, or extra keys
 

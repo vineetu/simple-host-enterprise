@@ -25,7 +25,7 @@
 set -u
 
 BASE="${BASE:-}"
-SKILL_VERSION="${SKILL_VERSION:-0.12.0}"
+SKILL_VERSION="${SKILL_VERSION:-0.12.1}"
 
 die() { echo "smoke-remote: $*" >&2; exit 2; }
 
