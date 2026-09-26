@@ -14,6 +14,12 @@ anything: they say what exists and what is deliberately unfinished.
 
 ## Rules
 
+- **Read before changing:** `INTENT.md` (what this is for), then
+  `FEATURES.md` (every feature and the surfaces it spans: the blast radius),
+  then the relevant `docs/`.
+- **Update `FEATURES.md` and `CHANGELOG.md` in the same commit** as any
+  feature change. `scripts/check-features.sh` (in `make test` and CI) fails
+  when a registered route or MCP tool is missing from `FEATURES.md`.
 - **Deploy and test before committing.** `make test`, then `make local` and
   `make smoke` for anything that touches serving, routing, the schema, or
   the manifests. Nothing is committed that has not run.

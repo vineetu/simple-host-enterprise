@@ -4,6 +4,13 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## Unreleased
+
+### Development
+- `FEATURES.md` maps every feature to its routes, MCP tools, skill text,
+  pages, code, tables and config. `make test` and CI fail when a registered
+  route or MCP tool is missing from it.
+
 ## v1.1.2 — 2026-09-25
 
 No schema change (still 0033).

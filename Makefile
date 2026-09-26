@@ -1,6 +1,6 @@
 # Simple Host: build, test, and run the package on a local cluster.
 #
-#   make test          go test ./...
+#   make test          go test ./... and scripts/check-features.sh
 #   make test-db       the migration chain against a throwaway Postgres in Docker
 #   make vuln          govulncheck
 #   make image         docker build -t simple-host:local
@@ -40,6 +40,7 @@ build:
 
 test:
 	go test ./...
+	./scripts/check-features.sh
 
 # Runs the embedded migration chain, start to finish, on a fresh database.
 test-db:

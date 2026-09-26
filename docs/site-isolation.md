@@ -1,5 +1,7 @@
 # Site-level isolation: where we are, and the path if we ever need more
 
+Status: Historical (design note, 2026-09-18). "What we have" still holds; the sandbox plan is unscheduled and predates bearer-token auth for `/mcp`. Current behaviour: `FEATURES.md`.
+
 Written 2026-09-18, after the package was complete. This is a design note,
 not a plan. Nothing here is scheduled.
 
