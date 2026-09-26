@@ -201,8 +201,8 @@ to the range your ingress controller's pods take their addresses from
 person's address rather than the ingress's (`docs/configuration.md`).
 
 1. Pick the image. The recommended one is the published release,
-   `ghcr.io/vineetu/simple-host-enterprise:v1.2.0`, pinned by its digest
-   `sha256:a5e4b508707ec4e4e0afbd7c2dc25c77f6c667a8b52feb29fe698eafbf8f1b57`.
+   `ghcr.io/vineetu/simple-host-enterprise:v1.2.1`, pinned by its digest
+   `sha256:ed0624168999a3c12606fc6765d5003ffb8c1a9a0813cac1623a2ae961e3ba5f`.
    Or push the image you built (`make image`, or your own CI build of the
    same `Dockerfile`) to a registry your cluster can pull from, scan it,
    and resolve its immutable digest. Verify a release image's signature and
