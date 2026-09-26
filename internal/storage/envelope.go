@@ -6,7 +6,11 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"log"
+	"sync"
 )
+
+var legacyEnvelopeOnce sync.Once
 
 // EnvelopeKey is one named 32-byte AES-256 key for the optional client-side
 // envelope. The first configured key wraps every new object; every
@@ -29,6 +33,14 @@ const (
 	metaEnvelopeWrapNC  = "sh-envelope-wrap-nonce"
 	metaEnvelopeWrapKey = "sh-envelope-wrapped-key"
 	metaEnvelopeDataNC  = "sh-envelope-data-nonce"
+	// metaEnvelopeFormat names the envelope format. "2" (v1.1.3 and later)
+	// binds the body to its object key: the key is the body's GCM associated
+	// data, so an object copied or moved to another key no longer decrypts.
+	// Objects written before v1.1.3 carry no format and were sealed with no
+	// associated data; they are still read (logged once per process), and
+	// every new write uses format 2.
+	metaEnvelopeFormat     = "sh-envelope-format"
+	envelopeFormatKeyBound = "2"
 
 	dataKeyLength = 32 // AES-256
 )
@@ -39,7 +51,7 @@ const (
 // object metadata; the ciphertext is the object body. Unwrapping needs only
 // the envelope key and this metadata, never the plaintext data key at rest
 // anywhere.
-func wrapObject(plaintext []byte, envelopeKey EnvelopeKey) ([]byte, map[string]string, error) {
+func wrapObject(objectKey string, plaintext []byte, envelopeKey EnvelopeKey) ([]byte, map[string]string, error) {
 	dataKey := make([]byte, dataKeyLength)
 	if _, err := rand.Read(dataKey); err != nil {
 		return nil, nil, fmt.Errorf("generate data key: %w", err)
@@ -53,7 +65,7 @@ func wrapObject(plaintext []byte, envelopeKey EnvelopeKey) ([]byte, map[string]s
 	if _, err := rand.Read(dataNonce); err != nil {
 		return nil, nil, fmt.Errorf("generate data nonce: %w", err)
 	}
-	ciphertext := dataGCM.Seal(nil, dataNonce, plaintext, nil)
+	ciphertext := dataGCM.Seal(nil, dataNonce, plaintext, []byte(objectKey))
 
 	wrapGCM, err := newGCM(envelopeKey.Key)
 	if err != nil {
@@ -76,6 +88,7 @@ func wrapObject(plaintext []byte, envelopeKey EnvelopeKey) ([]byte, map[string]s
 		metaEnvelopeWrapNC:  base64.StdEncoding.EncodeToString(wrapNonce),
 		metaEnvelopeWrapKey: base64.StdEncoding.EncodeToString(wrappedKey),
 		metaEnvelopeDataNC:  base64.StdEncoding.EncodeToString(dataNonce),
+		metaEnvelopeFormat:  envelopeFormatKeyBound,
 	}
 	return ciphertext, metadata, nil
 }
@@ -85,7 +98,7 @@ func wrapObject(plaintext []byte, envelopeKey EnvelopeKey) ([]byte, map[string]s
 // progress unwraps objects wrapped under either the old or the new key), then
 // decrypts the data key and the body in turn. AES-GCM's tag makes both steps
 // fail closed on any corruption or tampering.
-func unwrapObject(ciphertext []byte, metadata map[string]string, keys []EnvelopeKey) ([]byte, error) {
+func unwrapObject(objectKey string, ciphertext []byte, metadata map[string]string, keys []EnvelopeKey) ([]byte, error) {
 	keyID := metadata[metaEnvelopeKeyID]
 	var envelopeKey *EnvelopeKey
 	for i := range keys {
@@ -124,7 +137,18 @@ func unwrapObject(ciphertext []byte, metadata map[string]string, keys []Envelope
 	if err != nil {
 		return nil, err
 	}
-	plaintext, err := dataGCM.Open(nil, dataNonce, ciphertext, nil)
+	var associated []byte
+	switch metadata[metaEnvelopeFormat] {
+	case envelopeFormatKeyBound:
+		associated = []byte(objectKey)
+	case "":
+		legacyEnvelopeOnce.Do(func() {
+			log.Printf("storage: reading envelope objects written before v1.1.3 (not bound to their key, e.g. %s); new writes are bound", objectKey)
+		})
+	default:
+		return nil, fmt.Errorf("unknown envelope format %q", metadata[metaEnvelopeFormat])
+	}
+	plaintext, err := dataGCM.Open(nil, dataNonce, ciphertext, associated)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt object body (key id %q): %w", keyID, err)
 	}

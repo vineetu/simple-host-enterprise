@@ -32,6 +32,12 @@ type S3Config struct {
 	SSEKMSKeyID string
 	// EnvelopeKeys is the optional client-side envelope. Empty disables it.
 	EnvelopeKeys []EnvelopeKey
+	// PlaintextAllowed lets an install with EnvelopeKeys still read objects
+	// written before the envelope was turned on
+	// (BACKUP_ENVELOPE_PLAINTEXT_ALLOWED). Otherwise such an object is
+	// refused: with the envelope on, a plain object can only be one that
+	// somebody with bucket access put there.
+	PlaintextAllowed bool
 }
 
 // s3API is the subset of *s3.Client this package calls, so tests can
@@ -56,6 +62,8 @@ type S3Objects struct {
 	sse          types.ServerSideEncryption
 	sseKMSKeyID  string
 	envelopeKeys []EnvelopeKey
+	// plaintextAllowed: see S3Config.PlaintextAllowed.
+	plaintextAllowed bool
 }
 
 // NewS3Objects constructs the client for the configured endpoint. The endpoint
@@ -96,7 +104,9 @@ func NewS3Objects(ctx context.Context, cfg S3Config) (*S3Objects, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newS3Objects(client, cfg.Bucket, cfg.Prefix, sse, cfg.SSEKMSKeyID, cfg.EnvelopeKeys), nil
+	objects := newS3Objects(client, cfg.Bucket, cfg.Prefix, sse, cfg.SSEKMSKeyID, cfg.EnvelopeKeys)
+	objects.plaintextAllowed = cfg.PlaintextAllowed
+	return objects, nil
 }
 
 func newS3Objects(client s3API, bucket, prefix string, sse types.ServerSideEncryption, sseKMSKeyID string, envelopeKeys []EnvelopeKey) *S3Objects {
@@ -151,7 +161,7 @@ func (o *S3Objects) Put(ctx context.Context, key string, body []byte, contentTyp
 		input.SSEKMSKeyId = aws.String(o.sseKMSKeyID)
 	}
 	if len(o.envelopeKeys) > 0 {
-		ciphertext, metadata, err := wrapObject(body, o.envelopeKeys[0])
+		ciphertext, metadata, err := wrapObject(key, body, o.envelopeKeys[0])
 		if err != nil {
 			return fmt.Errorf("envelope-encrypt: %w", err)
 		}
@@ -187,10 +197,12 @@ func (o *S3Objects) Get(ctx context.Context, key string, maxBytes int64) ([]byte
 		return nil, fmt.Errorf("read %s: %w", key, err)
 	}
 	if isEnveloped(out.Metadata) {
-		body, err = unwrapObject(body, out.Metadata, o.envelopeKeys)
+		body, err = unwrapObject(key, body, out.Metadata, o.envelopeKeys)
 		if err != nil {
 			return nil, fmt.Errorf("unwrap %s: %w", key, err)
 		}
+	} else if len(o.envelopeKeys) > 0 && !o.plaintextAllowed {
+		return nil, fmt.Errorf("get %s: object is not envelope-encrypted but BACKUP_ENVELOPE_KEY is set (BACKUP_ENVELOPE_PLAINTEXT_ALLOWED=true reads objects written before the key was added)", key)
 	}
 	if int64(len(body)) > maxBytes {
 		return nil, ErrObjectTooLarge
@@ -232,10 +244,17 @@ func (o *S3Objects) List(ctx context.Context, prefix string) ([]ObjectInfo, erro
 	}
 }
 
-// Copy is a server-side copy. The envelope's wrapped key travels in the
-// object metadata, which CopyObject carries over, so an enveloped object stays
-// readable under its new key.
+// Copy is a server-side copy without the envelope. With it, the body is bound
+// to its object key, so the copy is read and re-wrapped under the new key
+// instead.
 func (o *S3Objects) Copy(ctx context.Context, from, to string) error {
+	if len(o.envelopeKeys) > 0 {
+		body, err := o.Get(ctx, from, maxVersionObjectBytes)
+		if err != nil {
+			return err
+		}
+		return o.Put(ctx, to, body, "application/octet-stream")
+	}
 	input := &s3.CopyObjectInput{
 		Bucket: aws.String(o.bucket),
 		// Keys are built from UUIDs, version numbers and fixed words only

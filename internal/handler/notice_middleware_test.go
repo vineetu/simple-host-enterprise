@@ -181,17 +181,6 @@ func TestSkillVersionRouteScopeAndAuthenticationOrdering(t *testing.T) {
 	NewUserHandler(nil).Register(mux, authMiddleware, skillMiddleware)
 	NewSiteHandler(nil, nil, "", HostModel{}).Register(mux, authMiddleware, skillMiddleware)
 
-	t.Run("registration and reset intake are gone", func(t *testing.T) {
-		for _, path := range []string{"/api/auth", "/api/reset-requests"} {
-			request := httptest.NewRequest(http.MethodPost, path, nil)
-			recorder := httptest.NewRecorder()
-			mux.ServeHTTP(recorder, request)
-			if recorder.Code != http.StatusNotFound {
-				t.Errorf("POST %s status = %d, want 404: identity is OIDC sign-in now, not open registration", path, recorder.Code)
-			}
-		}
-	})
-
 	tests := []struct {
 		name       string
 		method     string
@@ -224,11 +213,6 @@ func TestSkillVersionRouteScopeAndAuthenticationOrdering(t *testing.T) {
 		{name: "state restore is guarded", method: http.MethodPost, path: "/api/collaboration/sites/alice/demo/state-versions/1/restore", apiKey: "valid-key", wantStatus: http.StatusBadRequest, wantCode: "skill_version_required", wantHeader: true},
 		{name: "team site access is guarded", method: http.MethodPost, path: "/api/collaboration/sites/alice/demo/access", apiKey: "valid-key", wantStatus: http.StatusBadRequest, wantCode: "skill_version_required", wantHeader: true},
 		{name: "supported archive reaches authorization", method: http.MethodGet, path: "/api/collaboration/sites/alice/demo/versions/1/archive", apiKey: "valid-key", version: "0.8.1", wantStatus: http.StatusUnauthorized, wantHeader: true},
-		// Registration (POST /api/auth) and reset intake (POST
-		// /api/reset-requests) are gone: identity is OIDC sign-in now
-		// (internal/handler/auth.go), and neither route exists to be
-		// versionless about. See TestRegistrationAndResetRoutesAreGone.
-		//
 		// State used to have its own "remains unguarded" cases here
 		// (SiteHandler.Register used to mux-register it directly). State and
 		// assets have since moved off the mux entirely: the host gate

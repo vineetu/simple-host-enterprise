@@ -642,7 +642,7 @@ func (h *SiteAPIHandler) ServeAsset(w http.ResponseWriter, r *http.Request, call
 	}
 	openCtx, cancel := context.WithTimeout(r.Context(), siteOpenTimeout)
 	defer cancel()
-	asset, err := h.store.OpenAsset(openCtx, call.SiteID, row.ID, max(row.Size, h.assetLimits.MaxFileBytes))
+	asset, err := h.store.OpenAsset(openCtx, call.SiteID, row.ID, max(row.Size, h.assetLimits.MaxFileBytes), row.SHA256)
 	if err != nil {
 		if errors.Is(err, storage.ErrAssetNotFound) {
 			http.NotFound(w, r)

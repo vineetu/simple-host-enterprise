@@ -253,12 +253,51 @@ func TestS3ObjectsEnvelope(t *testing.T) {
 	if _, err := keyless.Get(ctx, "sites/x/v1.tar.gz", 1<<20); err == nil {
 		t.Fatal("Get of an enveloped object succeeded with no key configured")
 	}
-	// A plain object is still readable by an envelope-configured client.
+	// A plain object is refused by an envelope-configured client unless
+	// BACKUP_ENVELOPE_PLAINTEXT_ALLOWED says objects predate the key.
 	if err := keyless.Put(ctx, "sites/plain", []byte("plain"), "text/plain"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := objects.Get(ctx, "sites/plain", 100); err == nil {
+		t.Fatal("Get accepted a plain object with the envelope on")
+	}
+	objects.plaintextAllowed = true
 	if got, err := objects.Get(ctx, "sites/plain", 100); err != nil || string(got) != "plain" {
-		t.Fatalf("Get plain = %q, %v", got, err)
+		t.Fatalf("Get plain with plaintextAllowed = %q, %v", got, err)
+	}
+	objects.plaintextAllowed = false
+
+	// An enveloped object copied raw (body and metadata) over another key
+	// no longer decrypts: the body is bound to the key it was written at.
+	fake.objects["backups/sites/z/v1.tar.gz"] = fake.raw(t, "backups/sites/x/v1.tar.gz")
+	if _, err := objects.Get(ctx, "sites/z/v1.tar.gz", 1<<20); err == nil {
+		t.Fatal("Get accepted an enveloped object moved to another key")
+	}
+}
+
+func TestS3ObjectsReadsLegacyEnvelope(t *testing.T) {
+	fake := newFakeS3()
+	keys := []EnvelopeKey{testKey("k1", 0x12)}
+	objects := newS3Objects(fake, fake.bucket, "", types.ServerSideEncryptionAes256, "", keys)
+	// A v1.1.0-v1.1.2 object: sealed with no associated data, no format.
+	ciphertext, metadata, err := wrapObject("", []byte("old"), keys[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(metadata, metaEnvelopeFormat)
+	fake.objects["sites/old/v1.tar.gz"] = fakeObject{body: ciphertext, metadata: metadata}
+	if got, err := objects.Get(context.Background(), "sites/old/v1.tar.gz", 100); err != nil || string(got) != "old" {
+		t.Fatalf("Get legacy = %q, %v", got, err)
+	}
+	// A current object with its format stripped does not fall back.
+	if err := objects.Put(context.Background(), "sites/new/v1.tar.gz", []byte("new"), ""); err != nil {
+		t.Fatal(err)
+	}
+	stripped := fake.raw(t, "sites/new/v1.tar.gz")
+	delete(stripped.metadata, metaEnvelopeFormat)
+	fake.objects["sites/new/v1.tar.gz"] = stripped
+	if _, err := objects.Get(context.Background(), "sites/new/v1.tar.gz", 100); err == nil {
+		t.Fatal("Get accepted a key-bound object downgraded to the legacy format")
 	}
 }
 

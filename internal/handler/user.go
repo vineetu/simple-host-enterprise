@@ -36,22 +36,9 @@ func NewUserHandler(database *sql.DB, limits ...*AbuseLimits) *UserHandler {
 	return &UserHandler{database: database, limits: chooseAbuseLimits(limits)}
 }
 
-// Register wires only /api/me. Registration by email (POST /api/auth) and
-// the reset-request intake (POST /api/reset-requests) are gone: identity now
-// comes from OIDC sign-in (internal/handler/auth.go), and a lost credential
-// is a lost API key, revoked and re-minted from the dashboard rather than
-// recovered by emailing the platform.
+// Register wires /api/me.
 func (h *UserHandler) Register(mux *http.ServeMux, authMiddleware, skillVersionMiddleware func(http.Handler) http.Handler) {
 	mux.Handle("GET /api/me", authMiddleware(skillVersionMiddleware(http.HandlerFunc(h.me))))
-
-	// Explicit 404s, not left to fall through. The static UI catch-all
-	// ("GET /", ui.go) matches every path net/http has no other pattern
-	// for, and net/http's own behavior for a path that pattern DOES match
-	// but on the wrong method is 405, not 404 — so without these, an old
-	// client's POST here would see "Method Not Allowed" instead of the
-	// "this route doesn't exist" signal that old clients rely on.
-	mux.HandleFunc("POST /api/auth", http.NotFound)
-	mux.HandleFunc("POST /api/reset-requests", http.NotFound)
 }
 
 func (h *UserHandler) me(w http.ResponseWriter, r *http.Request) {

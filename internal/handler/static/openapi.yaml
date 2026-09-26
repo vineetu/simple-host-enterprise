@@ -192,53 +192,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/SkillVersionManifest'
 
-  /api/auth:
-    post:
-      summary: Authenticate or register
-      description: Enter an email. A first-time user receives a new API key; an approved reset can claim a replacement key. An existing account with a current key returns 409. Username is derived from the email local part (for example, alice.smith@company.com becomes alice.smith).
-      tags: [Auth]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [email]
-              properties:
-                email:
-                  type: string
-                  format: email
-                  example: alice.smith@company.com
-      responses:
-        '200':
-          description: Replacement key issued after an approved reset
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuthResponse'
-        '201':
-          description: New user created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuthResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '409':
-          description: Account already has a current key; use the reset-request flow if it was lost
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '413':
-          description: Request body is too large
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-
   /api/me:
     get:
       summary: Get current user info
@@ -1170,25 +1123,6 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
-  /api/admin/access-requests:
-    get:
-      summary: List network access requests and network-open sites
-      description: Admin only, browser session only (never an API key). Pending requests carry `requested_by`, `reason` and `requested_at`.
-      tags: [Admin]
-      responses:
-        '200':
-          description: Pending requests and approved network sites
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/NetworkAccessEntry'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-
   /api/admin/access-requests/{owner}/{sitename}/approve:
     post:
       summary: Approve a network access request
@@ -1947,23 +1881,6 @@ components:
       example: '"site-4b256b3b-9d15-4ce5-bba7-b04ef26f49e5-v7"'
 
   schemas:
-    AuthResponse:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-        username:
-          type: string
-          example: alice.smith
-        api_key:
-          type: string
-        is_admin:
-          type: boolean
-        created:
-          type: boolean
-          description: true if this is a new user
-
     Site:
       type: object
       properties:
@@ -2129,30 +2046,6 @@ components:
               unique_viewers:
                 type: integer
                 format: int64
-
-    NetworkAccessEntry:
-      type: object
-      required: [owner, site, access, status, url]
-      properties:
-        owner:
-          type: string
-        site:
-          type: string
-        access:
-          type: string
-          description: The site's current level.
-        status:
-          type: string
-          enum: [pending, approved]
-        requested_by:
-          type: string
-        reason:
-          type: string
-        requested_at:
-          type: string
-          format: date-time
-        url:
-          type: string
 
     SitePrecondition:
       type: object

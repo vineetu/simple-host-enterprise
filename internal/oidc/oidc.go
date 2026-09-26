@@ -38,6 +38,9 @@ type Config struct {
 	// byte for byte.
 	RedirectURL string
 	Scopes      []string
+	// InsecureAllowed permits a plain-http issuer and endpoints
+	// (OIDC_INSECURE_ALLOWED; local evaluation only).
+	InsecureAllowed bool
 }
 
 // Provider is a discovered, ready-to-use OIDC provider: its endpoints and its
@@ -62,7 +65,7 @@ func Discover(ctx context.Context, cfg Config, httpClient *http.Client) (*Provid
 	if cfg.Issuer == "" || cfg.ClientID == "" || cfg.ClientSecret == "" || cfg.RedirectURL == "" {
 		return nil, errors.New("oidc: issuer, client id, client secret and redirect URL are all required")
 	}
-	doc, err := discover(ctx, httpClient, cfg.Issuer)
+	doc, err := discover(ctx, httpClient, cfg.Issuer, cfg.InsecureAllowed)
 	if err != nil {
 		return nil, fmt.Errorf("oidc: discover %s: %w", cfg.Issuer, err)
 	}
@@ -156,8 +159,13 @@ func (p *Provider) Exchange(ctx context.Context, code, codeVerifier string) (Tok
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return TokenResponse{}, fmt.Errorf("oidc: token exchange: unexpected status %s: %s", resp.Status, string(body))
+		// Only the RFC 6749 error code is kept: the rest of the body is the
+		// provider's free text and does not belong in logs.
+		var e struct {
+			Error string `json:"error"`
+		}
+		_ = json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&e)
+		return TokenResponse{}, fmt.Errorf("oidc: token exchange: unexpected status %s (error %q)", resp.Status, truncate(e.Error, 64))
 	}
 	var tok TokenResponse
 	if err := json.NewDecoder(resp.Body).Decode(&tok); err != nil {
@@ -340,4 +348,11 @@ func splitJWT(token string) (header jwtHeader, payload []byte, signingInput []by
 	}
 	signingInput = []byte(parts[0] + "." + parts[1])
 	return header, payload, signingInput, signature, nil
+}
+
+func truncate(s string, n int) string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
 }

@@ -80,3 +80,37 @@ func TestHandoffCodeSpentByAnyFailedRedemption(t *testing.T) {
 		}
 	})
 }
+
+func TestPruneSessionsDeletesOnlyLongEnded(t *testing.T) {
+	database := assetsTestDB(t)
+	ctx := context.Background()
+	user, err := CreateOIDCUser(ctx, database, "pruned", "sub-pruned", "pruned@example.com", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := CreateSession(ctx, database, user.ID, time.Now().Add(time.Hour), "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err := CreateSession(ctx, database, user.ID, time.Now().Add(-100*24*time.Hour), "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateHandoffCode(ctx, database, "old-code", live.ID, "a.example.com", []byte("n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE handoff_codes SET created_at = now() - interval '2 days'`); err != nil {
+		t.Fatal(err)
+	}
+	n, err := PruneSessions(ctx, database, 90)
+	if err != nil || n != 1 {
+		t.Fatalf("PruneSessions = %d, %v; want 1", n, err)
+	}
+	var remaining int
+	if err := database.QueryRowContext(ctx, `SELECT count(*) FROM sessions WHERE id IN ($1, $2)`, live.ID, old.ID).Scan(&remaining); err != nil || remaining != 1 {
+		t.Fatalf("sessions left = %d, %v; want only the live one", remaining, err)
+	}
+	if err := database.QueryRowContext(ctx, `SELECT count(*) FROM handoff_codes`).Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatalf("handoff codes left = %d, %v", remaining, err)
+	}
+}

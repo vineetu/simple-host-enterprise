@@ -59,9 +59,15 @@ Managed PostgreSQL 16. TLS is on.
   `secrets.env`:
 
   ```sql
-  CREATE ROLE simplehost LOGIN CREATEROLE PASSWORD '<DB_PASSWORD>';
+  CREATE ROLE simplehost LOGIN CREATEROLE;
+  \password simplehost
   CREATE DATABASE simplehost OWNER simplehost;
   ```
+
+  `\password` prompts for `DB_PASSWORD` and sends only a SCRAM hash, so the password
+  stays out of the server's statement logs.
+- **Encryption at rest.** Confirm with UpCloud that the plan stores the database and
+  its backups encrypted at rest; the verified run did not check this.
 
 - **CA.** The server certificate is signed by the project's own CA. Download it from
   the database's page in the UpCloud console and save it as

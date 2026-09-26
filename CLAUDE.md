@@ -46,7 +46,9 @@ anything: they say what exists and what is deliberately unfinished.
 - `internal/config` reads the environment. Required values have no default;
   the database DSN and the bucket endpoint are additionally refused if their
   TLS is weaker than required, unless the local-evaluation
-  override envs are set (`DB_INSECURE_ALLOWED`, `BACKUP_STORAGE_INSECURE_ALLOWED`).
+  override envs are set (`DB_INSECURE_ALLOWED`, `BACKUP_STORAGE_INSECURE_ALLOWED`,
+  `OIDC_INSECURE_ALLOWED`; the OIDC issuer and its discovered endpoints
+  must be https otherwise).
 - `internal/migrate/sql/` is the schema, applied in file order by
   `simple-host migrate`; the server refuses to start against a schema newer
   than it embeds unless every newer applied migration begins with

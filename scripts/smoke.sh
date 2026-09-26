@@ -118,9 +118,6 @@ expect 200 "$BASE" /
 expect 200 "$BASE" /docs.html
 expect_header "$BASE" / X-Request-Id
 expect 401 "$BASE" /api/sites
-echo "== registration is gone (OIDC sign-in replaces it)"
-expect 404 "$BASE" /api/auth -X POST
-expect 404 "$BASE" /api/reset-requests -X POST
 
 # dex_sign_in <email> <password> <cookiejar>
 #

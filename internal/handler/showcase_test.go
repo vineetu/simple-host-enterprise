@@ -44,13 +44,6 @@ func TestShowcaseWithoutQueryPreservesPublicGallery(t *testing.T) {
 						{"user-private", "bob", false, now, "person", int64(0), nil, int64(0)},
 					},
 				}, nil
-			case strings.Contains(query, "site_type"):
-				return &showcaseTestRows{
-					columns: []string{"id", "site_type"},
-					values: [][]driver.Value{
-						{"site-public", "docs"},
-					},
-				}, nil
 			case strings.Contains(query, "access = 'specific'"):
 				return &showcaseTestRows{columns: []string{"id"}}, nil
 			case strings.Contains(query, "FROM sites"):
@@ -104,13 +97,13 @@ func TestShowcaseWithoutQueryPreservesPublicGallery(t *testing.T) {
 			t.Errorf("response does not contain %q", fragment)
 		}
 	}
-	for _, privateValue := range []string{"bob", "secret", "v4"} {
+	for _, privateValue := range []string{"bob", "secret", "v4", `name="type"`} {
 		if strings.Contains(body, privateValue) {
 			t.Errorf("private gallery value %q was rendered", privateValue)
 		}
 	}
-	if got := script.queryCount(); got != 5 {
-		t.Fatalf("database queries = %d, want 5", got)
+	if got := script.queryCount(); got != 4 {
+		t.Fatalf("database queries = %d, want 4", got)
 	}
 	if got := response.Header().Get("Cache-Control"); got == "no-store" {
 		t.Fatalf("no-query Cache-Control = %q, want ordinary gallery caching behavior", got)
@@ -153,8 +146,8 @@ func TestShowcaseQueryIsEscapedAndPreservesGallery(t *testing.T) {
 			// (security.go) — calling .page directly here bypasses that
 			// middleware, so it is covered separately in security_test.go
 			// instead.
-			if got := script.queryCount(); got != 5 {
-				t.Fatalf("database queries = %d, want 5", got)
+			if got := script.queryCount(); got != 4 {
+				t.Fatalf("database queries = %d, want 4", got)
 			}
 			body := response.Body.String()
 			escapedValue := `value="` + html.EscapeString(test.query) + `"`
@@ -252,8 +245,8 @@ func TestShowcaseFilterScriptUsesSafeDOMAndNoNetwork(t *testing.T) {
 			t.Errorf("filter page contains forbidden %q", forbidden)
 		}
 	}
-	if got := script.queryCount(); got != 5 {
-		t.Fatalf("database queries = %d, want 5", got)
+	if got := script.queryCount(); got != 4 {
+		t.Fatalf("database queries = %d, want 4", got)
 	}
 }
 
@@ -282,13 +275,6 @@ func showcaseGalleryTestScript() *showcaseTestDBScript {
 					values: [][]driver.Value{
 						{"user-public", "alice", false, now, "person", int64(0), nil, int64(0)},
 						{"user-private", "bob", false, now, "person", int64(0), nil, int64(0)},
-					},
-				}, nil
-			case strings.Contains(query, "site_type"):
-				return &showcaseTestRows{
-					columns: []string{"id", "site_type"},
-					values: [][]driver.Value{
-						{"site-public", "docs"},
 					},
 				}, nil
 			case strings.Contains(query, "access = 'specific'"):

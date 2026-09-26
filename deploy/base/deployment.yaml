@@ -59,13 +59,24 @@ spec:
           envFrom:
             - configMapRef:
                 name: simple-host-config
-            - secretRef:
-                name: simple-host-secrets
           env:
-            # DB_USER/DB_PASSWORD above (from simple-host-secrets) are the
-            # owning role migrations run as. This container also
-            # needs the application role's target password, to set it on the
-            # role migration 0020 creates; the server never sees this value.
+            # Only the database secrets, one key each: migrate never needs
+            # the OIDC, session, bucket or envelope keys. DB_PASSWORD (or a
+            # DB_DSN kept in the Secret) is the owning role migrations run
+            # as; DB_APP_PASSWORD is the application role's target password,
+            # set on the role migration 0020 creates.
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: simple-host-secrets
+                  key: DB_PASSWORD
+                  optional: true
+            - name: DB_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: simple-host-secrets
+                  key: DB_DSN
+                  optional: true
             - name: DB_APP_PASSWORD
               valueFrom:
                 secretKeyRef:

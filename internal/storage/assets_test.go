@@ -52,7 +52,7 @@ func TestCreateAssetStoresObjectAndRoundTrips(t *testing.T) {
 		t.Fatalf("object content type = %q, want image/png", recording.types[key])
 	}
 
-	lease, err := store.OpenAsset(ctx, testSiteA, stored.ID, generousLimits.MaxFileBytes)
+	lease, err := store.OpenAsset(ctx, testSiteA, stored.ID, generousLimits.MaxFileBytes, stored.SHA256[:])
 	if err != nil {
 		t.Fatalf("OpenAsset: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestCreateAssetStoresObjectAndRoundTrips(t *testing.T) {
 	}
 
 	// A second open is served from the cache.
-	second, err := store.OpenAsset(ctx, testSiteA, stored.ID, generousLimits.MaxFileBytes)
+	second, err := store.OpenAsset(ctx, testSiteA, stored.ID, generousLimits.MaxFileBytes, stored.SHA256[:])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestOpenAssetNotFound(t *testing.T) {
 		"../" + testSiteA + "/assets/" + stored.ID,
 	}
 	for _, id := range ids {
-		if lease, err := store.OpenAsset(ctx, testSiteA, id, generousLimits.MaxFileBytes); !errors.Is(err, ErrAssetNotFound) {
+		if lease, err := store.OpenAsset(ctx, testSiteA, id, generousLimits.MaxFileBytes, nil); !errors.Is(err, ErrAssetNotFound) {
 			if lease != nil {
 				lease.Close()
 			}
@@ -187,10 +187,10 @@ func TestOpenAssetNotFound(t *testing.T) {
 		}
 	}
 	// Another site's id does not reach this site's asset.
-	if _, err := store.OpenAsset(ctx, testSiteB, stored.ID, generousLimits.MaxFileBytes); !errors.Is(err, ErrAssetNotFound) {
+	if _, err := store.OpenAsset(ctx, testSiteB, stored.ID, generousLimits.MaxFileBytes, nil); !errors.Is(err, ErrAssetNotFound) {
 		t.Errorf("cross-site OpenAsset error = %v, want ErrAssetNotFound", err)
 	}
-	if _, err := store.OpenAsset(ctx, testSiteA, stored.ID, 2); !errors.Is(err, ErrObjectTooLarge) {
+	if _, err := store.OpenAsset(ctx, testSiteA, stored.ID, 2, nil); !errors.Is(err, ErrObjectTooLarge) {
 		t.Errorf("OpenAsset over maxBytes error = %v, want ErrObjectTooLarge", err)
 	}
 }
@@ -211,7 +211,7 @@ func TestDeleteAssetRemovesObject(t *testing.T) {
 	if err := store.DeleteAsset(ctx, testSiteA, stored.ID); err != nil {
 		t.Fatalf("deleting a missing asset: %v", err)
 	}
-	if _, err := store.OpenAsset(ctx, testSiteA, stored.ID, generousLimits.MaxFileBytes); !errors.Is(err, ErrAssetNotFound) {
+	if _, err := store.OpenAsset(ctx, testSiteA, stored.ID, generousLimits.MaxFileBytes, stored.SHA256[:]); !errors.Is(err, ErrAssetNotFound) {
 		t.Fatalf("OpenAsset after delete = %v, want ErrAssetNotFound", err)
 	}
 	if err := store.DeleteAsset(ctx, testSiteA, "../escape"); !errors.Is(err, ErrAssetNotFound) {
@@ -242,5 +242,22 @@ func TestCreateAssetRejectsBadInput(t *testing.T) {
 	}
 	if keys := memory.Keys(); len(keys) != 0 {
 		t.Fatalf("refused uploads wrote %v", keys)
+	}
+}
+
+func TestOpenAssetRefusesChecksumMismatch(t *testing.T) {
+	store, _, memory := newAssetStore(t)
+	ctx := context.Background()
+	stored, err := store.CreateAsset(ctx, testSiteA, "text/plain", strings.NewReader("genuine"), generousLimits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "sites/" + testSiteA + "/assets/" + stored.ID
+	if err := memory.Put(ctx, key, []byte("swapped"), "text/plain"); err != nil {
+		t.Fatal(err)
+	}
+	if lease, err := store.OpenAsset(ctx, testSiteA, stored.ID, generousLimits.MaxFileBytes, stored.SHA256[:]); err == nil {
+		lease.Close()
+		t.Fatal("OpenAsset served an object that does not match its recorded sha256")
 	}
 }

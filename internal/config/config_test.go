@@ -865,3 +865,23 @@ func TestTrustedProxiesAndAPIKeyMaxDays(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadRefusesHTTPIssuerUnlessAllowed(t *testing.T) {
+	completeEnv(t)
+	t.Setenv("OIDC_ISSUER", "http://issuer.example.com")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "OIDC_ISSUER") {
+		t.Fatalf("Load accepted an http issuer: %v", err)
+	}
+	t.Setenv("OIDC_INSECURE_ALLOWED", "true")
+	if _, err := Load(); err != nil {
+		t.Fatalf("http issuer with OIDC_INSECURE_ALLOWED: %v", err)
+	}
+}
+
+func TestParseKeysNeverEchoesKeyMaterial(t *testing.T) {
+	bare := "c2VjcmV0LWtleS1tYXRlcmlhbC10aGF0LW11c3Qtbm90LWxlYWs="
+	_, err := parseKeys(bare, 32, 2)
+	if err == nil || strings.Contains(err.Error(), bare) {
+		t.Fatalf("parseKeys error echoes the key: %v", err)
+	}
+}

@@ -7,8 +7,13 @@ package migrate
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/pbkdf2"
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"embed"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -325,30 +330,56 @@ const AppRoleName = "simplehost_app"
 
 // SetAppRolePassword sets AppRoleName's login password. Called after Apply
 // succeeds, as the owning role, with the password the server's own
-// connection will use (DB_APP_PASSWORD). The password never appears in SQL
-// text this function builds: it is bound as an ordinary argument to
-// Postgres's own format(), whose %L verb quotes and escapes it, and only the
-// resulting pre-quoted statement is executed. This avoids the SQL injection
-// a naive Sprintf into "ALTER ROLE ... PASSWORD '<password>'" would risk,
-// without requiring extended-protocol parameter binding that ALTER ROLE's
-// grammar does not accept in that position.
+// connection will use (DB_APP_PASSWORD). Only a SCRAM-SHA-256 verifier,
+// computed here, reaches the server: Postgres stores a pre-computed verifier
+// as-is, so the plaintext never appears in statement text, bind parameters,
+// server logs, pgaudit or pg_stat_statements. The verifier's alphabet
+// (base64, '$', ':') needs no quoting beyond the literal's own quotes.
 func SetAppRolePassword(ctx context.Context, db *sql.DB, password string) error {
-	if password == "" {
-		return errors.New("app role password must not be empty")
-	}
-	var stmt string
-	err := db.QueryRowContext(
-		ctx,
-		`SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L', $1::text, $2::text)`,
-		AppRoleName, password,
-	).Scan(&stmt)
+	verifier, err := scramSHA256Verifier(password)
 	if err != nil {
-		return fmt.Errorf("build ALTER ROLE statement: %w", err)
+		return err
 	}
+	stmt := "ALTER ROLE " + AppRoleName + " WITH LOGIN PASSWORD '" + verifier + "'"
 	if _, err := db.ExecContext(ctx, stmt); err != nil {
 		return fmt.Errorf("set %s password: %w", AppRoleName, err)
 	}
 	return nil
+}
+
+// scramIterations matches Postgres's default scram_iterations.
+const scramIterations = 4096
+
+// scramSHA256Verifier builds the verifier Postgres itself would store
+// (RFC 5802/7677): SCRAM-SHA-256$<iter>:<salt>$<StoredKey>:<ServerKey>.
+// Postgres runs a password through SASLprep, which is the identity for
+// printable ASCII; anything else is refused rather than risk a verifier the
+// server would never match.
+func scramSHA256Verifier(password string) (string, error) {
+	if password == "" {
+		return "", errors.New("app role password must not be empty")
+	}
+	for i := 0; i < len(password); i++ {
+		if password[i] < 0x20 || password[i] > 0x7e {
+			return "", errors.New("app role password must be printable ASCII")
+		}
+	}
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return "", err
+	}
+	salted, err := pbkdf2.Key(sha256.New, password, salt, scramIterations, sha256.Size)
+	if err != nil {
+		return "", err
+	}
+	mac := func(msg string) []byte {
+		h := hmac.New(sha256.New, salted)
+		h.Write([]byte(msg))
+		return h.Sum(nil)
+	}
+	storedKey := sha256.Sum256(mac("Client Key"))
+	b64 := base64.StdEncoding.EncodeToString
+	return fmt.Sprintf("SCRAM-SHA-256$%d:%s$%s:%s", scramIterations, b64(salt), b64(storedKey[:]), b64(mac("Server Key"))), nil
 }
 
 // isUndefinedTable matches PostgreSQL's 42P01 without depending on a driver

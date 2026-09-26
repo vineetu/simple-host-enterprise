@@ -69,6 +69,8 @@ Cloud SQL for PostgreSQL 16 on a private IP. Run this as one command:
 gcloud sql instances create <instance> --database-version=POSTGRES_16 --region=<region> --network=<vpc> --no-assign-ip --ssl-mode=ENCRYPTED_ONLY --server-ca-mode=GOOGLE_MANAGED_CAS_CA --backup-start-time=03:00 --enable-point-in-time-recovery --retained-transaction-log-days=7
 ```
 
+- Encryption at rest: Cloud SQL always encrypts storage and backups (Google-managed
+  key; `--disk-encryption-key` at creation for a customer-managed one).
 - You can only set the server CA mode at creation. With `GOOGLE_MANAGED_CAS_CA`, the server
   certificate carries the instance's DNS name, which `verify-full` needs.
 - DNS name: `gcloud sql instances describe <instance> --format='yaml(dnsName,dnsNames)'`.

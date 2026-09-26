@@ -36,8 +36,6 @@ Config names are documented in `docs/configuration.md`; schema in
   `GET /auth/sessions` (sessions page), `POST /auth/sessions/{id}/revoke`,
   `GET /auth/handoff`, `GET /api/me`.
   Host-gate: `GET /auth/session` (redeem, owner and restricted-site hosts).
-  Tombstones: `POST /api/auth` and `POST /api/reset-requests` answer 404
-  (the old registration and reset flows are gone).
 - **MCP.** `get_account` (→ `GET /api/me`).
 - **Skill.** `references/account-recovery.md` (Sign-in and API keys);
   `SKILL.md` §1–2.
@@ -199,7 +197,6 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Status.** Built.
 - **Routes.** `POST /api/sites/{sitename}/access`,
   `POST /api/collaboration/sites/{owner}/{sitename}/access`,
-  `GET /api/admin/access-requests`,
   `POST /api/admin/access-requests/{owner}/{sitename}/approve`,
   `POST /api/admin/access-requests/{owner}/{sitename}/decline`,
   `POST /api/admin/access-requests/{owner}/{sitename}/revoke`.
@@ -342,17 +339,15 @@ Config names are documented in `docs/configuration.md`; schema in
   revokes sessions and keys), orphan teams, access requests, rankings of users
   and sites (views, storage from a cached bucket measurement, updated), new
   users, state-backend usage, visitors and activity, all sites.
-- **Status.** Built, except site-type classification (see Orphans).
+- **Status.** Built.
 - **Routes.** `GET /admin`, `POST /api/admin/users/{username}/disable`,
-  `POST /api/admin/users/{username}/enable`,
-  `POST /api/admin/classify-sites`; plus the admin routes in sections 7, 9, 12.
+  `POST /api/admin/users/{username}/enable`; plus the admin routes in
+  sections 7, 9, 12.
 - **MCP.** None.
 - **Pages.** `/admin`.
 - **Go.** `internal/handler/admin.go`, `admin_rankings.go`,
-  `admin_disk_usage.go`, `admin_classify_sites.go`, `access.go`
-  (`renderAccessRequests`); `internal/sitetype/`; `internal/db/site_type.go`.
-- **DB.** `users.disabled_at` (0023), `sites.site_type` (0014),
-  `site_daily_analytics` (0003, 0013).
+  `admin_disk_usage.go`, `access.go` (`renderAccessRequests`).
+- **DB.** `users.disabled_at` (0023), `site_daily_analytics` (0003, 0013).
 - **Config.** `ADMIN_EMAILS`, `OIDC_ADMIN_CLAIM`, `OIDC_ADMIN_VALUE`.
 
 ## 14. Dashboard
@@ -448,14 +443,8 @@ Config names are documented in `docs/configuration.md`; schema in
 
 ## Orphans and dormant surface
 
-- `POST /api/admin/classify-sites` — registered, but `cmd/server/main.go`
-  wires no classifier (`_ = sitetype.StartWorker`), so it answers 503.
-  Site types are never assigned.
-- `POST /api/auth`, `POST /api/reset-requests` — tombstones answering 404 so
-  old clients fail clearly.
-- `GET /api/admin/access-requests` — JSON list with no in-repo caller; `/admin`
-  renders the same list server-side.
-- Tables with no reader or writer left in the code: `reset_requests` (0005),
-  `key_reissues` (0015, 0016), `ai_usage` (0008; `db.RecordAIUsage` has no
-  caller).
+- Columns with no reader or writer left in the code: `sites.site_type`,
+  `sites.site_type_version` and their index (0014). Kept one release after
+  the classifier's removal so a rollback still finds them; drop them next.
+- `reset_requests`, `key_reissues` and `ai_usage` are dropped by 0034.
 - No MCP tool is orphaned: every tool resolves to a route above.

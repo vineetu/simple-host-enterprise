@@ -26,8 +26,10 @@ goes in `deploy/overlays/byo/ingress-patch.yaml`.
 3. **Postgres.** Managed Postgres 16, TLS enforced on the server, the app connecting
    with `DB_SSLMODE=verify-full` and the provider's CA bundle in
    `deploy/overlays/byo/db-ca.crt`; `DB_HOST` is a name the server certificate
-   covers. Point-in-time recovery on, 7+ days. Nothing in the package backs up
-   Postgres; PITR is the database backup. Extension used by the migrations: `pgcrypto`.
+   covers. Storage encryption at rest on (it covers snapshots and PITR too; set it
+   at creation, some clouds cannot add it later). Point-in-time recovery on, 7+ days.
+   Nothing in the package backs up Postgres; PITR is the database backup. Extension
+   used by the migrations: `pgcrypto`.
 4. **Bucket.** An S3-compatible bucket over HTTPS with versioning on (versioning is
    the file backup) and a lifecycle rule that expires noncurrent versions after your
    retention window. Encryption at rest on.

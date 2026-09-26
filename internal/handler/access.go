@@ -318,47 +318,10 @@ func (h *SiteHandler) restoreStateVersion(w http.ResponseWriter, r *http.Request
 
 // --- Admin: network access requests ---
 
-type networkAccessEntryResponse struct {
-	Owner       string     `json:"owner"`
-	Site        string     `json:"site"`
-	Access      string     `json:"access"`
-	Status      string     `json:"status"` // "pending" or "approved"
-	RequestedBy string     `json:"requested_by,omitempty"`
-	Reason      string     `json:"reason,omitempty"`
-	RequestedAt *time.Time `json:"requested_at,omitempty"`
-	URL         string     `json:"url"`
-}
-
 func (h *AdminHandler) registerAccessRequestRoutes(mux *http.ServeMux, adminAPI, dashboardCheck func(http.Handler) http.Handler) {
-	mux.Handle("GET /api/admin/access-requests", adminAPI(http.HandlerFunc(h.listAccessRequests)))
 	mux.Handle("POST /api/admin/access-requests/{owner}/{sitename}/approve", dashboardCheck(adminAPI(http.HandlerFunc(h.approveAccessRequest))))
 	mux.Handle("POST /api/admin/access-requests/{owner}/{sitename}/decline", dashboardCheck(adminAPI(http.HandlerFunc(h.declineAccessRequest))))
 	mux.Handle("POST /api/admin/access-requests/{owner}/{sitename}/revoke", dashboardCheck(adminAPI(http.HandlerFunc(h.revokeNetworkAccess))))
-}
-
-func networkAccessStatus(e db.NetworkAccessEntry) string {
-	if e.RequestedAt != nil {
-		return "pending"
-	}
-	return "approved"
-}
-
-func (h *AdminHandler) listAccessRequests(w http.ResponseWriter, r *http.Request) {
-	entries, err := db.ListNetworkAccess(r.Context(), h.database)
-	if err != nil {
-		log.Printf("admin: list access requests: %v", err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	out := make([]networkAccessEntryResponse, 0, len(entries))
-	for _, e := range entries {
-		out = append(out, networkAccessEntryResponse{
-			Owner: e.Owner, Site: e.SiteName, Access: e.Access, Status: networkAccessStatus(e),
-			RequestedBy: e.RequestedBy, Reason: e.Reason, RequestedAt: e.RequestedAt,
-			URL: h.hosts.SiteURL(e.Owner, e.SiteName, e.Access == db.AccessSpecific),
-		})
-	}
-	writeJSON(w, http.StatusOK, out)
 }
 
 func (h *AdminHandler) approveAccessRequest(w http.ResponseWriter, r *http.Request) {

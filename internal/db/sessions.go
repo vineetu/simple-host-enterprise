@@ -198,3 +198,25 @@ func RevokeAllSessionsForUser(ctx context.Context, q Querier, userID string) err
 	_, err := q.ExecContext(ctx, query, userID)
 	return err
 }
+
+// PruneSessions deletes hand-off codes older than a day (useful for 60
+// seconds) and sessions that expired or were revoked more than
+// retentionDays ago, so their ip and user_agent do not outlive the access
+// log's retention. Run by the prune job as the owning role. It returns the
+// number of sessions deleted.
+func PruneSessions(ctx context.Context, q Querier, retentionDays int) (int64, error) {
+	if retentionDays <= 0 {
+		return 0, errors.New("PruneSessions requires positive retention days")
+	}
+	if _, err := q.ExecContext(ctx, `DELETE FROM handoff_codes WHERE created_at < now() - interval '1 day'`); err != nil {
+		return 0, err
+	}
+	result, err := q.ExecContext(ctx, `
+		DELETE FROM sessions
+		WHERE expires_at < now() - make_interval(days => $1)
+		   OR revoked_at < now() - make_interval(days => $1)`, retentionDays)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}

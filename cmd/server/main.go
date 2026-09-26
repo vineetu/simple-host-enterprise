@@ -29,7 +29,6 @@ import (
 	"github.com/vsriram/simple-host/internal/oidc"
 	"github.com/vsriram/simple-host/internal/reqlog"
 	"github.com/vsriram/simple-host/internal/search"
-	"github.com/vsriram/simple-host/internal/sitetype"
 	"github.com/vsriram/simple-host/internal/storage"
 )
 
@@ -141,11 +140,12 @@ func run() (runErr error) {
 	resources.accessWriter = accessWriter
 
 	oidcProvider, err := oidc.Discover(context.Background(), oidc.Config{
-		Issuer:       cfg.OIDC.Issuer,
-		ClientID:     cfg.OIDC.ClientID,
-		ClientSecret: cfg.OIDC.ClientSecret,
-		RedirectURL:  strings.TrimRight(cfg.PublicBaseURL, "/") + "/auth/callback",
-		Scopes:       cfg.OIDC.Scopes,
+		Issuer:          cfg.OIDC.Issuer,
+		ClientID:        cfg.OIDC.ClientID,
+		ClientSecret:    cfg.OIDC.ClientSecret,
+		RedirectURL:     strings.TrimRight(cfg.PublicBaseURL, "/") + "/auth/callback",
+		Scopes:          cfg.OIDC.Scopes,
+		InsecureAllowed: cfg.OIDC.InsecureAllowed,
 	}, nil)
 	if err != nil {
 		return fmt.Errorf("discover OIDC provider: %w", err)
@@ -304,11 +304,6 @@ func run() (runErr error) {
 		siteStore.RunSweeper(ctx, database)
 	}))
 
-	// Site-type classification has no classifier in this package: the showcase
-	// shows no type chips, and the worker is not started. An installer with a
-	// model can supply one through sitetype.StartWorker.
-	_ = sitetype.StartWorker
-
 	for _, server := range servers {
 		log.Printf("%s listening on %s", server.name, server.server.Addr)
 	}
@@ -344,15 +339,16 @@ func openStore(cfg config.Config, database *sql.DB) (*storage.Store, error) {
 
 func s3Config(cfg config.Config) storage.S3Config {
 	return storage.S3Config{
-		Endpoint:        cfg.Backup.Endpoint,
-		Region:          cfg.Backup.Region,
-		Bucket:          cfg.Backup.Bucket,
-		Prefix:          cfg.Backup.Prefix,
-		AccessKeyID:     cfg.Backup.AccessKeyID,
-		SecretAccessKey: cfg.Backup.SecretAccessKey,
-		SSE:             cfg.Backup.SSE,
-		SSEKMSKeyID:     cfg.Backup.SSEKMSKeyID,
-		EnvelopeKeys:    toStorageEnvelopeKeys(cfg.Backup.EnvelopeKeys),
+		Endpoint:         cfg.Backup.Endpoint,
+		Region:           cfg.Backup.Region,
+		Bucket:           cfg.Backup.Bucket,
+		Prefix:           cfg.Backup.Prefix,
+		AccessKeyID:      cfg.Backup.AccessKeyID,
+		SecretAccessKey:  cfg.Backup.SecretAccessKey,
+		SSE:              cfg.Backup.SSE,
+		SSEKMSKeyID:      cfg.Backup.SSEKMSKeyID,
+		EnvelopeKeys:     toStorageEnvelopeKeys(cfg.Backup.EnvelopeKeys),
+		PlaintextAllowed: cfg.Backup.EnvelopePlaintextAllowed,
 	}
 }
 

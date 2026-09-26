@@ -46,8 +46,21 @@ spec:
               envFrom:
                 - configMapRef:
                     name: simple-host-config
-                - secretRef:
-                    name: simple-host-secrets
+              # Only the owning role's credentials: prune needs nothing else
+              # from the Secret.
+              env:
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: simple-host-secrets
+                      key: DB_PASSWORD
+                      optional: true
+                - name: DB_DSN
+                  valueFrom:
+                    secretKeyRef:
+                      name: simple-host-secrets
+                      key: DB_DSN
+                      optional: true
               volumeMounts:
                 - name: db-ca
                   mountPath: /etc/simple-host/db-ca

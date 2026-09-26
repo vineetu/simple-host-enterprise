@@ -422,18 +422,18 @@ func runPrune(args []string) error {
 	if err != nil {
 		return err
 	}
-	db, err := sql.Open("postgres", dsn)
+	database, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return fmt.Errorf("open postgres: %w", err)
 	}
-	defer db.Close()
+	defer database.Close()
 
 	retention, err := config.LoadAuditRetention()
 	if err != nil {
 		return err
 	}
 
-	result, err := audit.Prune(context.Background(), db, audit.PruneOptions{
+	result, err := audit.Prune(context.Background(), database, audit.PruneOptions{
 		AuditRetentionDays:  int(retention.RetentionDays),
 		AccessRetentionDays: int(retention.AccessLogRetentionDays),
 		DryRun:              *dryRun,
@@ -453,6 +453,11 @@ func runPrune(args []string) error {
 		log.Printf("dropped %s partition %s (covered up to %s)", p.Table, p.Partition, p.MonthEnd.Format("2006-01-02"))
 	}
 	log.Printf("prune: %d partition(s) dropped", len(result.Dropped))
+	sessions, err := db.PruneSessions(context.Background(), database, int(retention.AccessLogRetentionDays))
+	if err != nil {
+		return fmt.Errorf("prune sessions: %w", err)
+	}
+	log.Printf("prune: %d ended session(s) deleted", sessions)
 	return nil
 }
 

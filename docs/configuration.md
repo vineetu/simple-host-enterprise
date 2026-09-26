@@ -57,7 +57,8 @@ shell.
 
 | Variable | Required | Default | Refusal it triggers when set wrong |
 |---|---|---|---|
-| `OIDC_ISSUER` | Yes | none | Discovery and JWKS are fetched from this issuer at startup (15-second timeout); if it is unreachable or its metadata does not match, the server exits and the pod crash-loops (it does not start and retry). Entra ID's multi-tenant endpoints (`/common`, `/organizations`, `/consumers`) are refused at startup: use the tenant's own issuer, `https://login.microsoftonline.com/<tenant id>/v2.0`. |
+| `OIDC_ISSUER` | Yes | none | Discovery and JWKS are fetched from this issuer at startup (15-second timeout); if it is unreachable or its metadata does not match, the server exits and the pod crash-loops (it does not start and retry). Entra ID's multi-tenant endpoints (`/common`, `/organizations`, `/consumers`) are refused at startup: use the tenant's own issuer, `https://login.microsoftonline.com/<tenant id>/v2.0`. The issuer and the discovered authorization, token and JWKS endpoints must be `https://`; `http` is refused unless `OIDC_INSECURE_ALLOWED=true`. |
+| `OIDC_INSECURE_ALLOWED` | No | `false` | Permits a plain-`http` issuer and discovered endpoints. For a local evaluation cluster only (the local overlay's in-cluster Dex sets it) — never set on a real install: the client secret and the signing keys would cross the network unprotected. |
 | `OIDC_CLIENT_ID` | Yes | none | none at startup; the provider refuses the authorization request if wrong. |
 | `OIDC_CLIENT_SECRET` | Yes | none | none at startup; token exchange fails if wrong. Belongs in a Secret, never in `config.env`. |
 | `OIDC_SCOPES` | No | `openid email profile` | Space-separated. |
@@ -95,7 +96,7 @@ Either `DB_DSN` (a complete URL) or the four parts below, not a mix.
 | `DB_SSL_ROOT_CERT` | Required in practice with `sslmode=verify-full` | none | `verify-full` with no root certificate configured is refused unless `DB_INSECURE_ALLOWED=true`. Renamed from `DB_SSLROOTCERT`; the old name is not read. |
 | `DB_INSECURE_ALLOWED` | No | `false` | Bypasses both TLS refusals above. For a local evaluation cluster only — never set on a real install. |
 | `DB_INCLUSTER_EVALUATION` | No | `false` | Set by `deploy/components/postgres-incluster`. The server logs a warning at every start: that database has no backup. Evaluation only. |
-| `DB_APP_PASSWORD` | Yes, whenever `migrate` runs, and for the server with `DB_APP_USER` | none | `DB_APP_PASSWORD_FILE` is read instead when set. The `migrate` subcommand sets this as the least-privilege application role's login password on every run, applied migrations or not, so a rotated value takes effect without a schema change. A role granted in a migration with no password to give it would otherwise sit unusable. |
+| `DB_APP_PASSWORD` | Yes, whenever `migrate` runs, and for the server with `DB_APP_USER` | none | `DB_APP_PASSWORD_FILE` is read instead when set. The `migrate` subcommand sets this as the least-privilege application role's login password on every run, applied migrations or not, so a rotated value takes effect without a schema change. A role granted in a migration with no password to give it would otherwise sit unusable. Only a SCRAM-SHA-256 hash computed by `migrate` reaches the database, so the password never appears in server statement logs; it must be printable ASCII (the generated one is hex). |
 | `DB_APP_USER` | No (set to `simplehost_app` by the Deployment manifest) | none | The role the **server** connects as. When set, the server builds its connection from `DB_HOST`/`DB_PORT`/`DB_NAME`, this user and `DB_APP_PASSWORD[_FILE]`, whatever `DB_USER`/`DB_PASSWORD[_FILE]` say. Refused together with `DB_DSN` (put the application role in the DSN itself). |
 
 Whichever way the server's connection is configured, it checks the role it
@@ -138,7 +139,7 @@ owning role, never from the server's own connection pool.
 | Variable | Required | Default | Refusal it triggers when set wrong |
 |---|---|---|---|
 | `AUDIT_RETENTION_DAYS` | No | `400` | Must be a positive integer. |
-| `ACCESS_LOG_RETENTION_DAYS` | No | `90` | Must be a positive integer. |
+| `ACCESS_LOG_RETENTION_DAYS` | No | `90` | Must be a positive integer. Also how long `prune` keeps a session (and its IP and user agent) after it expired or was signed out. |
 | `ACCESS_LOG_VISIBILITY` | No | `counts` | Must be `counts`, `owner` or `admin`. `counts` (the default) answers a site's owner and team members on `GET /api/access` with views per day and the number of distinct viewers, never who; `owner` gives them each visit with the viewer's user id (IP and user agent stay admin-only); `admin` refuses every non-admin caller of that route outright. Admins always see full rows. Read by `handler.NewAuditHandler` (`cmd/server/main.go`); does not affect `GET /api/audit`, which is always scoped by caller identity rather than gated by this switch. |
 
 ## Site bucket (S3-compatible)
@@ -158,7 +159,8 @@ layout and versioning: `docs/storage.md`.
 | `BACKUP_STORAGE_INSECURE_ALLOWED` | No | `false` | Permits a plain-`http` `BACKUP_STORAGE_ENDPOINT`. For a local cluster where the bucket sits on the same node only; the local overlay's MinIO sets this. |
 | `BACKUP_SSE` | No | `AES256` | Must be `AES256` or `aws:kms`. `aws:kms` requires `BACKUP_SSE_KEY_ID`; `AES256` refuses it being set. Sent as `x-amz-server-side-encryption` on every `PutObject`. Self-hosted MinIO refuses any value here without its own `MINIO_KMS_SECRET_KEY` configured on the MinIO side — see `docs/install.md` section 9. |
 | `BACKUP_SSE_KEY_ID` | Required with `BACKUP_SSE=aws:kms` | none | See `BACKUP_SSE`. |
-| `BACKUP_ENVELOPE_KEY` | No | none (envelope disabled) | Optional client-side envelope encryption, on top of the SSE header above (design 9.1). Up to eight comma-separated `<id>:<base64 32-byte key>` entries, same shape as `SESSION_SIGNING_KEY`: the first wraps every new object, every configured key is tried to unwrap an existing one. Rotation: add the new key second, deploy, swap the order, deploy — and never remove the old key, since stored objects are long-lived and every one wrapped under it would become unreadable. Set in a Secret; a bucket that is later fully compromised cannot read these objects without also having this key. |
+| `BACKUP_ENVELOPE_KEY` | No | none (envelope disabled) | Optional client-side envelope encryption, on top of the SSE header above (design 9.1). Up to eight comma-separated `<id>:<base64 32-byte key>` entries, same shape as `SESSION_SIGNING_KEY`: the first wraps every new object, every configured key is tried to unwrap an existing one. Rotation: add the new key second, deploy, swap the order, deploy — and never remove the old key, since stored objects are long-lived and every one wrapped under it would become unreadable. Set in a Secret; a bucket that is later fully compromised cannot read these objects without also having this key. Escrow it before first use: every site is readable only with it. With the envelope on, an object without one is refused (see the next row). |
+| `BACKUP_ENVELOPE_PLAINTEXT_ALLOWED` | No | `false` | Lets an install that added `BACKUP_ENVELOPE_KEY` after it already held sites keep reading the objects written before the key. Otherwise, with the envelope on, an unenveloped object is refused as one only somebody with bucket access could have put there. `docs/storage.md` (Encryption). |
 
 ## Removed variables
 

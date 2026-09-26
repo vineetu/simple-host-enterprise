@@ -175,6 +175,11 @@ type BackupConfig struct {
 	SSE string
 	// SSEKMSKeyID is required when SSE is "aws:kms" and rejected otherwise.
 	SSEKMSKeyID string
+	// EnvelopePlaintextAllowed (BACKUP_ENVELOPE_PLAINTEXT_ALLOWED) lets an
+	// install that added BACKUP_ENVELOPE_KEY after it already held objects
+	// keep reading the ones written before; otherwise a plain object is
+	// refused whenever the envelope is on.
+	EnvelopePlaintextAllowed bool
 	// EnvelopeKeys is optional client-side envelope encryption.
 	// Empty means backups travel with only the SSE header above. 1 or 2 keys
 	// mirror the SESSION_SIGNING_KEY rotation shape: the first wraps every
@@ -231,6 +236,9 @@ type OIDCConfig struct {
 	// authorization request. Defaults to the sole entry of
 	// AllowedEmailDomains when there is exactly one.
 	HintDomain string
+	// InsecureAllowed (OIDC_INSECURE_ALLOWED) permits a plain-http issuer
+	// and discovered endpoints. For the local overlay's in-cluster Dex only.
+	InsecureAllowed bool
 }
 
 // SessionConfig is the cookie and session-lifetime configuration.
@@ -294,6 +302,14 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	oidcInsecureAllowed, err := boolEnv("OIDC_INSECURE_ALLOWED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	envelopePlaintextAllowed, err := boolEnv("BACKUP_ENVELOPE_PLAINTEXT_ALLOWED", false)
+	if err != nil {
+		return Config{}, err
+	}
 
 	var need missing
 	cfg := Config{
@@ -315,6 +331,8 @@ func Load() (Config, error) {
 			InsecureAllowed: backupInsecure,
 			SSE:             getEnvOrDefault("BACKUP_SSE", defaultBackupSSE),
 			SSEKMSKeyID:     os.Getenv("BACKUP_SSE_KEY_ID"),
+
+			EnvelopePlaintextAllowed: envelopePlaintextAllowed,
 		},
 	}
 	cfg.OAuthRedirectHosts = splitLowerTrimmed(getEnvOrDefault("OAUTH_REDIRECT_HOSTS", defaultOAuthRedirectHosts))
@@ -337,6 +355,7 @@ func Load() (Config, error) {
 		AdminEmails:         splitLowerTrimmed(os.Getenv("ADMIN_EMAILS")),
 		AllowedEmailDomains: splitLowerTrimmed(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
 		HintDomain:          strings.TrimSpace(os.Getenv("OIDC_HINT_DOMAIN")),
+		InsecureAllowed:     oidcInsecureAllowed,
 	}
 
 	signingKeys, err := parseKeys(secretOrEmpty("SESSION_SIGNING_KEY", &secretErr), signingKeyLength, maxSigningKeys)
@@ -413,7 +432,7 @@ func Load() (Config, error) {
 		return Config{}, secretErr
 	}
 
-	if err := validateOIDCIssuer(cfg.OIDC.Issuer); err != nil {
+	if err := validateOIDCIssuer(cfg.OIDC.Issuer, cfg.OIDC.InsecureAllowed); err != nil {
 		return Config{}, fmt.Errorf("OIDC_ISSUER: %w", err)
 	}
 	if len(cfg.OIDC.AdminClaim) > 0 != (len(cfg.OIDC.AdminValue) > 0) {
@@ -490,10 +509,13 @@ func parseTrustedProxies(raw string) ([]netip.Prefix, error) {
 // tenant can sign in, and the email it presents is whatever that tenant
 // says. Use the tenant-specific issuer
 // (https://login.microsoftonline.com/<tenant id>/v2.0).
-func validateOIDCIssuer(issuer string) error {
+func validateOIDCIssuer(issuer string, insecureAllowed bool) error {
 	u, err := url.Parse(strings.ToLower(strings.TrimSpace(issuer)))
-	if err != nil {
-		return errors.New("must be a URL")
+	if err != nil || u.Host == "" {
+		return errors.New("must be an absolute URL")
+	}
+	if u.Scheme != "https" && !(u.Scheme == "http" && insecureAllowed) {
+		return errors.New("must use https (OIDC_INSECURE_ALLOWED=true permits http on a local evaluation cluster only)")
 	}
 	if u.Host != "login.microsoftonline.com" {
 		return nil
@@ -816,12 +838,14 @@ func parseKeys(raw string, keyLength, maxKeys int) ([]keyEntry, error) {
 	}
 	seen := make(map[string]bool, len(parts))
 	keys := make([]keyEntry, 0, len(parts))
-	for _, part := range parts {
+	for i, part := range parts {
 		part = strings.TrimSpace(part)
 		id, encoded, ok := strings.Cut(part, ":")
 		id = strings.TrimSpace(id)
 		if !ok || id == "" || encoded == "" {
-			return nil, fmt.Errorf("entry %q must be \"<id>:<base64 %d-byte key>\"", part, keyLength)
+			// The entry itself is never echoed: a bare key without its id
+			// is the usual mistake, and this error goes to the pod log.
+			return nil, fmt.Errorf("entry %d must be \"<id>:<base64 %d-byte key>\"", i+1, keyLength)
 		}
 		if seen[id] {
 			return nil, fmt.Errorf("key id %q repeated", id)

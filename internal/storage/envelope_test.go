@@ -6,6 +6,8 @@ import (
 	"testing"
 )
 
+const testObjectKey = "sites/00000000-0000-4000-8000-000000000001/v1.tar.gz"
+
 func testKey(id string, fill byte) EnvelopeKey {
 	key := make([]byte, dataKeyLength)
 	for i := range key {
@@ -18,7 +20,7 @@ func TestWrapUnwrapObjectRoundTrip(t *testing.T) {
 	key := testKey("k1", 0x42)
 	plaintext := []byte("the quick brown fox jumps over the lazy dog, repeated for bulk\n")
 
-	ciphertext, metadata, err := wrapObject(plaintext, key)
+	ciphertext, metadata, err := wrapObject(testObjectKey, plaintext, key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +31,7 @@ func TestWrapUnwrapObjectRoundTrip(t *testing.T) {
 		t.Fatalf("metadata key id = %q, want k1", metadata["sh-envelope-key-id"])
 	}
 
-	got, err := unwrapObject(ciphertext, metadata, []EnvelopeKey{key})
+	got, err := unwrapObject(testObjectKey, ciphertext, metadata, []EnvelopeKey{key})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,11 +48,11 @@ func TestUnwrapObjectRotation(t *testing.T) {
 	// An object wrapped under the key that is about to be retired must still
 	// unwrap as long as that key is still configured, even though it is no
 	// longer first.
-	ciphertext, metadata, err := wrapObject(plaintext, oldKey)
+	ciphertext, metadata, err := wrapObject(testObjectKey, plaintext, oldKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := unwrapObject(ciphertext, metadata, []EnvelopeKey{newKey, oldKey})
+	got, err := unwrapObject(testObjectKey, ciphertext, metadata, []EnvelopeKey{newKey, oldKey})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,12 +63,12 @@ func TestUnwrapObjectRotation(t *testing.T) {
 
 func TestUnwrapObjectUnknownKeyID(t *testing.T) {
 	key := testKey("k1", 0x03)
-	ciphertext, metadata, err := wrapObject([]byte("secret"), key)
+	ciphertext, metadata, err := wrapObject(testObjectKey, []byte("secret"), key)
 	if err != nil {
 		t.Fatal(err)
 	}
 	other := testKey("k2", 0x04)
-	if _, err := unwrapObject(ciphertext, metadata, []EnvelopeKey{other}); err == nil {
+	if _, err := unwrapObject(testObjectKey, ciphertext, metadata, []EnvelopeKey{other}); err == nil {
 		t.Fatal("unwrapObject accepted a key id with no configured match")
 	} else if !strings.Contains(err.Error(), "k1") {
 		t.Fatalf("error %v does not name the missing key id", err)
@@ -75,13 +77,13 @@ func TestUnwrapObjectUnknownKeyID(t *testing.T) {
 
 func TestUnwrapObjectTamperedCiphertextFailsClosed(t *testing.T) {
 	key := testKey("k1", 0x05)
-	ciphertext, metadata, err := wrapObject([]byte("do not tamper"), key)
+	ciphertext, metadata, err := wrapObject(testObjectKey, []byte("do not tamper"), key)
 	if err != nil {
 		t.Fatal(err)
 	}
 	tampered := append([]byte(nil), ciphertext...)
 	tampered[0] ^= 0xFF
-	if _, err := unwrapObject(tampered, metadata, []EnvelopeKey{key}); err == nil {
+	if _, err := unwrapObject(testObjectKey, tampered, metadata, []EnvelopeKey{key}); err == nil {
 		t.Fatal("unwrapObject accepted a tampered ciphertext")
 	}
 }
@@ -97,25 +99,25 @@ func TestUnwrapObjectSwappedKeyIDFailsClosed(t *testing.T) {
 	sharedBytes := testKey("k1", 0x07)
 	aliasKey := EnvelopeKey{ID: "k2", Key: sharedBytes.Key}
 
-	ciphertext, metadata, err := wrapObject([]byte("do not relabel"), sharedBytes)
+	ciphertext, metadata, err := wrapObject(testObjectKey, []byte("do not relabel"), sharedBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
 	metadata["sh-envelope-key-id"] = aliasKey.ID
 
-	if _, err := unwrapObject(ciphertext, metadata, []EnvelopeKey{aliasKey}); err == nil {
+	if _, err := unwrapObject(testObjectKey, ciphertext, metadata, []EnvelopeKey{aliasKey}); err == nil {
 		t.Fatal("unwrapObject accepted a wrapped key relabeled with a different key id")
 	}
 }
 
 func TestUnwrapObjectTamperedWrappedKeyFailsClosed(t *testing.T) {
 	key := testKey("k1", 0x06)
-	ciphertext, metadata, err := wrapObject([]byte("do not tamper"), key)
+	ciphertext, metadata, err := wrapObject(testObjectKey, []byte("do not tamper"), key)
 	if err != nil {
 		t.Fatal(err)
 	}
 	metadata["sh-envelope-wrapped-key"] = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-	if _, err := unwrapObject(ciphertext, metadata, []EnvelopeKey{key}); err == nil {
+	if _, err := unwrapObject(testObjectKey, ciphertext, metadata, []EnvelopeKey{key}); err == nil {
 		t.Fatal("unwrapObject accepted a tampered wrapped key")
 	}
 }

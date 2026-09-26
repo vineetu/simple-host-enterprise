@@ -171,7 +171,7 @@ func TestMinIOStoreRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAsset: %v", err)
 	}
-	asset, err := store.OpenAsset(ctx, testSiteA, stored.ID, generousLimits.MaxFileBytes)
+	asset, err := store.OpenAsset(ctx, testSiteA, stored.ID, generousLimits.MaxFileBytes, stored.SHA256[:])
 	if err != nil {
 		t.Fatalf("OpenAsset: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestMinIOStoreRoundTrip(t *testing.T) {
 	if err := store.DeleteAsset(ctx, testSiteA, stored.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.OpenAsset(ctx, testSiteA, testSiteC, generousLimits.MaxFileBytes); !errors.Is(err, ErrAssetNotFound) {
+	if _, err := store.OpenAsset(ctx, testSiteA, testSiteC, generousLimits.MaxFileBytes, nil); !errors.Is(err, ErrAssetNotFound) {
 		t.Fatalf("OpenAsset unknown = %v, want ErrAssetNotFound", err)
 	}
 	usage, err := store.Usage(ctx)

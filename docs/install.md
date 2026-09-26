@@ -101,8 +101,7 @@ make smoke
 
 `scripts/smoke.sh` signs in through Dex as both test accounts, mints and
 revokes an API key, confirms `X-API-Key` and the session cookie both
-authenticate `/api/sites`, confirms the old `/api/auth` and
-`/api/reset-requests` registration routes are gone (404), drives the full
+authenticate `/api/sites`, drives the full
 hand-off round trip from the base host to an owner host's own session,
 restricts a site to a named viewer and confirms it serves only on its own
 `<owner>--<site>` hostname (404 to everyone else), checks the
@@ -408,11 +407,11 @@ dashboard's base-host mirror (`internal/handler/assets_admin.go`'s
 For both asset-delete call sites, the bucket object is not deleted inside
 that transaction: the transaction queues it for the sweep, which deletes it
 an hour later (`docs/storage.md`, Retention), so the database row, its
-audit row and the queued deletion commit or roll back together. Eleven actions remain best-effort,
+audit row and the queued deletion commit or roll back together. Ten actions remain best-effort,
 written through the older `Record` with no shared transaction: `sign_in`,
 `sign_out`, `session_revoke`, `key_mint`, `key_revoke`, `hand_off`, and the
 admin actions `admin_disable_user`, `admin_enable_user`,
-`admin_archive_versions`, `admin_classify_sites`, `admin_export`. See
+`admin_archive_versions`, `admin_export`. See
 `docs/security-review.md`'s S9a row for the same inventory.
 `state_write` coalesces repeated writes from the same actor
 and site into one row per five-minute window (`detail.count`), so autosave
@@ -465,6 +464,9 @@ Retention runs as a monthly `CronJob` (`simple-host-prune`, wired into
 partitions and then drops any whose partition is fully past its retention
 window — `AUDIT_RETENTION_DAYS` (default 400) and
 `ACCESS_LOG_RETENTION_DAYS` (default 90), both in `docs/configuration.md`.
+It also deletes sessions that ended (expired or signed out) more than
+`ACCESS_LOG_RETENTION_DAYS` ago, with the IP and user agent they recorded,
+and hand-off codes older than a day.
 It runs under the database's owning credential, not `simplehost_app`: the
 application role has no `DROP` privilege on either table at all, so retention can only ever run as the owning role. Preview what a
 run would drop without dropping anything:
@@ -500,7 +502,8 @@ The bucket is the site store, not a copy of it: every version and asset is
 written there with a server-side-encryption header (`BACKUP_SSE`, default
 `AES256`); set `BACKUP_ENVELOPE_KEY` for an additional client-side envelope
 that makes the objects unreadable to anyone who can read the bucket but not
-your Kubernetes Secrets. Recovery comes from bucket versioning, which must be
+your Kubernetes Secrets. Escrow that key before first use: losing it loses
+every site. Recovery comes from bucket versioning, which must be
 on. `docs/storage.md` covers the bucket setup, retention, the `restore`
 subcommand, and migrating an install that still keeps sites on a volume.
 
@@ -608,7 +611,9 @@ cluster, where the image is loaded into the node and never pulled at all.
   `verify-full` with a root certificate, and the bucket endpoint must be
   `https://`, unless you have deliberately set `DB_INSECURE_ALLOWED=true`
   or `BACKUP_STORAGE_INSECURE_ALLOWED=true` for a local evaluation cluster —
-  never set either on a real install.
+  never set either on a real install. The same holds for the OIDC issuer and
+  the endpoints its discovery document names: `https://` only, unless
+  `OIDC_INSECURE_ALLOWED=true` (local evaluation only).
 - **You are standing up your own OIDC provider for CI (a second Dex, a
   test Okta tenant, and so on) and the server cannot reach it.** Every OIDC
   call this server makes — discovery, token exchange, JWKS — runs

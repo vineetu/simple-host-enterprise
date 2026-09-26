@@ -278,10 +278,11 @@ func (l *AssetLease) Close() error {
 }
 
 // OpenAsset returns one asset's bytes, fetching it into the cache on a miss.
-// maxBytes bounds the fetch (the configured per-file cap). The caller must
-// already have found the live asset row: a deleted asset's object may still
-// be cached here.
-func (s *Store) OpenAsset(ctx context.Context, siteID, id string, maxBytes int64) (*AssetLease, error) {
+// maxBytes bounds the fetch (the configured per-file cap). wantSHA256 is the
+// digest the asset's row recorded; a fetched object that does not match it is
+// refused rather than served. The caller must already have found the live
+// asset row: a deleted asset's object may still be cached here.
+func (s *Store) OpenAsset(ctx context.Context, siteID, id string, maxBytes int64, wantSHA256 []byte) (*AssetLease, error) {
 	key, err := AssetKey(siteID, id)
 	if err != nil {
 		return nil, err
@@ -294,6 +295,9 @@ func (s *Store) OpenAsset(ctx context.Context, siteID, id string, maxBytes int64
 		}
 		if err != nil {
 			return 0, err
+		}
+		if sum := sha256.Sum256(body); !bytes.Equal(sum[:], wantSHA256) {
+			return 0, fmt.Errorf("asset %s does not match its recorded sha256", key)
 		}
 		file, err := s.cache.root.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {

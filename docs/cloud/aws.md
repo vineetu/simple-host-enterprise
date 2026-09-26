@@ -62,6 +62,10 @@ RDS for PostgreSQL 16.
 - TLS: `rds.force_ssl` defaults to `1` on PostgreSQL 15 and later; keep it on.
 - CA bundle: `curl -fsSo deploy/overlays/byo/db-ca.crt https://truststore.pki.rds.amazonaws.com/<region>/<region>-bundle.pem`
 - PITR: automated backups on, backup retention 7+ days.
+- Encryption at rest: create the instance with `--storage-encrypted` (optionally
+  `--kms-key-id <key>`); `aws rds create-db-instance` leaves it off by default and it
+  cannot be turned on later without a snapshot copy and restore. Owner password: use
+  `--manage-master-user-password` rather than passing one on the command line.
 
 ```
 DB_HOST=<instance>.<id>.<region>.rds.amazonaws.com

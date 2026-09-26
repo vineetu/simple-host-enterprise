@@ -53,6 +53,8 @@ OCI Database with PostgreSQL 16. It only accepts TLS.
   `oci psql connection-details get --db-system-id <ocid>`. The CA field in that output
   is (unverified). Save it as `deploy/overlays/byo/db-ca.crt`.
 - PITR: backups on, with 7+ days retention in the backup policy.
+- Encryption at rest: OCI encrypts the database storage and backups by default
+  (Oracle-managed key; a Vault key can be chosen at creation).
 
 ```
 DB_HOST=<the FQDN shown under Connection details>

@@ -108,8 +108,27 @@ the lifecycle rule expires them.
 ## Encryption
 
 Every write carries the server-side-encryption header (`BACKUP_SSE`,
-`BACKUP_SSE_KEY_ID`). `BACKUP_ENVELOPE_KEY` adds an optional client-side
-envelope, so the bucket alone cannot read the objects.
+`BACKUP_SSE_KEY_ID`). `BACKUP_ENVELOPE_KEY` adds a client-side envelope, so
+the bucket alone cannot read the objects. **Escrow the key in your
+organisation's secret store before first use:** the bucket is the only copy
+of every site, every object in it (and every noncurrent version) is
+encrypted under the key, and losing the key loses every site.
+
+Since v1.1.3 each enveloped object is also bound to its own object key
+(the key is the encryption's associated data, marked by the
+`sh-envelope-format: 2` metadata field): an object copied or moved to
+another site's key does not decrypt, so someone who can write to the bucket
+cannot swap one site's content in for another's. Objects written by v1.1.0
+to v1.1.2 carry no format field and are still read (the server logs this
+once per start); they stay in the older form until rewritten, and every new
+deploy, upload and restore writes the bound form. Assets are also checked
+against the SHA-256 their row recorded before they are served.
+
+With the envelope on, an object without it is refused: only someone with
+bucket access could have put it there. An install that added
+`BACKUP_ENVELOPE_KEY` after it already held sites sets
+`BACKUP_ENVELOPE_PLAINTEXT_ALLOWED=true` so those older, unenveloped objects
+stay readable.
 
 Rotating the envelope key: add the new key second, deploy, swap the order so
 the new key wraps new objects, deploy. **Never remove the old key.** Objects

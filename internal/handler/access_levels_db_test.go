@@ -277,11 +277,9 @@ func TestNetworkAccessRequestApproveDeclineRevert(t *testing.T) {
 	if code := w.view("", "alice", "demo", false); code != http.StatusFound {
 		t.Fatalf("anonymous view while pending = %d, want the sign-in redirect", code)
 	}
-	var pending []map[string]any
-	rec := w.admin(http.MethodGet, "/api/admin/access-requests")
-	_ = json.Unmarshal(rec.Body.Bytes(), &pending)
-	if rec.Code != http.StatusOK || len(pending) != 1 || pending[0]["status"] != "pending" || pending[0]["reason"] != "public event page" {
-		t.Fatalf("admin list = %d %s", rec.Code, rec.Body)
+	pending, err := db.ListNetworkAccess(context.Background(), w.database)
+	if err != nil || len(pending) != 1 || pending[0].RequestedAt == nil || pending[0].Reason != "public event page" {
+		t.Fatalf("pending requests = %+v, %v", pending, err)
 	}
 	// Only an admin approves.
 	nonAdmin := httptest.NewRequest(http.MethodPost, "https://"+accessBase+"/api/admin/access-requests/alice/demo/approve", nil)

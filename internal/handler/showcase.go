@@ -13,7 +13,6 @@ import (
 
 	"github.com/vsriram/simple-host/internal/auth"
 	"github.com/vsriram/simple-host/internal/db"
-	"github.com/vsriram/simple-host/internal/sitetype"
 )
 
 // ShowcaseHandler renders /showcase — a public, unauth gallery that uses
@@ -109,14 +108,6 @@ func (h *ShowcaseHandler) page(w http.ResponseWriter, r *http.Request) {
 		log.Printf("showcase analytics: %v", err)
 		analyticsBySiteID = make(map[string]db.SiteAnalyticsSummary)
 	}
-	// Types are optional decoration. A failure here costs the chip row, not the
-	// page, so it degrades to the list exactly as it was before this feature.
-	typeBySiteID, err := db.ListPublicSiteTypes(r.Context(), h.database)
-	typesAvailable := err == nil
-	if err != nil {
-		log.Printf("showcase site types: %v", err)
-		typeBySiteID = map[string]string{}
-	}
 
 	// One flat list of sites. The showcase is browsed for interesting sites, not
 	// for a directory of people, so the owner is a column and one of the sort
@@ -137,50 +128,12 @@ func (h *ShowcaseHandler) page(w http.ResponseWriter, r *http.Request) {
 		}
 		summary := analyticsBySiteID[s.ID]
 		entries = append(entries, showcaseEntry{
-			site:     s,
-			owner:    owner,
-			views7d:  summary.Last7Pageviews,
-			views:    summary.TodayPageviews,
-			visits:   summary.TodayVisits,
-			siteType: sitetype.Parse(typeBySiteID[s.ID]),
+			site:    s,
+			owner:   owner,
+			views7d: summary.Last7Pageviews,
+			views:   summary.TodayPageviews,
+			visits:  summary.TodayVisits,
 		})
-	}
-
-	// Counted over every public site, never the narrowed set: the chips show
-	// these while a type is selected, and a count that shrank to match the
-	// current view would be wrong.
-	typeCounts := map[sitetype.Type]int{}
-	unsorted := 0
-	for _, e := range entries {
-		if e.siteType == "" {
-			unsorted++
-			continue
-		}
-		typeCounts[e.siteType]++
-	}
-
-	// With no type data — the transient state of a binary running ahead of its
-	// migration — a ?type= link narrows to nothing. Ignore the filter instead
-	// of showing an empty page for a link that used to work.
-	activeType := sitetype.Parse(r.URL.Query().Get("type"))
-	unsortedSelected := r.URL.Query().Get("type") == unsortedTypeKey
-	if !typesAvailable {
-		activeType, unsortedSelected = "", false
-	}
-	selectedTypeKey := ""
-	if unsortedSelected {
-		selectedTypeKey = unsortedTypeKey
-	} else if activeType != "" {
-		selectedTypeKey = string(activeType)
-	}
-	if activeType != "" || unsortedSelected {
-		kept := entries[:0]
-		for _, e := range entries {
-			if (unsortedSelected && e.siteType == "") || (activeType != "" && e.siteType == activeType) {
-				kept = append(kept, e)
-			}
-		}
-		entries = kept
 	}
 
 	// Sorted on the server so the order is right without JavaScript; the select
@@ -221,13 +174,9 @@ func (h *ShowcaseHandler) page(w http.ResponseWriter, r *http.Request) {
     </div>
     <input type="hidden" name="sort" value="`)
 	b.WriteString(html.EscapeString(string(activeSort)))
-	b.WriteString(`"><input type="hidden" name="type" value="`)
-	b.WriteString(html.EscapeString(selectedTypeKey))
 	b.WriteString(`">
   </form>
 </section>`)
-
-	renderTypeChips(&b, typeCounts, unsorted, selectedTypeKey, query, activeSort)
 
 	b.WriteString(`<div class="list-toolbar"><div class="list-count" id="showcase-count">`)
 	fmt.Fprintf(&b, `%s`, pluralize(len(entries), "1 site", fmt.Sprintf("%d sites", len(entries))))
@@ -239,8 +188,6 @@ func (h *ShowcaseHandler) page(w http.ResponseWriter, r *http.Request) {
 		// submitting here does not discard it.
 		b.WriteString(`<form class="sort-form" action="/showcase" method="get"><input type="hidden" name="q" value="`)
 		b.WriteString(html.EscapeString(query))
-		b.WriteString(`"><input type="hidden" name="type" value="`)
-		b.WriteString(html.EscapeString(selectedTypeKey))
 		b.WriteString(`"><label class="sort-label" for="showcase-sort">Sort</label><select id="showcase-sort" name="sort">`)
 		for _, option := range showcaseSorts {
 			selected := ""
@@ -329,18 +276,12 @@ func parseShowcaseSort(raw string) showcaseSortKey {
 }
 
 type showcaseEntry struct {
-	site     db.Site
-	owner    string
-	views7d  int64
-	views    int64
-	visits   int64
-	siteType sitetype.Type
+	site    db.Site
+	owner   string
+	views7d int64
+	views   int64
+	visits  int64
 }
-
-// unsortedTypeKey selects sites with no classification. It is not a member of
-// the closed set — an unclassified site is the absence of a judgement, not a
-// kind of site — so it travels as its own query value.
-const unsortedTypeKey = "unsorted"
 
 // showcaseRanks precomputes each site's position under every ordering and
 // returns them as ready-to-emit attributes.
@@ -455,27 +396,6 @@ const showcaseHeadHTML = `<!doctype html>
     text-transform:none;color:var(--ink-soft);
   }
   .sort-form{display:flex;align-items:center;gap:10px}
-  .type-chips{
-    display:flex;flex-wrap:wrap;gap:8px;
-    padding:20px 0 4px;
-  }
-  .type-chip{
-    display:inline-flex;align-items:baseline;gap:7px;
-    padding:6px 13px;border:1px solid var(--surface-line);
-    border-radius:999px;background:var(--surface);
-    color:var(--ink);text-decoration:none;
-    font:500 13px/1.2 var(--font-sans);white-space:nowrap;
-  }
-  .type-chip:hover{border-color:var(--ps-blue-700);color:var(--ps-blue-800)}
-  .type-chip:focus-visible{outline:3px solid var(--ps-blue-300);outline-offset:2px}
-  .type-chip.is-active{
-    background:var(--ps-blue-800);border-color:var(--ps-blue-800);color:#fff;
-  }
-  .type-chip-count{
-    font-family:var(--font-mono);font-size:11px;font-variant-numeric:tabular-nums;
-    color:var(--ink-muted);
-  }
-  .type-chip.is-active .type-chip-count{color:rgba(255,255,255,.75)}
   /* Announcements go to their own hidden node so the visible tally can update
      on every keystroke without a screen reader narrating each letter. */
   .sr-only{
@@ -707,64 +627,3 @@ const showcaseFilterScript = `<script>
   applyFilter();
 }());
 </script>`
-
-// showcaseTypeHref builds a chip link that keeps the filter text and sort the
-// visitor already chose. Chips are links rather than client-side toggles so
-// they work without JavaScript and so the counts beside them, which are
-// computed server-side over every public site, cannot drift out of step with
-// what is listed.
-func showcaseTypeHref(typeKey, query string, sort showcaseSortKey) string {
-	values := url.Values{}
-	if query != "" {
-		values.Set("q", query)
-	}
-	values.Set("sort", string(sort))
-	if typeKey != "" {
-		values.Set("type", typeKey)
-	}
-	return "/showcase?" + values.Encode()
-}
-
-// renderTypeChips draws the type filter row.
-//
-// It renders nothing at all when no site carries a type. That is the state
-// between deploying this and running the backfill, and a row of chips all
-// reading zero would look broken; the page is simply what it was before.
-func renderTypeChips(
-	b *strings.Builder,
-	counts map[sitetype.Type]int,
-	unsorted int,
-	selected, query string,
-	sort showcaseSortKey,
-) {
-	classified := 0
-	for _, n := range counts {
-		classified += n
-	}
-	if classified == 0 {
-		return
-	}
-
-	chip := func(key, label string, n int) {
-		if n == 0 {
-			return
-		}
-		class := "type-chip"
-		aria := ""
-		if key == selected {
-			class += " is-active"
-			aria = ` aria-current="true"`
-		}
-		fmt.Fprintf(b, `<a class="%s" href="%s"%s>%s<span class="type-chip-count">%d</span></a>`,
-			class, html.EscapeString(showcaseTypeHref(key, query, sort)), aria,
-			html.EscapeString(label), n)
-	}
-
-	b.WriteString(`<nav class="type-chips" aria-label="Filter by type">`)
-	chip("", "All", classified+unsorted)
-	for _, known := range sitetype.All {
-		chip(string(known.Type), known.Label, counts[known.Type])
-	}
-	chip(unsortedTypeKey, "Unsorted", unsorted)
-	b.WriteString(`</nav>`)
-}

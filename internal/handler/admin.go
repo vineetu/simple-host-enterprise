@@ -14,7 +14,6 @@ import (
 	"github.com/vsriram/simple-host/internal/audit"
 	"github.com/vsriram/simple-host/internal/auth"
 	"github.com/vsriram/simple-host/internal/db"
-	"github.com/vsriram/simple-host/internal/sitetype"
 	"github.com/vsriram/simple-host/internal/storage"
 )
 
@@ -30,11 +29,8 @@ type AdminHandler struct {
 	audit       audit.Recorder
 	// store sizes the storage ranking. Optional: nil shows no sizes.
 	store *storage.Store
-	// siteTypes enables the classification backfill endpoint. Optional.
-	siteTypes *sitetype.Worker
 	// auditReader backs GET /api/admin/export. Optional:
-	// nil leaves the endpoint returning 503, the same shape siteTypes uses
-	// for its own optional endpoint.
+	// nil leaves the endpoint returning 503.
 	auditReader *audit.Reader
 }
 
@@ -156,7 +152,6 @@ func (h *AdminHandler) Register(mux *http.ServeMux, authMiddleware, skillVersion
 	mux.Handle("POST /api/admin/users/{username}/disable", dashboardCheck(adminAPI(http.HandlerFunc(h.disableUser))))
 	mux.Handle("POST /api/admin/users/{username}/enable", dashboardCheck(adminAPI(http.HandlerFunc(h.enableUser))))
 	mux.Handle("POST /api/admin/teams/{team}/delete", dashboardCheck(adminAPI(http.HandlerFunc(h.deleteOrphanTeam))))
-	mux.Handle("POST /api/admin/classify-sites", dashboardCheck(adminAPI(http.HandlerFunc(h.classifySites))))
 	mux.Handle("GET /api/admin/export", adminAPI(http.HandlerFunc(h.exportAuditOrAccess)))
 	h.registerAccessRequestRoutes(mux, adminAPI, dashboardCheck)
 }

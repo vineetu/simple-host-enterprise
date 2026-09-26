@@ -4,7 +4,56 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
-## Unreleased
+## v1.1.3 — 2026-09-26
+
+Schema 0034, marked backward-compatible: it drops the unused tables
+`reset_requests`, `key_reissues` and `ai_usage`, which v1.1.2
+never reads or writes, so rolling back to v1.1.2 is safe.
+
+### Security
+- The OIDC issuer, and the authorization, token and JWKS endpoints its
+  discovery document names, must be `https://`. Plain `http` is refused at
+  startup unless `OIDC_INSECURE_ALLOWED=true` (the local overlay's
+  in-cluster Dex sets it; never on a real install).
+- `migrate` sets the application role's password as a SCRAM-SHA-256 hash
+  computed in the binary, so the plaintext `DB_APP_PASSWORD` never reaches
+  Postgres statement logs, pgaudit or `pg_stat_statements`. The password
+  must be printable ASCII (the generated one is hex).
+- The client-side envelope (`BACKUP_ENVELOPE_KEY`) now binds each object to
+  its own key: one site's object copied over another's no longer decrypts.
+  Objects written by v1.1.0 to v1.1.2 are still read (logged once per
+  start); every new deploy, upload and restore writes the bound form.
+  `restore` re-encrypts the copy instead of copying on the server side.
+- With the envelope on, an unenveloped object is refused. An install that
+  added `BACKUP_ENVELOPE_KEY` after it already held sites sets
+  `BACKUP_ENVELOPE_PLAINTEXT_ALLOWED=true` before upgrading.
+- Assets are checked against their recorded SHA-256 before they are served.
+- A malformed `SESSION_SIGNING_KEY` or `BACKUP_ENVELOPE_KEY` entry is no
+  longer echoed in the startup error.
+- A failed OIDC token exchange logs the status and the provider's error
+  code only, not the response body.
+- The `migrate` init container and the `prune` job get only the database
+  keys from the Secret, not every secret.
+- `prune` deletes sessions that ended more than `ACCESS_LOG_RETENTION_DAYS`
+  ago (with their IP and user agent) and hand-off codes older than a day.
+
+### Install
+- Database storage encryption at rest is listed as a requirement, with the
+  per-cloud setting (AWS: `--storage-encrypted` at creation).
+- The install runbook generates `BACKUP_ENVELOPE_KEY` by default and says
+  to escrow it before first use: losing it loses every site.
+- The runbook no longer passes the database owner password on the command
+  line.
+
+### Removed
+- `POST /api/admin/classify-sites` and the site-type classifier: no
+  classifier was ever wired, so the route answered 503 and no site got a
+  type. The showcase's type chips and `?type=` filter go with it. The
+  `sites.site_type` columns stay one more release for rollback.
+- The `POST /api/auth` and `POST /api/reset-requests` placeholders (they
+  now answer 405 like any unknown POST).
+- `GET /api/admin/access-requests`, a JSON list nothing called; `/admin`
+  shows the same requests and keeps approve, decline and revoke.
 
 ### Development
 - `FEATURES.md` maps every feature to its routes, MCP tools, skill text,

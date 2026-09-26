@@ -54,7 +54,7 @@ func newTestProvider(t *testing.T) *testProvider {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(TokenResponse{IDToken: tp.nextIDToken})
 	})
-	tp.server = httptest.NewServer(mux)
+	tp.server = httptest.NewTLSServer(mux)
 	t.Cleanup(tp.server.Close)
 	return tp
 }
@@ -272,5 +272,31 @@ func TestAuthCodeURLCarriesPKCEAndHint(t *testing.T) {
 	}
 	if !strings.Contains(authURL, "hd=example.com") {
 		t.Fatalf("auth URL missing hd hint: %s", authURL)
+	}
+}
+
+func TestDiscoverRefusesHTTP(t *testing.T) {
+	ctx := context.Background()
+	plain := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(plain.Close)
+	cfg := Config{Issuer: plain.URL, ClientID: "c", ClientSecret: "s", RedirectURL: "https://example.test/cb"}
+	if _, err := Discover(ctx, cfg, plain.Client()); err == nil || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("Discover accepted an http issuer: %v", err)
+	}
+
+	// An https issuer whose discovery document points at an http endpoint.
+	var srv *httptest.Server
+	srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"issuer":%q,"authorization_endpoint":%q,"token_endpoint":%q,"jwks_uri":%q}`,
+			srv.URL, srv.URL+"/auth", "http://attacker.example/token", srv.URL+"/jwks")
+	}))
+	t.Cleanup(srv.Close)
+	cfg.Issuer = srv.URL
+	if _, err := Discover(ctx, cfg, srv.Client()); err == nil || !strings.Contains(err.Error(), "token_endpoint") {
+		t.Fatalf("Discover accepted an http token_endpoint: %v", err)
+	}
+	cfg.InsecureAllowed = true
+	if _, err := Discover(ctx, cfg, srv.Client()); err != nil {
+		t.Fatalf("Discover with InsecureAllowed: %v", err)
 	}
 }

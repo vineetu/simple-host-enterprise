@@ -56,6 +56,8 @@ moving to pay-as-you-go.
   `az postgres flexible-server parameter set --resource-group <rg> --server-name <server> --name azure.extensions --value PGCRYPTO`
 - TLS: `require_secure_transport` must be `on` (the default).
 - PITR: backup retention 7+ days (`--backup-retention 7` or higher).
+- Encryption at rest: always on for flexible server (service-managed key by default;
+  a customer-managed key can only be chosen at creation).
 - CA bundle: concatenate the roots. DigiCert Global Root CA is only needed while the
   G1-to-G2 root rotation is still running in your region.
 
