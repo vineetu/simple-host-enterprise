@@ -314,24 +314,32 @@ Config names are documented in `docs/configuration.md`; schema in
 
 - **What.** `audit_events` records every mutation (most inside the mutation's
   transaction) and `access_denied`; `access_log` records visits through a
-  batching best-effort writer. Both partitioned monthly. `GET /api/audit` and
+  batching best-effort writer. Both partitioned monthly. Every audit event
+  is hash-chained in `audit_chain` by an AFTER INSERT trigger (tamper
+  evidence; `access_log` is not chained), and `simple-host audit-verify`
+  walks the chain and exits non-zero at the first break. Every event is also
+  written to stdout as one JSON line with `"type":"audit"` for a cluster log
+  shipper to forward to a SIEM. `GET /api/audit` and
   `GET /api/access` are scoped to the caller's namespaces (admins see all);
   access-log detail follows `ACCESS_LOG_VISIBILITY`. Admins export either as
   CSV (formula-safe) or NDJSON. `simple-host prune` (a CronJob) drops
-  partitions past retention and creates future ones.
+  partitions past retention, trims the chain's rows for them, and creates
+  future ones.
 - **Status.** Built.
 - **Routes.** `GET /api/audit`, `GET /api/access`, `GET /api/admin/export`.
 - **MCP.** None.
 - **Skill.** None.
 - **Pages.** `/dashboard` and `/admin` activity/visitor panels.
 - **Go.** `internal/audit/` (`audit.go`, `db_recorder.go`, `access_writer.go`,
-  `reader.go`, `prune.go`); `internal/handler/audit_access.go`,
+  `reader.go`, `prune.go`, `chain.go`); `internal/handler/audit_access.go`,
   `audit_helpers.go`, `admin_export.go`; `internal/db/audit.go`;
-  `cmd/server/subcommands.go` (`prune`).
+  `cmd/server/subcommands.go` (`prune`, `audit-verify`); `cmd/server/main.go`
+  (the shared stdout JSON logger).
 - **DB.** `audit_events`, `access_log` and their `_default` partitions (0027,
-  0028, 0030).
+  0028, 0030); `audit_chain`, `audit_chain_head`, `audit_event_canonical()`,
+  `audit_chain_append()` and trigger `audit_events_chain` (0036, owner-only).
 - **Config.** `AUDIT_RETENTION_DAYS`, `ACCESS_LOG_RETENTION_DAYS`,
-  `ACCESS_LOG_VISIBILITY`.
+  `ACCESS_LOG_VISIBILITY`. The stream and the chain have no settings.
 
 ## 13. Admin page
 

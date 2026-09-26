@@ -134,7 +134,7 @@ func ListAPIKeysForUser(ctx context.Context, db *sql.DB, userID string) ([]APIKe
 // RevokeAPIKey revokes one key, scoped to userID so a person can only revoke
 // their own. Returns sql.ErrNoRows if it doesn't exist, isn't theirs, or is
 // already revoked.
-func RevokeAPIKey(ctx context.Context, db *sql.DB, userID, keyID string) error {
+func RevokeAPIKey(ctx context.Context, db Querier, userID, keyID string) error {
 	const query = `
 		UPDATE api_keys SET revoked_at = now()
 		WHERE id = $1 AND user_id = $2 AND revoked_at IS NULL

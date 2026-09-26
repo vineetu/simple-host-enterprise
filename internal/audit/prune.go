@@ -57,6 +57,9 @@ type PruneOptions struct {
 type PruneResult struct {
 	Dropped   []PrunedPartition
 	WouldDrop []PrunedPartition
+	// ChainTrimmed is how many audit_chain rows (migration 0036) were
+	// deleted because their events' partitions are gone.
+	ChainTrimmed int64
 }
 
 // Prune drops (or, under DryRun, lists) partitions of audit_events and
@@ -117,6 +120,30 @@ func Prune(ctx context.Context, db *sql.DB, opts PruneOptions) (PruneResult, err
 			}
 			result.Dropped = append(result.Dropped, entry)
 		}
+	}
+	if opts.DryRun {
+		return result, nil
+	}
+	// The hash chain's oldest rows go with their events: everything older
+	// than the oldest monthly audit partition still standing. Run every
+	// time, not only when this run dropped something, so chain rows a
+	// prune from before migration 0036 left behind are trimmed too.
+	partitions, err := listMonthlyPartitions(ctx, db, "audit_events")
+	if err != nil {
+		return result, fmt.Errorf("list audit_events partitions: %w", err)
+	}
+	if len(partitions) > 0 {
+		oldest := partitions[0].monthEnd
+		for _, p := range partitions[1:] {
+			if p.monthEnd.Before(oldest) {
+				oldest = p.monthEnd
+			}
+		}
+		trimmed, err := trimChain(ctx, db, oldest.AddDate(0, -1, 0))
+		if err != nil {
+			return result, fmt.Errorf("trim audit chain: %w", err)
+		}
+		result.ChainTrimmed = trimmed
 	}
 	return result, nil
 }

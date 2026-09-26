@@ -589,6 +589,7 @@ func deleteTeamAndSites(ctx context.Context, tx *sql.Tx, recorder audit.Recorder
 		return err
 	}
 	actorKind, keyID := auditActorKind(ctx)
+	var events []audit.Event
 	// Each site's own lock first, in name order, so a deploy or rollback in
 	// flight finishes (its new files land under the prefix retired below)
 	// or, arriving after, finds the site gone.
@@ -614,28 +615,35 @@ func deleteTeamAndSites(ctx context.Context, tx *sql.Tx, recorder audit.Recorder
 			}
 			return err
 		}
-		if err := recorder.RecordTx(ctx, tx, audit.Event{
+		events = append(events, audit.Event{
 			ActorID: actorID, ActorKind: actorKind, KeyID: keyID,
 			Action: "site_delete", OwnerID: team.ID, SiteID: site.ID,
 			RequestID: auditRequestID(ctx),
 			Extra:     map[string]any{"active_version": site.ActiveVersion, "team_delete": reason},
-		}); err != nil {
-			return err
-		}
+		})
 	}
 	if err := db.TeamAudit(ctx, tx, team.ID, actorID, "delete", "", team.Username); err != nil {
 		return err
 	}
-	if err := recorder.RecordTx(ctx, tx, audit.Event{
+	if err := db.DeleteTeam(ctx, tx, team.ID); err != nil {
+		return err
+	}
+	// The audit rows go last: inserting one takes the audit chain's head
+	// lock (migration 0036), which must not be held while this transaction
+	// still waits for site or team row locks.
+	events = append(events, audit.Event{
 		ActorID: actorID, ActorKind: actorKind, KeyID: keyID,
 		Action: "team_delete", TeamID: team.ID,
 		RequestID: auditRequestID(ctx),
 		Detail:    team.Username,
 		Extra:     map[string]any{"reason": reason, "sites_deleted": len(sites)},
-	}); err != nil {
-		return err
+	})
+	for _, event := range events {
+		if err := recorder.RecordTx(ctx, tx, event); err != nil {
+			return err
+		}
 	}
-	return db.DeleteTeam(ctx, tx, team.ID)
+	return nil
 }
 
 // inTeamTransaction runs fn with the team's row locked for the rest of the
