@@ -2,6 +2,7 @@ package handler
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -43,6 +44,11 @@ var (
 	managementUserPolicy = ratelimit.Policy{
 		Name: "management-user", Burst: 30, RefillPerSecond: 0.1,
 	}
+	// API key mint has its own bucket (the management-user numbers it used
+	// to share) so it can be counted across replicas; see sharedPolicies.
+	apiKeyMintPolicy = ratelimit.Policy{
+		Name: "api-key-mint", Burst: 30, RefillPerSecond: 0.1,
+	}
 	stateClientPolicy = ratelimit.Policy{
 		Name: "state-client", Burst: 60, RefillPerSecond: 1,
 	}
@@ -77,6 +83,31 @@ var (
 	}
 )
 
+// sharedPolicies are the security-relevant limits: a caller who can spread
+// requests over N replicas must not get N times the budget for sign-in
+// (/auth/login, /auth/callback, the connector's /oauth/authorize, all on
+// auth-client), the session hand-off (/auth/handoff and the host gate's
+// /auth/session, also auth-client), API key mint, or the connector's token
+// and client registration endpoints. When a shared store is set (the server
+// always sets one) they are counted in Postgres in fixed windows derived by
+// ratelimit.FixedWindow from the same Policy:
+//
+//	auth-client     20 per 100s  (burst 20, 0.2/s)
+//	api-key-mint    30 per 300s  (burst 30, 0.1/s)
+//	oauth-register  30 per 300s  (burst 30, 0.1/s)
+//	oauth-token    120 per 60s   (burst 120, 2/s)
+//
+// Everything else stays per pod in memory: those are abuse and cost guards
+// (state reads and writes, management, admin, search) where N times the
+// budget with N pods is acceptable and a database round trip per request
+// is not worth it.
+var sharedPolicies = map[string]bool{
+	authClientPolicy.Name:    true,
+	apiKeyMintPolicy.Name:    true,
+	oauthRegisterPolicy.Name: true,
+	oauthTokenPolicy.Name:    true,
+}
+
 // AbuseLimits owns the process-wide limiter state and the memory-sensitive
 // concurrency slots. Handler constructors accept a shared instance so every
 // route observes one set of process-wide gates. Anonymous search traffic has a
@@ -84,6 +115,7 @@ var (
 // authenticated, administrative, or shared-state buckets.
 type AbuseLimits struct {
 	buckets              *ratelimit.Limiter
+	shared               *ratelimit.Shared
 	searchBuckets        *ratelimit.Limiter
 	searchQuerySlots     chan struct{}
 	searchClickSlots     chan struct{}
@@ -123,6 +155,14 @@ func newAbuseLimits(
 	}
 }
 
+// WithSharedStore counts sharedPolicies in database, across every replica,
+// falling back to this pod's in-memory buckets when the database errors.
+// Without it (unit tests) every policy is per pod.
+func (l *AbuseLimits) WithSharedStore(database *sql.DB) *AbuseLimits {
+	l.shared = ratelimit.NewShared(database, l.buckets)
+	return l
+}
+
 func chooseAbuseLimits(given []*AbuseLimits) *AbuseLimits {
 	if len(given) > 0 && given[0] != nil {
 		return given[0]
@@ -131,6 +171,9 @@ func chooseAbuseLimits(given []*AbuseLimits) *AbuseLimits {
 }
 
 func (l *AbuseLimits) allow(policy ratelimit.Policy, key string) ratelimit.Decision {
+	if l.shared != nil && sharedPolicies[policy.Name] {
+		return l.shared.Allow(policy, key)
+	}
 	return l.buckets.Allow(policy, key)
 }
 
