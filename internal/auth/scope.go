@@ -62,7 +62,9 @@ var routeKeyAccess = map[string]keyAccess{
 	"DELETE /mcp":  keyPublish,
 
 	// Full only: deleting a site, who can open it, viewers, teams, the
-	// audit and access logs, search.
+	// audit and access logs, search. A key on the audit and access logs
+	// sees only its owner's own namespace and teams, even an admin's: the
+	// company-wide view needs a browser session (handler/audit_access.go).
 	"DELETE /api/sites/{sitename}":                                          keyFull,
 	"DELETE /api/collaboration/sites/{owner}/{sitename}":                    keyFull,
 	"POST /api/sites/{sitename}/access":                                     keyFull,

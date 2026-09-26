@@ -88,6 +88,16 @@ func (h *AuditHandler) callerNamespaceLabels(r *http.Request, user *db.User) ([]
 	return labels, nil
 }
 
+// adminView reports whether the caller gets the company-wide view of the
+// audit and access logs: an admin, signed in with a browser session. An API
+// key (any scope) or an AI app's connector token held by an admin sees only
+// what any other person sees, their own namespace and their teams', the same
+// rule as the admin API, so a leaked CI key never reads who viewed what
+// across the company.
+func adminView(r *http.Request, user *db.User) bool {
+	return user.IsAdmin && auth.SessionID(r.Context()) != ""
+}
+
 func containsString(list []string, want string) bool {
 	for _, v := range list {
 		if v == want {
@@ -150,8 +160,9 @@ func (h *AuditHandler) listAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := audit.AuditQuery{Admin: user.IsAdmin, Cursor: r.URL.Query().Get("cursor"), Action: r.URL.Query().Get("action")}
-	if !user.IsAdmin {
+	admin := adminView(r, user)
+	query := audit.AuditQuery{Admin: admin, Cursor: r.URL.Query().Get("cursor"), Action: r.URL.Query().Get("action")}
+	if !admin {
 		scope, err := h.callerNamespaceScope(r, user)
 		if err != nil {
 			log.Printf("audit: resolve namespace scope for %s: %v", user.Username, err)
@@ -280,8 +291,9 @@ func (h *AuditHandler) listAccess(w http.ResponseWriter, r *http.Request) {
 	owner := r.URL.Query().Get("owner")
 	site := r.URL.Query().Get("site")
 
-	query := audit.AccessQuery{Admin: user.IsAdmin, Owner: owner, Site: site, Cursor: r.URL.Query().Get("cursor")}
-	if !user.IsAdmin {
+	admin := adminView(r, user)
+	query := audit.AccessQuery{Admin: admin, Owner: owner, Site: site, Cursor: r.URL.Query().Get("cursor")}
+	if !admin {
 		if h.visibility == "admin" {
 			writeJSON(w, http.StatusForbidden, errorResponse{Error: "forbidden"})
 			return

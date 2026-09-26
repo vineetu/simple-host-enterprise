@@ -362,7 +362,9 @@ Config names are documented in `docs/configuration.md`; schema in
   walks the chain and exits non-zero at the first break. Every event is also
   written to stdout as one JSON line with `"type":"audit"` for a cluster log
   shipper to forward to a SIEM. `GET /api/audit` and
-  `GET /api/access` are scoped to the caller's namespaces (admins see all);
+  `GET /api/access` are scoped to the caller's namespaces (admins see all,
+  from a browser session only: an admin's API key or connected app gets the
+  same own-namespace view as anyone else);
   access-log detail follows `ACCESS_LOG_VISIBILITY`. Admins export either as
   CSV (formula-safe) or NDJSON. `simple-host prune` (a CronJob) drops
   partitions past retention, trims the chain's rows for them, and creates

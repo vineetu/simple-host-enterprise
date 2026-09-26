@@ -415,4 +415,17 @@ func TestAccessLogOwnerSeesCountsAdminSeesWho(t *testing.T) {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), w.users["vera"]) || !strings.Contains(rec.Body.String(), "10.0.0.1") {
 		t.Fatalf("admin access log = %d %s, want each visit and who", rec.Code, rec.Body)
 	}
+
+	// The same admin by API key gets only a person's view: alice's
+	// namespace is not root's, so it is refused, and the company-wide
+	// audit log is scoped to root's own namespace.
+	if rec := w.api("root", http.MethodGet, "/api/access?owner=alice&site=demo", nil); rec.Code != http.StatusForbidden || strings.Contains(rec.Body.String(), "10.0.0.1") {
+		t.Fatalf("admin's key access log = %d %s, want 403", rec.Code, rec.Body)
+	}
+	if rec := w.api("root", http.MethodGet, "/api/audit?owner=alice", nil); rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), w.users["alice"]) {
+		t.Fatalf("admin's key audit log for alice = %d %s, want an empty page", rec.Code, rec.Body)
+	}
+	if rec := w.admin(http.MethodGet, "/api/audit?owner=alice"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), w.users["alice"]) {
+		t.Fatalf("admin session audit log for alice = %d %s, want alice's events", rec.Code, rec.Body)
+	}
 }

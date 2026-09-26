@@ -437,13 +437,16 @@ raw ids — the server resolves them for you, and an unresolvable name comes
 back as an empty page, not a `404`, since a filter that matches nothing is
 not the same claim as a request that failed. A non-admin's results are
 scoped to their own account plus every team they belong to; an admin may
-query any owner. `/api/access` needs an explicit `owner=` from a non-admin
+query any owner, but only from a browser session: an admin's API key (any
+scope) or connected AI app gets the same own-namespace view as everyone
+else, so a leaked key never reads the company-wide logs. `/api/access` needs an explicit `owner=` from a non-admin
 caller (`400` without one). Under the default `ACCESS_LOG_VISIBILITY=counts`
 (`docs/configuration.md`) a non-admin gets aggregates only —
 `{from, to, unique_viewers, days: [{day, views, unique_viewers}]}`, the
 last 30 days unless `from`/`to` say otherwise — never who. `owner` returns
 rows with user ids but redacts `ip`/`user_agent`; `admin` closes
-`/api/access` to non-admins entirely. Admins always see full rows.
+`/api/access` to non-admins entirely. Admins signed in with a browser
+session always see full rows.
 
 The dashboard's per-site panel gained "Activity" and "Visitors" tabs
 (`/dashboard`, under "Your sites") backed by the same two routes scoped to
