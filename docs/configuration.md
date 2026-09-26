@@ -67,9 +67,9 @@ shell.
 | `OIDC_ADMIN_CLAIM` | No | none | Must be set together with `OIDC_ADMIN_VALUE` — setting exactly one of the pair is refused at startup. |
 | `OIDC_ADMIN_VALUE` | No | none | See `OIDC_ADMIN_CLAIM`. |
 | `ADMIN_EMAILS` | No | none (empty) | Comma-separated, lowercased. A person is admin if their address is in this list, or `OIDC_ADMIN_CLAIM`/`OIDC_ADMIN_VALUE` matches (either source grants it), refreshed on every sign-in. When `OIDC_ADMIN_CLAIM` is not set, this list is also re-applied to every account at server start, so removing someone demotes them on the next deploy rather than at their next sign-in (with the claim in use, the claim can only be read at sign-in, so there the bound is `SESSION_TTL`). The portable admin path every reference install documents — Google does not put groups in the ID token. |
-| `ALLOWED_EMAIL_DOMAINS` | No | none (empty, meaning unrestricted) | Comma-separated, lowercased. Required in practice for Google: without it, anyone with a Google account can sign in. With `OIDC_ISSUER=https://accounts.google.com` and this list set, the ID token must also carry `hd` (a Google Workspace account) naming one of these domains — a consumer Google account can hold a verified address at your domain without your company controlling it. Also gates whether an existing row may be claimed by a new sign-in's (verified) email — without this list, that claim path never runs. |
+| `ALLOWED_EMAIL_DOMAINS` | Yes with Google, otherwise no | none (empty, meaning unrestricted) | Comma-separated, lowercased. With `OIDC_ISSUER=https://accounts.google.com` the server refuses to start while it is empty: without it, anyone with a Google account could sign in. With any other issuer, empty is allowed (an Okta org or a single-tenant Entra ID issuer is already your company's own), and the server logs a reminder at startup. With `OIDC_ISSUER=https://accounts.google.com` and this list set, the ID token must also carry `hd` (a Google Workspace account) naming one of these domains — a consumer Google account can hold a verified address at your domain without your company controlling it. Also gates whether an existing row may be claimed by a new sign-in's (verified) email — without this list, that claim path never runs. |
 | `OIDC_HINT_DOMAIN` | No | the sole `ALLOWED_EMAIL_DOMAINS` entry, if there is exactly one | Sent as the provider's domain hint (Google: `hd`) on the authorization request. A hint narrows the account chooser; it never authorizes — the callback still checks the claim and the domain list independently. |
-| `OAUTH_REDIRECT_HOSTS` | No | `chatgpt.com,claude.ai,vscode.dev,localhost,cursor://anysphere.cursor-mcp` | Where an AI app connecting to `/mcp` over OAuth may be sent back after sign-in. Comma-separated: a hostname allows `https` redirects to it, `localhost` allows loopback redirects for apps on the person's own machine (Claude Code, Codex), `scheme://host` allows an app's own URL scheme, and `*` allows any `https` host. Apps register themselves; this list is what limits which ones can finish connecting. |
+| `OAUTH_REDIRECT_HOSTS` | No | `chatgpt.com,claude.ai,vscode.dev,localhost,cursor://anysphere.cursor-mcp` | Where an AI app connecting to `/mcp` over OAuth may be sent back after sign-in. Comma-separated: a hostname allows `https` redirects to it, `localhost` allows loopback redirects for apps on the person's own machine (Claude Code, Codex), `scheme://host` allows an app's own URL scheme, and `*` allows any `https` host. Apps register themselves; this list is what limits which ones can finish connecting. The default admits the cloud apps `chatgpt.com` and `claude.ai`, which reach `/mcp` from the internet; on an internal-only install, narrow it to the apps used inside the network (for example `localhost,vscode.dev`). |
 
 ## Sessions
 
@@ -167,6 +167,17 @@ counts as zero until the server reads its size from the bucket, which it does
 in the background within minutes of starting. The per-site asset limits
 above still apply on their own.
 
+**Blocked file types.** Without any scanner, a deploy is refused (`400`) if
+any file in it has one of these extensions (case-insensitive,
+`internal/tarball/validate.go`): source scripts `.sh .bash .zsh .fish .bat
+.cmd .ps1 .py .pyc .rb .pl .go .php`; Windows executables, installers and
+script hosts `.exe .dll .msi .msix .appx .scr .com .pif .cpl .hta .vbs .vbe
+.jse .wsf .wsh .lnk .reg`; other packages and disk images `.jar .apk .aab
+.pkg .deb .rpm .iso .img`. Everything else is served, including `.js`, ZIP
+and DMG downloads. The list is a guardrail against a trusted company
+hostname handing out installers, not a malware defence: anything can be
+renamed. Set `CLAMD_ADDR` to scan the bytes themselves.
+
 **Malware scan.** With `CLAMD_ADDR` set, the server streams each file to
 clamd with `INSTREAM`. An infected file refuses the whole upload with `422`
 (`code: "malware_found"`, naming the file and the signature), stores nothing,
@@ -202,7 +213,7 @@ owning role, never from the server's own connection pool.
 |---|---|---|---|
 | `AUDIT_RETENTION_DAYS` | No | `400` | Must be a positive integer. |
 | `ACCESS_LOG_RETENTION_DAYS` | No | `90` | Must be a positive integer. Also how long `prune` keeps a session (and its IP and user agent) after it expired or was signed out. |
-| `ACCESS_LOG_VISIBILITY` | No | `counts` | Must be `counts`, `owner` or `admin`. `counts` (the default) answers a site's owner and team members on `GET /api/access` with views per day and the number of distinct viewers, never who; `owner` gives them each visit with the viewer's user id (IP and user agent stay admin-only); `admin` refuses every non-admin caller of that route outright. Admins always see full rows. Read by `handler.NewAuditHandler` (`cmd/server/main.go`); does not affect `GET /api/audit`, which is always scoped by caller identity rather than gated by this switch. |
+| `ACCESS_LOG_VISIBILITY` | No | `counts` | Must be `counts`, `owner` or `admin`. `counts` (the default) answers a site's owner and team members on `GET /api/access` with views per day and the number of distinct viewers, never who; `owner` gives them each visit with the viewer's user id (IP and user agent stay admin-only); `admin` refuses every non-admin caller of that route outright. Admins signed in with a browser session always see full rows; an admin's API key gets the non-admin view. Read by `handler.NewAuditHandler` (`cmd/server/main.go`); does not affect `GET /api/audit`, which is always scoped by caller identity rather than gated by this switch. |
 
 ## Streaming the audit log to a SIEM
 
