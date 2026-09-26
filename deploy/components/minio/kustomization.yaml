@@ -6,6 +6,11 @@ kind: Component
 # endpoint; the bucket is created once by a Job. Root credentials are the
 # application's BACKUP_STORAGE_ACCESS_KEY_ID / BACKUP_STORAGE_SECRET_ACCESS_KEY, so a
 # single secrets.env configures both sides.
+#
+# The image is pgsty/minio, a maintained rebuild of the MinIO source on Docker
+# Hub: MinIO no longer publishes community images, and quay.io/minio/* now
+# needs a login. It is the same server (same env, health paths and mc client,
+# which the bucket Job uses from the same image), pinned by digest.
 resources:
   - statefulset.yaml
   - service.yaml

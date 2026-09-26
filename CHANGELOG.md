@@ -4,6 +4,16 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## Unreleased
+
+### Local evaluation
+- `make local` no longer stalls on MinIO. MinIO stopped publishing community
+  images and `quay.io/minio/*` now needs a login, so the in-cluster MinIO
+  (`deploy/components/minio`) runs `pgsty/minio`, a maintained build of the
+  same MinIO source on Docker Hub, pinned by digest. The bucket Job uses the
+  `mc` client from the same image. Nothing else changes: same credentials,
+  KMS key, health checks and versioned bucket.
+
 ## v1.3.0 — 2026-09-26
 
 Schema 0042. Migrations 0041 (renames team rows) and 0042 (adds the
