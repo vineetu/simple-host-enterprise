@@ -106,7 +106,7 @@ func (h *SiteHandler) setSiteAccessForTarget(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	if err := db.LockSiteCollaboration(r.Context(), tx, target.OwnerID, siteName); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -314,7 +314,7 @@ func (h *SiteHandler) restoreStateVersion(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	version, err := db.RestoreStateHistory(r.Context(), tx, access.Site.ID, id, user.ID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -391,7 +391,7 @@ func (h *AdminHandler) decideNetworkAccess(w http.ResponseWriter, r *http.Reques
 		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	if err := db.LockSiteCollaboration(r.Context(), tx, owner.ID, siteName); err != nil {
 		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
 		return

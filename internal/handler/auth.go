@@ -344,7 +344,7 @@ func (h *AuthHandler) callback(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	session, err := db.CreateSession(r.Context(), tx, user.ID, expiresAt, ip, r.UserAgent())
 	if err == nil {
 		err = h.audit.RecordTx(r.Context(), tx, audit.Event{ActorID: user.ID, Action: "sign_in", Detail: "session " + session.ID, RequestID: auditRequestID(r.Context())})
@@ -528,7 +528,7 @@ func (h *AuthHandler) revokeSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	if err := db.RevokeSession(r.Context(), tx, user.ID, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			http.Error(w, "session not found", http.StatusNotFound)

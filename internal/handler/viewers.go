@@ -158,7 +158,7 @@ func (h *SiteHandler) mutateSiteViewers(w http.ResponseWriter, r *http.Request, 
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	if err := db.LockSiteCollaboration(r.Context(), tx, preliminary.OwnerID, siteName); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return

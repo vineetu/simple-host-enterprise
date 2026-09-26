@@ -142,7 +142,7 @@ func (h *KeysHandler) mint(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	key, err := db.CreateAPIKey(r.Context(), tx, user.ID, req.Name, hash, db.KeyPrefix(hash), time.Now().AddDate(0, 0, days), req.Scope)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -217,7 +217,7 @@ func (h *KeysHandler) revoke(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	if err := db.RevokeAPIKey(r.Context(), tx, user.ID, id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, errorResponse{Error: "key not found"})

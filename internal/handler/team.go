@@ -167,7 +167,7 @@ func (h *TeamHandler) createTeam(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 
 	team, err := db.CreateTeam(r.Context(), tx, name, user.ID)
 	if err != nil {
@@ -655,7 +655,7 @@ func (h *TeamHandler) inTeamTransaction(r *http.Request, teamID string, fn func(
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	if err := db.LockTeam(r.Context(), tx, teamID); err != nil {
 		return err
 	}

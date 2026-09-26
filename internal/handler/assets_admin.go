@@ -97,7 +97,7 @@ func (h *SiteHandler) deleteCollaborationAsset(w http.ResponseWriter, r *http.Re
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	if err := db.SoftDeleteAsset(r.Context(), tx, access.Site.ID, id); err != nil && !errors.Is(err, db.ErrAssetNotFound) {
 		log.Printf("soft-delete asset row for %s/%s id=%s: %v", ownerUsername, siteName, id, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})

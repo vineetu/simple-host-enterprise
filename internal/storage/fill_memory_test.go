@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
@@ -244,5 +245,55 @@ func TestMemoryBudgetBoundsConcurrency(t *testing.T) {
 	budget.release(10 * total)
 	if !budget.tryAcquire(total) {
 		t.Fatal("budget not fully returned")
+	}
+}
+
+// nilLengthOnCall drops ContentLength from the nth GetObject response, as
+// some S3-compatible endpoints and proxies do.
+type nilLengthOnCall struct {
+	*fakeS3
+	calls, nilOn int
+}
+
+func (f *nilLengthOnCall) GetObject(ctx context.Context, in *s3.GetObjectInput, opts ...func(*s3.Options)) (*s3.GetObjectOutput, error) {
+	f.calls++
+	out, err := f.fakeS3.GetObject(ctx, in, opts...)
+	if err == nil && f.calls == f.nilOn {
+		out.ContentLength = nil
+	}
+	return out, err
+}
+
+// An enveloped object replaced by a much bigger one while its fill waited
+// for the budget is refused, not buffered outside the budget, even when the
+// second response carries no length.
+func TestS3GetToEnvelopeRefetchStaysInBudget(t *testing.T) {
+	fake := &nilLengthOnCall{fakeS3: newFakeS3(), nilOn: 2}
+	objects := newS3Objects(fake, fake.bucket, "", "", "", []EnvelopeKey{testKey("k1", 0x46)})
+	objects.fillBudget = newMemoryBudget(1024)
+	ctx := context.Background()
+	if err := objects.Put(ctx, "sites/obj", randomBytes(t, 16), ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := objects.fillBudget.acquire(ctx, 1024); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := objects.GetTo(ctx, "sites/obj", bigObjectBytes, io.Discard)
+		done <- err
+	}()
+	time.Sleep(50 * time.Millisecond)
+	if err := objects.Put(ctx, "sites/obj", randomBytes(t, bigObjectBytes), ""); err != nil {
+		t.Fatal(err)
+	}
+	objects.fillBudget.release(1024)
+	var err error
+	allocated := allocatedDuring(func() { err = <-done })
+	if err == nil {
+		t.Fatal("GetTo read an object bigger than the budget it reserved")
+	}
+	if allocated > bigObjectBytes/4 {
+		t.Fatalf("GetTo allocated %d bytes for a %d-byte reservation", allocated, 16+envelopeOverhead)
 	}
 }

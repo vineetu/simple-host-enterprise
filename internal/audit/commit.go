@@ -1,7 +1,6 @@
 package audit
 
 import (
-	"context"
 	"database/sql"
 	"log/slog"
 	"sync"
@@ -12,7 +11,6 @@ import (
 type held struct {
 	mu    sync.Mutex
 	lines []heldLine
-	stop  func() bool
 }
 
 type heldLine struct {
@@ -23,25 +21,21 @@ type heldLine struct {
 // heldByTx maps a *sql.Tx to its *held lines.
 var heldByTx sync.Map
 
-// holdUntilCommit keeps line until tx is committed through Commit. If ctx
-// ends first (the request is over, so a transaction begun on it has been
-// rolled back or will never be committed through Commit), the lines are
-// dropped with it.
-func holdUntilCommit(ctx context.Context, tx *sql.Tx, stream *Stream, attrs []slog.Attr) {
-	v, loaded := heldByTx.LoadOrStore(tx, &held{})
+// holdUntilCommit keeps line until tx ends: Commit streams it, Rollback
+// drops it. Keyed to the transaction, not to a context, so a committed
+// event's line is never lost to a context that ended first.
+func holdUntilCommit(tx *sql.Tx, stream *Stream, attrs []slog.Attr) {
+	v, _ := heldByTx.LoadOrStore(tx, &held{})
 	h := v.(*held)
 	h.mu.Lock()
 	h.lines = append(h.lines, heldLine{stream, attrs})
-	if !loaded {
-		h.stop = context.AfterFunc(ctx, func() { heldByTx.CompareAndDelete(tx, h) })
-	}
 	h.mu.Unlock()
 }
 
 // Commit commits tx and then streams the SIEM lines RecordTx wrote in it,
 // so the SIEM never receives an event that was rolled back. Every caller
 // that records through RecordTx commits through here instead of
-// tx.Commit; a transaction that rolls back just drops its lines.
+// tx.Commit, and rolls back through Rollback.
 func Commit(tx *sql.Tx) error {
 	v, ok := heldByTx.LoadAndDelete(tx)
 	if err := tx.Commit(); err != nil {
@@ -53,11 +47,16 @@ func Commit(tx *sql.Tx) error {
 	h := v.(*held)
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.stop != nil {
-		h.stop()
-	}
 	for _, line := range h.lines {
 		line.stream.emit(line.attrs)
 	}
 	return nil
+}
+
+// Rollback rolls tx back and drops the SIEM lines RecordTx held for it. It
+// is what a RecordTx caller defers; after Commit it is a no-op, as
+// tx.Rollback is.
+func Rollback(tx *sql.Tx) error {
+	heldByTx.Delete(tx)
+	return tx.Rollback()
 }

@@ -188,31 +188,53 @@ func TestRecordTxStreamsOnlyAfterCommit(t *testing.T) {
 }
 
 // A request that rolls back drops its held lines when its context ends.
-func TestHeldLinesDroppedWhenContextEnds(t *testing.T) {
+func TestHeldLinesDroppedOnRollback(t *testing.T) {
 	db := openPruneTestDB(t)
 	r := newChainRecorder(db)
 	stream := NewStream(slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)), 0)
 	defer stream.Close(time.Second)
 	r.SetStream(stream)
-	ctx, cancel := context.WithCancel(context.Background())
-	tx, err := db.BeginTx(ctx, nil)
+	// A context that never ends: only Rollback can drop the lines.
+	tx, err := db.BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.RecordTx(ctx, tx, Event{ActorID: chainActor, Action: "key_mint"}); err != nil {
+	if err := r.RecordTx(context.Background(), tx, Event{ActorID: chainActor, Action: "key_mint"}); err != nil {
 		t.Fatal(err)
 	}
-	tx.Rollback()
+	if err := Rollback(tx); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := heldByTx.Load(tx); ok {
+		t.Fatal("held lines survived Rollback")
+	}
+}
+
+// A committed event is streamed even when the context RecordTx was given
+// ended before the commit.
+func TestCommittedLineSurvivesEndedRecordContext(t *testing.T) {
+	db := openPruneTestDB(t)
+	r := newChainRecorder(db)
+	buf := &syncBuffer{}
+	stream := NewStream(slog.New(slog.NewJSONHandler(buf, nil)), 0)
+	r.SetStream(stream)
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer Rollback(tx)
+	recordCtx, cancel := context.WithCancel(context.Background())
+	if err := r.RecordTx(recordCtx, tx, Event{ActorID: chainActor, Action: "key_mint"}); err != nil {
+		t.Fatal(err)
+	}
 	cancel()
-	deadline := time.Now().Add(time.Second)
-	for {
-		if _, ok := heldByTx.Load(tx); !ok {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("held lines were not dropped after the context ended")
-		}
-		time.Sleep(5 * time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
+	if err := Commit(tx); err != nil {
+		t.Fatal(err)
+	}
+	stream.Close(time.Second)
+	if !strings.Contains(buf.String(), `"key_mint"`) {
+		t.Fatalf("committed event not streamed: %q", buf.String())
 	}
 }
 
@@ -230,6 +252,9 @@ func TestRecordTxCallersCommitThroughAudit(t *testing.T) {
 			}
 			if bytes.Contains(src, []byte("RecordTx(")) && bytes.Contains(src, []byte(".Commit()")) {
 				t.Errorf("%s records through RecordTx but commits with tx.Commit(); use audit.Commit(tx)", path)
+			}
+			if bytes.Contains(src, []byte("RecordTx(")) && bytes.Contains(src, []byte(".Rollback()")) {
+				t.Errorf("%s records through RecordTx but rolls back with tx.Rollback(); use audit.Rollback(tx)", path)
 			}
 			return nil
 		})

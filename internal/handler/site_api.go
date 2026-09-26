@@ -223,7 +223,7 @@ func (h *SiteAPIHandler) PutState(w http.ResponseWriter, r *http.Request, call s
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	if err := db.UpdateSiteState(r.Context(), tx, call.Owner, call.SiteName, state); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, errorResponse{Error: "site not found"})
@@ -322,7 +322,7 @@ func (h *SiteAPIHandler) PutStateVersioned(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	newVersion, err := db.UpdateSiteStateCAS(r.Context(), tx, call.Owner, call.SiteName, req.State, *req.Version)
 	if err != nil {
 		if errors.Is(err, db.ErrVersionConflict) {
@@ -527,7 +527,7 @@ func (h *SiteAPIHandler) CreateAsset(w http.ResponseWriter, r *http.Request, cal
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	if h.quota.MaxBytes > 0 {
 		refusal, err := h.checkAssetQuota(r.Context(), tx, call.Owner, stored.Size)
 		if err != nil {
@@ -624,7 +624,7 @@ func (h *SiteAPIHandler) DeleteAsset(w http.ResponseWriter, r *http.Request, cal
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	if err := db.SoftDeleteAsset(r.Context(), tx, call.SiteID, id); err != nil && !errors.Is(err, db.ErrAssetNotFound) {
 		log.Printf("soft-delete asset row %s/%s id=%s: %v", call.Owner, call.SiteName, id, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})

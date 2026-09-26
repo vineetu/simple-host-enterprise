@@ -318,7 +318,7 @@ func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	if err := db.LockSiteCollaboration(r.Context(), tx, preliminary.OwnerID, siteName); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -451,7 +451,7 @@ func (h *SiteHandler) rollbackCollaborationSite(w http.ResponseWriter, r *http.R
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	if err := db.LockSiteCollaboration(r.Context(), tx, preliminary.OwnerID, siteName); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -557,7 +557,7 @@ func (h *SiteHandler) downloadCollaborationVersion(w http.ResponseWriter, r *htt
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	if err := db.LockSiteCollaboration(r.Context(), tx, access.OwnerID, siteName); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return

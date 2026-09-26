@@ -163,7 +163,7 @@ kubectl --context "$CTX" -n simple-host create job simple-host-audit-verify --fr
 the event to stdout as one JSON line with `"type":"audit"`, carrying the
 event's chain `seq` and `hash` (see "Streaming the audit log to a SIEM" in
 `docs/configuration.md`). An event recorded inside a larger transaction is
-held until that transaction commits (`audit.Commit`), so a rolled-back
+held until that transaction commits (`audit.Commit`; `audit.Rollback` drops it), so a rolled-back
 change never reaches the stream. Lines go through a bounded buffer and are
 never waited for: a line dropped because stdout fell behind is counted in
 `simplehost_audit_stream_dropped_total`, which should stay 0.

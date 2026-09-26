@@ -175,7 +175,7 @@ func runRestore(args []string) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	user, err := db.GetUserByUsername(ctx, tx, *owner)
 	if err != nil {
 		return fmt.Errorf("owner %q: %w", *owner, err)

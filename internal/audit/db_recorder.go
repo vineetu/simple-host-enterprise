@@ -106,7 +106,8 @@ func (r *DBRecorder) recordOwnTx(ctx context.Context, event Event) ([]slog.Attr,
 // failing. A nil tx falls back to Record's own transaction and
 // never returns an error, so a caller written before a transaction existed
 // at its call site does not have to change. The SIEM line is held until the
-// caller commits tx through Commit, so a rolled-back event is never streamed.
+// caller commits tx through Commit (and dropped by Rollback, which the caller
+// defers), so a rolled-back event is never streamed.
 func (r *DBRecorder) RecordTx(ctx context.Context, tx *sql.Tx, event Event) error {
 	if tx == nil {
 		r.Record(ctx, event)
@@ -117,7 +118,7 @@ func (r *DBRecorder) RecordTx(ctx context.Context, tx *sql.Tx, event Event) erro
 		return err
 	}
 	if r.stream != nil {
-		holdUntilCommit(ctx, tx, r.stream, line)
+		holdUntilCommit(tx, r.stream, line)
 	}
 	return nil
 }

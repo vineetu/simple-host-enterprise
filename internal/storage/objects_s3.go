@@ -191,7 +191,7 @@ func (o *S3Objects) Get(ctx context.Context, key string, maxBytes int64) ([]byte
 		return nil, err
 	}
 	defer out.Body.Close()
-	return o.readWhole(key, out, maxBytes)
+	return o.readWhole(key, out, maxBytes, maxBytes+envelopeOverhead)
 }
 
 // GetTo streams a plain object straight into w, so a cache fill holds no more
@@ -244,7 +244,10 @@ func (o *S3Objects) GetTo(ctx context.Context, key string, maxBytes int64, w io.
 		defer o.fillBudget.release(weight)
 	}
 	defer out.Body.Close()
-	body, err := o.readWhole(key, out, maxBytes)
+	// Never read more than the budget reserved, whatever the response
+	// claims (or omits): an object replaced by a bigger one while this fill
+	// waited is refused rather than buffered outside the budget.
+	body, err := o.readWhole(key, out, maxBytes, weight)
 	if err != nil {
 		return 0, err
 	}
@@ -276,13 +279,14 @@ func (o *S3Objects) checkPlaintext(key string) error {
 	return nil
 }
 
-// readWhole reads out's body into memory, unwrapping the envelope if present.
-func (o *S3Objects) readWhole(key string, out *s3.GetObjectOutput, maxBytes int64) ([]byte, error) {
+// readWhole reads out's body into memory, at most readLimit bytes of it,
+// unwrapping the envelope if present.
+func (o *S3Objects) readWhole(key string, out *s3.GetObjectOutput, maxBytes, readLimit int64) ([]byte, error) {
 	expected := int64(-1)
 	if out.ContentLength != nil {
 		expected = *out.ContentLength
 	}
-	body, err := readBoundedSized(out.Body, maxBytes+envelopeOverhead, expected)
+	body, err := readBoundedSized(out.Body, readLimit, expected)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", key, err)
 	}

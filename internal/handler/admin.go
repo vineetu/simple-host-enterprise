@@ -649,7 +649,7 @@ func (h *AdminHandler) setUserDisabled(w http.ResponseWriter, r *http.Request, d
 		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	err = db.SetUserDisabledTx(r.Context(), tx, target.ID, disabled)
 	if err == nil {
 		err = h.audit.RecordTx(r.Context(), tx, h.userAuditEvent(r, action, target.ID, username, nil))
@@ -732,7 +732,7 @@ func (h *AdminHandler) disableUserByEmail(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	people, err := db.PeopleByEmail(r.Context(), tx, email)
 	if err != nil {
 		log.Printf("admin: offboard: look up email: %v", err)
@@ -811,7 +811,7 @@ func (h *AdminHandler) deleteOrphanTeam(w http.ResponseWriter, r *http.Request) 
 		if err != nil {
 			return err
 		}
-		defer tx.Rollback()
+		defer audit.Rollback(tx)
 		if err := db.LockTeam(r.Context(), tx, team.ID); err != nil {
 			return err
 		}

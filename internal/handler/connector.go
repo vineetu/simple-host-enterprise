@@ -644,7 +644,7 @@ func (h *ConnectorHandler) decide(w http.ResponseWriter, r *http.Request) {
 		writeConnectError(w, "Something went wrong. Try connecting again.")
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	if err := db.InsertOAuthCode(r.Context(), tx, db.HashAPIKey(code), db.OAuthCode{
 		ClientID:      req.Client.ClientID,
 		UserID:        user.ID,
@@ -782,13 +782,13 @@ func (h *ConnectorHandler) redeemCode(w http.ResponseWriter, r *http.Request, cl
 		oauthError(w, http.StatusInternalServerError, "server_error", "")
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 
 	stored, err := db.ConsumeOAuthCode(r.Context(), tx, codeHash)
 	if errors.Is(err, db.ErrOAuthCodeUsed) {
 		// A code presented twice was intercepted or replayed: what the first
 		// redemption issued is revoked (RFC 6749 4.1.2).
-		_ = tx.Rollback()
+		_ = audit.Rollback(tx)
 		if stored.GrantID.Valid {
 			if derr := db.DeleteOAuthGrant(r.Context(), h.database, stored.GrantID.String); derr != nil {
 				log.Printf("oauth: revoke on code reuse: %v", derr)
@@ -862,7 +862,7 @@ func (h *ConnectorHandler) refresh(w http.ResponseWriter, r *http.Request, clien
 		oauthError(w, http.StatusInternalServerError, "server_error", "")
 		return
 	}
-	defer tx.Rollback()
+	defer audit.Rollback(tx)
 	tok, err := db.GetOAuthToken(r.Context(), tx, tokenHash, true)
 	if err != nil || tok.Kind != "refresh" || tok.ClientID != client.ClientID {
 		oauthError(w, http.StatusBadRequest, "invalid_grant", "unknown refresh token")
@@ -876,7 +876,7 @@ func (h *ConnectorHandler) refresh(w http.ResponseWriter, r *http.Request, clien
 		// A rotated-out refresh token came back: the app or a thief holds a
 		// copy. The whole grant goes, so the thief's copy dies too (OAuth 2.1
 		// 4.3.1). The person connects the app once more.
-		_ = tx.Rollback()
+		_ = audit.Rollback(tx)
 		if derr := db.DeleteOAuthGrant(r.Context(), h.database, tok.GrantID); derr != nil {
 			log.Printf("oauth: revoke on refresh reuse: %v", derr)
 		}
@@ -975,7 +975,7 @@ func (h *ConnectorHandler) revoke(w http.ResponseWriter, r *http.Request) {
 	if tok, err := db.GetOAuthToken(r.Context(), h.database, tokenHash, false); err == nil && tok.ClientID == client.ClientID {
 		tx, err := h.database.BeginTx(r.Context(), nil)
 		if err == nil {
-			defer tx.Rollback()
+			defer audit.Rollback(tx)
 			if tok.Kind == "refresh" {
 				err = db.DeleteOAuthGrant(r.Context(), tx, tok.GrantID)
 			} else {
