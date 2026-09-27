@@ -1382,6 +1382,137 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/audit:
+    get:
+      summary: Search the audit log
+      description: |
+        Newest first, 100 per page. A non-admin (and any API key or connected
+        app) sees only their own namespace and their teams'; an admin in a
+        browser session sees every owner. Filters are names, not ids; a name
+        that matches nobody returns an empty page. Each event carries
+        `owner_name`, `site_name` and `actor_name`; a non-admin gets
+        `actor_name` only for changes made by themselves or a member of the
+        team that owns the event, never for a visitor's write or a refused
+        visit.
+      tags: [Audit]
+      security:
+        - apiKey: []
+      parameters:
+        - name: owner
+          in: query
+          description: Username or team name
+          schema:
+            type: string
+        - name: site
+          in: query
+          description: 'Site name under `owner` (required with it); a site in Recently deleted still matches'
+          schema:
+            type: string
+        - name: actor
+          in: query
+          description: Username of the person who acted
+          schema:
+            type: string
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          description: 'RFC 3339 timestamp or `YYYY-MM-DD` (inclusive)'
+          schema:
+            type: string
+        - name: to
+          in: query
+          description: 'RFC 3339 timestamp or `YYYY-MM-DD` (inclusive, the whole day)'
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A page of events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: integer}
+                        at: {type: string, format: date-time}
+                        action: {type: string}
+                        actor_id: {type: string}
+                        actor_kind: {type: string}
+                        actor_name: {type: string}
+                        owner_id: {type: string}
+                        owner_name: {type: string}
+                        site_id: {type: string}
+                        site_name: {type: string}
+                        detail: {type: object}
+                  next_cursor: {type: string}
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/admin/export:
+    get:
+      summary: Export the audit or access log
+      description: Admin only, browser session only. Streams every matching row as CSV (formula-safe) or NDJSON; audited as `admin_export` with the filters used. For `kind=audit` it takes the same filters as `/api/audit` (CSV ends with `actor_name`, `owner_name`, `site_name`); for `kind=access`, `owner` and `site`.
+      tags: [Admin]
+      parameters:
+        - name: kind
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [audit, access]
+        - name: format
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [csv, jsonl]
+        - name: owner
+          in: query
+          schema:
+            type: string
+        - name: site
+          in: query
+          schema:
+            type: string
+        - name: actor
+          in: query
+          schema:
+            type: string
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+        - name: to
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The export, as an attachment
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/access:
     get:
       summary: Read a site's access log

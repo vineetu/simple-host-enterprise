@@ -123,6 +123,7 @@ var routeKeyAccess = map[string]keyAccess{
 	"GET /api/admin/erased-identities":                           keyNever,
 	"POST /api/admin/erased-identities/{id}/allow":               keyNever,
 	"GET /api/admin/export":                                      keyNever,
+	"POST /api/admin/keys/revoke":                                keyNever,
 	"GET /api/admin/deleted-sites":                               keyNever,
 	"POST /api/admin/deleted-sites/{owner}/{sitename}/restore":   keyNever,
 	"POST /api/admin/access-requests/{owner}/{sitename}/approve": keyNever,

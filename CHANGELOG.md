@@ -19,6 +19,16 @@ Schema 0050 (backward-compatible: nullable `api_keys.last4`).
   key", `POST /api/admin/keys/revoke`): only that key stops working, and the
   audit row (`admin_key_revoke`) names its owner.
 
+### Audit log
+- /admin's Activity card searches by owner, site, person, action and date,
+  shows names instead of ids, loads more, and its export links carry the
+  same filters (`GET /api/admin/export` now takes `owner`, `site`, `actor`,
+  `action`; CSV gains `actor_name`, `owner_name`, `site_name` at the end).
+- `GET /api/audit` events carry `owner_name`, `site_name` and `actor_name`,
+  and `from`/`to` also take a `YYYY-MM-DD` date. A site's Activity on the
+  dashboard shows who made each change: owners and team members see the
+  names of themselves and fellow members, never a visitor's.
+
 ## v1.4.0 — 2026-09-27
 
 Schema 0049 (from 0042). Run `simple-host migrate` before the new image.

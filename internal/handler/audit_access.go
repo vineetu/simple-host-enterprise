@@ -128,6 +128,14 @@ type auditEventResponse struct {
 	IP              string         `json:"ip,omitempty"`
 	UserAgent       string         `json:"user_agent,omitempty"`
 	Detail          map[string]any `json:"detail,omitempty"`
+	// ActorName, OwnerName and SiteName are the names behind the ids, so a
+	// reader sees people and sites rather than uuids. ActorName is given to
+	// an owner or team member only for changes made by themselves or a
+	// member of the team (never who viewed or wrote as a visitor), and to an
+	// admin always.
+	ActorName string `json:"actor_name,omitempty"`
+	OwnerName string `json:"owner_name,omitempty"`
+	SiteName  string `json:"site_name,omitempty"`
 }
 
 func toAuditEventResponse(e db.AuditEvent) auditEventResponse {
@@ -172,63 +180,20 @@ func (h *AuditHandler) listAudit(w http.ResponseWriter, r *http.Request) {
 		query.OwnerScope = scope
 	}
 
-	var ownerID string
-	if raw := r.URL.Query().Get("owner"); raw != "" {
-		owner, err := db.GetUserByUsername(r.Context(), h.database, raw)
-		if err != nil {
-			if !errors.Is(err, sql.ErrNoRows) {
-				log.Printf("audit: resolve owner %q: %v", raw, err)
-				writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-				return
-			}
-			writeJSON(w, http.StatusOK, auditListResponse{})
-			return
-		}
-		ownerID = owner.ID
-		query.Owner = ownerID
-	}
-
-	if raw := r.URL.Query().Get("site"); raw != "" {
-		if ownerID == "" {
-			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "site filter requires owner"})
-			return
-		}
-		site, err := db.GetSite(r.Context(), h.database, ownerID, raw)
-		if err != nil {
-			if !errors.Is(err, sql.ErrNoRows) {
-				log.Printf("audit: resolve site %s/%s: %v", raw, ownerID, err)
-				writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-				return
-			}
-			writeJSON(w, http.StatusOK, auditListResponse{})
-			return
-		}
-		query.Site = site.ID
-	}
-
-	if raw := r.URL.Query().Get("actor"); raw != "" {
-		actor, err := db.GetUserByUsername(r.Context(), h.database, raw)
-		if err != nil {
-			if !errors.Is(err, sql.ErrNoRows) {
-				log.Printf("audit: resolve actor %q: %v", raw, err)
-				writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-				return
-			}
-			writeJSON(w, http.StatusOK, auditListResponse{})
-			return
-		}
-		query.Actor = actor.ID
-	}
-
-	from, ok := parseAuditTimeParam(w, r, "from")
-	if !ok {
+	nothing, bad, err := resolveAuditFilters(r, h.database, &query)
+	if err != nil {
+		log.Printf("audit: resolve filters for %s: %v", user.Username, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	to, ok := parseAuditTimeParam(w, r, "to")
-	if !ok {
+	if bad != "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: bad})
 		return
 	}
-	query.From, query.To = from, to
+	if nothing {
+		writeJSON(w, http.StatusOK, auditListResponse{})
+		return
+	}
 
 	page, err := h.reader.ListAuditEvents(r.Context(), query)
 	if err != nil {
@@ -236,11 +201,129 @@ func (h *AuditHandler) listAudit(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	out := make([]auditEventResponse, 0, len(page.Events))
-	for _, e := range page.Events {
-		out = append(out, toAuditEventResponse(e))
+	out, err := namedAuditEvents(r, h.database, page.Events, user, admin)
+	if err != nil {
+		log.Printf("audit: name audit events for %s: %v", user.Username, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
 	}
 	writeJSON(w, http.StatusOK, auditListResponse{Events: out, NextCursor: page.NextCursor})
+}
+
+// resolveAuditFilters fills query's owner, site and actor from the request's
+// names (usernames, team names, a site name under the owner), and its from
+// and to. nothing is true when a name resolves to nobody: a filter nothing
+// can match, answered with an empty page rather than an error. bad is a
+// message for a 400.
+func resolveAuditFilters(r *http.Request, database *sql.DB, query *audit.AuditQuery) (nothing bool, bad string, err error) {
+	params := r.URL.Query()
+	query.Action = params.Get("action")
+	var ownerID string
+	if raw := params.Get("owner"); raw != "" {
+		owner, err := db.GetUserByUsername(r.Context(), database, raw)
+		if errors.Is(err, sql.ErrNoRows) {
+			return true, "", nil
+		}
+		if err != nil {
+			return false, "", err
+		}
+		ownerID = owner.ID
+		query.Owner = ownerID
+	}
+	if raw := params.Get("site"); raw != "" {
+		if ownerID == "" {
+			return false, "site filter requires owner", nil
+		}
+		id, err := db.SiteIDForAuditFilter(r.Context(), database, ownerID, raw)
+		if errors.Is(err, sql.ErrNoRows) {
+			return true, "", nil
+		}
+		if err != nil {
+			return false, "", err
+		}
+		query.Site = id
+	}
+	if raw := params.Get("actor"); raw != "" {
+		actor, err := db.GetUserByUsername(r.Context(), database, raw)
+		if errors.Is(err, sql.ErrNoRows) {
+			return true, "", nil
+		}
+		if err != nil {
+			return false, "", err
+		}
+		query.Actor = actor.ID
+	}
+	for _, name := range []string{"from", "to"} {
+		raw := params.Get(name)
+		if raw == "" {
+			continue
+		}
+		t, perr := parseAuditTime(raw, name == "to")
+		if perr != nil {
+			return false, name + " must be an RFC 3339 timestamp or a YYYY-MM-DD date", nil
+		}
+		if name == "from" {
+			query.From = t
+		} else {
+			query.To = t
+		}
+	}
+	return false, "", nil
+}
+
+// namedAuditEvents is a page of events for the JSON body, with the names
+// behind their ids. For someone who is not in the admin view, an actor is
+// named only when it is the caller, or a member of the team whose namespace
+// the event is in: the change events of the people who share the site, not
+// the visitors who opened or wrote it.
+func namedAuditEvents(r *http.Request, database *sql.DB, events []db.AuditEvent, caller *db.User, admin bool) ([]auditEventResponse, error) {
+	var userIDs, siteIDs []string
+	for _, e := range events {
+		for _, id := range []string{e.ActorID, e.OwnerID} {
+			if id != "" {
+				userIDs = append(userIDs, id)
+			}
+		}
+		if e.SiteID != "" {
+			siteIDs = append(siteIDs, e.SiteID)
+		}
+	}
+	users, sites, err := db.AuditNames(r.Context(), database, userIDs, siteIDs)
+	if err != nil {
+		return nil, err
+	}
+	var members map[string]map[string]bool
+	if !admin {
+		var teamIDs []string
+		for _, e := range events {
+			if e.OwnerID != "" && e.OwnerID != caller.ID {
+				teamIDs = append(teamIDs, e.OwnerID)
+			}
+		}
+		if members, err = db.TeamMemberIDs(r.Context(), database, teamIDs); err != nil {
+			return nil, err
+		}
+	}
+	out := make([]auditEventResponse, 0, len(events))
+	for _, e := range events {
+		row := toAuditEventResponse(e)
+		row.OwnerName, row.SiteName = users[e.OwnerID], sites[e.SiteID]
+		if admin || actorNamedToOwner(e, caller.ID, members) {
+			row.ActorName = users[e.ActorID]
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+// actorNamedToOwner reports whether an owner or team member may see who
+// made this change: themselves, or a member of the team that owns it. A
+// refused visit (access_denied) is a view, never a change.
+func actorNamedToOwner(e db.AuditEvent, callerID string, members map[string]map[string]bool) bool {
+	if e.ActorID == "" || e.Action == "access_denied" {
+		return false
+	}
+	return e.ActorID == callerID || members[e.OwnerID][e.ActorID]
 }
 
 // accessLogEntryResponse is one row of GET /api/access's JSON body.
@@ -395,10 +478,27 @@ func parseAuditTimeParam(w http.ResponseWriter, r *http.Request, name string) (t
 	if raw == "" {
 		return time.Time{}, true
 	}
-	parsed, err := time.Parse(time.RFC3339, raw)
+	parsed, err := parseAuditTime(raw, name == "to")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, errorResponse{Error: name + " must be an RFC 3339 timestamp"})
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: name + " must be an RFC 3339 timestamp or a YYYY-MM-DD date"})
 		return time.Time{}, false
 	}
 	return parsed, true
+}
+
+// parseAuditTime reads an RFC 3339 timestamp or a YYYY-MM-DD date (UTC). A
+// date as the end of a range (endOfDay) covers that whole day, since both
+// bounds are inclusive.
+func parseAuditTime(raw string, endOfDay bool) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t, nil
+	}
+	day, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if endOfDay {
+		return day.Add(24*time.Hour - time.Nanosecond), nil
+	}
+	return day, nil
 }

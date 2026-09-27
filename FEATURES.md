@@ -541,8 +541,17 @@ Config names are documented in `docs/configuration.md`; schema in
   `GET /api/access` are scoped to the caller's namespaces (admins see all,
   from a browser session only: an admin's API key or connected app gets the
   same own-namespace view as anyone else);
-  access-log detail follows `ACCESS_LOG_VISIBILITY`. Admins export either as
-  CSV (formula-safe) or NDJSON. `simple-host prune` (a daily CronJob) drops
+  access-log detail follows `ACCESS_LOG_VISIBILITY`. `/api/audit` filters by
+  `owner`, `site` (under the owner; a site in Recently deleted still
+  matches), `actor`, `action`, `from` and `to` (RFC 3339 or `YYYY-MM-DD`,
+  inclusive) and pages by `cursor`, and each event carries `owner_name`,
+  `site_name` and `actor_name`. An owner or team member is given
+  `actor_name` only for changes made by themselves or a member of the
+  owning team, never for a visitor's write or a refused visit; an admin
+  always. /admin's Activity card searches with those filters, loads more by
+  cursor, and its export links carry them. Admins export either as
+  CSV (formula-safe, with the three name columns last) or NDJSON; the export
+  takes the same filters (`owner` and `site` for the access log). `simple-host prune` (a daily CronJob) drops
   partitions past retention (so a row lives its retention plus up to one
   month), trims the chain's rows for them, and keeps partitions twelve
   months ahead; rows that reached a default partition while it was not
@@ -552,10 +561,11 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Routes.** `GET /api/audit`, `GET /api/access`, `GET /api/admin/export`.
 - **MCP.** None.
 - **Skill.** None.
-- **Pages.** `/dashboard` and `/admin` activity/visitor panels.
+- **Pages.** `/dashboard` and `/admin` activity/visitor panels (a site's
+  Activity names who made each change).
 - **Go.** `internal/audit/` (`stream.go`, `audit.go`, `db_recorder.go`, `access_writer.go`,
   `reader.go`, `prune.go`, `chain.go`, `canonical.go`, `commit.go`); `internal/handler/audit_access.go`,
-  `audit_helpers.go`, `admin_export.go`; `internal/db/audit.go`;
+  `audit_helpers.go`, `admin_export.go`; `internal/db/audit.go`, `audit_names.go`;
   `cmd/server/subcommands.go` (`prune`, `audit-verify`); `cmd/server/main.go`
   (the shared stdout JSON logger).
 - **DB.** `audit_events`, `access_log` and their `_default` partitions (0027,

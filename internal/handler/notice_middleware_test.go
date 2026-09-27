@@ -335,9 +335,9 @@ func (adminAuthConn) QueryContext(ctx context.Context, query string, args []driv
 			return noRowsResult{}, nil
 		}
 		return &fakeRows{
-			columns: []string{"id", "username", "is_admin", "created_at", "kind", "email", "disabled_at", "key_id", "scope"},
+			columns: []string{"id", "username", "is_admin", "created_at", "kind", "email", "disabled_at", "key_id", "scope", "expires_at"},
 			values: [][]driver.Value{{
-				fakeAdminUserID, fakeAdminUsername, true, createdAt, "person", "", nil, "fake-key-id", "full",
+				fakeAdminUserID, fakeAdminUsername, true, createdAt, "person", "", nil, "fake-key-id", "full", time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC),
 			}},
 		}, nil
 

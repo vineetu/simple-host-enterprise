@@ -54,12 +54,12 @@ func (s *collaborationArchiveDBState) query(query string, args []driver.NamedVal
 		var values [][]driver.Value
 		switch {
 		case bytesEqual(hash, db.HashAPIKey("owner-key")):
-			values = [][]driver.Value{{archiveTestOwnerID, "owner", false, createdAt, "person", "owner@example.test", nil, "owner-key-id", "full"}}
+			values = [][]driver.Value{{archiveTestOwnerID, "owner", false, createdAt, "person", "owner@example.test", nil, "owner-key-id", "full", time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)}}
 		case bytesEqual(hash, db.HashAPIKey("member-key")):
-			values = [][]driver.Value{{archiveTestMemberID, "member", false, createdAt, "person", "member@example.test", nil, "member-key-id", "full"}}
+			values = [][]driver.Value{{archiveTestMemberID, "member", false, createdAt, "person", "member@example.test", nil, "member-key-id", "full", time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)}}
 		}
 		return &collaborationArchiveRows{
-			columns: []string{"id", "username", "is_admin", "created_at", "kind", "email", "disabled_at", "key_id", "scope"},
+			columns: []string{"id", "username", "is_admin", "created_at", "kind", "email", "disabled_at", "key_id", "scope", "expires_at"},
 			values:  values,
 		}, nil
 

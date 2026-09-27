@@ -510,7 +510,7 @@ const dashboardSitesScript = `<script>
             var row = document.createElement('div');
             row.className = 'rank-row';
             row.innerHTML = '<span class="rank-name">' + esc(e.action) +
-              ' <span class="rank-sub">' + esc(new Date(e.at).toLocaleString()) + '</span></span>';
+              ' <span class="rank-sub">' + (e.actor_name ? esc(e.actor_name) + ' · ' : '') + esc(new Date(e.at).toLocaleString()) + '</span></span>';
             activityList.appendChild(row);
           });
         })
