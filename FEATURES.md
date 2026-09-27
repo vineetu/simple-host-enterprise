@@ -240,9 +240,12 @@ Config names are documented in `docs/configuration.md`; schema in
   `SMTP_FROM` may carry a display name; non-ASCII subjects RFC 2047
   encoded), gets an
   email ("not opened or changed in N days"); admins see the list on /admin.
-  The final check and the delete run under the site's lock and row lock, so
-  a use or Keep in flight either lands first (and saves the site) or finds
-  it gone. A visit, deploy, saved-data read or write, or restore
+  Each mark, unmark and delete runs in its own transaction under the site's
+  lock and then its row lock (the order every lifecycle change takes them),
+  re-checking the site there, so a use or Keep in flight either lands first
+  (and saves the site) or finds it gone, and a run never deadlocks with a
+  bulk move or delete. A site an admin has restricted is never marked or
+  deleted for disuse, and a mark it had is cleared. A visit, deploy, saved-data read or write, or restore
   unmarks it (`site_idle_cleared`); Keep (`POST .../keep`, `{"keep": false}`
   undoes it; `sites.idle_keep`; `site_idle_keep`) takes it out for good.
   `IDLE_CLEANUP_GRACE_DAYS` (30) after marking (`db.IdleGrace`), still unused and not kept, it

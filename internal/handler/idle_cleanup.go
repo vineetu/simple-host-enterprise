@@ -78,25 +78,33 @@ func (c *IdleCleanup) Run(ctx context.Context) {
 // (and tells their owners), and moves the ones whose grace has run out to
 // Recently deleted.
 func (c *IdleCleanup) RunOnce(ctx context.Context) error {
-	if err := c.step(ctx, "site_idle_cleared", func(tx *sql.Tx) ([]db.IdleSite, error) { return db.ClearUsedIdleSites(ctx, tx) }, nil); err != nil {
+	cleared, err := db.IdleClearCandidates(ctx, c.database)
+	if err != nil {
+		return fmt.Errorf("list used idle sites: %w", err)
+	}
+	if _, err := c.eachSite(ctx, "site_idle_cleared", cleared, func(tx *sql.Tx, s db.IdleSite) (db.IdleSite, bool, error) {
+		return db.ClearIdleSite(ctx, tx, s.ID)
+	}, nil); err != nil {
 		return fmt.Errorf("unmark used sites: %w", err)
 	}
 	notified := "dashboard"
 	if c.mailer != nil {
 		notified = "dashboard and email"
 	}
-	marked := []db.IdleSite{}
-	if err := c.step(ctx, "site_idle_marked", func(tx *sql.Tx) ([]db.IdleSite, error) {
-		// With email on, IDLE_CLEANUP_MAX_EMAILS bounds how many sites are
-		// marked (so emailed) per run; the rest wait for the next run.
-		limit := 0
-		if c.mailer != nil {
-			limit = oplimits.Get().IdleMaxEmails
-		}
-		sites, err := db.MarkIdleSites(ctx, tx, c.idleFor, limit)
-		marked = sites
-		return sites, err
-	}, map[string]any{"notified": notified}); err != nil {
+	// With email on, IDLE_CLEANUP_MAX_EMAILS bounds how many sites are
+	// marked (so emailed) per run; the rest wait for the next run.
+	limit := 0
+	if c.mailer != nil {
+		limit = oplimits.Get().IdleMaxEmails
+	}
+	candidates, err := db.IdleMarkCandidates(ctx, c.database, c.idleFor, limit)
+	if err != nil {
+		return fmt.Errorf("list idle sites: %w", err)
+	}
+	marked, err := c.eachSite(ctx, "site_idle_marked", candidates, func(tx *sql.Tx, s db.IdleSite) (db.IdleSite, bool, error) {
+		return db.MarkIdleSite(ctx, tx, s.ID, c.idleFor)
+	}, map[string]any{"notified": notified})
+	if err != nil {
 		return fmt.Errorf("mark idle sites: %w", err)
 	}
 	for _, s := range marked {
@@ -114,31 +122,58 @@ func (c *IdleCleanup) RunOnce(ctx context.Context) error {
 	return nil
 }
 
-// step runs one set-based change and records one audit event per site it
-// touched, in the same transaction.
-func (c *IdleCleanup) step(ctx context.Context, action string, change func(*sql.Tx) ([]db.IdleSite, error), extra map[string]any) error {
+// eachSite applies change to each site in its own transaction, under the
+// site's collaboration lock and then its row lock (the order every
+// lifecycle change takes them in), and records one audit event per site it
+// changed in that transaction. change re-checks the site under the locks
+// and reports false when it no longer applies. It returns the sites changed.
+func (c *IdleCleanup) eachSite(ctx context.Context, action string, sites []db.IdleSite, change func(*sql.Tx, db.IdleSite) (db.IdleSite, bool, error), extra map[string]any) ([]db.IdleSite, error) {
+	var done []db.IdleSite
+	for _, candidate := range sites {
+		changed, ok, err := c.oneSite(ctx, action, candidate, change, extra)
+		if err != nil {
+			return done, err
+		}
+		if ok {
+			done = append(done, changed)
+		}
+	}
+	return done, nil
+}
+
+func (c *IdleCleanup) oneSite(ctx context.Context, action string, candidate db.IdleSite, change func(*sql.Tx, db.IdleSite) (db.IdleSite, bool, error), extra map[string]any) (db.IdleSite, bool, error) {
 	tx, err := c.database.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return db.IdleSite{}, false, err
 	}
 	defer audit.Rollback(tx)
-	sites, err := change(tx)
-	if err != nil {
-		return err
+	if err := db.LockSiteCollaboration(ctx, tx, candidate.OwnerID, candidate.Name); err != nil {
+		return db.IdleSite{}, false, err
 	}
-	for _, s := range sites {
-		detail := map[string]any{"site": s.Name, "last_used": s.LastUsed.UTC().Format(time.RFC3339)}
-		if action == "site_idle_marked" {
-			detail["moves_to_recently_deleted_on"] = s.DeleteOn().UTC().Format("2006-01-02")
+	if err := db.LockSiteRow(ctx, tx, candidate.ID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return db.IdleSite{}, false, nil
 		}
-		for k, v := range extra {
-			detail[k] = v
-		}
-		if err := c.audit.RecordTx(ctx, tx, audit.Event{ActorKind: "system", Action: action, OwnerID: s.OwnerID, SiteID: s.ID, Extra: detail}); err != nil {
-			return err
-		}
+		return db.IdleSite{}, false, err
 	}
-	return audit.Commit(tx)
+	s, ok, err := change(tx, candidate)
+	if err != nil || !ok {
+		return db.IdleSite{}, false, err
+	}
+	detail := map[string]any{"site": s.Name, "last_used": s.LastUsed.UTC().Format(time.RFC3339)}
+	if action == "site_idle_marked" {
+		detail["moves_to_recently_deleted_on"] = s.DeleteOn().UTC().Format("2006-01-02")
+	}
+	for k, v := range extra {
+		detail[k] = v
+	}
+	if err := c.audit.RecordTx(ctx, tx, audit.Event{ActorKind: "system", Action: action, OwnerID: s.OwnerID, SiteID: s.ID, Extra: detail}); err != nil {
+		return db.IdleSite{}, false, err
+	}
+	if err := audit.Commit(tx); err != nil {
+		return db.IdleSite{}, false, err
+	}
+	return s, true, nil
 }
 
 // moveToRecentlyDeleted deletes one due site the way its owner would, under

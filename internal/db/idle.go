@@ -97,50 +97,93 @@ func scanIdleSites(rows *sql.Rows) ([]IdleSite, error) {
 	return out, rows.Err()
 }
 
-// MarkIdleSites marks every live site not kept and not used for idleFor,
-// and returns them. Atomic per row, so replicas running it at once never
-// mark (or report) a site twice.
-//
-// limit, when above 0, marks at most that many (the longest unused first);
-// the rest are marked on a later run.
-func MarkIdleSites(ctx context.Context, q Querier, idleFor time.Duration, limit int) ([]IdleSite, error) {
-	var maxSites any // NULL: LIMIT NULL marks every idle site
+// notRestricted keeps a site an admin has restricted (a takedown, often
+// held as evidence) out of idle cleanup: it is never marked or deleted for
+// disuse, and a mark it had is cleared.
+const notRestricted = `s.access_decision IS DISTINCT FROM 'restricted'`
+
+// markEligible is true for a live site (alias s) that is not kept, not
+// marked, not restricted, and unused for $1 seconds.
+const markEligible = `s.deleted_at IS NULL AND NOT s.idle_keep AND s.idle_since IS NULL AND ` + notRestricted + `
+		  AND ` + siteLastUsed + ` < now() - $1 * interval '1 second'`
+
+// IdleMarkCandidates lists the sites MarkIdleSite would mark now, the
+// longest unused first; limit, when above 0, lists at most that many (the
+// rest are marked on a later run). IdleSince is the listing time.
+func IdleMarkCandidates(ctx context.Context, q Querier, idleFor time.Duration, limit int) ([]IdleSite, error) {
+	var maxSites any // NULL: LIMIT NULL lists every idle site
 	if limit > 0 {
 		maxSites = limit
 	}
 	rows, err := q.QueryContext(ctx, `
-		UPDATE sites s SET idle_since = now(), idle_delete_at = now() + $3 * interval '1 second'
-		FROM users u
-		WHERE u.id = s.user_id AND s.deleted_at IS NULL AND NOT s.idle_keep AND s.idle_since IS NULL
-		  AND `+siteLastUsed+` < now() - $1 * interval '1 second'
-		  AND s.id IN (
-			SELECT s.id FROM sites s
-			WHERE s.deleted_at IS NULL AND NOT s.idle_keep AND s.idle_since IS NULL
-			  AND `+siteLastUsed+` < now() - $1 * interval '1 second'
-			ORDER BY `+siteLastUsed+`, s.id
-			LIMIT $2)
-		RETURNING s.id::text, s.user_id::text, u.username, s.name, s.active_version, s.idle_since, `+siteLastUsed+`, s.idle_delete_at`,
-		int64(idleFor/time.Second), maxSites, int64(IdleGrace()/time.Second))
+		SELECT s.id::text, s.user_id::text, u.username, s.name, s.active_version, now(), `+siteLastUsed+`, s.idle_delete_at
+		FROM sites s JOIN users u ON u.id = s.user_id
+		WHERE `+markEligible+`
+		ORDER BY `+siteLastUsed+`, s.id
+		LIMIT $2`,
+		int64(idleFor/time.Second), maxSites)
 	if err != nil {
 		return nil, err
 	}
 	return scanIdleSites(rows)
 }
 
-// ClearUsedIdleSites unmarks every marked site that has been used since it
-// was marked (a visit, a deploy, a saved-data write, or a restore), and
-// returns them.
-func ClearUsedIdleSites(ctx context.Context, q Querier) ([]IdleSite, error) {
+// MarkIdleSite marks one site if it is still eligible, and reports whether
+// it did. Called one site per transaction, under the site's collaboration
+// lock and row lock (LockSiteRow), the order every lifecycle change takes
+// them in, so a run never holds one site's row while waiting for another's.
+func MarkIdleSite(ctx context.Context, q Querier, siteID string, idleFor time.Duration) (IdleSite, bool, error) {
 	rows, err := q.QueryContext(ctx, `
-		UPDATE sites s SET idle_since = NULL
-		FROM users u, sites prev
-		WHERE u.id = s.user_id AND prev.id = s.id AND s.idle_since IS NOT NULL AND s.deleted_at IS NULL
-		  AND `+siteLastUsed+` > s.idle_since
-		RETURNING s.id::text, s.user_id::text, u.username, s.name, s.active_version, prev.idle_since, `+siteLastUsed+`, prev.idle_delete_at`)
+		UPDATE sites s SET idle_since = now(), idle_delete_at = now() + $3 * interval '1 second'
+		FROM users u
+		WHERE u.id = s.user_id AND s.id = $2::uuid AND `+markEligible+`
+		RETURNING s.id::text, s.user_id::text, u.username, s.name, s.active_version, s.idle_since, `+siteLastUsed+`, s.idle_delete_at`,
+		int64(idleFor/time.Second), siteID, int64(IdleGrace()/time.Second))
+	if err != nil {
+		return IdleSite{}, false, err
+	}
+	sites, err := scanIdleSites(rows)
+	if err != nil || len(sites) == 0 {
+		return IdleSite{}, false, err
+	}
+	return sites[0], true, nil
+}
+
+// clearEligible is true for a marked site (alias s) that has been used
+// since it was marked (a visit, a deploy, a saved-data write, or a
+// restore), or that an admin has restricted since.
+const clearEligible = `s.idle_since IS NOT NULL AND s.deleted_at IS NULL
+		  AND (` + siteLastUsed + ` > s.idle_since OR s.access_decision = 'restricted')`
+
+// IdleClearCandidates lists the marked sites ClearIdleSite would unmark now.
+func IdleClearCandidates(ctx context.Context, q Querier) ([]IdleSite, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT s.id::text, s.user_id::text, u.username, s.name, s.active_version, s.idle_since, `+siteLastUsed+`, s.idle_delete_at
+		FROM sites s JOIN users u ON u.id = s.user_id
+		WHERE `+clearEligible+`
+		ORDER BY s.id`)
 	if err != nil {
 		return nil, err
 	}
 	return scanIdleSites(rows)
+}
+
+// ClearIdleSite unmarks one site if it is still eligible, and reports
+// whether it did; locked the way MarkIdleSite is.
+func ClearIdleSite(ctx context.Context, q Querier, siteID string) (IdleSite, bool, error) {
+	rows, err := q.QueryContext(ctx, `
+		UPDATE sites s SET idle_since = NULL
+		FROM users u, sites prev
+		WHERE u.id = s.user_id AND prev.id = s.id AND s.id = $1::uuid AND `+clearEligible+`
+		RETURNING s.id::text, s.user_id::text, u.username, s.name, s.active_version, prev.idle_since, `+siteLastUsed+`, prev.idle_delete_at`, siteID)
+	if err != nil {
+		return IdleSite{}, false, err
+	}
+	sites, err := scanIdleSites(rows)
+	if err != nil || len(sites) == 0 {
+		return IdleSite{}, false, err
+	}
+	return sites[0], true, nil
 }
 
 // DueIdleSites lists the marked sites whose delete date (DeleteOn) has
@@ -150,7 +193,7 @@ func DueIdleSites(ctx context.Context, q Querier) ([]IdleSite, error) {
 	rows, err := q.QueryContext(ctx, `
 		SELECT s.id::text, s.user_id::text, u.username, s.name, s.active_version, s.idle_since, `+siteLastUsed+`, s.idle_delete_at
 		FROM sites s JOIN users u ON u.id = s.user_id
-		WHERE s.deleted_at IS NULL AND NOT s.idle_keep AND s.idle_since IS NOT NULL
+		WHERE s.deleted_at IS NULL AND NOT s.idle_keep AND s.idle_since IS NOT NULL AND `+notRestricted+`
 		  AND `+idleDue(1)+`
 		  AND `+siteLastUsed+` <= s.idle_since
 		ORDER BY s.idle_since`, int64(IdleGrace()/time.Second))
@@ -167,7 +210,7 @@ func StillDueIdle(ctx context.Context, q Querier, s IdleSite) (bool, error) {
 	err := q.QueryRowContext(ctx, `
 		SELECT EXISTS (SELECT 1 FROM sites s
 		WHERE s.id = $1::uuid AND s.user_id = $2::uuid AND s.name = $3
-		  AND s.deleted_at IS NULL AND NOT s.idle_keep AND s.idle_since IS NOT NULL
+		  AND s.deleted_at IS NULL AND NOT s.idle_keep AND s.idle_since IS NOT NULL AND `+notRestricted+`
 		  AND `+idleDue(4)+`
 		  AND `+siteLastUsed+` <= s.idle_since)`,
 		s.ID, s.OwnerID, s.Name, int64(IdleGrace()/time.Second)).Scan(&due)
@@ -187,7 +230,7 @@ func ListIdleSites(ctx context.Context, q Querier, actorID string) ([]IdleSite, 
 	rows, err := q.QueryContext(ctx, `
 		SELECT s.id::text, s.user_id::text, u.username, s.name, s.active_version, s.idle_since, `+siteLastUsed+`, s.idle_delete_at
 		FROM sites s JOIN users u ON u.id = s.user_id
-		WHERE s.deleted_at IS NULL AND s.idle_since IS NOT NULL AND NOT s.idle_keep
+		WHERE s.deleted_at IS NULL AND s.idle_since IS NOT NULL AND NOT s.idle_keep AND `+notRestricted+`
 		  AND ($1 = '' OR s.user_id = $1::uuid OR EXISTS (
 			SELECT 1 FROM team_members tm WHERE tm.team_id = s.user_id AND tm.user_id::text = $1))
 		ORDER BY s.idle_since, u.username, s.name`, actorID)

@@ -19,6 +19,8 @@ release, commit and schema.
   disconnected. Asking for a link is audited (`site_export_link`), and the
   download is recorded as the key when a key asked for it. Links asked for
   before this release stop working (they last 10 minutes by default).
+- Idle cleanup never marks or deletes a site an admin has restricted (a
+  takedown often held as evidence); a mark it had is cleared.
 
 ### Configuration
 - Safer lower bounds, refused at startup with a message naming the range:
@@ -32,6 +34,8 @@ release, commit and schema.
 - A download link validated just before it expired could be used a second
   time once its first use had been swept; an expired link is now refused
   when it is used.
+- Idle cleanup marks and unmarks one site at a time under the site's lock,
+  so it no longer deadlocks with a bulk move or delete.
 
 ## v1.7.0 — 2026-09-27
 

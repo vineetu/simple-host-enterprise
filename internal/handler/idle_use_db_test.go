@@ -153,9 +153,13 @@ func TestIdleMarkKeepsPromisedDate(t *testing.T) {
 	ctx := context.Background()
 	w.deploy("alice", "/api/sites/marked")
 	w.makeUnused("marked")
-	marked, err := db.MarkIdleSites(ctx, w.database, time.Hour, 0)
-	if err != nil || len(marked) != 1 || marked[0].DeleteOn().Before(time.Now().Add(29*24*time.Hour)) {
-		t.Fatalf("marked = %+v, %v; want one site due in 30 days", marked, err)
+	candidates, err := db.IdleMarkCandidates(ctx, w.database, time.Hour, 0)
+	if err != nil || len(candidates) != 1 {
+		t.Fatalf("candidates = %+v, %v; want one", candidates, err)
+	}
+	marked, ok, err := db.MarkIdleSite(ctx, w.database, candidates[0].ID, time.Hour)
+	if err != nil || !ok || marked.DeleteOn().Before(time.Now().Add(29*24*time.Hour)) {
+		t.Fatalf("marked = %+v, %v, %v; want one site due in 30 days", marked, ok, err)
 	}
 	before := oplimits.Get()
 	t.Cleanup(func() { oplimits.Set(before) })

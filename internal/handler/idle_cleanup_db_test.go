@@ -205,3 +205,38 @@ func TestIdleCleanup(t *testing.T) {
 		t.Fatalf("restored site: marked %v deleted %v; a restore counts as use", marked, deleted)
 	}
 }
+
+// A site an admin has restricted is never marked or deleted for disuse, and
+// a mark it had before the restriction is cleared.
+func TestIdleCleanupSkipsRestrictedSites(t *testing.T) {
+	w := newAccessWorld(t)
+	ctx := context.Background()
+	w.deploy("alice", "/api/sites/held")
+	w.deploy("alice", "/api/sites/marked")
+	if _, err := w.database.Exec(`UPDATE sites SET created_at = now() - interval '100 days', updated_at = now() - interval '100 days', last_used_at = now() - interval '100 days'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.database.Exec(`UPDATE sites SET access = 'only_me', access_decision = 'restricted' WHERE name = 'held'`); err != nil {
+		t.Fatal(err)
+	}
+	cleanup := NewIdleCleanup(w.database, audit.NewDBRecorder(w.database), 60, nil, "https://"+accessBase)
+	if err := cleanup.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if marked, _, _ := w.idleSince("held"); marked {
+		t.Fatal("a restricted site was marked idle")
+	}
+	if marked, _, _ := w.idleSince("marked"); !marked {
+		t.Fatal("an unused site was not marked")
+	}
+	// Restricted after it was marked, and past its date: cleared, not deleted.
+	if _, err := w.database.Exec(`UPDATE sites SET access = 'only_me', access_decision = 'restricted', idle_since = now() - interval '90 days', idle_delete_at = now() - interval '1 day' WHERE name = 'marked'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanup.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if marked, _, deleted := w.idleSince("marked"); marked || deleted {
+		t.Fatalf("restricted marked site: marked=%v deleted=%v, want neither", marked, deleted)
+	}
+}
