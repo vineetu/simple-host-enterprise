@@ -263,3 +263,66 @@ func TestPruneRecoversRowsStrandedInTheDefaultPartition(t *testing.T) {
 		t.Fatalf("chain after pruning the recovered month: %+v (break %v)", report, report.Break)
 	}
 }
+
+// Creating a missing month takes the parent's lock before the default
+// partition's, so a writer that holds the parent (an insert into another
+// month) and then needs the default partition waits instead of
+// deadlocking with it.
+func TestEnsureMonthPartitionDoesNotDeadlockWithWriter(t *testing.T) {
+	db := openPruneTestDB(t)
+	ctx := context.Background()
+	month := time.Now().UTC().Format("2006_01")
+	mustExec(t, db, `DROP TABLE access_log_p`+month)
+
+	writer, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Rollback()
+	next := time.Now().UTC().AddDate(0, 1, 0).Format(time.RFC3339)
+	if _, err := writer.ExecContext(ctx, `INSERT INTO access_log (at, owner_label, site_name, path, method, status) VALUES ($1, 'alice', 'demo', '/', 'GET', 200)`, next); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := db.ExecContext(ctx, `SELECT audit_ensure_month_partition('access_log', date_trunc('month', timezone('UTC', now()))::date)`)
+		done <- err
+	}()
+	// Let the upkeep run as far as it can while the writer holds the parent.
+	var upkeepErr error
+	finished := false
+	deadline := time.Now().Add(3 * time.Second)
+	for !finished && time.Now().Before(deadline) {
+		select {
+		case upkeepErr = <-done:
+			finished = true
+		default:
+			var waiting int
+			_ = db.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&waiting)
+			if waiting > 0 {
+				deadline = time.Now() // blocked: move on
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	insertCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	_, writeErr := writer.ExecContext(insertCtx, `INSERT INTO access_log (at, owner_label, site_name, path, method, status) VALUES (now(), 'alice', 'demo', '/', 'GET', 200)`)
+	if writeErr == nil {
+		writeErr = writer.Commit()
+	}
+	if !finished {
+		upkeepErr = <-done
+	}
+	if writeErr != nil || upkeepErr != nil {
+		t.Fatalf("writer: %v; partition upkeep: %v", writeErr, upkeepErr)
+	}
+	if !partitionExists(t, db, "access_log_p"+month) {
+		t.Fatal("this month's partition was not created")
+	}
+	var n int
+	if err := db.QueryRow(`SELECT count(*) FROM access_log_p` + month).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("this month's partition holds %d rows (%v), want the writer's 1", n, err)
+	}
+}

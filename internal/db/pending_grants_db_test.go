@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 )
 
 func pendingEmails(t *testing.T, database *sql.DB, table, idColumn, id string) []string {
@@ -304,5 +305,143 @@ func TestPendingGrantsNeedAClaimedAddress(t *testing.T) {
 	}
 	if got := convert(guess.ID, "guess@example.com"); len(got) != 1 {
 		t.Fatalf("converted %+v after the address was claimed, want one", got)
+	}
+}
+
+// waitForLockWaiter polls until a backend of this database waits on a lock.
+func waitForLockWaiter(t *testing.T, database *sql.DB) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var n int
+		if err := database.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n > 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("no backend ever waited on a lock")
+}
+
+// convertAsync runs ConvertPendingGrants in a transaction of its own and
+// sends its result once committed.
+func convertAsync(database *sql.DB, userID, email string) <-chan []ConvertedGrant {
+	done := make(chan []ConvertedGrant, 1)
+	go func() {
+		var converted []ConvertedGrant
+		tx, err := database.Begin()
+		if err == nil {
+			converted, err = ConvertPendingGrants(context.Background(), tx, userID, email)
+			if err == nil {
+				err = tx.Commit()
+			} else {
+				_ = tx.Rollback()
+			}
+		}
+		if err != nil {
+			converted = []ConvertedGrant{{SiteID: "error: " + err.Error()}}
+		}
+		done <- converted
+	}()
+	return done
+}
+
+// Sign-in's conversion takes the team's row before it touches a pending
+// membership, as removing one does, so the two serialize instead of
+// deadlocking (conversion holding the pending row and waiting on the team
+// row for the membership insert, removal holding the team row and waiting
+// on the pending row).
+func TestPendingTeamConversionWaitsForMembershipChange(t *testing.T) {
+	database := assetsTestDB(t)
+	ctx := context.Background()
+	creatorID, _ := mustCreateUserAndSite(t, database, "mo", "m")
+	var team User
+	if err := inTx(t, database, func(tx *sql.Tx) error {
+		var err error
+		if team, err = CreateTeam(ctx, tx, "crew", creatorID); err != nil {
+			return err
+		}
+		_, err = AddTeamMembers(ctx, tx, team.ID, []string{"later@example.com"}, creatorID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	user, err := CreateOIDCUser(ctx, database, "later", "sub-later", "later@example.com", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	removal, err := database.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer removal.Rollback()
+	if err := LockTeam(ctx, removal, team.ID); err != nil {
+		t.Fatal(err)
+	}
+	done := convertAsync(database, user.ID, "later@example.com")
+	waitForLockWaiter(t, database)
+	removeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	removed, err := RemovePendingTeamMember(removeCtx, removal, team.ID, "later@example.com")
+	if err != nil || !removed {
+		t.Fatalf("remove pending member while sign-in converts = %v, %v; want removed", removed, err)
+	}
+	if err := removal.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	converted := <-done
+	if len(converted) != 0 {
+		t.Fatalf("converted = %+v, want nothing (the grant was removed first)", converted)
+	}
+	if ok, err := IsTeamMember(ctx, database, team.ID, user.ID); err != nil || ok {
+		t.Fatalf("IsTeamMember = %v (%v), want false", ok, err)
+	}
+}
+
+// Conversion takes a site's name lock, as viewer changes do, before it
+// touches the site's pending grants.
+func TestPendingSiteConversionWaitsForViewerChange(t *testing.T) {
+	database := assetsTestDB(t)
+	ctx := context.Background()
+	ownerID, siteID := mustCreateUserAndSite(t, database, "alice", "demo")
+	if err := inTx(t, database, func(tx *sql.Tx) error {
+		_, err := GrantSiteViewers(ctx, tx, ownerID, "demo", siteID, &ownerID, []string{"later@example.com"})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	user, err := CreateOIDCUser(ctx, database, "later", "sub-later", "later@example.com", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	change, err := database.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer change.Rollback()
+	if err := LockSiteCollaboration(ctx, change, ownerID, "demo"); err != nil {
+		t.Fatal(err)
+	}
+	done := convertAsync(database, user.ID, "later@example.com")
+	waitForLockWaiter(t, database)
+	if left := pendingEmails(t, database, "pending_site_viewers", "site_id", siteID); len(left) != 1 {
+		t.Fatalf("conversion took the pending grant without the site's lock: %v left", left)
+	}
+	removed, pending, err := RevokeSiteViewer(ctx, change, ownerID, "demo", siteID, "later@example.com")
+	if err != nil || !removed || !pending {
+		t.Fatalf("revoke pending viewer = %v %v %v", removed, pending, err)
+	}
+	if err := change.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if converted := <-done; len(converted) != 0 {
+		t.Fatalf("converted = %+v, want nothing (the grant was revoked first)", converted)
+	}
+	if ok, err := ViewerAllowed(ctx, database, siteID, user.ID); err != nil || ok {
+		t.Fatalf("ViewerAllowed = %v (%v), want false", ok, err)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -156,16 +157,33 @@ type ConvertedGrant struct {
 	TeamID  string
 }
 
+// The pending rows are read first without taking them, so the locks their
+// grants need come first, in the order every other change to the same rows
+// takes them: team rows (LockTeam, as membership changes do), then each
+// site's LockSiteCollaboration (as viewer changes do). Only then are the
+// rows taken, and only those still under a site name that was locked.
+const pendingSitesForEmailQuery = `
+	SELECT DISTINCT s.user_id::text, s.name
+	FROM pending_site_viewers p
+	JOIN sites s ON s.id = p.site_id
+	WHERE p.email = $1
+`
+
+const pendingTeamsForEmailQuery = `
+	SELECT DISTINCT team_id::text FROM pending_team_members WHERE email = $1
+`
+
 const takePendingSiteViewersQuery = `
 	DELETE FROM pending_site_viewers p
 	USING sites s
 	WHERE p.email = $1 AND s.id = p.site_id
+	  AND (s.user_id::text || chr(31) || s.name) = ANY($2::text[])
 	RETURNING p.site_id::text, s.user_id::text, p.added_by::text
 `
 
 const takePendingTeamMembersQuery = `
 	DELETE FROM pending_team_members
-	WHERE email = $1
+	WHERE email = $1 AND team_id = ANY($2::uuid[])
 	RETURNING team_id::text, added_by::text
 `
 
@@ -189,7 +207,9 @@ const convertTeamMemberQuery = `
 // meet) and is the address userID's account now holds from a claim (not one
 // the sign-in's refresh refused because another account holds it). Matching
 // is exact on the lower-cased address. Each pending grant was counted against its site's or team's cap
-// when it was added, so converting one never exceeds it.
+// when it was added, so converting one never exceeds it. Locks: every team
+// row first, then every site name, each set in sorted order, before any
+// pending row is taken (see pendingSitesForEmailQuery).
 func ConvertPendingGrants(ctx context.Context, tx *sql.Tx, userID, email string) ([]ConvertedGrant, error) {
 	email = strings.TrimSpace(email)
 	if email == "" || strings.IndexFunc(email, func(r rune) bool { return r > unicode.MaxASCII }) >= 0 {
@@ -203,13 +223,62 @@ func ConvertPendingGrants(ctx context.Context, tx *sql.Tx, userID, email string)
 	if !holds {
 		return nil, nil
 	}
+	lockedTeams, err := queryStrings(ctx, tx, pendingTeamsForEmailQuery, email)
+	if err != nil {
+		return nil, fmt.Errorf("list pending team members: %w", err)
+	}
+	sort.Strings(lockedTeams)
+	for _, teamID := range lockedTeams {
+		// A team deleted since the read has taken its pending rows with it.
+		if err := LockTeam(ctx, tx, teamID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+	}
+	var lockedSites []string
+	rows, err := tx.QueryContext(ctx, pendingSitesForEmailQuery, email)
+	if err != nil {
+		return nil, fmt.Errorf("list pending site viewers: %w", err)
+	}
+	type siteKey struct{ owner, name string }
+	var keys []siteKey
+	for rows.Next() {
+		var k siteKey
+		if err := rows.Scan(&k.owner, &k.name); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("list pending site viewers: %w", err)
+		}
+		keys = append(keys, k)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Sorted as lockMoves sorts: owner id, then name, byte order.
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].owner != keys[j].owner {
+			return keys[i].owner < keys[j].owner
+		}
+		return keys[i].name < keys[j].name
+	})
+	for _, k := range keys {
+		if err := LockSiteCollaboration(ctx, tx, k.owner, k.name); err != nil {
+			return nil, err
+		}
+		lockedSites = append(lockedSites, k.owner+"\x1f"+k.name)
+	}
+
 	type taken struct {
 		grant   ConvertedGrant
 		addedBy sql.NullString
 	}
 	var all []taken
 
-	rows, err := tx.QueryContext(ctx, takePendingSiteViewersQuery, email)
+	// A grant on a site moved or renamed between the read and its lock
+	// stays pending for the next sign-in rather than being taken without
+	// the lock its new name needs.
+	rows, err = tx.QueryContext(ctx, takePendingSiteViewersQuery, email, pq.Array(lockedSites))
 	if err != nil {
 		return nil, fmt.Errorf("take pending site viewers: %w", err)
 	}
@@ -228,7 +297,7 @@ func ConvertPendingGrants(ctx context.Context, tx *sql.Tx, userID, email string)
 		return nil, err
 	}
 
-	rows, err = tx.QueryContext(ctx, takePendingTeamMembersQuery, email)
+	rows, err = tx.QueryContext(ctx, takePendingTeamMembersQuery, email, pq.Array(lockedTeams))
 	if err != nil {
 		return nil, fmt.Errorf("take pending team members: %w", err)
 	}

@@ -750,6 +750,37 @@ func scanSiteAnalyticsDailySeries(rows *sql.Rows) (map[string][]SiteAnalyticsDay
 	return seriesBySiteID, nil
 }
 
+// LockSiteIncarnation reports whether the row is still siteID under ownerID
+// and name (live or recently deleted), and row-locks it for the rest of tx
+// when it is. Call it holding the name's LockSiteCollaboration (the advisory
+// lock always comes before the row lock).
+func LockSiteIncarnation(ctx context.Context, tx *sql.Tx, siteID, ownerID, name string) (bool, error) {
+	var one int
+	err := tx.QueryRowContext(ctx, `SELECT 1 FROM sites WHERE id = $1::uuid AND user_id = $2::uuid AND name = $3 FOR UPDATE`, siteID, ownerID, name).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// DeleteSiteIncarnation removes the row only while it is still siteID under
+// ownerID and name (live or recently deleted), so a caller working from an
+// earlier list never deletes, or retires the files of, a site that has
+// since moved away or a different site that has since taken the name.
+// sql.ErrNoRows when it no longer matches.
+func DeleteSiteIncarnation(ctx context.Context, q Querier, siteID, ownerID, name string) error {
+	result, err := q.ExecContext(ctx, `DELETE FROM sites WHERE id = $1::uuid AND user_id = $2::uuid AND name = $3`, siteID, ownerID, name)
+	if err != nil {
+		return err
+	}
+	if n, err := result.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func DeleteSite(ctx context.Context, q Querier, userID, siteName string) error {
 	const query = `
 		DELETE FROM sites

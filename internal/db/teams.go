@@ -380,6 +380,29 @@ func LockTeam(ctx context.Context, tx *sql.Tx, teamID string) error {
 	return tx.QueryRowContext(ctx, lockTeamQuery, teamID).Scan(&one)
 }
 
+// LockNamespacesShared takes FOR KEY SHARE on each person or team row named,
+// in id order, for the rest of tx. A site move takes it on both namespaces
+// before any site-name lock: it lets other moves, deploys and sign-ins
+// through, but waits for a transaction holding the row FOR UPDATE (LockTeam:
+// team deletion and membership changes; an erasure's person row), which
+// take their own site-name locks after that row lock. One order everywhere,
+// namespace rows before site names, is what keeps these from deadlocking.
+// A row that no longer exists is skipped: the move then fails on its own
+// checks.
+func LockNamespacesShared(ctx context.Context, tx *sql.Tx, ids ...string) error {
+	sorted := append([]string(nil), ids...)
+	sort.Strings(sorted)
+	for i, id := range sorted {
+		if i > 0 && id == sorted[i-1] {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `SELECT 1 FROM users WHERE id = $1::uuid FOR KEY SHARE`, id); err != nil {
+			return fmt.Errorf("lock namespace: %w", err)
+		}
+	}
+	return nil
+}
+
 const countTeamSitesQuery = `
 	SELECT count(*)::int
 	FROM sites

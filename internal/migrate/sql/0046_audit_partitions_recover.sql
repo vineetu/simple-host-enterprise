@@ -31,6 +31,15 @@ SET LOCAL statement_timeout = '120s';
 -- One month's partition of parent (audit_events or access_log), moving any
 -- rows for that month out of the default partition first. Owner-role only,
 -- like audit_ensure_partitions.
+--
+-- Locks, always parent before default partition: SHARE UPDATE EXCLUSIVE on
+-- the parent (it lets inserts through, and serializes two maintenance runs,
+-- so the existence check below cannot race), then ACCESS EXCLUSIVE on the
+-- default partition. Every month, empty or not, is built beside the table
+-- and attached, which needs nothing stronger on the parent: CREATE TABLE
+-- ... PARTITION OF would upgrade to ACCESS EXCLUSIVE on the parent while the
+-- default partition is held, and deadlock with an insert that holds the
+-- parent and is waiting to open the default partition.
 CREATE OR REPLACE FUNCTION audit_ensure_month_partition(parent text, month_start date)
 RETURNS void
 LANGUAGE plpgsql
@@ -40,25 +49,18 @@ DECLARE
     default_name text := parent || '_default';
     bound_from   text := to_char(month_start, 'YYYY-MM-DD') || ' 00:00:00+00';
     bound_to     text := to_char((month_start + interval '1 month')::date, 'YYYY-MM-DD') || ' 00:00:00+00';
-    stranded     boolean := false;
 BEGIN
+    EXECUTE format('LOCK TABLE %I IN SHARE UPDATE EXCLUSIVE MODE', parent);
     IF to_regclass(part_name) IS NOT NULL THEN
         RETURN;
     END IF;
+    EXECUTE format('CREATE TABLE %I (LIKE %I INCLUDING DEFAULTS INCLUDING CONSTRAINTS)', part_name, parent);
     IF to_regclass(default_name) IS NOT NULL THEN
         EXECUTE format('LOCK TABLE %I IN ACCESS EXCLUSIVE MODE', default_name);
-        EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I WHERE at >= $1::timestamptz AND at < $2::timestamptz)', default_name)
-            INTO stranded USING bound_from, bound_to;
+        EXECUTE format(
+            'WITH moved AS (DELETE FROM %I WHERE at >= $1::timestamptz AND at < $2::timestamptz RETURNING *) INSERT INTO %I SELECT * FROM moved',
+            default_name, part_name) USING bound_from, bound_to;
     END IF;
-    IF NOT stranded THEN
-        EXECUTE format('CREATE TABLE %I PARTITION OF %I FOR VALUES FROM (%L) TO (%L)',
-            part_name, parent, bound_from, bound_to);
-        RETURN;
-    END IF;
-    EXECUTE format('CREATE TABLE %I (LIKE %I INCLUDING DEFAULTS INCLUDING CONSTRAINTS)', part_name, parent);
-    EXECUTE format(
-        'WITH moved AS (DELETE FROM %I WHERE at >= $1::timestamptz AND at < $2::timestamptz RETURNING *) INSERT INTO %I SELECT * FROM moved',
-        default_name, part_name) USING bound_from, bound_to;
     EXECUTE format('ALTER TABLE %I ATTACH PARTITION %I FOR VALUES FROM (%L) TO (%L)',
         parent, part_name, bound_from, bound_to);
 END;

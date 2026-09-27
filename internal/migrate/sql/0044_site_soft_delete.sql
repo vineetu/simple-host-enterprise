@@ -7,6 +7,16 @@
 --
 -- Not marked backward-compatible on purpose: a binary from before this
 -- column would serve every site in its recovery window again.
+--
+-- Lock duration: the ALTER takes ACCESS EXCLUSIVE on sites and the index
+-- build below keeps it for one scan of the table, so site reads and writes
+-- wait for that scan. It is one transaction on purpose (the migrator runs
+-- each file in a transaction and has no non-transactional step for CREATE
+-- INDEX CONCURRENTLY): a company's sites table holds one row per site,
+-- thousands at most, which scans in milliseconds; the new column is all
+-- NULL and the index is partial on NOT NULL, so it is built empty. The 30s
+-- statement timeout bounds the worst case: a much larger table rolls the
+-- whole file back instead of holding the lock longer.
 
 BEGIN;
 

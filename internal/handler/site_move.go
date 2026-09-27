@@ -119,6 +119,17 @@ func lockMoves(ctx context.Context, tx *sql.Tx, moves []plannedMove) error {
 // record last (the audit chain's head lock must not be held while row locks
 // are still being taken).
 func (s siteMover) applyMoves(ctx context.Context, tx *sql.Tx, actorID, action string, moves []plannedMove, extra map[string]any) ([]audit.Event, *moveRefusal, error) {
+	// Both namespaces' rows before any name: a team being deleted (or a
+	// person being erased) holds its row and then takes its sites' names,
+	// so a move out of it waits for that to finish instead of committing
+	// between its site list and its name locks.
+	var namespaces []string
+	for _, m := range moves {
+		namespaces = append(namespaces, m.From.ID, m.To.ID)
+	}
+	if err := db.LockNamespacesShared(ctx, tx, namespaces...); err != nil {
+		return nil, nil, err
+	}
 	if err := lockMoves(ctx, tx, moves); err != nil {
 		return nil, nil, err
 	}

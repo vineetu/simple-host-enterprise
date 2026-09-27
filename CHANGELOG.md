@@ -123,6 +123,12 @@ the migration. Skills are at 0.14.0 (0.11.0 still works).
   verified `email` claim is plain ASCII and is the address the account now
   holds (not one another account keeps).
 - Moves re-check team membership inside their transaction.
+- Concurrent changes take their locks in one order (person or team row,
+  then site names): moving a site out of a team no longer races the team's
+  deletion (which could queue the moved site's files for removal), a bulk
+  delete of a leaver's sites skips one an admin handed to someone else
+  meanwhile, and a sign-in converting pending grants waits for a
+  membership or viewer change instead of deadlocking with it.
 - Migration 0046's partition functions are not executable by `PUBLIC`
   (only the owning role that runs `migrate` and `prune` uses them).
 
@@ -141,7 +147,8 @@ the migration. Skills are at 0.14.0 (0.11.0 still works).
   months' partitions, unchanged and still hash-chained, instead of every
   later run failing. The prune CronJob now runs daily (was monthly) and
   keeps partitions twelve months ahead (was two). A row lives for its
-  retention setting plus up to one month.
+  retention setting plus up to one month. Creating a month's partition no
+  longer deadlocks with a concurrent write.
 - Docs state that the stdout request log carries full client IPs and user
   agents, so the log pipeline's retention governs those lines.
 

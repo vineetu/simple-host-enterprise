@@ -736,6 +736,17 @@ func retireSites(ctx context.Context, tx *sql.Tx, actorID, ownerID string, sites
 		}
 	}
 	for _, site := range sites {
+		// Under the name's lock, the row must still be this site in this
+		// namespace. One that was deleted, moved away, or replaced by
+		// another site of the same name since the list was read is skipped:
+		// nothing is queued for a site that lives on elsewhere.
+		same, err := db.LockSiteIncarnation(ctx, tx, site.ID, ownerID, site.Name)
+		if err != nil {
+			return nil, err
+		}
+		if !same {
+			continue
+		}
 		if err := db.EnqueueSiteSearch(ctx, tx, site.ID, db.SiteSearchDelete); err != nil {
 			return nil, err
 		}
@@ -746,10 +757,7 @@ func retireSites(ctx context.Context, tx *sql.Tx, actorID, ownerID string, sites
 		if err := db.RetireObjects(ctx, tx, prefix, storage.RetireGrace); err != nil {
 			return nil, err
 		}
-		if err := db.DeleteSite(ctx, tx, ownerID, site.Name); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				continue // deleted by somebody else before our lock; its own delete queued it
-			}
+		if err := db.DeleteSiteIncarnation(ctx, tx, site.ID, ownerID, site.Name); err != nil {
 			return nil, err
 		}
 		detail := map[string]any{"active_version": site.ActiveVersion}

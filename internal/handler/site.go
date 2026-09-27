@@ -831,7 +831,7 @@ func (h *SiteHandler) deleteSiteForTarget(w http.ResponseWriter, r *http.Request
 	// bucket objects stay as they are for db.DeletedSiteRetention, so the
 	// site can be restored whole (site_restore.go); the sweeper then purges
 	// the row and retires the objects.
-	if err := db.SoftDeleteSite(r.Context(), tx, site.ID, target.ActorID); err != nil {
+	if err := db.SoftDeleteSite(r.Context(), tx, site.ID, target.OwnerID, siteName, target.ActorID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, errorResponse{Error: "site not found"})
 			return

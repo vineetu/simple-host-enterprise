@@ -202,8 +202,8 @@ func (h *AdminHandler) deleteLeaverSites(w http.ResponseWriter, r *http.Request)
 
 // softDeleteSites marks every one of ownerID's sites listed deleted, in tx,
 // as the owner's own delete does (site.go), and returns the site_delete
-// events to record. A site deleted by somebody else before its lock is
-// skipped.
+// events to record. A site deleted, moved or renamed by somebody else
+// before its lock is skipped.
 func softDeleteSites(ctx context.Context, tx *sql.Tx, actorID, ownerID string, sites []db.TeamSite) ([]audit.Event, error) {
 	actorKind, keyID := auditActorKind(ctx)
 	for _, site := range sites {
@@ -214,7 +214,9 @@ func softDeleteSites(ctx context.Context, tx *sql.Tx, actorID, ownerID string, s
 	restorableUntil := time.Now().Add(db.DeletedSiteRetention).UTC().Format(time.RFC3339)
 	var events []audit.Event
 	for _, site := range sites {
-		if err := db.SoftDeleteSite(ctx, tx, site.ID, actorID); err != nil {
+		// Constrained to this owner and name: a site handed to someone else
+		// after the list was read is theirs now and is skipped.
+		if err := db.SoftDeleteSite(ctx, tx, site.ID, ownerID, site.Name, actorID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				continue
 			}

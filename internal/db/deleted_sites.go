@@ -51,11 +51,15 @@ func scanDeletedSites(rows *sql.Rows) ([]DeletedSite, error) {
 }
 
 // SoftDeleteSite marks a live site deleted. It stops serving and leaves every
-// listing at once; nothing else about the row changes.
-func SoftDeleteSite(ctx context.Context, q Querier, siteID, actorID string) error {
+// listing at once; nothing else about the row changes. The row must still be
+// siteID under ownerID and name: a caller holding that name's
+// LockSiteCollaboration but working from an earlier read (a bulk delete's
+// list) never deletes a site that has since moved to someone else.
+// sql.ErrNoRows when it no longer matches.
+func SoftDeleteSite(ctx context.Context, q Querier, siteID, ownerID, name, actorID string) error {
 	result, err := q.ExecContext(ctx, `
-		UPDATE sites SET deleted_at = now(), deleted_by = NULLIF($2, '')::uuid
-		WHERE id = $1::uuid AND deleted_at IS NULL`, siteID, actorID)
+		UPDATE sites SET deleted_at = now(), deleted_by = NULLIF($4, '')::uuid
+		WHERE id = $1::uuid AND user_id = $2::uuid AND name = $3 AND deleted_at IS NULL`, siteID, ownerID, name, actorID)
 	if err != nil {
 		return err
 	}
