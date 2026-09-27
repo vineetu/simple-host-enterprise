@@ -86,8 +86,7 @@ artifact.
   and write its saved data; named viewers made it private. Most artifacts are made for their
   author. Listing is a deliberate act. (Wording corrected 2026-09-25: this line said "private",
   which the access model never was.)
-- **2026-09-23 — Attribution is the discovery mechanism.** Search, AI site classification and
-  `/showcase` exist so a shared artifact is findable by its author's name, and so publishing
+- **2026-09-23 — Attribution is the discovery mechanism.** Search and `/showcase` exist so a shared artifact is findable by its author's name, and so publishing
   earns the author visibility. This is why search is in a hosting product.
 - **2026-09-23 — Static pages plus a stateful API, never a per-app backend.** This is what
   makes a prototype or a tracker possible while keeping both the token cost and the
@@ -149,3 +148,22 @@ artifact.
   CI. People and their agents still publish through MCP; a pipeline deploys with a `publish`
   key and one call (`PUT ...?create=true`, `docs/ci.md`). Nothing CI-specific is added
   beyond that: no build runners, no webhooks.
+- **2026-09-27 — Sites move only into a team you are in; nobody is handed a site.** An admin
+  moves a leaver's or an abandoned team's sites to a team or a person. Reason: nobody receives a
+  site they did not ask for.
+- **2026-09-27 — Delete is recoverable for 30 days** (`DELETED_RETENTION_DAYS`). The name stays
+  held and the site keeps counting toward quota. Reason: a mistaken delete is undone by its
+  owner, not by an operator restoring a backup.
+- **2026-09-27 — An admin's restriction is sticky.** The owner cannot raise it, rename the site
+  or move it until an admin lifts it. Reason: a takedown that the owner can undo is not one.
+- **2026-09-27 — Data subject requests are admin-only, for a disabled person.** An erased
+  identity is held so it cannot sign straight back in. Reason: the company, not the employee,
+  decides what happens to a work account.
+- **2026-09-27 — Idle-site cleanup is opt-in** (`IDLE_CLEANUP_DAYS`, off by default). Reason:
+  deleting someone's site for disuse is a policy each company chooses.
+- **2026-09-27 — Only an admin renames a person's address.** Names come from the directory, and
+  old links redirect only for people who may open the site. Reason: a name change is often
+  sensitive, and an address must not be claimable by whoever asks.
+- **2026-09-27 — Every operational time and limit is an env setting,** with today's value as the
+  default and a range check at startup. Reason: operators tune an install without a rebuild,
+  and a typo cannot switch a safeguard off.

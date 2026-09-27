@@ -28,7 +28,9 @@ const (
 	skillBundleName      = "simple-host-skills"
 	skillBundleURL       = "/skills.zip"
 	// skillReleaseType is hand-set, so it has to move with the version above
-	// it. 0.15.4 says a renamed person's old page of sites is not found and
+	// it. 0.15.5 says only the uploader, owner or team deletes an uploaded
+	// file from the site's own address, and drops a vendor's name from the
+	// builder skill; 0.15.4 says a renamed person's old page of sites is not found and
 	// that site_activity's referring domains are visitor data; 0.15.3
 	// documents the one-call CI deploy (PUT ?create=true) and that
 	// only an admin renames a person's address; 0.15.2 states this installation's own limits (restore window,
@@ -163,6 +165,7 @@ func RegisterUIRoutes(mux *http.ServeMux, baseURL string) {
 	mux.HandleFunc("GET /skills/sha256/{digest}/skills.zip", serveImmutableSkillsZip(baseURL))
 	mux.HandleFunc("GET /openapi.yaml", serveExpandedStatic("openapi.yaml", "application/yaml; charset=utf-8"))
 	mux.HandleFunc("GET /{$}", serveExpandedStatic("index.html", "text/html; charset=utf-8"))
+	mux.HandleFunc("GET /capabilities.html", serveExpandedStatic("capabilities.html", "text/html; charset=utf-8"))
 	mux.Handle("GET /", fileServer)
 }
 

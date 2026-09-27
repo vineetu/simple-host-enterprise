@@ -156,7 +156,7 @@ Config names are documented in `docs/configuration.md`; schema in
   disconnects one (the grant and its tokens deleted, audited
   `connector_revoke`) on `/auth/sessions`, through two session-only routes.
   `/plugin.zip` is an installable
-  plugin (Claude plugin and Agent Plugins manifests plus the skills) already
+  plugin (an agent-app plugin manifest and the Agent Plugins manifest, plus the skills) already
   pointing at `<base>/mcp`.
 - **Status.** Built.
 - **Routes.** `POST /mcp`, `GET /mcp`, `DELETE /mcp`,
@@ -967,9 +967,9 @@ Config names are documented in `docs/configuration.md`; schema in
 ## 17. Landing and static pages
 
 - **What.** The base host serves embedded static pages and the API spec.
-- **Routes.** `GET /` (file server: `docs.html`,
-  `capabilities.html`, `install.html`, `changelog.html`, fonts, CSS);
-  `GET /{$}` (`index.html`) and `GET /openapi.yaml`, served with the
+- **Routes.** `GET /` (file server: `docs.html`, `install.html`,
+  `changelog.html`, fonts, CSS); `GET /{$}` (`index.html`),
+  `GET /capabilities.html` and `GET /openapi.yaml`, served with the
   installation's operational values filled in (section 18).
 - **Go.** `internal/handler/ui.go`, `internal/handler/static/`.
   `changelog.html` is the owner's to edit (see `CLAUDE.md`).
@@ -1004,8 +1004,9 @@ Config names are documented in `docs/configuration.md`; schema in
   `simple-host migrate` applies the schema and sets the least-privilege
   `simplehost_app` role's password; the server connects as that role.
 - **Subcommands.** No argument runs the server. Others: `migrate`, `restore`, `migrate-storage`,
-  `reencrypt` (section 6), `prune`, `audit-verify` (section 12), `owner-hosts`
-  (section 19), `settings --json` (below), `version`.
+  `reencrypt`, `verify-storage`, `rebuild-index` (section 6), `prune`,
+  `audit-verify` (section 12), `owner-hosts` (section 19), `settings --json`
+  (below), `version`.
 - **Settings registry and advanced docs.** `internal/config/settings.go` lists
   every variable `internal/config` reads with its area, a plain description,
   type, default, range, whether it is security-sensitive, required, or asked

@@ -3,9 +3,10 @@
 A build pipeline publishes a site with one call and a `publish` API key.
 
 1. Sign in to the dashboard and mint a key with the **Publish** scope (the
-   default). It can deploy, update and roll back your sites and your teams'
-   sites, and nothing else: it cannot delete a site, change who can open it,
-   or read the audit log. Keys expire (`API_KEY_DEFAULT_DAYS`, at most
+   default). It can deploy, update, roll back and list your sites and your
+   teams' sites, read their versions, and read and write their saved data
+   and uploaded files; it cannot delete a site, change who can open it, or
+   read the audit log. Keys expire (`API_KEY_DEFAULT_DAYS`, at most
    `API_KEY_MAX_DAYS`); responses carry `X-Key-Expires` in the last
    `API_KEY_EXPIRY_WARNING_DAYS`, so a job can warn before it breaks.
 2. Store it as a CI secret, for example `SIMPLE_HOST_KEY`.

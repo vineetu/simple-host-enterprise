@@ -242,13 +242,13 @@ Never set `DB_INSECURE_ALLOWED`, `BACKUP_STORAGE_INSECURE_ALLOWED` or
 ### Internal-only installs
 
 Nothing in the package checks where the install is reachable from. If it
-sits on an internal-only ingress, the cloud AI apps (ChatGPT, Claude on the
-web) cannot reach its `/mcp` at all, since their servers call it from the
-internet. Say so in config too: set `OAUTH_REDIRECT_HOSTS` to only the apps
+sits on an internal-only ingress, cloud-hosted AI apps cannot reach its
+`/mcp` at all, since their servers call it from the internet. Say so in config too: set `OAUTH_REDIRECT_HOSTS` to only the apps
 you use inside the network, for example `localhost` (command-line agents on
 the person's own machine) plus `vscode.dev` or `cursor://anysphere.cursor-mcp`
-if those are in use. The default list includes `chatgpt.com` and
-`claude.ai`; an app whose redirect host is not listed can register but can
+if those are in use. The default list includes the hosted AI apps' redirect
+hosts (see `OAUTH_REDIRECT_HOSTS` in docs/configuration.md); an app whose
+redirect host is not listed can register but can
 never finish connecting. The certificate in "done" (top of this file) still has to be
 publicly trusted (a DNS-01 issuer works for a name only reachable inside),
 and section 8's check runs from any machine on the network that is not in

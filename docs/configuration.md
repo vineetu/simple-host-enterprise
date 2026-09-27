@@ -485,12 +485,13 @@ equivalent here; do not set them.
 Neither overlay sets the Assets, Upload limits, Operational times and
 limits, or Retention variables above; they are left at their code defaults
 unless an installation overrides them (`byo`'s `config.env.example` lists
-them, commented out, at their defaults).
+every one of them, and every other optional setting, commented out at its
+default).
 
 Editing `config.env` or `secrets.env` and re-applying does not restart the
 pods (the generated ConfigMap and Secret keep fixed names). Run
 `kubectl -n <namespace> rollout restart deploy/simple-host` afterwards.
 
-`docs/cloud/aws.md`, `gcp.md`, `azure.md`, and `oci.md` show where the
+`docs/cloud/aws.md`, `gcp.md`, `azure.md`, `oci.md` and `upcloud.md` show where the
 database, bucket, and certificate values for a specific cloud's managed
 services map onto this table.

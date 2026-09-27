@@ -7,7 +7,7 @@ release, commit and schema.
 ## Unreleased
 
 Schema 0058 (backward-compatible); run `simple-host migrate` before
-deploying.
+deploying. Skills are at 0.15.5 (0.11.0 still works).
 
 ### Security
 - Deleting an uploaded file from the site's own address
@@ -44,6 +44,20 @@ deploying.
 - A refused preview no longer writes its link's token into the audit log.
 - An admin's rename of a person and an admin's revoke of a leaked key now
   appear in that person's own activity (`/api/audit`).
+
+### Docs
+- `/openapi.yaml` is versioned with the release (1.8.0; it said 2.5.0) and
+  now lists every route a key can call: creating and deleting a site by
+  owner (`POST`/`DELETE /api/collaboration/sites/{owner}/{sitename}`),
+  `POST /api/sites/{sitename}/keep`, a site's named viewers and viewer
+  search, team member search, and offboarding by email
+  (`POST /api/admin/users/disable`).
+- `deploy/overlays/byo/config.env.example` and `secrets.env.example` list
+  every setting, the optional ones commented out at their defaults.
+- The Capabilities page mentions preview, Recently deleted (with this
+  install's window), rename and move, and whole-site download.
+- README, INTENT (decisions of v1.4 to v1.7 recorded), `docs/ci.md` (what a
+  publish key can do), `docs/configuration.md` and FEATURES corrected.
 
 ### Configuration
 - Safer lower bounds, refused at startup with a message naming the range:
@@ -93,7 +107,7 @@ deploying.
 ## v1.7.0 — 2026-09-27
 
 Schema 0055–0057 (all backward-compatible); run `simple-host migrate`
-before deploying. Skills are at 0.15.4.
+before deploying. Skills are at 0.15.4 (0.11.0 still works).
 
 ### Renaming a person's address
 - After a name change an admin presses **Rename…** on the person's row in
@@ -182,7 +196,9 @@ before deploying. Skills are at 0.15.4.
   product terms with recipes. The tables are generated, so they cannot drift.
 - The setup helper at https://simple-host.app/setup (choose Enterprise)
   writes `config.env`, a `secrets.env` template naming every secret and the
-  apply commands, in the browser, sending nothing anywhere.
+  apply commands, in the browser; an optional check of your choices sends
+  only the names and values of the numbers, durations, switches and rates
+  you changed.
 
 ## v1.6.0 — 2026-09-27
 
@@ -675,7 +691,7 @@ backward-compatible, so rolling back to v1.2.0 is safe. Skills are at 0.12.1
   otherwise sign in. Set it before upgrading a Google install. Other issuers still start with it empty (an Okta org or
   a single-tenant Entra ID issuer is already your own) and log a reminder.
 - INSTALL.md, "Internal-only installs": how to narrow `OAUTH_REDIRECT_HOSTS`
-  (whose default admits `chatgpt.com` and `claude.ai`) when the install is
+  (whose default admits the hosted AI apps) when the install is
   not reachable from the internet.
 
 ### Keys

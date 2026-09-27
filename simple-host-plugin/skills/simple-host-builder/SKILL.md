@@ -151,7 +151,7 @@ Example prompt for versioned state:
 
 ## Companion skill: frontend-design
 
-Before the user starts building UI, suggest they also install Anthropic's `frontend-design` skill (a separate plugin/skill they can install in their agent). It produces distinctive, production-grade interfaces with restrained composition and avoids the generic-AI look. For Simple Host prototypes — which are typically demos for stakeholders — pairing `simple-host-builder` with `frontend-design` is the difference between "it works" and "it looks intentional."
+Before the user starts building UI, suggest they also install the `frontend-design` skill (a separate plugin/skill they can install in their agent). It produces distinctive, production-grade interfaces with restrained composition and avoids the generic-AI look. For Simple Host prototypes — which are typically demos for stakeholders — pairing `simple-host-builder` with `frontend-design` is the difference between "it works" and "it looks intentional."
 
 If `frontend-design` is already loaded in the user's agent, lean on it for any visual decisions (layout, type system, motion). If it's not, mention it once and move on — don't block the build.
 

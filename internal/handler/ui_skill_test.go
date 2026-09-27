@@ -351,7 +351,7 @@ func TestOpenAPIDocumentsEveryManagementClientBootstrap(t *testing.T) {
 	document := string(body)
 
 	for _, want := range []string{
-		"version: 2.5.0",
+		"version: 1.8.0",
 		"/skills/version:",
 		"SkillVersionManifest:",
 		"X-Simple-Host-Client",
@@ -362,15 +362,15 @@ func TestOpenAPIDocumentsEveryManagementClientBootstrap(t *testing.T) {
 			t.Errorf("OpenAPI is missing %q", want)
 		}
 	}
-	if got := strings.Count(document, "#/components/parameters/SkillVersion"); got != 30 {
-		t.Fatalf("documented %d guarded management operations, want 30", got)
+	if got := strings.Count(document, "#/components/parameters/SkillVersion"); got != 37 {
+		t.Fatalf("documented %d guarded management operations, want 37", got)
 	}
-	if got := strings.Count(document, "#/components/parameters/SimpleHostClient"); got != 30 {
-		t.Fatalf("documented %d direct-client classifications, want 30", got)
+	if got := strings.Count(document, "#/components/parameters/SimpleHostClient"); got != 37 {
+		t.Fatalf("documented %d direct-client classifications, want 37", got)
 	}
 	if got := strings.Count(document, "#/components/responses/SkillVersionRequired") +
-		strings.Count(document, "#/components/responses/ManagementBadRequest"); got != 30 {
-		t.Fatalf("documented %d management bootstrap errors, want 30", got)
+		strings.Count(document, "#/components/responses/ManagementBadRequest"); got != 37 {
+		t.Fatalf("documented %d management bootstrap errors, want 37", got)
 	}
 }
 

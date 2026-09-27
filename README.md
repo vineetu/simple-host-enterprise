@@ -26,20 +26,20 @@ Read INSTALL.md in this repository and install Simple Host on our Kubernetes clu
 - Sign-in only through the company's OIDC provider. Accounts are created at first sign-in.
 - Admins come from a list of emails or an OIDC claim. There is no admin key.
 - Sessions with idle and absolute limits. A person sees and revokes their sessions and connected apps, or signs out everywhere.
-- API keys for CI, with a scope (`publish`, `full`, `offboard`) and an expiry.
+- API keys for CI, with a scope (`publish`, `full`, `offboard`) and an expiry; one call creates or updates a site from a pipeline ([docs/ci.md](docs/ci.md)).
 
 ### Sites, versions, preview, hand-over
 - Publish a folder. Every publish is a new version; roll back to any kept version.
 - Every site on its own origin: `<site>.<person>.<internal-domain>`, with a certificate issued per person.
 - Preview before live: store a version without publishing, open a one-hour preview link, then make it live.
-- Rename a site or move it into a team. Old addresses keep redirecting.
+- Rename a site or move it into a team you are in (never to a person). Old addresses keep redirecting for people who can open the site.
 - Delete is recoverable for 30 days. Download a whole site as one zip.
 - Per-person quotas for sites and storage. Optional malware scan of every upload.
 - Optional idle-site cleanup, with a warning, a Keep button and email.
 
 ### Who can see a site
 - Five access levels: only me (the default), named viewers, the whole company, listed in the company showcase, and anyone on the network.
-- Named viewers are people or teams, added by company email, even before they have signed in.
+- Named viewers are people or teams, added by name or company email, including people who have not signed in yet.
 - Teams: a shared place for sites; every member can do everything.
 - Opening a site to the network needs an admin's approval, or two admins' if configured.
 - Someone without access sees the same page as for a site that does not exist.
@@ -47,7 +47,7 @@ Read INSTALL.md in this repository and install Simple Host on our Kubernetes clu
 
 ### Saved data and files
 - Each site has one JSON document its pages read and write, plain or versioned.
-- The last 20 changes are kept; the owner restores any of them.
+- The last 20 changes are kept; the owner or a team member restores any of them.
 - Pages upload files (images, video, PDFs and more), with per-site limits and the same malware scan.
 
 ### Agents
@@ -56,12 +56,12 @@ Read INSTALL.md in this repository and install Simple Host on our Kubernetes clu
 - An installable plugin at `<base>/plugin.zip`, already pointing at the instance.
 
 ### Admin and audit
-- Take down: restrict any site with a reason, and lift it later.
-- Leavers: disable a person (sessions, keys and apps revoked at once), move or delete their sites, export their data as one zip, or erase them for good.
+- Take down: restrict any site to its owner with a reason the owner sees. Until an admin lifts it, the owner cannot raise the level, rename it or move it.
+- Leavers: disable a person (sessions, keys and apps revoked at once), move their sites to a team or a person, or delete them, export their data as one zip, or erase them for good (an erased person cannot sign back in until an admin allows it). After a name change, an admin renames a person's address; old links keep working.
 - Revoke a leaked key by pasting it.
 - Every change is written to an audit log with a hash chain; `simple-host audit-verify` checks it.
 - Every audit event is also streamed as a JSON line to stdout, for a SIEM.
-- A visit log per site: owners see view counts, admins see who.
+- A visit log per site: owners see view counts, top pages and referring domains; admins see who.
 
 ### Operations
 - Runs on any Kubernetes cluster with Postgres and an S3-compatible bucket. Manifests for local, staging and production.
@@ -97,13 +97,13 @@ The instance answers at `https://simple-host.127-0-0-1.nip.io`. `make local` pri
 Required, with no default: the public base URL, the OIDC provider, the database, the bucket and the session signing key. Startup fails with the list of what is missing.
 
 - [docs/configuration.md](docs/configuration.md): every variable, its default, and what it refuses.
-- `deploy/overlays/byo/config.env.example` and `secrets.env.example` name every variable.
+- `deploy/overlays/byo/config.env.example` and `secrets.env.example` name every variable, the optional ones commented out at their defaults; [docs/advanced/](docs/advanced/README.md) explains each.
 - [docs/storage.md](docs/storage.md): the bucket, the cache, encryption and key rotation.
 - [docs/site-isolation.md](docs/site-isolation.md): every site on its own origin, and the redirects.
 
 ## Layout
 
-- `cmd/server`: the binary and its subcommands (`migrate`, `restore`, `reencrypt`, `verify-storage`, `rebuild-index`, `audit-verify`, `prune`, `owner-hosts`, `version`).
+- `cmd/server`: the binary and its subcommands (`migrate`, `restore`, `migrate-storage`, `reencrypt`, `verify-storage`, `rebuild-index`, `audit-verify`, `prune`, `owner-hosts`, `settings`, `version`).
 - `internal/`: one package per concern (`handler`, `db`, `storage`, `migrate`, `oidc`, `audit`, `mcp`).
 - `deploy/`: the manifests, optional components and environment overlays.
 - `simple-host-plugin/`: the skills and plugin agents install.

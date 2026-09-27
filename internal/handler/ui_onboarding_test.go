@@ -235,8 +235,9 @@ func TestHomepageOnboardingJourneyAndEmailPrivacy(t *testing.T) {
 		}
 	}
 
-	// Step 3 sets honest expectations and names a model per agent.
-	for _, want := range []string{"ChatGPT", "Claude Code", "Cursor", "GPT-5.6 Sol", "Opus 4.8"} {
+	// Step 3 sets honest expectations per agent, and names no model (model
+	// names go stale): the most capable one the plan offers.
+	for _, want := range []string{"ChatGPT", "Claude Code", "Cursor", "most capable model your plan offers"} {
 		if !strings.Contains(onboardingRawText(document), want) {
 			t.Errorf("step-3 guidance is missing %q", want)
 		}
@@ -1153,4 +1154,16 @@ func attributeOr(node *htmlnode.Node, name, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// The capabilities page states this installation's own recovery window.
+func TestCapabilitiesStatesTheRecoveryWindow(t *testing.T) {
+	mux := http.NewServeMux()
+	RegisterUIRoutes(mux, "https://hosting.example")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/capabilities.html", nil))
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK || strings.Contains(body, "{{") || !strings.Contains(body, "Recently deleted for 30 days") {
+		t.Fatalf("capabilities = %d, placeholders filled: %v", rec.Code, !strings.Contains(body, "{{"))
+	}
 }
