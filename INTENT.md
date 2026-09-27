@@ -55,7 +55,6 @@ artifact.
   signing in.
 - **Not a document tool.** Notion and Confluence write documents better. What earns a place
   here is something that runs.
-- **Not a CI target.** The publisher is an agent through MCP, not a build pipeline.
 - **No per-artifact infrastructure.** One object store for every site, one Postgres, one
   service. An artifact never gets its own container, database or deployment.
 
@@ -145,3 +144,8 @@ artifact.
 - **2026-09-26 — Teams are named `team-<name>`** (migration 0041). A team can then never take a
   name a person signs in with, and the address says at a glance whose it is. Typing `sales` or
   `team-sales` both work; old team addresses redirect while no person holds the old name.
+- **2026-09-27 — CI deploys are supported through scoped keys.** The non-goal "Not a CI
+  target" contradicted API keys existing for CI, and the owner had already said keys are for
+  CI. People and their agents still publish through MCP; a pipeline deploys with a `publish`
+  key and one call (`PUT ...?create=true`, `docs/ci.md`). Nothing CI-specific is added
+  beyond that: no build runners, no webhooks.

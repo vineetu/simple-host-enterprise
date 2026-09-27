@@ -534,6 +534,9 @@ func codeHint(code string, tool Tool) string {
 		return "That team name is already registered. Ask the user for a different one rather than composing a variation of it."
 	case "name_held":
 		return "A site deleted in the last {{DELETED_RETENTION}} still holds that name. Ask the user whether to bring it back with restore_site (list_deleted_sites shows it) or to use a different name; do not choose for them."
+	case "site_exists":
+		return "A site with that name already exists in that namespace, so nothing was created. Call get_site to look at it; if the user does mean this site, deploy with intent update and reconcile what changed into the files you send. " +
+			"If they meant a new site, ask them for a different name."
 	case "name_conflict":
 		return "That name would share one web address with an existing account or site. Ask the user for a clearly different name."
 	case "team_limit":

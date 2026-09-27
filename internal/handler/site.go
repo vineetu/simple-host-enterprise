@@ -452,7 +452,7 @@ func (h *SiteHandler) createSiteForTarget(w http.ResponseWriter, r *http.Request
 	unlock := h.mutations.lock(target.OwnerID, siteName)
 	defer unlock()
 	if _, err := db.GetSite(r.Context(), h.database, target.OwnerID, siteName); err == nil {
-		writeJSON(w, http.StatusConflict, errorResponse{Error: "site already exists"})
+		writeSiteExists(w, target.OwnerUsername, siteName)
 		return
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
@@ -484,7 +484,7 @@ func (h *SiteHandler) createSiteForTarget(w http.ResponseWriter, r *http.Request
 				writeNameHeld(w)
 				return
 			}
-			writeJSON(w, http.StatusConflict, errorResponse{Error: "site already exists"})
+			writeSiteExists(w, target.OwnerUsername, siteName)
 			return
 		}
 
@@ -583,6 +583,19 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 	siteName, ok := validatedSiteName(w, r)
 	if !ok {
 		return
+	}
+	create, ok := deployCreatesWhenMissing(w, r)
+	if !ok {
+		return
+	}
+	if create {
+		if _, err := db.GetSite(r.Context(), h.database, user.ID, siteName); errors.Is(err, sql.ErrNoRows) {
+			h.createSite(w, r)
+			return
+		} else if err != nil {
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+			return
+		}
 	}
 	publish, ok := deployPublishes(w, r)
 	if !ok {
@@ -771,6 +784,32 @@ func reconcileStoredVersion(database *sql.DB, siteID string, version int, commit
 	exists, err := db.VersionExists(ctx, database, siteID, version)
 	log.Printf("site commit reconciliation operation=\"store_version\" site_id=%q version=%d exists=%t commit_error=%v query_error=%v", siteID, version, exists, commitErr, err)
 	return err == nil && exists, err == nil
+}
+
+// deployCreatesWhenMissing reads ?create= on an update: true makes the one
+// call a CI job needs, creating the site when it does not exist yet (the
+// create route's rules and 201) and updating it otherwise. Explicit, so an
+// update with a mistyped name still answers 404 rather than quietly
+// creating a second site.
+func deployCreatesWhenMissing(w http.ResponseWriter, r *http.Request) (create, ok bool) {
+	switch r.URL.Query().Get("create") {
+	case "", "false":
+		return false, true
+	case "true":
+		return true, true
+	}
+	writeJSON(w, http.StatusBadRequest, errorResponse{Error: "create must be true or false"})
+	return false, false
+}
+
+// writeSiteExists is the create route's 409 for a name the namespace
+// already has, naming the call that would have worked.
+func writeSiteExists(w http.ResponseWriter, owner, siteName string) {
+	writeJSON(w, http.StatusConflict, errorResponse{
+		Error: fmt.Sprintf("%s already has a site named %q, so nothing was created. To publish a new version of it, send the same upload with PUT instead of POST; "+
+			"a PUT with ?create=true creates the site when it is missing and updates it otherwise (the one call a CI job needs)", owner, siteName),
+		Code: "site_exists",
+	})
 }
 
 // refuseUnpublishedCreate answers a create sent with publish=false: a new

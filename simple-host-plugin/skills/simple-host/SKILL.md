@@ -238,6 +238,9 @@ Typical combinations:
      `?publish=false` (`publish: false`), give them the `preview_version`
      link, and make it live with a rollback to it once they are happy
      (`references/collaboration.md`).
+   `PUT ...?create=true` (create when missing, update otherwise) exists for
+   unattended build pipelines with a publish key; you name the intent instead.
+   If the user wants their CI to deploy, point them at it (`/openapi.yaml`).
 9. Verify the site at the `url` the deploy response returns, quoted as
    returned, including its asset requests.
 10. After a first publish, tell the user only they (or their team) can open the

@@ -345,6 +345,23 @@ func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
+	create, ok := deployCreatesWhenMissing(w, r)
+	if !ok {
+		return
+	}
+	if create {
+		// Only for a namespace the caller may create in; anything else
+		// falls through to the update's own answer.
+		if actor := auth.GetUser(r.Context()); actor != nil {
+			access, err := db.ResolveNamespaceAccess(r.Context(), h.database, actor.ID, ownerUsername)
+			if err == nil && (access.Role == db.CollaborationRoleOwner || access.Role == db.CollaborationRoleMember) {
+				if _, err := db.GetSite(r.Context(), h.database, access.OwnerID, siteName); errors.Is(err, sql.ErrNoRows) {
+					h.createCollaborationSite(w, r)
+					return
+				}
+			}
+		}
+	}
 	publish, ok := deployPublishes(w, r)
 	if !ok {
 		return

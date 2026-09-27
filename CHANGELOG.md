@@ -6,6 +6,15 @@ release, commit and schema.
 
 ## Unreleased
 
+### Deploying from CI
+- One call deploys from a pipeline: `PUT /api/sites/{sitename}?create=true`
+  (or the team route `PUT /api/collaboration/sites/{owner}/{sitename}?create=true`)
+  creates the site when it is missing (`201`) and updates it otherwise
+  (`200`). Without the flag a missing site is still `404`. A create of a
+  name the namespace already has now answers `409` with code `site_exists`
+  and says which call would have worked. `docs/ci.md` has the recipe with a
+  publish-scoped key; INTENT records CI deploys as supported (2026-09-27).
+
 ### Connected apps
 - Two connections of the same app can be told apart: `/auth/sessions`
   shows, next to when each was connected and last used, the browser that

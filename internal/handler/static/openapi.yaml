@@ -351,7 +351,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '409':
-          description: Site already exists, or `name_conflict` (the name equals the address of one of the owner's older sites)
+          description: '`site_exists` (the namespace already has a site of that name; the message names the PUT that updates it, or `?create=true` to create or update in one call), `name_held` (a recently deleted site holds the name), or `name_conflict` (the name equals the address of one of the owner''s older sites)'
           content:
             application/json:
               schema:
@@ -366,8 +366,8 @@ paths:
           $ref: '#/components/responses/TooManyRequests'
 
     put:
-      summary: Update an existing site
-      description: Upload a new gzip-compressed tar or ZIP version using the same archive safety, type, path, denylist, and size/count limits as site creation. Creates a new version number. Versions beyond the newest 5 (`QUOTA_MAX_VERSIONS`) are automatically cleaned up. `If-Match` is optional here, since only the owner deploys a site in their own namespace; team sites use the owner-qualified route, where it is required.
+      summary: Update an existing site (or, with create=true, create it when missing)
+      description: Upload a new gzip-compressed tar or ZIP version using the same archive safety, type, path, denylist, and size/count limits as site creation. Creates a new version number. Versions beyond the newest 5 (`QUOTA_MAX_VERSIONS`) are automatically cleaned up. `If-Match` is optional here, since only the owner deploys a site in their own namespace; team sites use the owner-qualified route, where it is required. With `?create=true` a missing site is created instead (`201`), which is the one call a CI job with a `publish` key needs.
       tags: [Sites]
       security:
         - apiKey: []
@@ -376,6 +376,7 @@ paths:
         - $ref: '#/components/parameters/SimpleHostClient'
         - $ref: '#/components/parameters/sitename'
         - $ref: '#/components/parameters/publish'
+        - $ref: '#/components/parameters/create'
         - name: If-Match
           in: header
           required: false
@@ -403,6 +404,12 @@ paths:
               $ref: '#/components/headers/MinimumSkillVersion'
             X-Simple-Host-Update-URL:
               $ref: '#/components/headers/SkillUpdateURL'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteWithNote'
+        '201':
+          description: Site created (only with `create=true`, when it was missing)
           content:
             application/json:
               schema:
@@ -909,7 +916,9 @@ paths:
         artifact under the resource owner's existing namespace. Capture the
         ETag before editing and send it in `If-Match`; never refresh the ETag
         immediately before uploading a stale local snapshot. A stale validator
-        returns 412 and must be reconciled deliberately.
+        returns 412 and must be reconciled deliberately. With `?create=true`
+        a site missing from a namespace the caller owns or is a member of is
+        created instead (`201`), for CI jobs that deploy with one call.
       tags: [Collaboration]
       security:
         - apiKey: []
@@ -919,6 +928,7 @@ paths:
         - $ref: '#/components/parameters/owner'
         - $ref: '#/components/parameters/sitename'
         - $ref: '#/components/parameters/publish'
+        - $ref: '#/components/parameters/create'
         - $ref: '#/components/parameters/IfMatch'
       requestBody:
         required: true
@@ -947,6 +957,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CollaborationSite'
+        '201':
+          description: Site created (only with `create=true`, when it was missing)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteWithNote'
         '400':
           $ref: '#/components/responses/ManagementBadRequest'
         '401':
@@ -2911,11 +2927,18 @@ components:
       description: 'Absent or `true`: the new version goes live. `false`: it is stored but not made live (the answer has `new_version`; `active_version` and the ETag stay), to be previewed and made live later by a rollback to it. Refused on a create (400 `publish_required`).'
       schema:
         type: boolean
+    create:
+      name: create
+      in: query
+      required: false
+      description: '`true`: create the site when it does not exist yet (the create route''s rules, answered `201`) and update it otherwise (`200`), so a CI job deploys with one call. Absent or `false`: a missing site is `404`, so a mistyped name never creates a second site. A created site''s first version is always live, so `publish=false` with it on a missing site is refused (400 `publish_required`).'
+      schema:
+        type: boolean
     IfMatch:
       name: If-Match
       in: header
       required: true
-      description: ETag captured before the caller began editing the current site version.
+      description: ETag captured before the caller began editing the current site version. Not checked when `create=true` creates the site.
       schema:
         type: string
       example: '"site-4b256b3b-9d15-4ce5-bba7-b04ef26f49e5-v7"'

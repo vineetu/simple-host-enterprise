@@ -3,6 +3,8 @@
 - `install.md` — installing on a local cluster, then on a real one.
 - `cloud/` — per-cloud notes for managed Kubernetes, Postgres and buckets.
 - `configuration.md` — every environment variable the server reads.
+- `ci.md` — deploying a site from a build pipeline with one call and a
+  publish-scoped API key.
 - `storage.md` — the bucket, the pod cache, encryption and key rotation.
 - `security-review.md` — the controls, the pen-test list and what was run,
   and the accepted limitations.

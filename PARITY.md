@@ -59,6 +59,7 @@ that should get it). Last derived from both `FEATURES.md` files and code on 2026
 | API keys: scopes | none (every key is full) | `publish` (default) / `full` / `offboard`, deny-by-default | `gap → hosted` |
 | API keys: list and revoke one | named keys (origin label or typed), last 4, last used; mint, list, revoke each from the owner app's Keys panel; any account key may mint (hosted has no browser session) (2026-09-27) | mint, list, revoke each; browser session only; last 4 and last used on each row, "expires soon" in the last 14 days (2026-09-27) | `same` |
 | Revoke a leaked key (admin) | none; the operator deletes or suspends the account | admin pastes the key on /admin, that key alone is revoked, audited with the owner's name (2026-09-27) | `gap → hosted` — an operator should be able to kill one leaked key |
+| Deploy from CI in one call | none: create (`POST`) and update (`PUT`) are separate calls | `PUT .../{sitename}?create=true` (personal or team route) creates a missing site and updates an existing one; a create of an existing name answers `409 site_exists` naming that call; recipe in `docs/ci.md` (2026-09-27) | `gap → hosted` |
 | Why a key stopped working | 401 with `invalid_api_key` | 401 `code`: `key_expired` (with date), `key_revoked`, `key_not_recognised` (also for a disabled person's key); `X-Key-Expires` while 14 days or less remain (2026-09-27) | `different on purpose` — hosted keys have no expiry; one code, whose message says the key may have been revoked or signed out |
 | Reissue another person's key | organiser/admin replaces a participant's keys with one new key (`POST /v1/admin/users/{id}/key`) | none (keys are self-service; admin disables the person) | `different on purpose` — hosted events hand out keys to people with no mailbox |
 | MCP connector and OAuth | DCR, PKCE S256, rotating refresh, reuse revokes the grant, hourly sweep, tokens hashed | same design (hosted's adapter was ported from enterprise) | `same` |
@@ -136,7 +137,7 @@ Every numbered `FEATURES.md` section, per repo, and the rows above that cover it
 | hosted | MCP tool index (`internal/mcp/tools.go`, 35 tools) | MCP tools |
 | hosted | Unplaced routes and tools | (index of FEATURES itself, no feature) |
 | enterprise | Identity: OIDC sign-in, sessions, hand-off | Owner sign-in and sessions; Sign out and sign out everywhere; Change sign-in email; Sign-in alert email; Visitor sign-in on a site |
-| enterprise | API keys (CI and automation) | API keys rows; Revoke a leaked key (admin); Why a key stopped working |
+| enterprise | API keys (CI and automation) | API keys rows; Revoke a leaked key (admin); Why a key stopped working; Deploy from CI in one call |
 | enterprise | MCP server, OAuth connector, plugin.zip | MCP connector; Connector token lifetime; Connected apps; MCP error hints; Skills and plugin |
 | enterprise | Skills bundle and skill-version gate | Skills and plugin |
 | enterprise | Sites: deploy, versions, rollback, delete | Sites; Look before it goes live; Recently deleted; Idle-site cleanup; Site rename; Take a site offline; Hand a site to another owner; Site export; Per-site hosts; Quotas; Malware scan |

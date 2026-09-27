@@ -112,7 +112,11 @@ Config names are documented in `docs/configuration.md`; schema in
   `key_not_recognised` (also for any key of a disabled person, so a found
   key does not reveal that its owner left). While a key has
   `API_KEY_EXPIRY_WARNING_DAYS` or less left, every response to it carries `X-Key-Expires` (RFC 3339) and an
-  `X-Simple-Host-Notice` line. An admin revokes a leaked key by pasting it on
+  `X-Simple-Host-Notice` line. A CI job deploys with one call: `?create=true` on
+  `PUT /api/sites/{sitename}` or `PUT /api/collaboration/sites/{owner}/{sitename}`
+  creates a missing site (the create route's rules, `201`) and updates an
+  existing one; without it a missing site stays `404`. A create of a name
+  that exists answers `409 site_exists` naming that call (`docs/ci.md`). An admin revokes a leaked key by pasting it on
   /admin (`POST /api/admin/keys/revoke`, section 13).
 - **Status.** Built.
 - **Routes.** `GET /api/keys`, `POST /api/keys`, `DELETE /api/keys/{id}`.
