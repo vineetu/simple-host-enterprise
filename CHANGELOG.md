@@ -50,6 +50,9 @@ release, commit and schema.
   `docs/install.md` say so, and the 400's message names both headers.
   `docs/ci.md` also says a publish key cannot delete uploaded files or
   download a whole site.
+- The settings registry marks `DB_INCLUSTER_EVALUATION` as security and
+  data-safety sensitive (it marks the database as throwaway), so
+  `simple-host settings --json` and the setup check flag it.
 - `make smoke` against a real install checks the key's scope first and
   stops before publishing when it is not Full, instead of failing four
   checks and leaving its throwaway site behind; if the site cannot be

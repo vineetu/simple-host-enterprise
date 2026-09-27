@@ -22,7 +22,7 @@
 | `DB_SSLMODE` | `verify-full` | text | TLS to the database. Anything but verify-full needs DB_INSECURE_ALLOWED. **Security-sensitive.** |
 | `DB_SSL_ROOT_CERT` | none | text | The database's CA bundle, mounted from the simple-host-db-ca Secret. **Security-sensitive.** |
 | `DB_INSECURE_ALLOWED` | `false` | `true` / `false` | Allows a database without verified TLS. Local evaluation only. **Security-sensitive.** |
-| `DB_INCLUSTER_EVALUATION` | `false` | `true` / `false` | Set by the in-cluster evaluation Postgres, which nothing backs up; logs a warning at every start. |
+| `DB_INCLUSTER_EVALUATION` | `false` | `true` / `false` | Set by the in-cluster evaluation Postgres, which nothing backs up; logs a warning at every start. Never set it on a real install: it marks the database as throwaway. **Security-sensitive.** |
 | `BACKUP_STORAGE_ENDPOINT` | none | text | The S3-compatible bucket's endpoint, over HTTPS. **Required.** |
 | `BACKUP_STORAGE_REGION` | `us-east-1` | text | The bucket's region, where the provider needs one. |
 | `BACKUP_STORAGE_BUCKET` | none | text | The bucket that stores every site. Turn its versioning on. **Required.** |

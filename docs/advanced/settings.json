@@ -1018,14 +1018,14 @@
     {
       "name": "DB_INCLUSTER_EVALUATION",
       "group": "storage",
-      "description": "Set by the in-cluster evaluation Postgres, which nothing backs up; logs a warning at every start.",
+      "description": "Set by the in-cluster evaluation Postgres, which nothing backs up; logs a warning at every start. Never set it on a real install: it marks the database as throwaway.",
       "type": "bool",
       "default": "false",
       "allowed": [
         "true",
         "false"
       ],
-      "security_sensitive": false,
+      "security_sensitive": true,
       "required": false,
       "basic": false
     },
