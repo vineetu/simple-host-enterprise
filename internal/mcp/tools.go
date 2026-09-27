@@ -963,7 +963,7 @@ func toolList() []Tool {
 			Title: "Delete an uploaded file",
 			Description: "Delete one file a site's pages uploaded, by the `id` from list_site_assets. Its address stops working at once, any page that shows it shows a broken file, and its space is freed. " +
 				"It cannot be brought back, and restoring the site does not return it. Always tell the user which file (name and size) and ask before calling this; never delete files in bulk on your own judgement. " +
-				"Works for the owner or a member of the owning team.",
+				"Works for the owner or a member of the owning team, with a connected app or a full-scope key (a publish key is refused with 403).",
 			InputSchema: object(map[string]any{
 				"site":  str(siteArgDesc),
 				"owner": str(ownerArgDesc),

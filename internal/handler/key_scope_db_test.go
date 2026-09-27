@@ -61,11 +61,19 @@ func TestAPIKeyScopes(t *testing.T) {
 	if got := state("root-offboard", http.MethodGet, ""); got != http.StatusForbidden {
 		t.Errorf("offboard key GET state = %d, want 403", got)
 	}
+	// Deleting an uploaded file cannot be undone: full keys only, on the
+	// site's own host too.
+	r := httptest.NewRequest(http.MethodDelete, "https://demo.alice."+accessBase+"/api/sites/demo/assets/0f8c", nil)
+	r.Header.Set("X-API-Key", w.apiKeys["alice-publish"])
+	if rec := w.do(r); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"scope":"publish"`) {
+		t.Errorf("publish key DELETE asset on the site host = %d %s, want 403", rec.Code, rec.Body)
+	}
 
 	// Not publish: delete, access, viewers, teams, audit, search, admin.
 	for _, c := range []struct{ method, path string }{
 		{http.MethodDelete, "/api/sites/demo"},
 		{http.MethodDelete, "/api/collaboration/sites/alice/demo"},
+		{http.MethodDelete, "/api/collaboration/sites/alice/demo/assets/0f8c"},
 		{http.MethodPost, "/api/sites/demo/access"},
 		{http.MethodGet, "/api/teams"},
 		{http.MethodGet, "/api/audit"},

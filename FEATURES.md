@@ -624,7 +624,10 @@ Config names are documented in `docs/configuration.md`; schema in
   routes and `GET /{site}/_assets/{id}[/{name}]`. Mux: `GET /api/collaboration/sites/{owner}/{sitename}/assets`,
   `DELETE /api/collaboration/sites/{owner}/{sitename}/assets/{id}`.
 - **MCP.** `list_site_assets`, `delete_site_asset` (over the two mux routes;
-  owner or team member; a publish key may use both, as on REST).
+  owner or team member; a publish key may list but not delete, on either
+  host: a deleted file cannot be brought back, so deleting is `keyFull`,
+  and the host gate's site API classifies its DELETE as
+  `auth.SiteAPIDeletePattern`).
 - **Skill.** `references/state-and-ai.md` (Uploaded assets);
   `simple-host-builder` §3.
 - **Pages.** `/dashboard` assets panel.

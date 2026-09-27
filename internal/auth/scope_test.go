@@ -56,7 +56,7 @@ func TestEveryRouteIsClassified(t *testing.T) {
 		}
 	}
 	for pattern := range routeKeyAccess {
-		if _, ok := routes[pattern]; !ok && pattern != SiteAPIPattern {
+		if _, ok := routes[pattern]; !ok && pattern != SiteAPIPattern && pattern != SiteAPIDeletePattern {
 			t.Errorf("routeKeyAccess lists %q, which no longer exists", pattern)
 		}
 	}
@@ -71,6 +71,9 @@ func TestKeyScopeAllows(t *testing.T) {
 		{db.APIKeyScopePublish, SiteAPIPattern, true},
 		{db.APIKeyScopePublish, "POST /mcp", true},
 		{db.APIKeyScopePublish, "DELETE /api/sites/{sitename}", false},
+		{db.APIKeyScopePublish, "DELETE /api/collaboration/sites/{owner}/{sitename}/assets/{id}", false},
+		{db.APIKeyScopePublish, SiteAPIDeletePattern, false},
+		{db.APIKeyScopeFull, SiteAPIDeletePattern, true},
 		{db.APIKeyScopePublish, "POST /api/sites/{sitename}/access", false},
 		{db.APIKeyScopePublish, "GET /api/admin/export", false},
 		{db.APIKeyScopePublish, "POST /api/admin/users/disable", false},

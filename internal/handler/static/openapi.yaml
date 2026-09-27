@@ -1129,7 +1129,7 @@ paths:
   /api/collaboration/sites/{owner}/{sitename}/assets/{id}:
     delete:
       summary: Delete one uploaded file
-      description: Owner/member operation. The file stops being served at once and its space is freed; it cannot be brought back. Audited as `asset_delete`. A publish-scope key may call it.
+      description: Owner/member operation. The file stops being served at once and its space is freed; it cannot be brought back. Audited as `asset_delete`. Full-scope key or session; a publish-scope key is refused (403), here and on the site's own `DELETE /api/sites/{site}/assets/{id}`.
       tags: [Collaboration]
       security:
         - apiKey: []

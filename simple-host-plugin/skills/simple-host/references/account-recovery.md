@@ -119,7 +119,7 @@ Every key has a scope, chosen when it is created:
 - **Publish** (the default): deploy, update, roll back and list sites, their
   versions and archives, saved data and uploaded files, `GET /api/me`, and
   MCP. Enough for a CI job that publishes a site, and nothing more: it cannot
-  delete a site, change who can open it, manage viewers or teams, or read the
+  delete a site or an uploaded file, change who can open it, manage viewers or teams, or read the
   audit log.
 - **Full**: everything the person can do, except administration. Ask for it
   only when the user wants one of the management actions above.

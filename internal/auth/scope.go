@@ -30,6 +30,11 @@ const (
 // owner or restricted-site host, which is not served by the mux).
 const SiteAPIPattern = "HOSTGATE /api/sites/{site}/{state|assets}"
 
+// SiteAPIDeletePattern is the site-facing API's one DELETE, an uploaded
+// file's: a full key only, like the management route, since a deleted file
+// cannot be brought back (a publish key's other writes can all be undone).
+const SiteAPIDeletePattern = "HOSTGATE DELETE /api/sites/{site}/assets/{id}"
+
 // routeKeyAccess classifies every registered route. It is deny-by-default:
 // a pattern missing from it is refused to every key, and
 // TestEveryRouteIsClassified fails until a new route is added here, so a
@@ -56,17 +61,18 @@ var routeKeyAccess = map[string]keyAccess{
 	"GET /api/collaboration/sites/{owner}/{sitename}/state-versions/{id}":          keyPublish,
 	"POST /api/collaboration/sites/{owner}/{sitename}/state-versions/{id}/restore": keyPublish,
 	"GET /api/collaboration/sites/{owner}/{sitename}/assets":                       keyPublish,
-	"DELETE /api/collaboration/sites/{owner}/{sitename}/assets/{id}":               keyPublish,
 	SiteAPIPattern: keyPublish,
 	"POST /mcp":    keyPublish,
 	"GET /mcp":     keyPublish,
 	"DELETE /mcp":  keyPublish,
 
-	// Full only: deleting, handing over, renaming or downloading a site, who can open it, viewers, teams, the
+	// Full only: deleting a site or an uploaded file, handing over, renaming or downloading a site, who can open it, viewers, teams, the
 	// audit and access logs, search. A key on the audit and access logs
 	// sees only its owner's own namespace and teams, even an admin's: the
 	// company-wide view needs a browser session (handler/audit_access.go).
 	"DELETE /api/sites/{sitename}":                                          keyFull,
+	"DELETE /api/collaboration/sites/{owner}/{sitename}/assets/{id}":        keyFull,
+	SiteAPIDeletePattern:                                                    keyFull,
 	"DELETE /api/collaboration/sites/{owner}/{sitename}":                    keyFull,
 	"POST /api/sites/{sitename}/transfer":                                   keyFull,
 	"POST /api/collaboration/sites/{owner}/{sitename}/transfer":             keyFull,
@@ -178,6 +184,9 @@ func KeyScopeAllows(scope, pattern string) bool {
 // requestPattern is what the scope table is keyed on for r.
 func requestPattern(r *http.Request) string {
 	if isSiteAPI(r.Context()) {
+		if r.Method == http.MethodDelete {
+			return SiteAPIDeletePattern
+		}
 		return SiteAPIPattern
 	}
 	return r.Pattern
