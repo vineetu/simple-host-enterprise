@@ -226,6 +226,7 @@ func (h *SiteHandler) Register(mux *http.ServeMux, authMiddleware, skillVersionM
 	h.registerViewerRoutes(mux, ownerMutation, browserWrite)
 	h.registerAssetAdminRoutes(mux, ownerMutation, browserWrite)
 	h.registerStateHistoryRoutes(mux, ownerMutation, browserWrite)
+	h.registerMoveRoutes(mux, ownerMutation, browserWrite)
 	// Namespace-scoped writes: create, delete and access level in a namespace
 	// the caller owns or belongs to — see requireOwnerOrMember.
 	mux.Handle("POST /api/collaboration/sites/{owner}/{sitename}", browserWrite(ownerUpload(http.HandlerFunc(h.createCollaborationSite))))

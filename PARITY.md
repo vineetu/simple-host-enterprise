@@ -16,14 +16,15 @@ Rules (also in each `CLAUDE.md`):
   `FEATURES.md` has no line in the section index at the bottom.
 
 Status: `same` · `different on purpose` (reason) · `gap → hosted` / `gap → enterprise` (the side
-that should get it). Last derived from both `FEATURES.md` files and code on 2026-09-26.
+that should get it). Last derived from both `FEATURES.md` files and code on 2026-09-27.
 
 ## Feature table
 
 | Area | Hosted | Enterprise | Status |
 |---|---|---|---|
 | Sites: deploy, versions, rollback, delete | tar.gz/zip or inline JSON files; `KEEP_VERSIONS`; rollback; delete | tar.gz or MCP file list, `If-Match` ETags; 5 versions kept; rollback; delete | `same` |
-| Site rename | `PATCH /v1/sites/{s}`, `rename_site` | none | `gap → enterprise` |
+| Site rename | `PATCH /v1/sites/{s}`, `rename_site`; old address 404s | `POST .../rename`, `rename_site`, dashboard; old address redirects until the name is reused | `gap → hosted` — the old address should redirect |
+| Hand a site to another owner | none | `POST .../transfer`, `transfer_site`, dashboard; admin moves a leaver's or abandoned team's sites; old address redirects | `different on purpose` — hosted has no teams or company leavers |
 | Site export with saved data | `export.tar.gz` (files + state + collections) | version archive download only (files, no saved data) | `gap → enterprise` |
 | Per-site hosts `<site>.<owner>.<domain>` | live 2026-09-26; path fallback until the owner's wildcard cert exists | v1.3 2026-09-26; same fallback | `same` |
 | Per-owner certificates | root issuer, certbot DNS-01, 40/week 12/day cap | `owner-hosts` reconciler → cert-manager Ingress per owner | `different on purpose` — box vs cluster tooling |
@@ -105,7 +106,7 @@ Every numbered `FEATURES.md` section, per repo, and the rows above that cover it
 | enterprise | API keys (CI and automation) | API keys rows |
 | enterprise | MCP server, OAuth connector, plugin.zip | MCP connector; Connector token lifetime; Skills and plugin |
 | enterprise | Skills bundle and skill-version gate | Skills and plugin |
-| enterprise | Sites: deploy, versions, rollback, delete | Sites; Site rename; Site export; Per-site hosts; Quotas; Malware scan |
+| enterprise | Sites: deploy, versions, rollback, delete | Sites; Site rename; Hand a site to another owner; Site export; Per-site hosts; Quotas; Malware scan |
 | enterprise | Bucket storage, cache, retire sweep, migrate-storage, restore and reencrypt | Storage backend |
 | enterprise | Access levels and network approval | Who can open a site |
 | enterprise | Named viewers (restricted sites) | Who can open a site |

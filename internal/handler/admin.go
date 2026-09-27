@@ -34,6 +34,9 @@ type AdminHandler struct {
 	auditReader *audit.Reader
 	// networkApprovals is NETWORK_ACCESS_APPROVALS (see access.go).
 	networkApprovals int
+	// quota bounds what an admin's move of a leaver's sites may add to the
+	// destination (admin_move.go).
+	quota UploadQuota
 }
 
 // WithAuditReader attaches the reader GET /api/admin/export streams from.
@@ -166,6 +169,7 @@ func (h *AdminHandler) Register(mux *http.ServeMux, authMiddleware, skillVersion
 	mux.Handle("POST /api/admin/teams/{team}/delete", dashboardCheck(adminAPI(http.HandlerFunc(h.deleteOrphanTeam))))
 	mux.Handle("GET /api/admin/export", adminAPI(http.HandlerFunc(h.exportAuditOrAccess)))
 	h.registerAccessRequestRoutes(mux, adminAPI, dashboardCheck)
+	h.registerMoveRoutes(mux, adminAPI, dashboardCheck)
 }
 
 // requireAdmin is auth.RequireAdmin plus an access_denied audit row when a
@@ -528,6 +532,7 @@ func writeUserBlockHeader(b *strings.Builder, hosts HostModel, u db.User, siteCo
 		// any active member can leave or delete it themselves.
 		if u.ActiveMemberCount == 0 {
 			nameChips += ` <span class="chip chip-warn">no active members</span>`
+			actions += leaverSiteActions(u.Username, siteCount, false)
 			actions += fmt.Sprintf(`<form method="POST" action="/api/admin/teams/%s/delete" onsubmit="return confirm('Delete team %s and its %s? Nobody in it can sign in any more. This cannot be undone.');"><button type="submit" class="btn-reset">Delete team</button></form>`,
 				html.EscapeString(u.Username),
 				html.EscapeString(u.Username),
@@ -536,6 +541,7 @@ func writeUserBlockHeader(b *strings.Builder, hosts HostModel, u db.User, siteCo
 		}
 	} else if u.DisabledAt != nil {
 		nameChips = ` <span class="chip chip-warn">disabled</span>`
+		actions += leaverSiteActions(u.Username, siteCount, true)
 		actions += fmt.Sprintf(`<form method="POST" action="/api/admin/users/%s/enable" onsubmit="return confirm('Re-enable %s? They will be able to sign in again.');"><button type="submit" class="btn-reset">Enable</button></form>`,
 			html.EscapeString(u.Username),
 			html.EscapeString(u.Username),
@@ -565,6 +571,25 @@ func writeUserBlockHeader(b *strings.Builder, hosts HostModel, u db.User, siteCo
 		pluralize(siteCount, "1 site", fmt.Sprintf("%d sites", siteCount)),
 		actions,
 	)
+}
+
+// leaverSiteActions are the header actions for a namespace nobody can act on
+// any more (a disabled person, a team with no active member): move every
+// site to a team (or a person), and, for a person, delete them. A team's
+// sites go with "Delete team". Nothing when there are no sites.
+func leaverSiteActions(username string, siteCount int, person bool) string {
+	if siteCount == 0 {
+		return ""
+	}
+	name := html.EscapeString(username)
+	sites := pluralize(siteCount, "1 site", fmt.Sprintf("%d sites", siteCount))
+	actions := fmt.Sprintf(`<form method="POST" action="/api/admin/users/%s/transfer-sites" onsubmit="var t = prompt('Move %s of %s to which team? (A person who can sign in works too.) Files, saved data, access and viewers go with them, and the old addresses redirect.'); if (!t) return false; this.elements.to.value = t; return true;"><input type="hidden" name="to"><button type="submit" class="btn-reset">Move to team…</button></form>`,
+		name, sites, name)
+	if person {
+		actions += fmt.Sprintf(`<form method="POST" action="/api/admin/users/%s/delete-sites" onsubmit="return confirm('Delete %s of %s permanently, with their saved data? This cannot be undone.');"><button type="submit" class="btn-reset">Delete sites</button></form>`,
+			name, sites, name)
+	}
+	return actions
 }
 
 // writeSiteRow emits one row of a site list. The grouped list under each user

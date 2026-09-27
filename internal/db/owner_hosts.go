@@ -13,11 +13,15 @@ func ReadyOwnerLabels(ctx context.Context, q Querier) ([]string, error) {
 }
 
 // OwnerLabelsWithSites lists the host label of every account or team that
-// owns at least one site: the owners that need a certificate of their own.
+// owns at least one site, and every owner label a moved or renamed site
+// still redirects from (site_redirects): the owners that need a certificate
+// of their own, so an old address keeps answering over TLS.
 func OwnerLabelsWithSites(ctx context.Context, q Querier) ([]string, error) {
 	return queryStrings(ctx, q, `
-		SELECT DISTINCT lower(replace(u.username, '.', '-'))
+		SELECT lower(replace(u.username, '.', '-'))
 		FROM users u JOIN sites s ON s.user_id = u.id
+		UNION
+		SELECT owner_label FROM site_redirects
 		ORDER BY 1`)
 }
 

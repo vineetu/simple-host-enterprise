@@ -626,6 +626,96 @@ paths:
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
+  /api/sites/{sitename}/transfer:
+    post:
+      summary: Hand a site to a team or another person
+      description: Moves one of the caller's own sites to a team the caller is in or to any person who can still sign in. Versions, saved data and its history, assets, access level and viewers move with it; the old address redirects (301, or 308 for other methods, path and query kept) to the new one until a site takes the old name again. Full-scope key or session. Audited as `site_transfer` with `from` and `to`.
+      tags: [Sites]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/sitename'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to]
+              properties:
+                to:
+                  type: string
+                  description: A team the caller is in (`team-sales`; `sales` also finds it), or a person's exact username.
+      responses:
+        '200':
+          description: Moved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteMove'
+        '400':
+          $ref: '#/components/responses/ManagementBadRequest'
+        '404':
+          description: No such site, or `destination_not_found` (no such person, or a team the caller is not in)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: '`name_conflict` (the receiver has a site by that name), `destination_inactive` (a disabled person, or a team nobody in can sign in), or `site_limit`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: '`storage_quota`: the receiver has no room'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/sites/{sitename}/rename:
+    post:
+      summary: Rename a site
+      description: Gives one of the caller's own sites a new name, and so a new address; everything else stays. The old address redirects to the new one until a site takes the old name again. Full-scope key or session. Audited as `site_rename`.
+      tags: [Sites]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/sitename'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  description: Lowercase letters, numbers and hyphens, starting and ending with a letter or number, at most 63 characters.
+      responses:
+        '200':
+          description: Renamed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteMove'
+        '400':
+          $ref: '#/components/responses/ManagementBadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`name_conflict`: the owner already has a site by that name'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/collaboration/sites:
     get:
       summary: List owned and team sites
@@ -1094,6 +1184,98 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+
+  /api/collaboration/sites/{owner}/{sitename}/transfer:
+    post:
+      summary: Hand a site to a team or another person
+      description: Moves the named owner's site (a person or team the caller is, or is in) to a team the caller is in or to any person who can still sign in. Versions, saved data and its history, assets, access level and viewers move with it; the old address redirects (301, or 308 for other methods, path and query kept) to the new one until a site takes the old name again. Full-scope key or session. Audited as `site_transfer` with `from` and `to`.
+      tags: [Sites]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to]
+              properties:
+                to:
+                  type: string
+                  description: A team the caller is in (`team-sales`; `sales` also finds it), or a person's exact username.
+      responses:
+        '200':
+          description: Moved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteMove'
+        '400':
+          $ref: '#/components/responses/ManagementBadRequest'
+        '404':
+          description: No such site, or `destination_not_found` (no such person, or a team the caller is not in)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: '`name_conflict` (the receiver has a site by that name), `destination_inactive` (a disabled person, or a team nobody in can sign in), or `site_limit`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: '`storage_quota`: the receiver has no room'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/collaboration/sites/{owner}/{sitename}/rename:
+    post:
+      summary: Rename a site
+      description: Gives the named owner's site (a person or team the caller is, or is in) a new name, and so a new address; everything else stays. The old address redirects to the new one until a site takes the old name again. Full-scope key or session. Audited as `site_rename`.
+      tags: [Sites]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  description: Lowercase letters, numbers and hyphens, starting and ending with a letter or number, at most 63 characters.
+      responses:
+        '200':
+          description: Renamed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SiteMove'
+        '400':
+          $ref: '#/components/responses/ManagementBadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`name_conflict`: the owner already has a site by that name'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/access:
     get:
@@ -1787,6 +1969,66 @@ paths:
         '409':
           description: The team still has an active member
 
+  /api/admin/sites/{owner}/{sitename}/transfer:
+    post:
+      summary: Move one site of a leaver or an abandoned team
+      description: Admin only, browser session only. The owner must be a disabled person or a team none of whose members can sign in (`409` otherwise; they hand their own sites over). Form or JSON field `to`, any team somebody can act on or any person who can sign in. Same move, redirect and refusals as the owner's transfer; audited as `site_transfer` with `by_admin`.
+      tags: [Admin]
+      parameters:
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+      responses:
+        '200':
+          description: Moved
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The owner can still act on the site, the name is taken at the destination, or the destination is inactive or full
+
+  /api/admin/users/{username}/transfer-sites:
+    post:
+      summary: Move every site of a leaver or an abandoned team
+      description: As the single-site move, for all of the owner's sites in one transaction, all or none.
+      tags: [Admin]
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Moved
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The owner can still act on the sites, a name is taken at the destination, or the destination is inactive or full
+
+  /api/admin/users/{username}/delete-sites:
+    post:
+      summary: Delete every site of a leaver or an abandoned team
+      description: Admin only, browser session only. Deletes each site as its owner's delete would (files retired after the grace period, audited as `site_delete` with `by_admin`). `409` while the owner can still sign in, or the team still has an active member.
+      tags: [Admin]
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The owner can still act on the sites
+
 components:
   headers:
     LatestSkillVersion:
@@ -2377,6 +2619,27 @@ components:
           type: string
           enum: [/install.html]
 
+    SiteMove:
+      type: object
+      required: [owner, name, url, previous_owner, previous_name, previous_url, previous_url_status]
+      properties:
+        owner:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
+          description: The site's address now.
+        previous_owner:
+          type: string
+        previous_name:
+          type: string
+        previous_url:
+          type: string
+          description: The address it had, which now redirects to `url`.
+        previous_url_status:
+          type: string
+          enum: [redirects]
     Error:
       type: object
       properties:

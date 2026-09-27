@@ -807,6 +807,68 @@ func toolList() []Tool {
 			},
 		},
 		{
+			Name:  "transfer_site",
+			Title: "Hand a site to a team or a person",
+			Description: "Move a site to another owner: a team you are in, or any person who can sign in (to hand a leaver's work on, or to put your own site into your team). " +
+				"Everything moves with it: every version, its saved data and that data's history, uploaded files, who can open it and its named viewers. Only the owner, and so the address, changes: " +
+				"the site's new address is `url` in the response, and the old one (`previous_url`) redirects to it until a site takes the old name again. " +
+				"Works on a site you own and on a site owned by a team you are in. Refused with `name_conflict` when the receiver already has a site by that name (rename_site one of them first), and with `site_limit` or `storage_quota` when the receiver has no room. " +
+				"When leaving a team would delete it, move the sites worth keeping first with this tool. Confirm the receiver with the user before calling; a person receiving a site can then do anything with it, including delete it.",
+			InputSchema: object(map[string]any{
+				"site":  str(siteArgDesc),
+				"owner": str(ownerArgDesc + " Omit only for a site in your own account."),
+				"to":    str("Who receives the site: a team you are in (`team-sales`; `sales` also finds it) or a person's exact username (find_users or find_team_members turns a name into one)."),
+			}, "site", "to"),
+			Annotations: writes(false, false),
+			family:      familySite,
+			call: func(args map[string]any) (upstream, error) {
+				ownerScoped, collaboration, err := siteRoute(args, "transfer")
+				if err != nil {
+					return upstream{}, err
+				}
+				to, err := stringArg(args, "to")
+				if err != nil {
+					return upstream{}, err
+				}
+				body, _ := json.Marshal(map[string]any{"to": to})
+				path := ownerScoped
+				if collaboration != "" {
+					path = collaboration
+				}
+				return upstream{Method: "POST", Path: path, Body: body, ContentType: "application/json"}, nil
+			},
+		},
+		{
+			Name:  "rename_site",
+			Title: "Rename a site",
+			Description: "Give a site a new name, and so a new address. Everything stays: versions, saved data and its history, uploaded files, who can open it. " +
+				"The new address is `url` in the response; the old one (`previous_url`) redirects to it until a site takes the old name again. " +
+				"Works on a site you own and on a site owned by a team you are in. Refused with `name_conflict` when the owner already has a site by that name.",
+			InputSchema: object(map[string]any{
+				"site":  str(siteArgDesc),
+				"owner": str(ownerArgDesc + " Omit only for a site in your own account."),
+				"name":  str("The new name: lowercase letters, numbers and hyphens, starting and ending with a letter or number, at most 63 characters. It becomes the site's address."),
+			}, "site", "name"),
+			Annotations: writes(false, true),
+			family:      familySite,
+			call: func(args map[string]any) (upstream, error) {
+				ownerScoped, collaboration, err := siteRoute(args, "rename")
+				if err != nil {
+					return upstream{}, err
+				}
+				name, err := stringArg(args, "name")
+				if err != nil {
+					return upstream{}, err
+				}
+				body, _ := json.Marshal(map[string]any{"name": name})
+				path := ownerScoped
+				if collaboration != "" {
+					path = collaboration
+				}
+				return upstream{Method: "POST", Path: path, Body: body, ContentType: "application/json"}, nil
+			},
+		},
+		{
 			Name:  "create_team",
 			Title: "Create a team",
 			Description: "Create a team. A team is a namespace that owns sites exactly as a person does, but it is not a person: it has no API key, and its members act with their own. " +
@@ -971,7 +1033,7 @@ func toolList() []Tool {
 			Title: "Leave a team",
 			Description: "Take the user out of a team. They lose access to every site the team owns at once. " +
 				"If nobody who can still sign in would be left, leaving deletes the team and every site it owns: the first call without confirm_name is refused with how many sites that is. " +
-				"Tell the user that number and ask; only if they agree, call again with confirm_name. Call this only when the user asks to leave.",
+				"Tell the user that number and ask; offer to keep sites by moving them first with transfer_site (to another team they are in, or to a person). Only if they agree to the delete, call again with confirm_name. Call this only when the user asks to leave.",
 			InputSchema: object(map[string]any{
 				"team":         str(teamArgDesc),
 				"confirm_name": str("Only when leaving deletes the team: the team's name typed again, exactly as in `team`, after the user agreed. Otherwise omit it."),

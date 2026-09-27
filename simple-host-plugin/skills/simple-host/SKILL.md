@@ -191,7 +191,7 @@ References are one level deep. Read each selected file completely before acting.
 | Install or update skills | [`references/updating.md`](references/updating.md) |
 | Sign in and get a key | [`references/account-recovery.md`](references/account-recovery.md) |
 | Edit, download, roll back, delete, share, or restore saved data of an existing site | [`references/collaboration.md`](references/collaboration.md) |
-| Create, list, join, leave, or delete a team | [`references/teams.md`](references/teams.md) |
+| Create, list, join, leave, or delete a team; rename a site or hand it to a team or another person | [`references/teams.md`](references/teams.md) |
 | Detect and build a framework with relative paths | [`references/frameworks.md`](references/frameworks.md) |
 | Validate, package, upload, and verify a site | [`references/packaging-and-validation.md`](references/packaging-and-validation.md) |
 | Add state, search, or AI/browser capabilities | [`references/state-and-ai.md`](references/state-and-ai.md) |

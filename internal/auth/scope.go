@@ -61,12 +61,16 @@ var routeKeyAccess = map[string]keyAccess{
 	"GET /mcp":     keyPublish,
 	"DELETE /mcp":  keyPublish,
 
-	// Full only: deleting a site, who can open it, viewers, teams, the
+	// Full only: deleting, handing over or renaming a site, who can open it, viewers, teams, the
 	// audit and access logs, search. A key on the audit and access logs
 	// sees only its owner's own namespace and teams, even an admin's: the
 	// company-wide view needs a browser session (handler/audit_access.go).
 	"DELETE /api/sites/{sitename}":                                          keyFull,
 	"DELETE /api/collaboration/sites/{owner}/{sitename}":                    keyFull,
+	"POST /api/sites/{sitename}/transfer":                                   keyFull,
+	"POST /api/collaboration/sites/{owner}/{sitename}/transfer":             keyFull,
+	"POST /api/sites/{sitename}/rename":                                     keyFull,
+	"POST /api/collaboration/sites/{owner}/{sitename}/rename":               keyFull,
 	"POST /api/sites/{sitename}/access":                                     keyFull,
 	"POST /api/collaboration/sites/{owner}/{sitename}/access":               keyFull,
 	"GET /api/collaboration/sites/{owner}/{sitename}/viewers":               keyFull,
@@ -105,6 +109,9 @@ var routeKeyAccess = map[string]keyAccess{
 	"POST /api/admin/users/{username}/disable":                   keyNever,
 	"POST /api/admin/users/{username}/enable":                    keyNever,
 	"POST /api/admin/teams/{team}/delete":                        keyNever,
+	"POST /api/admin/sites/{owner}/{sitename}/transfer":          keyNever,
+	"POST /api/admin/users/{username}/transfer-sites":            keyNever,
+	"POST /api/admin/users/{username}/delete-sites":              keyNever,
 	"GET /api/admin/export":                                      keyNever,
 	"POST /api/admin/access-requests/{owner}/{sitename}/approve": keyNever,
 	"POST /api/admin/access-requests/{owner}/{sitename}/decline": keyNever,

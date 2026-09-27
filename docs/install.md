@@ -623,8 +623,11 @@ One known gap, flagged rather than silently left: `/api/audit`'s
 `actor_id`/`owner_id`/`site_id` fields are not resolved back to
 usernames/site names, so the dashboard's Activity tab shows raw ids for
 those columns (the action, timestamp, and `via_site_label`/`via_site_name`
-carry most of the practical signal). There is no site-transfer feature and
-no per-site write-mode setting, so neither has an audit action.
+carry most of the practical signal). Handing a site over and renaming it
+are audited as `site_transfer` and `site_rename` (recorded against the
+receiving owner, with `from`, `to`, `from_name` and `name`; `by_admin` when an
+admin moved a leaver's sites). There is no per-site write-mode setting, so it
+has no audit action.
 
 ## 9. Backup and restore
 

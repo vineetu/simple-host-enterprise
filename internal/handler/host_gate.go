@@ -98,6 +98,9 @@ type hostGate struct {
 	// legacyTeam is db.LegacyTeamName by default: which team a pre-v1.3
 	// team address now belongs to. nil redirects nothing.
 	legacyTeam func(r *http.Request, label string) (string, bool, error)
+	// movedSite is db.SiteRedirect by default: where a site handed over or
+	// renamed away from an address now lives. nil redirects nothing.
+	movedSite func(r *http.Request, address db.SiteAddress) (owner, site string, ok bool, err error)
 	// ownerIndex backs the root of an owner host (owner_index.go), wired in
 	// NewHostGate from the database and factored into a field for the same
 	// reason as siteForServing above.
@@ -153,6 +156,9 @@ func NewHostGate(hosts HostModel, files *SiteFiles, database *sql.DB, signingKey
 		ownerIndex: newOwnerIndexData(database),
 		legacyTeam: func(r *http.Request, label string) (string, bool, error) {
 			return db.LegacyTeamName(r.Context(), database, label)
+		},
+		movedSite: func(r *http.Request, address db.SiteAddress) (string, string, bool, error) {
+			return db.SiteRedirect(r.Context(), database, address)
 		},
 		recordAccess: func(event audit.AccessEvent) {
 			if files != nil {
@@ -313,7 +319,9 @@ func (g *hostGate) serveOwnerPath(w http.ResponseWriter, r *http.Request, label,
 		}
 		owner, ok := g.resolveOwner(label, siteFromPath)
 		if !ok {
-			http.NotFound(w, r)
+			if !g.redirectMovedSite(w, r, label, siteHostPart(siteFromPath), r.URL.EscapedPath()) {
+				http.NotFound(w, r)
+			}
 			return
 		}
 		g.serveSiteAPI(w, r, route, owner, siteFromPath, assetID, label)
@@ -327,7 +335,10 @@ func (g *hostGate) serveOwnerPath(w http.ResponseWriter, r *http.Request, label,
 	}
 	owner, ok := g.resolveOwner(label, sitename)
 	if !ok {
-		http.NotFound(w, r)
+		_, rest, _ := strings.Cut(strings.TrimPrefix(r.URL.EscapedPath(), "/"), "/")
+		if !g.redirectMovedSite(w, r, label, siteHostPart(sitename), "/"+rest) {
+			http.NotFound(w, r)
+		}
 		return
 	}
 	siteID, restricted, err := g.siteForServing(r, owner, sitename)
@@ -378,14 +389,16 @@ func (g *hostGate) serveLegacySiteHost(w http.ResponseWriter, r *http.Request, l
 		http.NotFound(w, r)
 		return
 	}
-	owner, ok := g.resolveLabelHolder(g.currentOwnerLabel(r, ownerPart))
-	if !ok {
-		http.NotFound(w, r)
-		return
+	current := g.currentOwnerLabel(r, ownerPart)
+	owner, ok := g.resolveLabelHolder(current)
+	var sitename string
+	if ok {
+		sitename, ok = g.resolveSiteName(owner, sitePart)
 	}
-	sitename, ok := g.resolveSiteName(owner, sitePart)
 	if !ok {
-		http.NotFound(w, r)
+		if !g.redirectMovedSite(w, r, current, sitePart, r.URL.EscapedPath()) {
+			http.NotFound(w, r)
+		}
 		return
 	}
 	location := g.hosts.SiteURL(owner, sitename)
@@ -425,6 +438,56 @@ func (g *hostGate) currentOwnerLabel(r *http.Request, label string) string {
 		return ownerLabel(team)
 	}
 	return label
+}
+
+// redirectMovedSite answers an address no live site holds, when a site that
+// was handed over or renamed used to (db.SiteRedirect): the same request on
+// the site's current address, rest being the path beneath the site's root.
+// A site-API path is carried over in the shape the new address serves. It
+// reports whether it wrote a response; false leaves the caller's 404.
+//
+// Unlike the pre-v1.3 redirects this one does read the database, and so
+// confirms that a site moved from the address to the one it names; both
+// addresses still demand whatever sign-in the site's access level does.
+func (g *hostGate) redirectMovedSite(w http.ResponseWriter, r *http.Request, ownerLbl, sitePart, rest string) bool {
+	if g.movedSite == nil {
+		return false
+	}
+	owner, site, ok, err := g.movedSite(r, db.SiteAddress{OwnerLabel: ownerLbl, SitePart: sitePart})
+	if err != nil {
+		log.Printf("host gate: moved site lookup %s.%s: %v", sitePart, ownerLbl, err)
+		return false
+	}
+	if !ok {
+		return false
+	}
+	location := g.hosts.SiteURL(owner, site)
+	if location == "" {
+		return false
+	}
+	rest = strings.TrimPrefix(rest, "/")
+	if after, named := strings.CutPrefix(rest, "api/sites/"); named {
+		// The old name is not the site's name any more; the nameless shape
+		// names whichever site the host serves.
+		if _, suffix, ok := strings.Cut(after, "/"); ok {
+			rest = "api/site/" + suffix
+		}
+	}
+	if suffix, nameless := strings.CutPrefix(rest, "api/site/"); nameless && !g.hosts.OwnerReady(ownerLabel(owner)) {
+		// The owner path serves only the named API shape.
+		location = g.hosts.OwnerOrigin(ownerLabel(owner)) + "/"
+		rest = "api/sites/" + neturl.PathEscape(site) + "/" + suffix
+	}
+	location += rest
+	if r.URL.RawQuery != "" {
+		location += "?" + r.URL.RawQuery
+	}
+	code := http.StatusMovedPermanently
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		code = http.StatusPermanentRedirect
+	}
+	http.Redirect(w, r, location, code)
+	return true
 }
 
 // redirectToHost sends the request to hostLabel's host with escapedPath and
@@ -468,13 +531,16 @@ func (g *hostGate) serveSiteHost(w http.ResponseWriter, r *http.Request, label s
 		return
 	}
 	owner, ok := g.resolveLabelHolder(ownerLabelPart)
-	if !ok {
-		http.NotFound(w, r)
-		return
+	var sitename string
+	if ok {
+		sitename, ok = g.resolveSiteName(owner, sitePart)
 	}
-	sitename, ok := g.resolveSiteName(owner, sitePart)
 	if !ok {
-		http.NotFound(w, r)
+		// Nothing lives here now. A site handed over or renamed away from
+		// this address is sent on to where it is, path and query kept.
+		if !g.redirectMovedSite(w, r, ownerLabelPart, sitePart, r.URL.EscapedPath()) {
+			http.NotFound(w, r)
+		}
 		return
 	}
 
