@@ -319,7 +319,7 @@ func (g *hostGate) serveOwnerPath(w http.ResponseWriter, r *http.Request, label,
 		}
 		owner, ok := g.resolveOwner(label, siteFromPath)
 		if !ok {
-			if !g.redirectMovedSite(w, r, label, siteHostPart(siteFromPath), r.URL.EscapedPath()) {
+			if !g.redirectMovedSite(w, r, requestHost, label, siteHostPart(siteFromPath), r.URL.EscapedPath()) {
 				http.NotFound(w, r)
 			}
 			return
@@ -336,7 +336,7 @@ func (g *hostGate) serveOwnerPath(w http.ResponseWriter, r *http.Request, label,
 	owner, ok := g.resolveOwner(label, sitename)
 	if !ok {
 		_, rest, _ := strings.Cut(strings.TrimPrefix(r.URL.EscapedPath(), "/"), "/")
-		if !g.redirectMovedSite(w, r, label, siteHostPart(sitename), "/"+rest) {
+		if !g.redirectMovedSite(w, r, requestHost, label, siteHostPart(sitename), "/"+rest) {
 			http.NotFound(w, r)
 		}
 		return
@@ -396,9 +396,24 @@ func (g *hostGate) serveLegacySiteHost(w http.ResponseWriter, r *http.Request, l
 		sitename, ok = g.resolveSiteName(owner, sitePart)
 	}
 	if !ok {
-		if !g.redirectMovedSite(w, r, current, sitePart, r.URL.EscapedPath()) {
+		// A site that moved away from this address: send the request to the
+		// current shape of the same address (built from the request, so it
+		// names nothing new), where the site host's own gate decides whether
+		// this caller may learn where it went (redirectMovedSite). This host
+		// cannot sign anybody in itself.
+		host := sitePart + "." + current
+		if g.movedSite == nil || !g.hosts.OwnerReady(current) || len(host)+1+len(g.hosts.BaseHost()) > maxHostLen {
 			http.NotFound(w, r)
+			return
 		}
+		if _, _, moved, err := g.movedSite(r, db.SiteAddress{OwnerLabel: current, SitePart: sitePart}); err != nil || !moved {
+			if err != nil {
+				log.Printf("host gate: moved site lookup %s.%s: %v", sitePart, current, err)
+			}
+			http.NotFound(w, r)
+			return
+		}
+		g.redirectToHost(w, r, host, r.URL.EscapedPath())
 		return
 	}
 	location := g.hosts.SiteURL(owner, sitename)
@@ -446,10 +461,15 @@ func (g *hostGate) currentOwnerLabel(r *http.Request, label string) string {
 // A site-API path is carried over in the shape the new address serves. It
 // reports whether it wrote a response; false leaves the caller's 404.
 //
-// Unlike the pre-v1.3 redirects this one does read the database, and so
-// confirms that a site moved from the address to the one it names; both
-// addresses still demand whatever sign-in the site's access level does.
-func (g *hostGate) redirectMovedSite(w http.ResponseWriter, r *http.Request, ownerLbl, sitePart, rest string) bool {
+// Unlike the pre-v1.3 redirects this one reads the database, and the
+// Location names the site's new owner and name, so it is given only to
+// somebody who could open the site there: anyone while an admin has it open
+// to the network, otherwise a caller signed in on this host (or carrying a
+// key) whom the site's access rule admits. A caller with no identity yet is
+// sent through the usual sign-in on this host first (a navigation) and
+// asked again; everyone else gets false, the same 404 as an address nothing
+// ever held.
+func (g *hostGate) redirectMovedSite(w http.ResponseWriter, r *http.Request, requestHost, ownerLbl, sitePart, rest string) bool {
 	if g.movedSite == nil {
 		return false
 	}
@@ -460,6 +480,9 @@ func (g *hostGate) redirectMovedSite(w http.ResponseWriter, r *http.Request, own
 	}
 	if !ok {
 		return false
+	}
+	if follow, wrote := g.mayFollowMovedSite(w, r, requestHost, owner, site); !follow {
+		return wrote
 	}
 	location := g.hosts.SiteURL(owner, site)
 	if location == "" {
@@ -489,6 +512,70 @@ func (g *hostGate) redirectMovedSite(w http.ResponseWriter, r *http.Request, own
 	http.Redirect(w, r, location, code)
 	return true
 }
+
+// mayFollowMovedSite decides whether the caller may learn where a moved site
+// went (see redirectMovedSite). wrote reports that it answered the request
+// itself (the sign-in hand-off).
+func (g *hostGate) mayFollowMovedSite(w http.ResponseWriter, r *http.Request, requestHost, owner, site string) (follow, wrote bool) {
+	siteID, _, err := g.siteForServing(r, owner, site)
+	if err != nil {
+		if err != db.ErrSiteNotFound {
+			log.Printf("host gate: resolve moved site %s/%s: %v", owner, site, err)
+		}
+		return false, false
+	}
+	if userID := g.redirectViewer(r, requestHost); userID != "" {
+		allowed, err := g.viewerAllowed(r, siteID, userID)
+		if err != nil {
+			log.Printf("host gate: viewer allowed check for moved site %s: %v", siteID, err)
+			return false, false
+		}
+		return allowed, false
+	}
+	if g.networkOpen != nil {
+		open, err := g.networkOpen(r, siteID)
+		if err != nil {
+			log.Printf("host gate: network access check for moved site %s: %v", siteID, err)
+			return false, false
+		}
+		if open {
+			return true, false
+		}
+	}
+	if wantsNavigation(r) && g.handoff != nil {
+		g.handoff.beginHandoff(w, r, requestHost)
+		return false, true
+	}
+	return false, false
+}
+
+// redirectViewer is who is asking, for mayFollowMovedSite: the host
+// session's user, or the user of a key or token the request carries (a
+// script or agent calling the site API at an old address). "" when neither.
+func (g *hostGate) redirectViewer(r *http.Request, requestHost string) string {
+	if uid, _, valid := g.validHostSession(r, requestHost); valid {
+		return uid
+	}
+	_, hasBearer := auth.BearerToken(r)
+	if (r.Header.Get("X-API-Key") == "" && !hasBearer) || g.authMiddleware == nil {
+		return ""
+	}
+	var userID string
+	g.authMiddleware(http.HandlerFunc(func(_ http.ResponseWriter, ar *http.Request) {
+		if user := auth.GetUser(ar.Context()); user != nil {
+			userID = user.ID
+		}
+	})).ServeHTTP(discardResponse{}, r.WithContext(auth.WithSiteAPI(auth.WithExpectedSessionHost(r.Context(), requestHost))))
+	return userID
+}
+
+// discardResponse swallows what an authentication middleware would have
+// written, for a check whose refusal is answered by the caller.
+type discardResponse struct{}
+
+func (discardResponse) Header() http.Header         { return http.Header{} }
+func (discardResponse) Write(b []byte) (int, error) { return len(b), nil }
+func (discardResponse) WriteHeader(int)             {}
 
 // redirectToHost sends the request to hostLabel's host with escapedPath and
 // the original query. A navigation or a read is a 301; anything else is a
@@ -538,7 +625,7 @@ func (g *hostGate) serveSiteHost(w http.ResponseWriter, r *http.Request, label s
 	if !ok {
 		// Nothing lives here now. A site handed over or renamed away from
 		// this address is sent on to where it is, path and query kept.
-		if !g.redirectMovedSite(w, r, ownerLabelPart, sitePart, r.URL.EscapedPath()) {
+		if !g.redirectMovedSite(w, r, requestHost, ownerLabelPart, sitePart, r.URL.EscapedPath()) {
 			http.NotFound(w, r)
 		}
 		return

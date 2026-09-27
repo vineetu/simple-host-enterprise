@@ -119,19 +119,23 @@ Removing someone ends their access to every site in the namespace. It does not
 undo content they deployed; offer rollback separately if that is what the user
 means.
 
-### Hand a site over
+### Move a site into a team
 
 ```
 POST /api/collaboration/sites/<owner>/<site>/transfer   {"to": "team-sales"}
 ```
 
-Moves a site to a team the caller is in, or to any person who can still sign
-in (`to` is their exact username). Its versions, saved data and history,
-uploads, access level (an admin's restriction included) and viewers all go
-with it; only the owner, and so the
-address, changes. The response carries the new `url` and `previous_url`; the old
-address redirects to the new one until a site takes the old name again. `404`
-`destination_not_found` means no such person or team you are in; `409`
+Moves a site into a team the caller is in: their own site into their team, or
+a team's site into another team they also belong to. A site cannot be handed
+to a person; an admin moves a leaver's sites. Its versions, saved data and
+history, uploads, access level and viewers all go with it, except network
+access, which the new owner requests again (the site drops to `company`);
+only the owner, and so the address, changes. The response carries the new
+`url` and `previous_url`; the old address redirects to the new one, for people
+who can open the site, until a site takes the old name again. `404`
+`destination_not_found` means no team you are in has that name; `409`
+`site_restricted_by_admin` means an admin restricted the site (quote the
+`reason`; only an admin lifts it, and rename is refused the same way); `409`
 `name_conflict` means the receiver already has a site by that name (rename one
 with `POST .../rename {"name": "..."}` first); `409` `name_held` means a
 recently deleted site of the receiver still holds the name (restore it or pick
@@ -142,7 +146,7 @@ another name); a recently deleted site itself is `404` until restored; `409`
 
 When leaving would delete a team, the `409 confirm_team_delete` says so and
 offers this: move the sites worth keeping first (to another team the person is
-in, or to the person), then leave. Ask which sites to keep.
+in), then leave. Ask which sites to keep.
 
 ### Delete
 
@@ -174,7 +178,9 @@ exactly as returned.
   owns it: add him to that team (say how many sites that covers), or, for a
   personal site, offer to publish it under a team he is in. To open it, add him
   as a viewer.
-- "Move my site to the team" is a transfer (see "Hand a site over" below). Confirm
-  the team, move it, and report the new `url`; the old address redirects.
+- "Move my site to the team" is a transfer (see "Move a site into a team"
+  below). Confirm the team, move it, and report the new `url`; the old
+  address redirects. "Give my site to Bob" cannot be done: a site moves only
+  into a team; offer a team Bob and the user are both in.
 - A name that is close but not exact — "deploy this to acme" when the team is
   `team-acme-ai` — is not a match. Show the list and ask. Never create `team-acme`.

@@ -2,7 +2,6 @@ package handler
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
@@ -514,6 +513,7 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 	b.WriteString(`</main>`)
 	b.WriteString(adminListScript)
 	b.WriteString(adminActivityScript)
+	b.WriteString(adminFormScript)
 	b.WriteString(`</body></html>`)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -539,24 +539,19 @@ func writeUserBlockHeader(b *strings.Builder, hosts HostModel, u db.User, siteCo
 		if u.ActiveMemberCount == 0 {
 			nameChips += ` <span class="chip chip-warn">no active members</span>`
 			actions += leaverSiteActions(u.Username, siteCount, false)
-			actions += fmt.Sprintf(`<form method="POST" action="/api/admin/teams/%s/delete" onsubmit="return confirm('Delete team %s and its %s? Nobody in it can sign in any more. This cannot be undone.');"><button type="submit" class="btn-reset">Delete team</button></form>`,
-				html.EscapeString(u.Username),
-				html.EscapeString(u.Username),
-				pluralize(siteCount, "1 site", fmt.Sprintf("%d sites", siteCount)),
-			)
+			actions += confirmForm("/api/admin/teams/"+url.PathEscape(u.Username)+"/delete",
+				fmt.Sprintf("Delete team %s and its %s? Nobody in it can sign in any more. This cannot be undone.",
+					u.Username, pluralize(siteCount, "1 site", fmt.Sprintf("%d sites", siteCount))),
+				"Delete team")
 		}
 	} else if u.DisabledAt != nil {
 		nameChips = ` <span class="chip chip-warn">disabled</span>`
 		actions += leaverSiteActions(u.Username, siteCount, true)
-		actions += fmt.Sprintf(`<form method="POST" action="/api/admin/users/%s/enable" onsubmit="return confirm('Re-enable %s? They will be able to sign in again.');"><button type="submit" class="btn-reset">Enable</button></form>`,
-			html.EscapeString(u.Username),
-			html.EscapeString(u.Username),
-		)
+		actions += confirmForm("/api/admin/users/"+url.PathEscape(u.Username)+"/enable",
+			fmt.Sprintf("Re-enable %s? They will be able to sign in again.", u.Username), "Enable")
 	} else {
-		actions += fmt.Sprintf(`<form method="POST" action="/api/admin/users/%s/disable" onsubmit="return confirm('Disable %s? Their sessions and API keys are revoked immediately and they cannot sign in again until re-enabled. Their sites keep serving.');"><button type="submit" class="btn-reset">Disable</button></form>`,
-			html.EscapeString(u.Username),
-			html.EscapeString(u.Username),
-		)
+		actions += confirmForm("/api/admin/users/"+url.PathEscape(u.Username)+"/disable",
+			fmt.Sprintf("Disable %s? Their sessions and API keys are revoked immediately and they cannot sign in again until re-enabled. Their sites keep serving.", u.Username), "Disable")
 	}
 	fmt.Fprintf(b, `<section class="user-block" data-search="%s" data-username="%s" data-sitecount="%d" data-views="%d" data-latest="%d">
   <div class="user-header">
@@ -587,13 +582,14 @@ func leaverSiteActions(username string, siteCount int, person bool) string {
 	if siteCount == 0 {
 		return ""
 	}
-	name := html.EscapeString(username)
+	base := "/api/admin/users/" + url.PathEscape(username)
 	sites := pluralize(siteCount, "1 site", fmt.Sprintf("%d sites", siteCount))
-	actions := fmt.Sprintf(`<form method="POST" action="/api/admin/users/%s/transfer-sites" onsubmit="var t = prompt('Move %s of %s to which team? (A person who can sign in works too.) Files, saved data, access and viewers go with them, and the old addresses redirect.'); if (!t) return false; this.elements.to.value = t; return true;"><input type="hidden" name="to"><button type="submit" class="btn-reset">Move to team…</button></form>`,
-		name, sites, name)
+	actions := promptForm(base+"/transfer-sites",
+		fmt.Sprintf("Move %s of %s to which team? (A person who can sign in works too.) Files, saved data, access and viewers go with them, and the old addresses redirect.", sites, username),
+		"to", "btn-reset", "Move to team…")
 	if person {
-		actions += fmt.Sprintf(`<form method="POST" action="/api/admin/users/%s/delete-sites" onsubmit="return confirm('Delete %s of %s? They stop serving at once and can be restored from Recently deleted for 30 days.');"><button type="submit" class="btn-reset">Delete sites</button></form>`,
-			name, sites, name)
+		actions += confirmForm(base+"/delete-sites",
+			fmt.Sprintf("Delete %s of %s? They stop serving at once and can be restored from Recently deleted for 30 days.", sites, username), "Delete sites")
 	}
 	return actions
 }
@@ -650,14 +646,42 @@ func writeSiteRow(b *strings.Builder, hosts HostModel, site db.Site, owner strin
 func siteRestrictionControl(owner string, site db.Site) string {
 	base := "/api/admin/sites/" + url.PathEscape(owner) + "/" + url.PathEscape(site.Name)
 	if site.AccessDecision == db.AccessDecisionRestricted {
-		return fmt.Sprintf(` <span class="chip chip-warn" title="%s">restricted</span><form method="POST" action="%s/unrestrict" onsubmit="return confirm('Lift the restriction on %s/%s? It goes back to the access level it had.');"><button type="submit" class="btn-reset">Lift</button></form>`,
-			html.EscapeString(site.AccessDecisionReason), html.EscapeString(base), html.EscapeString(owner), html.EscapeString(site.Name))
+		return fmt.Sprintf(` <span class="chip chip-warn" title="%s">restricted</span>`, html.EscapeString(site.AccessDecisionReason)) +
+			confirmForm(base+"/unrestrict", "Lift the restriction on "+owner+"/"+site.Name+"? It goes back to the access level it had.", "Lift")
 	}
-	question, _ := json.Marshal("Restrict " + owner + "/" + site.Name + " to only its owner (or team)? Anyone else loses access at once. The owner sees your reason. Reason:")
-	onsubmit := "var n = prompt(" + string(question) + ", ''); if (n === null || !n.trim()) return false; this.reason.value = n; return true;"
-	return fmt.Sprintf(`<form method="POST" action="%s/restrict" onsubmit="%s"><input type="hidden" name="reason"><button type="submit" class="btn-reject">Restrict</button></form>`,
-		html.EscapeString(base), html.EscapeString(onsubmit))
+	return promptForm(base+"/restrict",
+		"Restrict "+owner+"/"+site.Name+" to only its owner (or team)? Anyone else loses access at once. The owner sees your reason. Reason:",
+		"reason", "btn-reject", "Restrict")
 }
+
+// confirmForm is an admin action form that asks first. The question travels
+// in a data attribute (HTML-escaped once, read back as plain text by
+// adminFormScript), never inside inline JavaScript, so a name with quotes in
+// it stays text.
+func confirmForm(action, question, button string) string {
+	return fmt.Sprintf(`<form method="POST" action="%s" data-confirm="%s"><button type="submit" class="btn-reset">%s</button></form>`,
+		html.EscapeString(action), html.EscapeString(question), html.EscapeString(button))
+}
+
+// promptForm is an admin action form that asks for one value (filled into
+// the hidden input named field) and is not sent without it.
+func promptForm(action, question, field, class, button string) string {
+	return fmt.Sprintf(`<form method="POST" action="%s" data-prompt="%s" data-field="%s"><input type="hidden" name="%s"><button type="submit" class="%s">%s</button></form>`,
+		html.EscapeString(action), html.EscapeString(question), html.EscapeString(field), html.EscapeString(field), html.EscapeString(class), html.EscapeString(button))
+}
+
+// adminFormScript runs the confirmForm and promptForm questions.
+const adminFormScript = `<script>
+document.addEventListener('submit', function(ev){
+  var f = ev.target;
+  if (f.hasAttribute('data-confirm') && !confirm(f.getAttribute('data-confirm'))) { ev.preventDefault(); return; }
+  if (f.hasAttribute('data-prompt')) {
+    var v = prompt(f.getAttribute('data-prompt'), '');
+    if (v === null || !v.trim()) { ev.preventDefault(); return; }
+    f.elements[f.getAttribute('data-field')].value = v;
+  }
+});
+</script>`
 
 // disableUser is the offboarding action: sessions and keys
 // revoked in the same transaction as the flag, sign-in refused from then on,
@@ -1404,7 +1428,7 @@ const adminActivityScript = `<script>
   var activityCount = document.getElementById('admin-activity-count');
   var visitorCount = document.getElementById('admin-visitor-count');
 
-  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 
   function load(list, countEl, url, render) {
     fetch(url, {credentials: 'same-origin'})

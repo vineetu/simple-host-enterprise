@@ -25,6 +25,17 @@ func TestCheckGrantEmail(t *testing.T) {
 		{"trailing dot in domain", "a@corp.com.", nil, "not an email"},
 		{"double dot in domain", "a@corp..com", nil, "not an email"},
 		{"too long", strings.Repeat("a", 250) + "@corp.com", nil, "not an email"},
+		{"plus and percent are fine", "a.b+tag%x_y-z@mail.corp.com", nil, ""},
+		// Stored before its owner signs in and rendered back to other people:
+		// anything that could close an attribute or open a tag is refused.
+		{"double quote", "a\"onmouseover=x@corp.com", nil, "not an email"},
+		{"single quote", "o'brien@corp.com", nil, "not an email"},
+		{"angle brackets", "<b>@corp.com", nil, "not an email"},
+		{"parentheses and equals", "a(x)=1@corp.com", nil, "not an email"},
+		{"non-ASCII local part", "\u212aelvin@corp.com", nil, "not an email"},
+		{"non-ASCII domain", "a@c\u00f6rp.com", nil, "not an email"},
+		{"numeric top-level label", "a@corp.123", nil, "not an email"},
+		{"label starting with hyphen", "a@-corp.com", nil, "not an email"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -46,5 +57,25 @@ func TestCheckGrantEmailsChecksOnlyEmails(t *testing.T) {
 	}
 	if got := checkGrantEmails([]string{"alice", "eve@elsewhere.com"}, []string{"corp.com"}); got == "" {
 		t.Fatal("an email outside ALLOWED_EMAIL_DOMAINS was accepted")
+	}
+}
+
+// TestPageEscapeCoversQuotes guards the other half of the viewer-email fix:
+// every page script that builds rows with innerHTML escapes quotes too, so a
+// stored string can never close the attribute it is placed in.
+func TestPageEscapeCoversQuotes(t *testing.T) {
+	for name, script := range map[string]string{
+		"dashboard sites":   dashboardSitesScript,
+		"dashboard deleted": dashboardDeletedScript,
+		"admin activity":    adminActivityScript,
+	} {
+		i := strings.Index(script, "function esc(s)")
+		if i < 0 {
+			t.Fatalf("%s: no esc()", name)
+		}
+		body := script[i : i+strings.Index(script[i:], "\n")]
+		if !strings.Contains(body, "&quot;") || !strings.Contains(body, "&#39;") {
+			t.Fatalf("%s: esc() does not escape quotes: %s", name, body)
+		}
 	}
 }

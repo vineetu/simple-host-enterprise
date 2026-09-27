@@ -68,7 +68,9 @@ func (e *restoreNameTaken) Error() string {
 
 // restoreDeletedSite brings ownerID's deleted site named siteName back, in one
 // transaction under the site's advisory lock: the row is undeleted, the
-// owner's quota is checked with the site counted again, search is told to
+// owner's quota is checked (a no-op in practice: a recently deleted site
+// never stopped counting, db.OwnerUsageOf; it only refuses an owner already
+// over, e.g. after the limits were lowered), search is told to
 // index it, and a site_restore event is recorded. A quota refusal restores
 // nothing. event carries the actor; Action, OwnerID and SiteID are filled in.
 func restoreDeletedSite(ctx context.Context, database *sql.DB, quota UploadQuota, recorder audit.Recorder, ownerID, siteName string, event audit.Event) (db.DeletedSite, *quotaRefusal, error) {

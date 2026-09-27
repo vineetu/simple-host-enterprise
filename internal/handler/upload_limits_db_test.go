@@ -82,7 +82,7 @@ func TestQuotaSiteLimitPerOwner(t *testing.T) {
 	for _, path := range []string{"/api/sites/three", "/api/collaboration/sites/alice/three"} {
 		rec := w.api("alice", http.MethodPost, path, zipOf(t, map[string][]byte{"index.html": []byte("x")}))
 		code, message := errorCode(t, rec)
-		if rec.Code != http.StatusConflict || code != "site_limit" || !strings.Contains(message, "too many sites (2 of 2)") {
+		if rec.Code != http.StatusConflict || code != "site_limit" || !strings.Contains(message, "too many sites (2 of 2;") {
 			t.Fatalf("third site via %s = %d %s", path, rec.Code, rec.Body)
 		}
 	}

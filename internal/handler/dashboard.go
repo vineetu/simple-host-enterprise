@@ -371,7 +371,7 @@ const dashboardSitesScript = `<script>
   if (!container) return;
   var CH = {'X-Simple-Host-Client': 'control-ui'};
 
-  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
   function fmtBytes(n) {
     if (n < 1024) return n + ' B';
     var units = ['KB','MB','GB'], u = -1;
@@ -471,12 +471,12 @@ const dashboardSitesScript = `<script>
       '<div class="site-subsection"><h4>Assets</h4><div class="asset-list" aria-live="polite"></div></div>' +
       '<div class="site-subsection"><h4>Rename</h4>' +
       '<p class="share-help">The site gets a new address. The old one sends visitors on to it until another site takes the name.</p>' +
-      '<div class="add-row"><input type="text" class="rename-input" placeholder="new-name" autocomplete="off">' +
-      '<button type="button" class="btn-login rename-button">Rename</button></div></div>' +
-      '<div class="site-subsection"><h4>Hand it over</h4>' +
-      '<p class="share-help">Move the site to a team you are in, or to another person. Its files, versions, saved data, uploads, access and viewers go with it, and the old address sends visitors on to the new one.</p>' +
-      '<div class="add-row"><input type="text" class="transfer-input" placeholder="team-name or username" autocomplete="off">' +
-      '<button type="button" class="btn-login transfer-button">Move</button></div></div>' +
+      '<div class="add-row"><input type="text" class="rename-input" placeholder="new-name" autocomplete="off"' + locked + '>' +
+      '<button type="button" class="btn-login rename-button"' + locked + '>Rename</button></div></div>' +
+      '<div class="site-subsection"><h4>Move to a team</h4>' +
+      '<p class="share-help">Move the site into a team you are in. Its files, versions, saved data, uploads, access and viewers go with it, and the old address sends visitors on to the new one. Network access has to be requested again.</p>' +
+      '<div class="add-row"><input type="text" class="transfer-input" placeholder="team-name" autocomplete="off"' + locked + '>' +
+      '<button type="button" class="btn-login transfer-button"' + locked + '>Move</button></div></div>' +
       '<div class="site-subsection site-tabs"><div class="site-tab-buttons">' +
       '<button type="button" class="btn-reject site-tab-button active" data-tab="activity">Activity</button>' +
       '<button type="button" class="btn-reject site-tab-button" data-tab="visitors">Visitors</button>' +
@@ -648,7 +648,7 @@ const dashboardSitesScript = `<script>
     panel.querySelector('.transfer-button').addEventListener('click', function(){
       var to = panel.querySelector('.transfer-input').value.trim();
       if (!to) return;
-      moveSite('/transfer', {to: to}, 'Move ' + owner + '/' + site.name + ' to ' + to + '? They will own it and can change or delete it; you keep access only if you are in that team.');
+      moveSite('/transfer', {to: to}, 'Move ' + owner + '/' + site.name + ' into ' + to + '? Every member of that team can then change or delete it.');
     });
 
     viewerList.addEventListener('click', function(ev){
@@ -688,7 +688,7 @@ const dashboardDeletedScript = `<script>
   var list = document.getElementById('deleted-list');
   if (!section || !list) return;
   var CH = {'X-Simple-Host-Client': 'control-ui'};
-  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
   function when(s) { var d = new Date(s); return isNaN(d) ? '' : d.toLocaleString(); }
 
   function load() {

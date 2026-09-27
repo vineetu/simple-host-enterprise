@@ -137,7 +137,12 @@ func TestRestoreRespectsSiteLimit(t *testing.T) {
 	if rec := w.api("alice", http.MethodDelete, "/api/sites/demo", nil); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete = %d", rec.Code)
 	}
-	w.deploy("alice", "/api/sites/other") // the deleted site no longer counts
+	// A deleted site keeps counting (TestDeletedSitesCountTowardQuota), so
+	// only an owner already over the limit (a site made before the deleted
+	// ones counted, or a lowered limit) is refused a restore.
+	if _, err := db.CreateSite(context.Background(), w.database, w.users["alice"], "other"); err != nil {
+		t.Fatal(err)
+	}
 	rec := w.api("alice", http.MethodPost, "/api/sites/demo/restore", nil)
 	if rec.Code != http.StatusConflict || !containsCode(rec.Body.Bytes(), "site_limit") {
 		t.Fatalf("restore over the limit = %d %s, want 409 site_limit", rec.Code, rec.Body)

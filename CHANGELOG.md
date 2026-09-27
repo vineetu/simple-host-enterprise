@@ -17,20 +17,30 @@ schema, and rolling back to v1.3.1 needs the database restored from before
 the migration. Skills are at 0.14.0 (0.11.0 still works).
 
 ### Sites
-- Hand a site over: the owner, or any member of the owning team, moves a
-  site to a team they are in or to any person who can still sign in
-  (`POST .../transfer`, MCP `transfer_site`, "Hand it over" in the site's
-  Manage panel). Versions, saved data and its history, uploaded files, the
-  access level (an admin's restriction included) and viewers go with it.
-  Refused when the receiver already has a site by that name
-  (`name_conflict`), a recently deleted site of theirs holds it
-  (`name_held`), or they have no room (`site_limit`, `storage_quota`).
-  Audited as `site_transfer` with `from` and `to`.
+- Move a site into a team: the owner moves their site into a team they are
+  in, or a member moves a team's site into another team they are also in
+  (`POST .../transfer`, MCP `transfer_site`, "Move to a team" in the site's
+  Manage panel). Nobody hands a site to a person; an admin moves a leaver's
+  sites to a team or a person. Versions, saved data and its history,
+  uploaded files, the access level and viewers go with it; network access
+  does not (the site drops to `company`, audited as
+  `network_access_reverted`, and a pending request is withdrawn). Refused
+  for anything but a team the caller is in (`destination_not_found`, one
+  answer whatever the reason), while an admin's restriction stands
+  (`site_restricted_by_admin`), when the team already has a site by that
+  name (`name_conflict`), a recently deleted site of the team holds it
+  (`name_held`), or it has no room (`site_limit`, `storage_quota`). Audited
+  as `site_transfer` with `from` and `to`, in both namespaces' logs.
 - Rename a site (`POST .../rename`, MCP `rename_site`, "Rename" in the
-  Manage panel), keeping everything it holds.
+  Manage panel), keeping everything it holds, network access included.
+  Refused while an admin's restriction stands.
 - After either, the old address redirects to the new one (path and query
-  kept) until a site takes the old name again, and answers the ordinary
-  not-found while the site is recently deleted. The owner-hosts reconciler
+  kept) until a site takes the old name again, but only for somebody who
+  can open the site there: anyone while it is open to the network,
+  otherwise a caller signed in on the old address (a visitor with no
+  session is taken through sign-in first) or carrying a key, whom the
+  site's access admits. Everyone else, and everyone while the site is
+  recently deleted, gets the ordinary not-found. The owner-hosts reconciler
   keeps the old owner's certificate while any of its addresses redirects.
 - Deleting a site can be undone for 30 days. It stops serving and leaves
   every list at once, but keeps its versions, saved data and history, access
@@ -41,10 +51,12 @@ the migration. Skills are at 0.14.0 (0.11.0 still works).
   `GET /api/deleted-sites` and `POST /api/sites/{site}/restore` (or the
   owner-qualified `/api/collaboration/sites/{owner}/{site}/restore`), or the
   new MCP tools `list_deleted_sites` and `restore_site`; an admin restores
-  any from the "Recently deleted" card on `/admin`. A restore counts toward
-  the quota again, is refused with `409 name_taken` if a live site now holds
-  its address, and is audited as `site_restore`. After 30 days the sweeper
-  removes the site for good. Deleting a team still removes its sites at
+  any from the "Recently deleted" card on `/admin`. A recently deleted site
+  keeps counting toward its owner's site and storage quota until its window
+  ends, so deleting does not make room at once. A restore is refused with
+  `409 name_taken` if a live site now holds its address, and is audited as
+  `site_restore`. After 30 days the site cannot be restored (even before the
+  sweeper runs), and the sweeper removes it for good. Deleting a team still removes its sites at
   once.
 - `simple-host restore` into a name a recently deleted site holds undeletes
   that site rather than creating an empty one.
@@ -87,16 +99,32 @@ the migration. Skills are at 0.14.0 (0.11.0 still works).
   the reason. The restriction is sticky: until an admin lifts it, the owner
   or team cannot raise the level, request network access or add viewers
   (`409 site_restricted_by_admin` with the reason; the dashboard's controls
-  are off), and it stays with the site through a rename or hand-over. Lift
+  are off), nor rename it or move it into a team. Lift
   on `/admin` restores the earlier level (`company` for a site that was on
   the network).
 - Declining a network request or taking a site off the network asks for
   an optional note for the owner, recorded in the audit event.
 - A disabled person's row on `/admin` offers "Move to team…" (all their
-  sites, to a team or a person, all or none) and "Delete sites" (they go to
+  sites, to a team or a person, all or none; the only way a site reaches a
+  person) and "Delete sites" (they go to
   Recently deleted, restorable for 30 days); a team with no active member
   offers "Move to team…" beside "Delete team". Nobody else's sites can be
   moved or deleted by an admin.
+
+### Security
+- A viewer or team member named by email must be a plain ASCII address
+  (letters, digits and `._%+-` before the `@`, a dotted domain); quotes,
+  brackets and non-ASCII look-alikes are refused. Every dashboard and
+  `/admin` list escapes quotes as well as markup, and `/admin`'s confirm
+  and prompt buttons carry their questions in data attributes, not inline
+  script.
+- A grant by email reaches an existing account only through an address the
+  IdP verified at a sign-in, and a pending grant converts only when the
+  verified `email` claim is plain ASCII and is the address the account now
+  holds (not one another account keeps).
+- Moves re-check team membership inside their transaction.
+- Migration 0046's partition functions are not executable by `PUBLIC`
+  (only the owning role that runs `migrate` and `prune` uses them).
 
 ### Operations
 - Startup warns when no admin is configured (neither `ADMIN_EMAILS` nor

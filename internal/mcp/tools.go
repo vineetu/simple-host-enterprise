@@ -851,16 +851,16 @@ func toolList() []Tool {
 		},
 		{
 			Name:  "transfer_site",
-			Title: "Hand a site to a team or a person",
-			Description: "Move a site to another owner: a team you are in, or any person who can sign in (to hand a leaver's work on, or to put your own site into your team). " +
-				"Everything moves with it: every version, its saved data and that data's history, uploaded files, who can open it (an admin's restriction included) and its named viewers. A recently deleted site cannot be moved: restore_site it first. Only the owner, and so the address, changes: " +
-				"the site's new address is `url` in the response, and the old one (`previous_url`) redirects to it until a site takes the old name again. " +
-				"Works on a site you own and on a site owned by a team you are in. Refused with `name_conflict` when the receiver already has a site by that name (rename_site one of them first), `name_held` when one of the receiver's recently deleted sites still holds the name (restore it or pick another name), and with `site_limit` or `storage_quota` when the receiver has no room. " +
-				"When leaving a team would delete it, move the sites worth keeping first with this tool. Confirm the receiver with the user before calling; a person receiving a site can then do anything with it, including delete it.",
+			Title: "Move a site into a team",
+			Description: "Move a site into a team you are in: your own site into your team, or a team's site into another team you also belong to. Sites cannot be handed to a person (an admin moves a leaver's sites). " +
+				"Everything moves with it: every version, its saved data and that data's history, uploaded files, who can open it and its named viewers, except network access, which the new owner has to request again (the site drops to `company`). A recently deleted site cannot be moved: restore_site it first. Only the owner, and so the address, changes: " +
+				"the site's new address is `url` in the response, and the old one (`previous_url`) redirects to it, for people who can open the site, until a site takes the old name again. " +
+				"Works on a site you own and on a site owned by a team you are in. Refused with `destination_not_found` for anything but a team you are in, `site_restricted_by_admin` (with the admin's `reason`) while an admin's restriction stands (only an admin lifts it; do not retry), `name_conflict` when the team already has a site by that name (rename_site one of them first), `name_held` when one of the team's recently deleted sites still holds the name (restore it or pick another name), and with `site_limit` or `storage_quota` when the team has no room. " +
+				"When leaving a team would delete it, move the sites worth keeping first with this tool. Confirm the team with the user before calling; every member of it can then do anything with the site, including delete it.",
 			InputSchema: object(map[string]any{
 				"site":  str(siteArgDesc),
 				"owner": str(ownerArgDesc + " Omit only for a site in your own account."),
-				"to":    str("Who receives the site: a team you are in (`team-sales`; `sales` also finds it) or a person's exact username (find_users or find_team_members turns a name into one)."),
+				"to":    str("The team that receives the site, one you are in: `team-sales`, or `sales`, which finds the same team."),
 			}, "site", "to"),
 			Annotations: writes(false, false),
 			family:      familySite,
@@ -886,7 +886,7 @@ func toolList() []Tool {
 			Title: "Rename a site",
 			Description: "Give a site a new name, and so a new address. Everything stays: versions, saved data and its history, uploaded files, who can open it. " +
 				"The new address is `url` in the response; the old one (`previous_url`) redirects to it until a site takes the old name again. " +
-				"Works on a site you own and on a site owned by a team you are in. Refused with `name_conflict` when the owner already has a site by that name, and `name_held` when a recently deleted site of theirs still holds it. A recently deleted site cannot be renamed or handed over: restore_site it first.",
+				"Works on a site you own and on a site owned by a team you are in. Refused with `name_conflict` when the owner already has a site by that name, `name_held` when a recently deleted site of theirs still holds it, and `site_restricted_by_admin` (with the admin's `reason`) while an admin's restriction stands. A recently deleted site cannot be renamed or handed over: restore_site it first.",
 			InputSchema: object(map[string]any{
 				"site":  str(siteArgDesc),
 				"owner": str(ownerArgDesc + " Omit only for a site in your own account."),
@@ -1077,7 +1077,7 @@ func toolList() []Tool {
 			Title: "Leave a team",
 			Description: "Take the user out of a team. They lose access to every site the team owns at once. " +
 				"If nobody who can still sign in would be left, leaving deletes the team and every site it owns: the first call without confirm_name is refused with how many sites that is. " +
-				"Tell the user that number and ask; offer to keep sites by moving them first with transfer_site (to another team they are in, or to a person). Only if they agree to the delete, call again with confirm_name. Call this only when the user asks to leave.",
+				"Tell the user that number and ask; offer to keep sites by moving them first with transfer_site (to another team they are in). Only if they agree to the delete, call again with confirm_name. Call this only when the user asks to leave.",
 			InputSchema: object(map[string]any{
 				"team":         str(teamArgDesc),
 				"confirm_name": str("Only when leaving deletes the team: the team's name typed again, exactly as in `team`, after the user agreed. Otherwise omit it."),

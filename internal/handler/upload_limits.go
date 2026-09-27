@@ -68,7 +68,7 @@ func checkOwnerQuota(ctx context.Context, tx *sql.Tx, quota UploadQuota, ownerID
 	}
 	if newSite && quota.MaxSites > 0 && usage.Sites > quota.MaxSites {
 		return &quotaRefusal{status: http.StatusConflict, body: errorResponse{
-			Error: fmt.Sprintf("too many sites (%s of %s): delete a site to create another", formatCount(usage.Sites-1), formatCount(quota.MaxSites)),
+			Error: fmt.Sprintf("too many sites (%s of %s; a deleted site counts until its 30-day recovery window ends): delete a site to create another", formatCount(usage.Sites-1), formatCount(quota.MaxSites)),
 			Code:  "site_limit",
 		}}, nil
 	}

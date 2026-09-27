@@ -84,6 +84,34 @@ func checkNotRestricted(ctx context.Context, tx *sql.Tx, siteID string) error {
 	return nil
 }
 
+// CheckSiteNotRestricted is checkNotRestricted for callers outside the
+// package: a transfer or rename refuses a site an admin restricted.
+func CheckSiteNotRestricted(ctx context.Context, tx *sql.Tx, siteID string) error {
+	return checkNotRestricted(ctx, tx, siteID)
+}
+
+// DropNetworkAccess takes a site that is about to change hands off the
+// network: an approved site goes to company, a pending request is
+// withdrawn, and either way its approvals are cleared, so the new owner has
+// to ask (and an admin approve) again. It reports what it dropped.
+func DropNetworkAccess(ctx context.Context, tx *sql.Tx, siteID string) (wasNetwork, hadRequest bool, err error) {
+	var access string
+	var requested sql.NullTime
+	if err := tx.QueryRowContext(ctx, `SELECT access, network_requested_at FROM sites WHERE id = $1::uuid FOR UPDATE`, siteID).Scan(&access, &requested); err != nil {
+		return false, false, err
+	}
+	wasNetwork, hadRequest = access == AccessNetwork, requested.Valid
+	if !wasNetwork && !hadRequest {
+		return false, false, nil
+	}
+	level := access
+	if wasNetwork {
+		level = AccessCompany
+	}
+	_, err = setSiteAccess(ctx, tx, siteID, level)
+	return wasNetwork, hadRequest, err
+}
+
 // SetSiteAccess moves a site to any level but network, which only an
 // admin's approval sets. Moving a site anywhere withdraws a pending
 // network-access request, and moving a network site anywhere revokes its

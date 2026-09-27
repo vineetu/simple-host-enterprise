@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"time"
 )
 
 // OwnerUsage is what one owner (a person's or a team's namespace) holds:
@@ -28,18 +29,22 @@ func LockOwnerQuota(ctx context.Context, tx *sql.Tx, ownerID string) error {
 	return err
 }
 
-// OwnerUsageOf returns ownerID's site count and stored bytes.
+// OwnerUsageOf returns ownerID's site count and stored bytes. A recently
+// deleted site still counts, sites and bytes, until its recovery window ends:
+// its objects stay in the bucket that long, and a restore brings it back
+// without a second check it could fail. (Not counting it let a
+// deploy-and-delete loop store without limit.)
 func OwnerUsageOf(ctx context.Context, q Querier, ownerID string) (OwnerUsage, error) {
 	const query = `
 		SELECT
-			(SELECT count(*) FROM sites WHERE user_id = $1 AND deleted_at IS NULL),
+			(SELECT count(*) FROM sites WHERE user_id = $1 AND (deleted_at IS NULL OR deleted_at > now() - $2 * interval '1 second')),
 			(SELECT COALESCE(sum(v.size_bytes), 0) FROM versions v JOIN sites s ON s.id = v.site_id
-			   WHERE s.user_id = $1 AND s.deleted_at IS NULL)
+			   WHERE s.user_id = $1 AND (s.deleted_at IS NULL OR s.deleted_at > now() - $2 * interval '1 second'))
 			+ (SELECT COALESCE(sum(a.size), 0) FROM site_assets a JOIN sites s ON s.id = a.site_id
-			   WHERE s.user_id = $1 AND s.deleted_at IS NULL AND a.deleted_at IS NULL)
+			   WHERE s.user_id = $1 AND (s.deleted_at IS NULL OR s.deleted_at > now() - $2 * interval '1 second') AND a.deleted_at IS NULL)
 	`
 	var usage OwnerUsage
-	err := q.QueryRowContext(ctx, query, ownerID).Scan(&usage.Sites, &usage.Bytes)
+	err := q.QueryRowContext(ctx, query, ownerID, int64(DeletedSiteRetention/time.Second)).Scan(&usage.Sites, &usage.Bytes)
 	return usage, err
 }
 

@@ -194,6 +194,21 @@ func IsTeamMember(ctx context.Context, q Querier, teamID, userID string) (bool, 
 	return member, nil
 }
 
+// IsTeamMemberLocked is IsTeamMember inside tx, holding the membership row
+// (FOR SHARE) until tx ends, so a concurrent removal waits for the caller's
+// transaction instead of slipping in between the check and the change.
+func IsTeamMemberLocked(ctx context.Context, tx *sql.Tx, teamID, userID string) (bool, error) {
+	var one int
+	err := tx.QueryRowContext(ctx, `SELECT 1 FROM team_members WHERE team_id = $1::uuid AND user_id = $2::uuid FOR SHARE`, teamID, userID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("is team member: %w", err)
+	}
+	return true, nil
+}
+
 const countTeamMembersQuery = `
 	SELECT
 		(SELECT count(*) FROM team_members WHERE team_id = $1::uuid) +

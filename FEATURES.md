@@ -40,7 +40,9 @@ Config names are documented in `docs/configuration.md`; schema in
   session row and expiry, so it never outlives it. Every sign-in (verified
   email, allowed domain) turns any pending viewer or team grants for that
   email (sections 8, 9) into real ones in the session's transaction, each
-  audited as `pending_grant_converted`. Every sign-in also refreshes
+  audited as `pending_grant_converted`, but only when the verified `email`
+  claim is plain ASCII and is the address the account now holds from a
+  claim (exact, lower-cased match; not an address another account keeps). Every sign-in also refreshes
   the stored email from the verified claim (the account is found by
   subject); an address another person already holds is not taken over
   (`email_change` / `email_change_skipped` in the audit log). The sessions
@@ -179,9 +181,11 @@ Config names are documented in `docs/configuration.md`; schema in
   history, access level, viewers and asset records stay; its name stays
   held (409 `name_held`). The owner or a team member lists them
   (`GET /api/deleted-sites`, dashboard "Recently deleted") and restores one
-  whole (`site_restore`, quota-checked again: 409 `site_limit`, 413
-  `storage_quota`; 409 `name_taken` if a live site of the owner now holds
-  its name or address); an admin restores any from `/admin`, and an
+  whole (`site_restore`; 409 `name_taken` if a live site of the owner now
+  holds its name or address). A recently deleted site keeps counting toward
+  its owner's site and storage quota until its window ends, so the
+  restore's quota re-check only refuses an owner already over; past the
+  window a restore is 404 even before the sweeper runs; an admin restores any from `/admin`, and an
   admin's "Delete sites" for a leaver lands there too. After the window the
   sweeper purges the row and retires the objects (section 6). A team's
   deletion still removes its sites for good. Every site, at
@@ -204,30 +208,42 @@ Config names are documented in `docs/configuration.md`; schema in
   redirect the same way to the site's current address. The owner-scoped
   routes act on the caller's own namespace; the collaboration routes name the
   owner (person or team) explicitly, by its stored name (`team-sales`).
-  **Hand over and rename.** The owner, or any member for a team site, can
-  move a site to a team they are in or to any person who can still sign in
-  (`transfer`, `{"to"}`; a bare `sales` finds `team-sales` unless a person
-  holds `sales`), or give it a new name (`rename`, `{"name"}`, the new-site
-  name rules). Only the row's owner or name changes: versions, saved data
-  and its history, assets, access level (an admin's restriction included), a
-  pending network request and named viewers (pending ones too) are keyed by
-  the site id and stay. A recently deleted site cannot be moved or renamed
-  (404 until restored). The old address
+  **Move to a team and rename.** The owner can move their site into a team
+  they are in, and a member can move a team's site into another team they
+  are also in (`transfer`, `{"to"}`; `sales` and `team-sales` both name the
+  team). Nobody hands a site to a person: only an admin's leaver flow does
+  (section 13). Or the site gets a new name (`rename`, `{"name"}`, the
+  new-site name rules). Only the row's owner or name changes: versions,
+  saved data and its history, assets, access level and named viewers
+  (pending ones too) are keyed by the site id and stay, except that a
+  transfer drops network access (an approved site goes to `company`, a
+  pending request is withdrawn; audited `network_access_reverted`) and a
+  rename keeps it. Membership of both teams is re-checked, under lock,
+  inside the move's transaction. A recently deleted site cannot be moved or
+  renamed (404 until restored), nor can a site an admin restricted (409
+  `site_restricted_by_admin` with the reason). The old address
   `<old part>.<old owner>.<base>` is kept in `site_redirects` and redirects
   (301 GET/HEAD, 308 otherwise, path and query kept; a named site-API path
   becomes the nameless `/api/site/...`) to the current address, following
-  later moves, until a live site takes that address (live always wins); the
-  fallback owner path and v1.2 hosts redirect the same way. While the site
-  it points to is recently deleted, the old address answers the ordinary
-  not-found, never a redirect. Refused: `404
-  destination_not_found` (nobody, or a team the caller is not in), `409
-  destination_inactive` (a disabled person, a team nobody in can sign in),
-  `409 name_conflict` (the receiver has a site with that name or address),
-  `409 name_held` (a recently deleted site of the receiver holds it),
-  `409 site_limit` / `413 storage_quota` (the receiver's quota), `400
+  later moves, until a live site takes that address (live always wins),
+  but only for a caller who could open the site there: anyone while it is
+  open to the network; otherwise a caller with a host session on the old
+  address or a key, whom the site's access rule admits (a navigation with
+  no session is taken through the hand-off on the old host first). Anyone
+  else gets the ordinary not-found, never a Location. The fallback owner
+  path gates the same way; a v1.2 host sends a moved address to its current
+  shape on the old owner, never to the new name. While the site it points
+  to is recently deleted, the old address answers the ordinary not-found.
+  Refused: `404 destination_not_found` (anything but a team the caller is
+  in: no such team, a person, an inactive account; one message, whatever
+  the reason), `409 name_conflict` (the team has a site with that name or
+  address), `409 name_held` (a recently deleted site of the team holds it),
+  `409 site_limit` / `413 storage_quota` (the team's quota), `400
   same_owner` / `same_name`. Full-scope key or session. Audited as
-  `site_transfer` / `site_rename` (owner = the receiver) with `from`, `to`,
-  `from_name`, `name`; the search entry is re-indexed. An admin moves or
+  `site_transfer` / `site_rename` with `from`, `to`, `from_name`, `name`,
+  `from_owner_id`, `to_owner_id`; a transfer is recorded twice, once in each
+  namespace (owner = the receiver, and owner = the previous owner), so both
+  audit logs show it; the search entry is re-indexed. An admin moves or
   deletes the sites of a disabled person or of a team with no active member
   (section 13); nobody else's. Visitor counts are kept per address, so a
   moved site's Visitors tab starts again.
@@ -263,7 +279,7 @@ Config names are documented in `docs/configuration.md`; schema in
   and conflict rules; `references/packaging-and-validation.md`,
   `references/collaboration.md` §1–5 and §8, `references/frameworks.md`;
   `skills/fix-paths-for-subpath-hosting/`, `skills/simple-host-builder/`.
-- **Pages.** `/dashboard` "Your sites" (Manage: Rename, Hand it over) and
+- **Pages.** `/dashboard` "Your sites" (Manage: Rename, Move to a team; both off while an admin's restriction stands) and
   "Recently deleted"; `/admin` "Recently deleted".
 - **Go.** `internal/handler/site.go`, `site_restore.go`, `collaboration.go`, `site_mutation.go`,
   `site_move.go`, `admin_move.go`,
@@ -340,7 +356,7 @@ Config names are documented in `docs/configuration.md`; schema in
   `access_decision`, audited `site_restricted`). The restriction is sticky:
   while it stands the owner or team cannot raise the level, request network
   access or add viewers (`409 site_restricted_by_admin` with the reason),
-  and it stays with the site through a rename or hand-over. Only an admin
+  nor rename the site or move it into a team. Only an admin
   lifts it (Lift, `unrestrict`), which restores the earlier level
   (`company` for a site that was on the network; `site_restriction_lifted`).
 - **Status.** Built.
@@ -375,8 +391,9 @@ Config names are documented in `docs/configuration.md`; schema in
   listed viewers (and the owner or team) can open it. Viewers
   read, never write. Removing the last viewer keeps the level at `specific`,
   narrowing the site to its owner. A viewer may be named by company email
-  (refused outside `ALLOWED_EMAIL_DOMAINS` when set): the account carrying
-  it, or, if nobody has signed in with it yet, a pending viewer, listed with
+  (a plain ASCII address, letters, digits and `._%+-` before the `@`;
+  refused outside `ALLOWED_EMAIL_DOMAINS` when set): the account whose
+  IdP-verified address it is, or, if nobody has signed in with it yet, a pending viewer, listed with
   `pending: true` and the email as `username` ("hasn't signed in yet" on the
   dashboard), counted toward the 50, removed by that email, and converted at
   their first sign-in (section 1).
@@ -417,11 +434,11 @@ Config names are documented in `docs/configuration.md`; schema in
   deleted — refused with `409 confirm_team_delete` and `site_count` until the
   call carries `?confirm_name=<team>`; delete works the same way. That 409
   offers the way to keep sites: move each first with `transfer_site` (to
-  another team the person is in, or to a person), then leave. A team whose
+  another team the person is in), then leave. A team whose
   members are all disabled is deleted by an admin, who can first move its
   sites to another team or a person (section 13). A team has no key and no
-  sign-in. A member may be named by company email (refused `invalid_email`
-  outside `ALLOWED_EMAIL_DOMAINS` when set): the account carrying it, or a
+  sign-in. A member may be named by company email (a plain ASCII address;
+  refused `invalid_email` outside `ALLOWED_EMAIL_DOMAINS` when set): the account carrying it, or a
   pending member (listed with `pending: true`, the email as `username`,
   counted toward the 50, removed by that email) who joins at their first
   sign-in (section 1).

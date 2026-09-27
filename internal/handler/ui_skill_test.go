@@ -373,3 +373,33 @@ func TestOpenAPIDocumentsEveryManagementClientBootstrap(t *testing.T) {
 		t.Fatalf("documented %d management bootstrap errors, want 25", got)
 	}
 }
+
+// TestOpenAPIPlainScalarsAreValidYAML catches the YAML mistake a long
+// description most often makes: an unquoted value containing ": " (or " #")
+// is not a valid plain scalar, and the whole document then fails to parse
+// in every client. No YAML parser is vendored, so this checks that rule
+// line by line; quote such a value ('...', doubling any ').
+func TestOpenAPIPlainScalarsAreValidYAML(t *testing.T) {
+	body, err := fs.ReadFile(staticFiles, "static/openapi.yaml")
+	if err != nil {
+		t.Fatalf("read embedded OpenAPI: %v", err)
+	}
+	for i, line := range strings.Split(string(body), "\n") {
+		trimmed := strings.TrimLeft(line, " ")
+		trimmed = strings.TrimPrefix(trimmed, "- ")
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(trimmed, ": ")
+		if !ok || strings.ContainsAny(key, " \"") && !strings.HasPrefix(key, "'") {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if value == "" || strings.ContainsAny(value[:1], `'"|>[{&*!`) {
+			continue
+		}
+		if strings.Contains(value, ": ") || strings.Contains(value, " #") || strings.HasSuffix(value, ":") {
+			t.Errorf("openapi.yaml:%d: unquoted value contains \": \", \" #\" or a trailing colon; quote it: %.120s", i+1, line)
+		}
+	}
+}

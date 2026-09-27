@@ -69,11 +69,13 @@ func SoftDeleteSite(ctx context.Context, q Querier, siteID, actorID string) erro
 
 // GetDeletedSite returns ownerID's deleted site of that name, locking its row
 // for the caller's transaction. sql.ErrNoRows when there is none (or it has
-// been purged).
+// been purged, or its recovery window has ended and the sweeper has not
+// purged it yet).
 func GetDeletedSite(ctx context.Context, tx *sql.Tx, ownerID, name string) (DeletedSite, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT `+deletedSiteColumns+`
 		WHERE s.user_id = $1::uuid AND s.name = $2 AND s.deleted_at IS NOT NULL
-		FOR UPDATE OF s`, ownerID, name)
+		  AND s.deleted_at > now() - $3 * interval '1 second'
+		FOR UPDATE OF s`, ownerID, name, int64(DeletedSiteRetention/time.Second))
 	if err != nil {
 		return DeletedSite{}, err
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/lib/pq"
 )
@@ -44,11 +45,14 @@ const resolveEmailsQuery = `
 	FROM users
 	WHERE lower(email) = ANY($1::text[])
 	  AND kind = 'person'
+	  AND email_source = 'claimed'
 	GROUP BY lower(email)
 `
 
 // resolveEmails maps each address that one person's account carries to that
-// account's username; the addresses no account carries come back as
+// account's username, counting only addresses the identity provider vouched
+// for at a sign-in (email_source 'claimed'; never an inferred or
+// reset-request guess); the addresses no account carries come back as
 // pending, in their given order. An address two accounts carry is refused.
 func resolveEmails(ctx context.Context, q Querier, emails []string) (usernames map[string]string, pending []string, err error) {
 	usernames = make(map[string]string, len(emails))
@@ -180,11 +184,23 @@ const convertTeamMemberQuery = `
 // ConvertPendingGrants turns every pending grant for email into the real
 // grant for userID and deletes the pending rows, in tx. The caller must have
 // the provider's word that userID holds email (a verified email claim at
-// sign-in). Each pending grant was counted against its site's or team's cap
+// sign-in); on top of that, nothing converts unless email is plain ASCII
+// (grant emails are, and Unicode case folding must never make two addresses
+// meet) and is the address userID's account now holds from a claim (not one
+// the sign-in's refresh refused because another account holds it). Matching
+// is exact on the lower-cased address. Each pending grant was counted against its site's or team's cap
 // when it was added, so converting one never exceeds it.
 func ConvertPendingGrants(ctx context.Context, tx *sql.Tx, userID, email string) ([]ConvertedGrant, error) {
-	email = strings.ToLower(strings.TrimSpace(email))
-	if email == "" {
+	email = strings.TrimSpace(email)
+	if email == "" || strings.IndexFunc(email, func(r rune) bool { return r > unicode.MaxASCII }) >= 0 {
+		return nil, nil
+	}
+	email = strings.ToLower(email)
+	var holds bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE id = $1::uuid AND email = $2 AND email_source = 'claimed')`, userID, email).Scan(&holds); err != nil {
+		return nil, fmt.Errorf("check account email: %w", err)
+	}
+	if !holds {
 		return nil, nil
 	}
 	type taken struct {

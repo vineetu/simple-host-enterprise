@@ -25,7 +25,7 @@ that should get it). Last derived from both `FEATURES.md` files and code on 2026
 | Sites: deploy, versions, rollback, delete | tar.gz/zip or inline JSON files; `KEEP_VERSIONS`; rollback; delete | tar.gz or MCP file list, `If-Match` ETags; 5 versions kept; rollback; delete | `same` |
 | Recently deleted (undo a delete) | delete is immediate and final | 30 days: whole site (files, saved data, access, viewers, assets) restorable by owner, team member or admin (also after an admin's "Delete sites" for a leaver); name held against create, rename and hand-over; purged by the sweeper | `gap → hosted` |
 | Site rename | `PATCH /v1/sites/{s}`, `rename_site`; old address 404s | `POST .../rename`, `rename_site`, dashboard; old address redirects until the name is reused | `gap → hosted` — the old address should redirect |
-| Hand a site to another owner | none | `POST .../transfer`, `transfer_site`, dashboard; admin moves a leaver's or abandoned team's sites; old address redirects | `different on purpose` — hosted has no teams or company leavers |
+| Hand a site to another owner | none | `POST .../transfer`, `transfer_site`, dashboard: owners and members move a site only into a team they are in (never to a person); admin moves a leaver's or abandoned team's sites to a team or person; network access dropped on a move; audited in both namespaces; old address redirects only for people who can open the site | `different on purpose` — hosted has no teams or company leavers |
 | Site export with saved data | `export.tar.gz` (files + state + collections) | version archive download only (files, no saved data) | `gap → enterprise` |
 | Per-site hosts `<site>.<owner>.<domain>` | live 2026-09-26; path fallback until the owner's wildcard cert exists | v1.3 2026-09-26; same fallback | `same` |
 | Per-owner certificates | root issuer, certbot DNS-01, 40/week 12/day cap | `owner-hosts` reconciler → cert-manager Ingress per owner | `different on purpose` — box vs cluster tooling |
@@ -60,7 +60,7 @@ that should get it). Last derived from both `FEATURES.md` files and code on 2026
 | Rate limits and abuse caps | per-IP token buckets in memory; size caps; write auth; reserved names | per-pod buckets plus Postgres-shared counters for sign-in, hand-off, key mint, connector | `different on purpose` — one process needs no shared counters |
 | Security headers and CSP | `SecurityHeaders`, nonce CSP on apex pages | `security.go`, same approach | `same` |
 | Admin | admin key or admin user; usage, bulk participant accounts, delete account, API traffic | IdP admins; disable/enable (revokes sessions, keys, apps), offboard by email, access requests, rankings, export | `different on purpose` — event organiser vs company IT |
-| Admin take-down of one site | none (only deleting the whole account) | Restrict any site to only-me with a reason the owner sees; sticky (the owner cannot raise it, `site_restricted_by_admin`) and kept through rename or hand-over; only an admin's Lift restores it; audited | `gap → hosted` — abuse reports need a reversible take-down that keeps the evidence |
+| Admin take-down of one site | none (only deleting the whole account) | Restrict any site to only-me with a reason the owner sees; sticky (the owner cannot raise it, rename it or move it, `site_restricted_by_admin`); only an admin's Lift restores it; audited | `gap → hosted` — abuse reports need a reversible take-down that keeps the evidence |
 | Dashboard | `/dashboard`, owner app, per-site analytics page | `/dashboard`: keys, sites, access, viewers, assets, usage | `same` — each shows its own features |
 | AI create and voice input | Grok sidecar only, local speech-to-text | none | `different on purpose` — enterprise: the publisher is the person's own agent via MCP; content stays in the cluster |
 | Event / hackathon instances | setup page, participant accounts, `simple-hack.app` names | none | `different on purpose` — this is the small-box edition's job |
@@ -78,6 +78,8 @@ that should get it). Last derived from both `FEATURES.md` files and code on 2026
 | 2026-09-26 | hosted | visitor Google sign-in bound to the starting browser (login CSRF) | enterprise hand-off already nonce-bound: n/a |
 | 2026-09-26 | enterprise | connector tokens accepted only on `/mcp` | hosted keeps Bearer on `/v1/*` on purpose (GPT Actions); see table |
 | 2026-09-27 | enterprise | people can disconnect a connected app and sign out everywhere themselves; stored email follows the IdP so offboarding by email matches | hosted already lists and disconnects apps; server-side sign-out is a hosted gap (table) |
+| 2026-09-27 | enterprise | page scripts' `esc()` escapes quotes (stored XSS through a pending viewer's email); grant emails strict ASCII; `/admin` confirms via data attributes | hosted's `esc()` already escapes `"` and `'` (admin, index, showcase, analytics pages); hosted has no grants by email: n/a |
+| 2026-09-27 | enterprise | moved-site redirects only for people who can open the site; no hand-over to a person; restricted sites cannot be moved or renamed; deleted sites count toward quota | hosted has no transfer, redirects, restriction or soft delete: n/a |
 
 ## Section index
 

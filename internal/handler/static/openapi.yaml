@@ -731,8 +731,8 @@ paths:
 
   /api/sites/{sitename}/transfer:
     post:
-      summary: Hand a site to a team or another person
-      description: Moves one of the caller's own sites to a team the caller is in or to any person who can still sign in. Versions, saved data and its history, assets, access level (an admin's restriction included) and viewers move with it; a recently deleted site is not found until restored; the old address redirects (301, or 308 for other methods, path and query kept) to the new one until a site takes the old name again. Full-scope key or session. Audited as `site_transfer` with `from` and `to`.
+      summary: Move a site into a team
+      description: Moves one of the caller's own sites into a team the caller is in. A site is never handed to a person here (an admin moves a leaver's sites). Versions, saved data and its history, assets, access level and viewers move with it, except network access, which is dropped (the site goes to `company`, audited as `network_access_reverted`) and must be requested again. A recently deleted site is not found until restored. The old address redirects (301, or 308 for other methods, path and query kept) to the new one, only for a caller who can open the site there (anyone while it is open to the network); anyone else gets the same 404 as for an address nothing holds. Full-scope key or session. Audited as `site_transfer` with `from` and `to`, once in each namespace's log.
       tags: [Sites]
       security:
         - apiKey: []
@@ -750,7 +750,7 @@ paths:
               properties:
                 to:
                   type: string
-                  description: A team the caller is in (`team-sales`; `sales` also finds it), or a person's exact username.
+                  description: A team the caller is in (`team-sales`; `sales` also finds it).
       responses:
         '200':
           description: Moved
@@ -761,13 +761,13 @@ paths:
         '400':
           $ref: '#/components/responses/ManagementBadRequest'
         '404':
-          description: No such site, or `destination_not_found` (no such person, or a team the caller is not in)
+          description: No such site, or `destination_not_found` (anything but a team the caller is in; the answer never says which)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: '`name_conflict` (the receiver has a site by that name), `name_held` (a recently deleted site of the receiver holds the name), `destination_inactive` (a disabled person, or a team nobody in can sign in), or `site_limit`'
+          description: '`site_restricted_by_admin` (an admin restricted the site; `reason` carries their note), `name_conflict` (the team has a site by that name), `name_held` (a recently deleted site of the team holds the name), or `site_limit` (a deleted site counts until its recovery window ends)'
           content:
             application/json:
               schema:
@@ -782,7 +782,7 @@ paths:
   /api/sites/{sitename}/rename:
     post:
       summary: Rename a site
-      description: Gives one of the caller's own sites a new name, and so a new address; everything else stays. The old address redirects to the new one until a site takes the old name again. Full-scope key or session. Audited as `site_rename`.
+      description: Gives one of the caller's own sites a new name, and so a new address; everything else stays. The old address redirects to the new one, only for a caller who can open the site, until a site takes the old name again; network access stays. Refused while an admin's restriction stands. Full-scope key or session. Audited as `site_rename`.
       tags: [Sites]
       security:
         - apiKey: []
@@ -813,7 +813,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: '`name_conflict`: the owner already has a site by that name; `name_held`: a recently deleted site of theirs still holds it'
+          description: '`name_conflict`: the owner already has a site by that name; `name_held`: a recently deleted site of theirs still holds it; `site_restricted_by_admin`: an admin restricted the site (`reason` carries their note)'
           content:
             application/json:
               schema:
@@ -1292,8 +1292,8 @@ paths:
 
   /api/collaboration/sites/{owner}/{sitename}/transfer:
     post:
-      summary: Hand a site to a team or another person
-      description: Moves the named owner's site (a person or team the caller is, or is in) to a team the caller is in or to any person who can still sign in. Versions, saved data and its history, assets, access level (an admin's restriction included) and viewers move with it; a recently deleted site is not found until restored; the old address redirects (301, or 308 for other methods, path and query kept) to the new one until a site takes the old name again. Full-scope key or session. Audited as `site_transfer` with `from` and `to`.
+      summary: Move a site into a team
+      description: Moves the named owner's site (the caller's own, or a team's the caller is in) into another team the caller is in. A site is never handed to a person here (an admin moves a leaver's sites). Versions, saved data and its history, assets, access level and viewers move with it, except network access, which is dropped (the site goes to `company`, audited as `network_access_reverted`) and must be requested again. A recently deleted site is not found until restored. The old address redirects (301, or 308 for other methods, path and query kept) to the new one, only for a caller who can open the site there (anyone while it is open to the network); anyone else gets the same 404 as for an address nothing holds. Full-scope key or session. Audited as `site_transfer` with `from` and `to`, once in each namespace's log.
       tags: [Sites]
       security:
         - apiKey: []
@@ -1312,7 +1312,7 @@ paths:
               properties:
                 to:
                   type: string
-                  description: A team the caller is in (`team-sales`; `sales` also finds it), or a person's exact username.
+                  description: A team the caller is in (`team-sales`; `sales` also finds it).
       responses:
         '200':
           description: Moved
@@ -1323,13 +1323,13 @@ paths:
         '400':
           $ref: '#/components/responses/ManagementBadRequest'
         '404':
-          description: No such site, or `destination_not_found` (no such person, or a team the caller is not in)
+          description: No such site, or `destination_not_found` (anything but a team the caller is in; the answer never says which)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: '`name_conflict` (the receiver has a site by that name), `name_held` (a recently deleted site of the receiver holds the name), `destination_inactive` (a disabled person, or a team nobody in can sign in), or `site_limit`'
+          description: '`site_restricted_by_admin` (an admin restricted the site; `reason` carries their note), `name_conflict` (the team has a site by that name), `name_held` (a recently deleted site of the team holds the name), or `site_limit` (a deleted site counts until its recovery window ends)'
           content:
             application/json:
               schema:
@@ -1344,7 +1344,7 @@ paths:
   /api/collaboration/sites/{owner}/{sitename}/rename:
     post:
       summary: Rename a site
-      description: Gives the named owner's site (a person or team the caller is, or is in) a new name, and so a new address; everything else stays. The old address redirects to the new one until a site takes the old name again. Full-scope key or session. Audited as `site_rename`.
+      description: Gives the named owner's site (a person or team the caller is, or is in) a new name, and so a new address; everything else stays. The old address redirects to the new one, only for a caller who can open the site, until a site takes the old name again; network access stays. Refused while an admin's restriction stands. Full-scope key or session. Audited as `site_rename`.
       tags: [Sites]
       security:
         - apiKey: []
@@ -1376,7 +1376,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: '`name_conflict`: the owner already has a site by that name; `name_held`: a recently deleted site of theirs still holds it'
+          description: '`name_conflict`: the owner already has a site by that name; `name_held`: a recently deleted site of theirs still holds it; `site_restricted_by_admin`: an admin restricted the site (`reason` carries their note)'
           content:
             application/json:
               schema:
@@ -1577,7 +1577,7 @@ paths:
   /api/admin/sites/{owner}/{sitename}/restrict:
     post:
       summary: Restrict a site to its owner
-      description: Admin only, browser session only (never an API key). Takes any site down to `only_me` (its owner, or the owning team's members) at once, withdrawing any network request or approval. `reason` is required and shown to the owner as the site's `access_decision` (`restricted`). It is sticky: until an admin calls `unrestrict`, the owner or team cannot raise the level, request network access or add viewers (`409 site_restricted_by_admin` with the `reason`). Audited as `site_restricted`.
+      description: 'Admin only, browser session only (never an API key). Takes any site down to `only_me` (its owner, or the owning team''s members) at once, withdrawing any network request or approval. `reason` is required and shown to the owner as the site''s `access_decision` (`restricted`). It is sticky: until an admin calls `unrestrict`, the owner or team cannot raise the level, request network access or add viewers (`409 site_restricted_by_admin` with the `reason`). Audited as `site_restricted`.'
       tags: [Admin]
       parameters:
         - $ref: '#/components/parameters/owner'
@@ -2232,7 +2232,7 @@ paths:
   /api/admin/users/{username}/delete-sites:
     post:
       summary: Delete every site of a leaver or an abandoned team
-      description: Admin only, browser session only. Deletes each site as its owner's delete would: it stops serving at once and can be restored for 30 days (Recently deleted), audited as `site_delete` with `by_admin`. `409` while the owner can still sign in, or the team still has an active member.
+      description: 'Admin only, browser session only. Deletes each site as its owner''s delete would: it stops serving at once and can be restored for 30 days (Recently deleted), audited as `site_delete` with `by_admin`. `409` while the owner can still sign in, or the team still has an active member.'
       tags: [Admin]
       parameters:
         - name: username
@@ -2900,6 +2900,11 @@ components:
       properties:
         error:
           type: string
+        code:
+          type: string
+        reason:
+          type: string
+          description: With `site_restricted_by_admin`, the admin's note.
 
     AdminNote:
       type: object

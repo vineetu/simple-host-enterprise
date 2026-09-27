@@ -670,14 +670,14 @@ func writeTeamDeleteUnconfirmed(w http.ResponseWriter, team db.Team, sites int, 
 	})
 }
 
-// keepSitesHint offers the way to keep a closing team's sites: hand each one
-// over first (to another team the person is in, or to a person), after which
+// keepSitesHint offers the way to keep a closing team's sites: move each one
+// first into another team the person is in, after which
 // the team closes with nothing in it.
 func keepSitesHint(sites int) string {
 	if sites == 0 {
 		return ""
 	}
-	return " To keep the sites instead, move each one first with POST /api/collaboration/sites/{team}/{site}/transfer (MCP transfer_site) to another team the person is in or to a person; their old addresses redirect."
+	return " To keep the sites instead, move each one first with POST /api/collaboration/sites/{team}/{site}/transfer (MCP transfer_site) to another team the person is in; their old addresses redirect."
 }
 
 // deleteTeamAndSites deletes a team and every site it owns in tx, which must

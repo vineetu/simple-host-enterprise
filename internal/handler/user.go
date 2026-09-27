@@ -37,6 +37,8 @@ type errorResponse struct {
 	// retry, a dialog deciding what to say. Omitted where the status alone is
 	// the whole answer, so adding one later is additive rather than a change.
 	Code string `json:"code,omitempty"`
+	// Reason is the admin's note on a site_restricted_by_admin refusal.
+	Reason string `json:"reason,omitempty"`
 }
 
 func NewUserHandler(database *sql.DB, limits ...*AbuseLimits) *UserHandler {

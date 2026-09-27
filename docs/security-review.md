@@ -316,13 +316,21 @@ Stated once, not repeated per finding:
   row, which is the same limitation the `actor_id`/`owner_id`/`site_id`
   "not resolved back to usernames" bullet above already describes for the
   live case.
-- **Handing a site over** (`site_transfer`) is limited to the owner or a
-  member of the owning team, towards a team they are in or a person who can
-  still sign in; an admin may move only a disabled person's or a memberless
-  team's sites. The receiver can then do anything with the site. The old
-  address redirects to the new one by a database lookup (`site_redirects`),
-  so it confirms to anyone who has the old address that the site moved and
-  where; the new address still demands the site's own sign-in.
+- **Moving a site** (`site_transfer`) is limited to the owner or a member
+  of the owning team, and only into a team they are in (never to a person:
+  nobody receives a site they did not ask for). Membership of both sides is
+  re-checked inside the move's transaction. An admin may move only a
+  disabled person's or a memberless team's sites, to a team or a person.
+  A site an admin restricted cannot be moved or renamed by its owner. A
+  move drops network access. Every member of the receiving team can then do
+  anything with the site. The old address redirects by a database lookup
+  (`site_redirects`), but only for a caller who could open the site at its
+  new address (anyone while it is on the network; otherwise a caller with a
+  host session or key whom the access rule admits); anyone else gets the
+  ordinary not-found. A navigation with no session is taken through sign-in
+  on the old host first, which tells a visitor that the old address is not
+  simply unknown (not where the site went). The transfer is audited in both
+  namespaces.
 - **There is no per-site write-mode setting**, so there is nothing to audit
   for it. Every site's saved
   data is writable by anyone signed in who may open it (anonymous network
@@ -350,6 +358,54 @@ Stated once, not repeated per finding:
   in the first place — that half of the guarantee is standard browser
   behavior this package depends on, and it has not been observed in a
   real browser. See "Browser-only checks" in section 3 for the steps.
+
+### Review of the hand-over, recently-deleted and restriction work (2026-09-27)
+
+Fixed in the same release: stored XSS through a pending viewer's email
+(strict ASCII grant emails; every page `esc()` escapes quotes; `/admin`
+questions in data attributes), redirect leaks, restriction bypass by
+moving, unsolicited hand-over to a person, one-sided transfer audit, the
+soft-delete quota bypass, pending-grant conversion on an unverified or
+refused address (and Unicode case folding), grants by email to an
+unverified stored address, disabled status revealed by a transfer refusal,
+membership checked outside the move's transaction, network access
+surviving a hand-over, `PUBLIC` execute on 0046's partition functions, and
+restore past the 30-day window. What was left, and why:
+
+- **Email refresh with recycled addresses.** The stored email follows the
+  IdP. If an address is later reassigned to a new hire, offboarding by that
+  email finds the new hire, not the leaver. The offboarding result should
+  name the matched username and when its email last changed, or keep an
+  email history. `email_change` is also written with the best-effort
+  `Record` (listed above), not in the sign-in's transaction.
+- **Pending grants outlive whoever added them.** A member removed from a
+  team, or offboarded, leaves the pending memberships and viewer grants they
+  added, and those still convert. Dropping them when the adder leaves or is
+  disabled, or showing "added by" prominently, is not built.
+- **Team deletion ignores the recovery window.** Deleting a team hard-deletes
+  its recently deleted sites too, and the confirmation count includes them
+  without saying so.
+- **Connected apps have no scopes.** An OAuth connector acts with the
+  person's full power, which includes moving a site into a team. Moves are
+  now limited to teams the person is in, which bounds the damage, but a
+  connector is not asked to confirm in a browser.
+- **The sign-in email is lower-cased with Go's Unicode rules.** Pending
+  grants now require a plain-ASCII claim, but binding an existing account by
+  email at first sign-in and the stored address still use
+  `strings.ToLower`, which folds a few non-ASCII letters (the Kelvin sign)
+  into ASCII. An IdP that verifies such an address could collide with an
+  ASCII one; refusing non-ASCII addresses at sign-in is not done.
+- **The final purge is not audited.** The sweeper's purge of a site past its
+  window (`storage/sweep.go` `purgeBatch`) writes no audit event; the
+  `site_delete` event records `restorable_until`.
+- **A redirect or move response may name the wrong host for a restricted
+  site** (not verified): both use `hosts.SiteURL`, which does not account
+  for restricted-site hosts. Functional only; the gate still decides.
+- **Redirect rows are never pruned.** `OwnerLabelsWithSites` keeps a
+  certificate for every label with a redirect, forever; bounded by the
+  number of accounts.
+- **No `script-src` CSP on the base host.** The pages' inline scripts would
+  need nonces first; escaping is the control today.
 
 ## 5. What this review did not cover
 

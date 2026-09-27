@@ -73,10 +73,14 @@ func TestTransferSiteToTeamKeepsEverythingAndRedirects(t *testing.T) {
 		t.Errorf("team member opens the moved site = %d", code)
 	}
 
-	// The old address redirects, path and query kept; a write is a 308.
-	old := w.siteRequest("", http.MethodGet, "tracker.alice."+accessBase, "/page?x=1", "")
+	// The old address redirects anyone who can open the site (company:
+	// anyone signed in), path and query kept; a write is a 308.
+	old := w.siteRequest("vera", http.MethodGet, "tracker.alice."+accessBase, "/page?x=1", "")
 	if old.Code != http.StatusMovedPermanently || old.Header().Get("Location") != "https://tracker.team-crew."+accessBase+"/page?x=1" {
 		t.Errorf("old address = %d %q", old.Code, old.Header().Get("Location"))
+	}
+	if anon := w.siteRequest("", http.MethodGet, "tracker.alice."+accessBase, "/page?x=1", ""); anon.Code != http.StatusNotFound || anon.Header().Get("Location") != "" {
+		t.Errorf("old address with nobody signed in = %d %q, want 404", anon.Code, anon.Header().Get("Location"))
 	}
 	put := w.siteRequest("alice", http.MethodPut, "tracker.alice."+accessBase, "/api/sites/tracker/state/versioned", `{}`)
 	if put.Code != http.StatusPermanentRedirect || put.Header().Get("Location") != "https://tracker.team-crew."+accessBase+"/api/site/state/versioned" {
@@ -94,8 +98,12 @@ func TestTransferSiteToTeamKeepsEverythingAndRedirects(t *testing.T) {
 		t.Errorf("owner labels = %v, %v", labels, err)
 	}
 
-	if n := w.count(`SELECT count(*) FROM audit_events WHERE action = 'site_transfer' AND site_id = $1 AND detail->>'from' = 'alice' AND detail->>'to' = 'team-crew'`, siteID); n != 1 {
-		t.Errorf("site_transfer audit rows = %d, want 1", n)
+	// Recorded in both namespaces' logs.
+	if n := w.count(`SELECT count(*) FROM audit_events WHERE action = 'site_transfer' AND site_id = $1 AND detail->>'from' = 'alice' AND detail->>'to' = 'team-crew'`, siteID); n != 2 {
+		t.Errorf("site_transfer audit rows = %d, want 2", n)
+	}
+	if n := w.count(`SELECT count(*) FROM audit_events WHERE action = 'site_transfer' AND site_id = $1 AND owner_id = $2`, siteID, w.users["alice"]); n != 1 {
+		t.Errorf("site_transfer rows in alice's namespace = %d, want 1", n)
 	}
 	if n := w.count(`SELECT count(*) FROM site_search_queue WHERE site_id = $1`, siteID); n != 1 {
 		t.Errorf("search queue rows = %d, want 1", n)
@@ -111,41 +119,50 @@ func TestTransferSiteToTeamKeepsEverythingAndRedirects(t *testing.T) {
 func TestTransferSiteRefusals(t *testing.T) {
 	w := newAccessWorld(t)
 	w.newTeam("crew", "mo")
+	w.newTeam("home", "alice")
 	w.deploy("alice", "/api/sites/board")
 	w.deploy("vera", "/api/sites/board")
-
-	for _, tc := range []struct {
-		to   string
-		want int
-		code string
-	}{
-		{"crew", http.StatusNotFound, "destination_not_found"},   // alice is not in it
-		{"nobody", http.StatusNotFound, "destination_not_found"}, // no such account
-		{"alice", http.StatusBadRequest, "same_owner"},
-		{"vera", http.StatusConflict, "name_conflict"},
-	} {
-		out := w.move("alice", "/api/sites/board/transfer", map[string]any{"to": tc.to}, tc.want)
-		if out["code"] != tc.code {
-			t.Errorf("to %s: %v", tc.to, out)
-		}
-	}
 	w.disable("olly")
-	if out := w.move("alice", "/api/sites/board/transfer", map[string]any{"to": "olly"}, http.StatusConflict); out["code"] != "destination_inactive" {
-		t.Errorf("to a disabled person: %v", out)
+
+	// Anything but a team alice is in gets one answer, which never says
+	// which: a team she is not in, nobody, a person (enabled or disabled),
+	// herself.
+	var first string
+	for _, to := range []string{"crew", "nobody", "vera", "olly", "alice"} {
+		out := w.move("alice", "/api/sites/board/transfer", map[string]any{"to": to}, http.StatusNotFound)
+		msg, _ := out["error"].(string)
+		if out["code"] != "destination_not_found" || strings.Contains(msg, "sign in") {
+			t.Errorf("to %s: %v", to, out)
+		}
+		shape := strings.Replace(msg, to, "X", 1)
+		if first == "" {
+			first = shape
+		} else if shape != first {
+			t.Errorf("to %s answered %q, not the same as %q", to, msg, first)
+		}
 	}
 	// Somebody else's site is not found.
 	w.move("vera", "/api/collaboration/sites/alice/board/transfer", map[string]any{"to": "vera"}, http.StatusNotFound)
-	// To an enabled person works.
-	if out := w.move("alice", "/api/sites/board/transfer", map[string]any{"to": "mo"}, http.StatusOK); out["owner"] != "mo" {
-		t.Errorf("to a person: %v", out)
+	// Into her team works.
+	if out := w.move("alice", "/api/sites/board/transfer", map[string]any{"to": "home"}, http.StatusOK); out["owner"] != "team-home" {
+		t.Errorf("to her team: %v", out)
+	}
+	// A team site cannot go to a member's own namespace, nor to the team it
+	// is in.
+	if out := w.move("alice", "/api/collaboration/sites/team-home/board/transfer", map[string]any{"to": "alice"}, http.StatusNotFound); out["code"] != "destination_not_found" {
+		t.Errorf("team site to a member: %v", out)
+	}
+	if out := w.move("alice", "/api/collaboration/sites/team-home/board/transfer", map[string]any{"to": "home"}, http.StatusBadRequest); out["code"] != "same_owner" {
+		t.Errorf("team site to its own team: %v", out)
 	}
 }
 
 func TestTransferRespectsDestinationQuota(t *testing.T) {
 	w := newAccessWorldWith(t, UploadQuota{MaxSites: 1}, nil)
+	w.newTeam("crew", "mo", "alice")
 	w.deploy("alice", "/api/sites/one")
-	w.deploy("mo", "/api/sites/two")
-	if out := w.move("alice", "/api/sites/one/transfer", map[string]any{"to": "mo"}, http.StatusConflict); out["code"] != "site_limit" {
+	w.deploy("mo", "/api/collaboration/sites/team-crew/two")
+	if out := w.move("alice", "/api/sites/one/transfer", map[string]any{"to": "crew"}, http.StatusConflict); out["code"] != "site_limit" {
 		t.Errorf("over quota: %v", out)
 	}
 	if n := w.count(`SELECT count(*) FROM sites s JOIN users u ON u.id = s.user_id WHERE u.username = 'alice'`); n != 1 {
@@ -156,24 +173,25 @@ func TestTransferRespectsDestinationQuota(t *testing.T) {
 func TestLastMemberMovesSitesOutThenLeaves(t *testing.T) {
 	w := newAccessWorld(t)
 	w.newTeam("crew", "mo")
+	w.newTeam("keep", "mo")
 	w.deploy("mo", "/api/collaboration/sites/team-crew/board")
 
 	rec := w.api("mo", http.MethodPost, "/api/teams/crew/leave", nil)
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "transfer_site") {
 		t.Fatalf("leave as last member = %d %s, want the move offered", rec.Code, rec.Body)
 	}
-	w.move("mo", "/api/collaboration/sites/team-crew/board/transfer", map[string]any{"to": "mo"}, http.StatusOK)
+	w.move("mo", "/api/collaboration/sites/team-crew/board/transfer", map[string]any{"to": "keep"}, http.StatusOK)
 	if rec := w.api("mo", http.MethodPost, "/api/teams/crew/leave?confirm_name=team-crew", nil); rec.Code != http.StatusOK {
 		t.Fatalf("leave with no sites = %d %s", rec.Code, rec.Body)
 	}
 	if w.teamExists("team-crew") {
 		t.Error("the team outlived its last member")
 	}
-	if code := w.view("mo", "mo", "board", false); code != http.StatusOK {
+	if code := w.view("mo", "team-keep", "board", false); code != http.StatusOK {
 		t.Errorf("moved site = %d", code)
 	}
-	old := w.siteRequest("", http.MethodGet, "board.team-crew."+accessBase, "/", "")
-	if old.Code != http.StatusMovedPermanently || old.Header().Get("Location") != "https://board.mo."+accessBase+"/" {
+	old := w.siteRequest("mo", http.MethodGet, "board.team-crew."+accessBase, "/", "")
+	if old.Code != http.StatusMovedPermanently || old.Header().Get("Location") != "https://board.team-keep."+accessBase+"/" {
 		t.Errorf("closed team's old address = %d %q", old.Code, old.Header().Get("Location"))
 	}
 }
@@ -194,7 +212,7 @@ func TestRenameSite(t *testing.T) {
 	if code := w.view("alice", "alice", "tracker", false); code != http.StatusOK {
 		t.Errorf("renamed site = %d", code)
 	}
-	old := w.siteRequest("", http.MethodGet, "test2.alice."+accessBase, "/", "")
+	old := w.siteRequest("alice", http.MethodGet, "test2.alice."+accessBase, "/", "")
 	if old.Code != http.StatusMovedPermanently || old.Header().Get("Location") != "https://tracker.alice."+accessBase+"/" {
 		t.Errorf("old name = %d %q", old.Code, old.Header().Get("Location"))
 	}
@@ -236,8 +254,8 @@ func TestAdminMovesAndDeletesLeaverSites(t *testing.T) {
 	if ids := w.teamSiteIDs("team-crew"); len(ids) != 2 {
 		t.Fatalf("team now has %d sites, want 2", len(ids))
 	}
-	if n := w.count(`SELECT count(*) FROM audit_events WHERE action = 'site_transfer' AND actor_id = $1 AND detail->>'by_admin' = 'true'`, w.users["root"]); n != 2 {
-		t.Errorf("admin site_transfer audit rows = %d, want 2", n)
+	if n := w.count(`SELECT count(*) FROM audit_events WHERE action = 'site_transfer' AND actor_id = $1 AND detail->>'by_admin' = 'true'`, w.users["root"]); n != 4 {
+		t.Errorf("admin site_transfer audit rows = %d, want 4 (each move in both namespaces)", n)
 	}
 	// A non-admin is refused.
 	if rec := w.adminAsPost("vera", "/api/admin/users/alice/delete-sites", ""); rec.Code != http.StatusForbidden {

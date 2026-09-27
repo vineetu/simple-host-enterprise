@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/vsriram/simple-host/internal/audit"
 	"github.com/vsriram/simple-host/internal/auth"
@@ -117,6 +118,10 @@ func (c OIDCClaimConfig) refuseIdentity(claims oidc.Claims, email string) (reaso
 		return "google_hd_not_allowed", "this account's Google Workspace domain is not allowed to sign in here"
 	}
 	return "", ""
+}
+
+func isASCII(s string) bool {
+	return strings.IndexFunc(s, func(r rune) bool { return r > unicode.MaxASCII }) < 0
 }
 
 func isGoogleIssuer(issuer string) bool {
@@ -350,7 +355,15 @@ func (h *AuthHandler) callback(w http.ResponseWriter, r *http.Request) {
 	// account become theirs now. refuseIdentity above has already required a
 	// verified email at an allowed domain. Checked at every sign-in, not only
 	// the first, so a grant that raced the account's creation still lands.
-	converted, err := db.ConvertPendingGrants(r.Context(), tx, user.ID, email)
+	// Only the provider-verified "email" claim converts (EMAIL_CLAIM may
+	// name another claim, which email_verified does not cover), and
+	// ConvertPendingGrants adds its own checks on the stored address.
+	var converted []db.ConvertedGrant
+	// The raw claim must be ASCII: strings.ToLower folds some non-ASCII
+	// letters (the Kelvin sign) into ASCII ones.
+	if strings.ToLower(strings.TrimSpace(claims.Email)) == email && isASCII(claims.Email) {
+		converted, err = db.ConvertPendingGrants(r.Context(), tx, user.ID, email)
+	}
 	var session db.Session
 	if err == nil {
 		session, err = db.CreateSession(r.Context(), tx, user.ID, expiresAt, ip, r.UserAgent())

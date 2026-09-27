@@ -235,3 +235,74 @@ func TestPendingTeamMembers(t *testing.T) {
 		t.Fatalf("pending members outlived their team: %v", left)
 	}
 }
+
+// A grant by email reaches an existing account only through an address the
+// identity provider vouched for (email_source 'claimed'), and a pending grant
+// converts only for an account that now holds that address from a claim,
+// matched exactly on plain ASCII.
+func TestPendingGrantsNeedAClaimedAddress(t *testing.T) {
+	database := assetsTestDB(t)
+	ctx := context.Background()
+	ownerID, siteID := mustCreateUserAndSite(t, database, "alice", "demo")
+	guess, err := CreateOIDCUser(ctx, database, "guess", "sub-guess", "guess@example.com", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`UPDATE users SET email_source = 'inferred' WHERE id = $1`, guess.ID); err != nil {
+		t.Fatal(err)
+	}
+	other, err := CreateOIDCUser(ctx, database, "other", "sub-other", "other@example.com", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var viewers []SiteViewer
+	if err := inTx(t, database, func(tx *sql.Tx) error {
+		viewers, err = GrantSiteViewers(ctx, tx, ownerID, "demo", siteID, &ownerID, []string{"guess@example.com", "someone@example.com", "kelvin@example.com"})
+		return err
+	}); err != nil {
+		t.Fatalf("GrantSiteViewers: %v", err)
+	}
+	for _, v := range viewers {
+		if !v.Pending {
+			t.Fatalf("viewers = %+v: an unverified address reached an account", viewers)
+		}
+	}
+
+	convert := func(userID, email string) []ConvertedGrant {
+		t.Helper()
+		var converted []ConvertedGrant
+		if err := inTx(t, database, func(tx *sql.Tx) error {
+			var err error
+			converted, err = ConvertPendingGrants(ctx, tx, userID, email)
+			return err
+		}); err != nil {
+			t.Fatalf("ConvertPendingGrants(%q): %v", email, err)
+		}
+		return converted
+	}
+	// Not the account's stored address: nothing converts.
+	if got := convert(other.ID, "someone@example.com"); len(got) != 0 {
+		t.Fatalf("converted %+v for an address the account does not hold", got)
+	}
+	// Stored, but not from a claim.
+	if got := convert(guess.ID, "guess@example.com"); len(got) != 0 {
+		t.Fatalf("converted %+v for an inferred address", got)
+	}
+	// A Kelvin sign lower-cases to an ASCII k in Go; it must never match.
+	if _, err := database.Exec(`UPDATE users SET email = 'kelvin@example.com' WHERE id = $1`, other.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := convert(other.ID, "Kelvin@example.com"); len(got) != 0 {
+		t.Fatalf("converted %+v for a non-ASCII address", got)
+	}
+	if got := convert(other.ID, "kelvin@example.com"); len(got) != 1 {
+		t.Fatalf("converted %+v, want the one grant for the claimed address", got)
+	}
+	if _, err := database.Exec(`UPDATE users SET email_source = 'claimed' WHERE id = $1`, guess.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := convert(guess.ID, "guess@example.com"); len(got) != 1 {
+		t.Fatalf("converted %+v after the address was claimed, want one", got)
+	}
+}

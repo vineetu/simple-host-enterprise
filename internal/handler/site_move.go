@@ -37,6 +37,9 @@ type siteMover struct {
 	hosts    HostModel
 	audit    audit.Recorder
 	quota    UploadQuota
+	// admin is the leaver flow: the actor need not be in either namespace,
+	// may hand sites to a person, and may move a site an admin restricted.
+	admin bool
 }
 
 // moveRefusal is a move the server will not make, and why, in words the
@@ -120,6 +123,8 @@ func (s siteMover) applyMoves(ctx context.Context, tx *sql.Tx, actorID, action s
 		return nil, nil, err
 	}
 	destinations := map[string]bool{}
+	actorKind, keyID := auditActorKind(ctx)
+	var events []audit.Event
 	for _, m := range moves {
 		site, err := db.GetSite(ctx, tx, m.From.ID, m.OldName)
 		if errors.Is(err, sql.ErrNoRows) || (err == nil && site.ID != m.SiteID) {
@@ -127,6 +132,18 @@ func (s siteMover) applyMoves(ctx context.Context, tx *sql.Tx, actorID, action s
 		}
 		if err != nil {
 			return nil, nil, err
+		}
+		if !s.admin {
+			if refusal, err := checkMoveAuthority(ctx, tx, actorID, m); refusal != nil || err != nil {
+				return nil, refusal, err
+			}
+			if err := db.CheckSiteNotRestricted(ctx, tx, m.SiteID); err != nil {
+				var restricted *db.SiteRestrictedError
+				if errors.As(err, &restricted) {
+					return nil, restrictedMoveRefusal(restricted), nil
+				}
+				return nil, nil, err
+			}
 		}
 		if s.hosts.SiteHost(m.To.Username, m.NewName) == "" {
 			return nil, refuseMove(http.StatusConflict, "invalid_site_name",
@@ -177,6 +194,24 @@ func (s siteMover) applyMoves(ctx context.Context, tx *sql.Tx, actorID, action s
 		}
 		if m.From.ID != m.To.ID {
 			destinations[m.To.ID] = true
+			// An admin approved network access for the owner it had, not
+			// for whoever holds it next: a hand-over drops it (a rename
+			// keeps it).
+			wasNetwork, hadRequest, err := db.DropNetworkAccess(ctx, tx, m.SiteID)
+			if err != nil {
+				return nil, nil, err
+			}
+			if wasNetwork || hadRequest {
+				extra := map[string]any{"reason": "site_transfer", "to": db.AccessCompany}
+				if !wasNetwork {
+					extra = map[string]any{"reason": "site_transfer", "request_withdrawn": true}
+				}
+				events = append(events, audit.Event{
+					ActorID: actorID, ActorKind: actorKind, KeyID: keyID,
+					Action: "network_access_reverted", OwnerID: m.From.ID, SiteID: m.SiteID,
+					RequestID: auditRequestID(ctx), Extra: extra,
+				})
+			}
 		}
 	}
 	for ownerID := range destinations {
@@ -184,10 +219,9 @@ func (s siteMover) applyMoves(ctx context.Context, tx *sql.Tx, actorID, action s
 			return nil, refusal, err
 		}
 	}
-	actorKind, keyID := auditActorKind(ctx)
-	events := make([]audit.Event, 0, len(moves))
 	for _, m := range moves {
-		detail := map[string]any{"from": m.From.Username, "to": m.To.Username, "from_name": m.OldName, "name": m.NewName}
+		detail := map[string]any{"from": m.From.Username, "to": m.To.Username, "from_name": m.OldName, "name": m.NewName,
+			"from_owner_id": m.From.ID, "to_owner_id": m.To.ID}
 		for k, v := range extra {
 			detail[k] = v
 		}
@@ -196,8 +230,56 @@ func (s siteMover) applyMoves(ctx context.Context, tx *sql.Tx, actorID, action s
 			Action: action, OwnerID: m.To.ID, SiteID: m.SiteID,
 			RequestID: auditRequestID(ctx), Extra: detail,
 		})
+		if m.From.ID != m.To.ID {
+			// The namespace the site left sees the hand-over in its own
+			// audit log too (the reader scopes rows by owner_id).
+			events = append(events, audit.Event{
+				ActorID: actorID, ActorKind: actorKind, KeyID: keyID,
+				Action: action, OwnerID: m.From.ID, SiteID: m.SiteID,
+				RequestID: auditRequestID(ctx), Extra: detail,
+			})
+		}
 	}
 	return events, nil, nil
+}
+
+// checkMoveAuthority re-checks, inside the move's transaction and holding
+// the membership rows until it ends, that the actor may still take the site
+// out of its namespace and put it into the destination: the site is theirs
+// or their team's, and a hand-over goes to a team they are in. A person is
+// never a destination here (only an admin's leaver flow hands a site to a
+// person).
+func checkMoveAuthority(ctx context.Context, tx *sql.Tx, actorID string, m plannedMove) (*moveRefusal, error) {
+	if m.From.ID != actorID {
+		member, err := db.IsTeamMemberLocked(ctx, tx, m.From.ID, actorID)
+		if err != nil {
+			return nil, err
+		}
+		if !member {
+			return refuseMove(http.StatusNotFound, "", "site not found"), nil
+		}
+	}
+	if m.To.ID == m.From.ID {
+		return nil, nil
+	}
+	member, err := db.IsTeamMemberLocked(ctx, tx, m.To.ID, actorID)
+	if err != nil {
+		return nil, err
+	}
+	if !member {
+		return destinationNotFound(m.To.Username), nil
+	}
+	return nil, nil
+}
+
+// restrictedMoveRefusal refuses a transfer or rename of a site an admin
+// restricted, with the admin's reason, as the access routes do.
+func restrictedMoveRefusal(restricted *db.SiteRestrictedError) *moveRefusal {
+	message := "An admin restricted this site; it cannot be renamed or handed over until an admin lifts the restriction."
+	if restricted.Reason != "" {
+		message = "An admin restricted this site: " + restricted.Reason + ". It cannot be renamed or handed over until an admin lifts the restriction."
+	}
+	return &moveRefusal{status: http.StatusConflict, body: errorResponse{Error: message, Code: "site_restricted_by_admin", Reason: restricted.Reason}}
 }
 
 // checkMoveQuota refuses a move that takes ownerID over its site count or
@@ -221,7 +303,7 @@ func (s siteMover) checkMoveQuota(ctx context.Context, tx *sql.Tx, ownerID strin
 	}
 	if s.quota.MaxSites > 0 && usage.Sites > s.quota.MaxSites {
 		return refuseMove(http.StatusConflict, "site_limit",
-			"%s would have %s sites, more than the %s allowed; delete a site there first", name, formatCount(usage.Sites), formatCount(s.quota.MaxSites)), nil
+			"%s would have %s sites, more than the %s allowed (a deleted site counts until its 30-day recovery window ends); delete a site there first", name, formatCount(usage.Sites), formatCount(s.quota.MaxSites)), nil
 	}
 	if s.quota.MaxBytes > 0 && usage.Bytes > s.quota.MaxBytes {
 		return &moveRefusal{status: http.StatusRequestEntityTooLarge, body: errorResponse{
@@ -261,9 +343,25 @@ func (s siteMover) response(m plannedMove) siteMoveResponse {
 	}
 }
 
-// resolveDestination finds the person or team a site is being handed to:
-// the exact stored name first, then, for a bare name, the team "team-<name>"
-// (so "sales" reaches team-sales unless a person is called sales).
+// resolveTeamDestination finds the team an owner or member is moving a site
+// to: "sales" and "team-sales" both name team-sales. People are never
+// destinations here.
+func resolveTeamDestination(ctx context.Context, q db.Querier, typed string) (db.MoveDestination, error) {
+	name := teamName(typed)
+	if name == "" {
+		return db.MoveDestination{}, sql.ErrNoRows
+	}
+	dest, err := db.GetMoveDestination(ctx, q, name)
+	if err == nil && !dest.IsTeam() {
+		return db.MoveDestination{}, sql.ErrNoRows
+	}
+	return dest, err
+}
+
+// resolveDestination finds the person or team an admin is handing a
+// leaver's sites to: the exact stored name first, then, for a bare name,
+// the team "team-<name>" (so "sales" reaches team-sales unless a person is
+// called sales).
 func resolveDestination(ctx context.Context, q db.Querier, typed string) (db.MoveDestination, error) {
 	name := strings.ToLower(strings.TrimSpace(typed))
 	if name == "" {
@@ -289,9 +387,13 @@ func destinationRefusal(dest db.MoveDestination) *moveRefusal {
 	return nil
 }
 
+// destinationNotFound is the one answer an owner or member gets for any
+// destination they cannot move a site to: no such team, a team they are not
+// in, a person (only an admin hands sites to a person), or an account that
+// can no longer sign in. It never says which.
 func destinationNotFound(typed string) *moveRefusal {
 	return refuseMove(http.StatusNotFound, "destination_not_found",
-		"no person or team you can hand sites to is called %q; a team must be one you are in, and a person must have signed in at least once", strings.TrimSpace(typed))
+		"no team you are in is called %q; a site can be moved only to a team you belong to", strings.TrimSpace(typed))
 }
 
 func (h *SiteHandler) mover() siteMover {
@@ -336,8 +438,10 @@ func (h *SiteHandler) movableSite(w http.ResponseWriter, r *http.Request) (*db.U
 	return user, access, true
 }
 
-// transferSite hands a site the caller owns (or a team site of a team they
-// are in) to a team they belong to or to any person who can still sign in.
+// transferSite moves a site the caller owns (or a team site of a team they
+// are in) into another team they belong to. Handing a site to a person is
+// the admin's leaver flow only (admin_move.go): nobody receives a site they
+// did not ask for.
 func (h *SiteHandler) transferSite(w http.ResponseWriter, r *http.Request) {
 	user, access, ok := h.movableSite(w, r)
 	if !ok {
@@ -349,7 +453,7 @@ func (h *SiteHandler) transferSite(w http.ResponseWriter, r *http.Request) {
 	if !decodeSmallJSON(w, r, &req) {
 		return
 	}
-	dest, err := resolveDestination(r.Context(), h.database, req.To)
+	dest, err := resolveTeamDestination(r.Context(), h.database, req.To)
 	if errors.Is(err, sql.ErrNoRows) {
 		destinationNotFound(req.To).write(w)
 		return
@@ -359,20 +463,16 @@ func (h *SiteHandler) transferSite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	if dest.IsTeam() {
-		member, err := db.IsTeamMember(r.Context(), h.database, dest.ID, user.ID)
-		if err != nil {
-			log.Printf("transfer: team membership %s: %v", dest.Username, err)
-			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-			return
-		}
-		if !member {
-			destinationNotFound(req.To).write(w)
-			return
-		}
+	// Membership is checked again, under lock, inside the move
+	// (checkMoveAuthority); this is the early answer.
+	member, err := db.IsTeamMember(r.Context(), h.database, dest.ID, user.ID)
+	if err != nil {
+		log.Printf("transfer: team membership %s: %v", dest.Username, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
 	}
-	if refusal := destinationRefusal(dest); refusal != nil {
-		refusal.write(w)
+	if !member || destinationRefusal(dest) != nil {
+		destinationNotFound(req.To).write(w)
 		return
 	}
 	if dest.ID == access.OwnerID {
