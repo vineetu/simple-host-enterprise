@@ -834,6 +834,7 @@ PodMonitor, pod annotations, or any in-cluster scraper.
 | `simplehost_db_wait_count_total`, `simplehost_db_wait_seconds_total` | Waits for a free connection |
 | `simplehost_build_info{version,commit,schema}` | The running release |
 | `simplehost_bucket_ok` | 1 when the last bucket check (made by `/readyz`) succeeded, 0 when it failed |
+| `simplehost_config_warning{check}` | 1 while a startup warning stands, 0 once its check passed: `no_admin` (neither `ADMIN_EMAILS` nor `OIDC_ADMIN_CLAIM` is set) and `bucket_versioning` (the bucket reports versioning is not enabled; a provider that cannot report it is logged and not flagged) |
 | `simplehost_audit_stream_dropped_total` | Audit lines not written to stdout because the writer fell behind (the database rows are intact); should stay 0 |
 
 Probes: `/healthz` is liveness and checks nothing else. `/readyz` checks
@@ -852,6 +853,9 @@ No alerting stack ships with the package. What to watch:
 - `simplehost_bucket_ok` at 0, or `readyz: bucket:` in the logs. Pods stay
   Ready and cached pages keep serving, but uncached pages answer 503 and
   publishing fails until the bucket is fixed.
+- `simplehost_config_warning` at 1, or `WARNING:` lines at startup: no admin
+  configured, or bucket versioning off (a swept object then cannot be
+  brought back).
 - Failed CronJob runs (`kube_job_status_failed`), the prune job included.
 - The 5xx rate from `simplehost_http_requests_total`.
 - Certificate expiry (`certmanager_certificate_expiration_timestamp_seconds`,

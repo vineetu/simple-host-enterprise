@@ -4,6 +4,16 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## Unreleased
+
+### Operations
+- Startup warns when no admin is configured (neither `ADMIN_EMAILS` nor
+  `OIDC_ADMIN_CLAIM`) and when the bucket's versioning is not enabled (a
+  provider that cannot report it is logged, not flagged). Both are also
+  exported as `simplehost_config_warning{check="no_admin"|"bucket_versioning"}`.
+  The bucket credentials need `s3:GetBucketVersioning` for the check; without
+  it the status is logged as unknown.
+
 ## v1.3.1 — 2026-09-26
 
 No schema change (still 0042); rolling back to v1.3.0 is safe. Skills are at

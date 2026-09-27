@@ -27,6 +27,8 @@ type fakeS3 struct {
 	objects  map[string]fakeObject
 	pageSize int  // ListObjectsV2 page size; 0 means unlimited
 	denyGet  bool // GetObject answers AccessDenied, as after a policy removal
+	// versioning is what GetBucketVersioning reports; empty is never enabled.
+	versioning types.BucketVersioningStatus
 }
 
 type fakeObject struct {
@@ -183,6 +185,13 @@ func (f *fakeS3) HeadBucket(_ context.Context, in *s3.HeadBucketInput, _ ...func
 		return nil, err
 	}
 	return &s3.HeadBucketOutput{}, nil
+}
+
+func (f *fakeS3) GetBucketVersioning(_ context.Context, in *s3.GetBucketVersioningInput, _ ...func(*s3.Options)) (*s3.GetBucketVersioningOutput, error) {
+	if err := f.checkBucket(in.Bucket); err != nil {
+		return nil, err
+	}
+	return &s3.GetBucketVersioningOutput{Status: f.versioning}, nil
 }
 
 func (f *fakeS3) raw(t *testing.T, key string) fakeObject {
@@ -474,5 +483,34 @@ func TestNewS3ObjectsChecksumModeByEndpoint(t *testing.T) {
 		if objects.sse != "aws:kms" || objects.sseKMSKeyID == "" {
 			t.Errorf("%q: SSE-KMS not carried: %q %q", test.endpoint, objects.sse, objects.sseKMSKeyID)
 		}
+	}
+}
+
+func TestStoreBucketVersioning(t *testing.T) {
+	for _, tc := range []struct {
+		status         types.BucketVersioningStatus
+		enabled, known bool
+	}{
+		{types.BucketVersioningStatusEnabled, true, true},
+		{types.BucketVersioningStatusSuspended, false, true},
+		{"", false, true},
+	} {
+		fake := &fakeS3{bucket: "b", objects: map[string]fakeObject{}, versioning: tc.status}
+		store, err := New(Options{Objects: newS3Objects(fake, "b", "", "", "", nil), Index: mapIndex{}, CacheDir: t.TempDir(), CacheMaxBytes: 1 << 20})
+		if err != nil {
+			t.Fatal(err)
+		}
+		enabled, known := store.BucketVersioning(context.Background())
+		if enabled != tc.enabled || known != tc.known {
+			t.Errorf("status %q: got enabled=%v known=%v", tc.status, enabled, known)
+		}
+	}
+	// A bucket kind that cannot report versioning is unknown, not off.
+	store, err := New(Options{Objects: NewMemoryObjects(), Index: mapIndex{}, CacheDir: t.TempDir(), CacheMaxBytes: 1 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, known := store.BucketVersioning(context.Background()); known {
+		t.Error("memory objects reported versioning as known")
 	}
 }

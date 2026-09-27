@@ -500,7 +500,7 @@ Config names are documented in `docs/configuration.md`; schema in
 - **What.** `/healthz` (liveness) and `/readyz` (database and schema; bucket is
   reported, not gating) on every host. `/metrics` on its own port, never on
   the Service or Ingress: request counts and latency, `simplehost_bucket_ok`,
-  DB pool, build info. Structured request log. Rate limits and concurrency
+  `simplehost_config_warning` (startup checks, section 18), DB pool, build info. Structured request log. Rate limits and concurrency
   slots: sign-in, session hand-off, API key mint and the connector's token
   and registration limits are counted in Postgres and shared by every
   replica; every other limit is per pod in memory (`docs/install.md`,
@@ -542,6 +542,10 @@ Config names are documented in `docs/configuration.md`; schema in
   `OAUTH_REFRESH_TTL`, `OAUTH_REFRESH_TTL` over 90 days; clashing ports; `DB_APP_PASSWORD` equal to
   `DB_PASSWORD`; `DB_APP_USER` combined with `DB_DSN`; a schema newer than the
   binary unless every newer migration is marked backward-compatible.
+  Startup also warns (log line and `simplehost_config_warning{check}`),
+  without refusing, when no admin is configured (neither `ADMIN_EMAILS` nor
+  `OIDC_ADMIN_CLAIM`) and when the bucket reports versioning not enabled; a
+  provider that cannot report versioning is logged as unknown, not flagged.
   `simple-host migrate` applies the schema and sets the least-privilege
   `simplehost_app` role's password; the server connects as that role.
 - **Subcommands.** No argument runs the server. Others: `migrate`, `restore`, `migrate-storage`,

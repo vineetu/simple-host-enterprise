@@ -57,7 +57,8 @@ the default two replicas. A small managed plan can be lower than that
   unset to use IRSA or EKS Pod Identity through the SDK's default credential
   chain. `BACKUP_SSE=AES256` (SSE-S3) and `BACKUP_SSE=aws:kms` with
   `BACKUP_SSE_KEY_ID` (SSE-KMS) both work; the role needs `s3:GetObject`,
-  `s3:PutObject`, `s3:DeleteObject`, `s3:ListBucket` on the bucket (plus
+  `s3:PutObject`, `s3:DeleteObject`, `s3:ListBucket` on the bucket, and
+  `s3:GetBucketVersioning` for the startup versioning check (plus
   `kms:GenerateDataKey`/`kms:Decrypt` on the key for SSE-KMS). The SDK's
   default request checksums stay on for Amazon S3; for every other endpoint
   they are sent only when an operation requires them, which GCS and OCI need.

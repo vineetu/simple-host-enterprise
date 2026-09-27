@@ -61,7 +61,7 @@ that should get it). Last derived from both `FEATURES.md` files and code on 2026
 | Event / hackathon instances | setup page, participant accounts, `simple-hack.app` names | none | `different on purpose` — this is the small-box edition's job |
 | Storage backend | local disk (`DATA_DIR`), served by nginx or Caddy | S3-compatible bucket, pod cache, SSE, optional envelope encryption, retire sweep | `different on purpose` — one folder on one box vs replicas |
 | Deployment model | one binary + Postgres + disk: systemd on simple-host.app; `deploy/install/install.sh` + Docker Compose + Caddy for a small box | Kubernetes (kustomize), cert-manager, least-privilege DB role, TLS-only DB and bucket, startup refusals, rollback-safe migrations | `different on purpose` — owner decision: hosted is the small-box edition, enterprise the cluster edition |
-| Health and metrics | `/healthz`, `/readyz` | `/healthz`, `/readyz`, `/metrics` on its own port | `different on purpose` — no metrics stack on a small box |
+| Health and metrics | `/healthz`, `/readyz` | `/healthz`, `/readyz`, `/metrics` on its own port; startup warnings (no admin, bucket versioning off) logged and exported | `different on purpose` — no metrics stack on a small box |
 | Static, marketing and legal pages | landing, features, enterprise pages, terms, privacy, support | landing, docs, capabilities, install, changelog | `different on purpose` — public service vs internal install |
 | Notifications | none (sign-in email only) | none (SIEM stream only) | `same` |
 

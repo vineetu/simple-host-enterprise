@@ -50,3 +50,19 @@ func TestAuditStreamDroppedMetric(t *testing.T) {
 		t.Fatalf("metric missing: %s", rec.Body)
 	}
 }
+
+func TestConfigWarningMetric(t *testing.T) {
+	r := New()
+	r.SetConfigWarning("no_admin", true)
+	r.SetConfigWarning("bucket_versioning", false)
+	rec := httptest.NewRecorder()
+	r.Handler(nil, Build{}).ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	for _, want := range []string{
+		"simplehost_config_warning{check=\"bucket_versioning\"} 0\n",
+		"simplehost_config_warning{check=\"no_admin\"} 1\n",
+	} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, rec.Body)
+		}
+	}
+}

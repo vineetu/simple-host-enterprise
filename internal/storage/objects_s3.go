@@ -51,6 +51,7 @@ type s3API interface {
 	CopyObject(ctx context.Context, params *s3.CopyObjectInput, optFns ...func(*s3.Options)) (*s3.CopyObjectOutput, error)
 	ListObjectsV2(ctx context.Context, params *s3.ListObjectsV2Input, optFns ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
 	HeadBucket(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error)
+	GetBucketVersioning(ctx context.Context, params *s3.GetBucketVersioningInput, optFns ...func(*s3.Options)) (*s3.GetBucketVersioningOutput, error)
 }
 
 // S3Objects is Objects on any bucket that speaks the S3 API — Amazon S3,
@@ -374,6 +375,17 @@ func (o *S3Objects) Copy(ctx context.Context, from, to string) error {
 // answers AccessDenied. HeadBucket alone can keep succeeding after the
 // credentials lose object access, as a real bucket-policy removal showed.
 const readyProbeKey = "readyz-probe"
+
+// Versioning reports whether the bucket has versioning enabled. A provider
+// that cannot answer (no such API, or no permission to ask) returns an error,
+// which callers treat as "unknown" rather than "off".
+func (o *S3Objects) Versioning(ctx context.Context) (bool, error) {
+	out, err := o.client.GetBucketVersioning(ctx, &s3.GetBucketVersioningInput{Bucket: aws.String(o.bucket)})
+	if err != nil {
+		return false, err
+	}
+	return out.Status == types.BucketVersioningStatusEnabled, nil
+}
 
 func (o *S3Objects) Ping(ctx context.Context) error {
 	if _, err := o.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(o.bucket)}); err != nil {
