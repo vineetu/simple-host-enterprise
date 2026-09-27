@@ -20,8 +20,8 @@ func TestDashboardScriptsParse(t *testing.T) {
 		t.Skip("node is required to parse the dashboard scripts")
 	}
 	blocks := scriptBlock.FindAllStringSubmatch(dashboardScript, -1)
-	if len(blocks) < 3 {
-		t.Fatalf("found %d dashboard scripts, want at least 3", len(blocks))
+	if len(blocks) < 4 {
+		t.Fatalf("found %d dashboard scripts, want at least 4", len(blocks))
 	}
 	for i, block := range blocks {
 		path := filepath.Join(t.TempDir(), "s.js")
@@ -43,6 +43,7 @@ func TestDashboardSitePanelControls(t *testing.T) {
 		"delete-site-button", "Type the site name to confirm",
 		"include=shared", "renderShared",
 		"location.origin + '/mcp'", "/plugin.zip", "/install.html",
+		"'/api/teams'", "'/members'", "'/leave'", "confirm_team_delete", "?confirm_name=", "Type the team name to confirm",
 	} {
 		if !strings.Contains(dashboardScript, want) {
 			t.Errorf("dashboard script lacks %q", want)

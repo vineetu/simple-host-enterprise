@@ -26,6 +26,10 @@ backward-compatible. Skills are at 0.14.2 (0.11.0 still works).
   Restore), Download site, and Delete (type the site name; it goes to
   Recently deleted).
 - A "Shared with me" section lists the sites shared with you.
+- A "Teams" section: create a team, see its members (people not signed in
+  yet included), add and remove them, leave, and delete a team (type its
+  name). Leaving as the last active member says how many sites go with the
+  team and asks for the name first.
 - With no sites yet, the list shows how to connect an AI app: the `/mcp`
   address, `plugin.zip` and the install page.
 

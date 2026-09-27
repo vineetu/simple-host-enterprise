@@ -147,6 +147,16 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
   <div id="site-list" class="rank-list" role="region" aria-label="Sites"></div>
 </section>
 
+<section id="teams-section">
+  <h2 class="section-title">Teams</h2>
+  <p class="login-copy">A team publishes sites together: every member can change or delete any of its sites. Add people by username or work email; someone who hasn't signed in yet joins at their first sign-in.</p>
+  <form class="login-form" onsubmit="return false">
+    <input type="text" id="team-name" placeholder="New team name" maxlength="58" autocomplete="off">
+    <button type="button" id="team-create" class="btn-login">Create team</button>
+  </form>
+  <div id="team-list" class="rank-list" role="region" aria-label="Teams"></div>
+</section>
+
 <section id="shared-section" hidden>
   <h2 class="section-title">Shared with me</h2>
   <p class="login-copy">Sites other people have shared with you by name, or with a team you are in.</p>
@@ -356,7 +366,7 @@ const dashboardScript = `<script>
     });
   }
 })();
-</script>` + dashboardSitesScript + dashboardDeletedScript
+</script>` + dashboardSitesScript + dashboardDeletedScript + dashboardTeamsScript
 
 // dashboardSitesScript renders the signed-in person's accessible sites and,
 // for a site they own or belong to the owning team of (requireOwnerRole's
@@ -908,6 +918,158 @@ const dashboardDeletedScript = `<script>
       })
       .catch(function(){ alert('Network error restoring the site.'); button.disabled = false; });
   });
+
+  load();
+})();
+</script>`
+
+// dashboardTeamsScript lists the person's teams (GET /api/teams) and, per
+// team, its members with add and remove, Leave and Delete, each over the
+// team routes. Leaving as the last active member and deleting a team with
+// sites both need the team's name typed back (confirm_name), which the page
+// asks for before sending.
+const dashboardTeamsScript = `<script>
+(function(){
+  var list = document.getElementById('team-list');
+  var createButton = document.getElementById('team-create');
+  var nameInput = document.getElementById('team-name');
+  if (!list) return;
+  var CH = {'X-Simple-Host-Client': 'control-ui'};
+  var me = (document.querySelector('.mast') || {getAttribute: function(){ return ''; }}).getAttribute('data-username') || '';
+  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+  function teamPath(team) { return '/api/teams/' + encodeURIComponent(team); }
+  function send(method, path, body) {
+    var opts = {method: method, credentials: 'same-origin', headers: Object.assign({}, CH)};
+    if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+    return fetch(path, opts).then(function(r){
+      return r.text().then(function(t){ var b = {}; try { b = t ? JSON.parse(t) : {}; } catch (e) {} return {ok: r.ok, status: r.status, body: b}; });
+    });
+  }
+
+  function load() {
+    send('GET', '/api/teams').then(function(res){
+      var teams = (res.body && res.body.teams) || [];
+      list.innerHTML = '';
+      if (!teams.length) { list.innerHTML = '<div class="rank-empty">You are not in a team.</div>'; return; }
+      teams.forEach(renderTeam);
+    }).catch(function(){ list.innerHTML = '<div class="rank-empty">Could not load teams.</div>'; });
+  }
+
+  function renderTeam(team) {
+    var row = document.createElement('div');
+    row.className = 'rank-row site-row';
+    row.innerHTML = '<span class="rank-name">' + esc(team.name) + '</span>' +
+      '<button type="button" class="btn-reject manage-toggle">Manage</button>';
+    var panel = document.createElement('div');
+    panel.className = 'site-panel';
+    panel.hidden = true;
+    row.appendChild(panel);
+    list.appendChild(row);
+    var loaded = false;
+    row.querySelector('.manage-toggle').addEventListener('click', function(){
+      panel.hidden = !panel.hidden;
+      if (!panel.hidden && !loaded) { loaded = true; renderPanel(panel, team.name); }
+    });
+  }
+
+  // confirmDestroy asks for the team's name typed back when the server says
+  // the change deletes the team and its sites, then repeats it with it.
+  function confirmDestroy(res, name, retry) {
+    var typed = prompt((res.body.error ? res.body.error.split(' Confirm with')[0] + '. ' : '') + 'Type the team name to confirm:');
+    if (typed === null) return;
+    if (typed.trim() !== name) { alert('The name did not match, so nothing changed.'); return; }
+    retry(name);
+  }
+
+  function renderPanel(panel, name) {
+    panel.innerHTML =
+      '<div class="site-subsection"><h4>Members</h4><div class="member-list" aria-live="polite"></div>' +
+      '<div class="add-row"><input type="text" class="add-member-input" placeholder="username or work email, another" autocomplete="off">' +
+      '<button type="button" class="btn-login add-member-button">Add</button></div></div>' +
+      '<div class="site-subsection"><h4>Leave or delete</h4>' +
+      '<p class="share-help">Leaving keeps the team and its sites for the others. If you are the last active member, leaving deletes the team and every site it owns. Deleting removes the team and all its sites for good; move any site you want to keep into another team first.</p>' +
+      '<div class="add-row"><button type="button" class="btn-reject leave-team">Leave team</button>' +
+      '<button type="button" class="btn-reject delete-team">Delete team</button></div></div>';
+    var memberList = panel.querySelector('.member-list');
+
+    function renderMembers(members) {
+      memberList.innerHTML = '';
+      (members || []).forEach(function(m){
+        var r = document.createElement('div');
+        r.className = 'rank-row';
+        var sub = m.pending ? 'hasn\'t signed in yet' : (m.username === me ? 'you' : 'member');
+        r.innerHTML = '<span class="rank-name">' + esc(m.username) + ' <span class="rank-sub">' + esc(sub) + '</span></span>' +
+          (m.username === me ? '' : '<button type="button" class="btn-reject remove-member" data-username="' + esc(m.username) + '">Remove</button>');
+        memberList.appendChild(r);
+      });
+    }
+    function loadMembers() {
+      send('GET', teamPath(name) + '/members').then(function(res){
+        if (!res.ok) { memberList.innerHTML = '<div class="rank-empty">Could not load members.</div>'; return; }
+        renderMembers(res.body.members);
+      }).catch(function(){ memberList.innerHTML = '<div class="rank-empty">Could not load members.</div>'; });
+    }
+
+    panel.querySelector('.add-member-button').addEventListener('click', function(){
+      var input = panel.querySelector('.add-member-input');
+      var usernames = input.value.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+      if (!usernames.length) return;
+      send('POST', teamPath(name) + '/members', {usernames: usernames}).then(function(res){
+        if (!res.ok) { alert('Could not add: ' + (res.body.error || 'unknown error')); return; }
+        input.value = '';
+        renderMembers(res.body.members);
+      }).catch(function(){ alert('Network error adding members.'); });
+    });
+
+    memberList.addEventListener('click', function(ev){
+      var button = ev.target.closest('.remove-member');
+      if (!button) return;
+      var who = button.getAttribute('data-username');
+      if (!confirm('Remove ' + who + ' from ' + name + '? They lose access to the team\'s sites.')) return;
+      send('DELETE', teamPath(name) + '/members/' + encodeURIComponent(who)).then(function(res){
+        if (!res.ok) { alert('Could not remove: ' + (res.body.error || 'unknown error')); return; }
+        loadMembers();
+      }).catch(function(){ alert('Network error removing the member.'); });
+    });
+
+    function leave(confirmName) {
+      var path = teamPath(name) + '/leave' + (confirmName ? '?confirm_name=' + encodeURIComponent(confirmName) : '');
+      send('POST', path).then(function(res){
+        if (res.status === 409 && res.body.code === 'confirm_team_delete') { confirmDestroy(res, name, leave); return; }
+        if (!res.ok) { alert('Could not leave: ' + (res.body.error || 'unknown error')); return; }
+        location.reload();
+      }).catch(function(){ alert('Network error leaving the team.'); });
+    }
+    panel.querySelector('.leave-team').addEventListener('click', function(){
+      if (!confirm('Leave ' + name + '? You lose access to its sites.')) return;
+      leave('');
+    });
+
+    panel.querySelector('.delete-team').addEventListener('click', function(){
+      var typed = prompt('Delete ' + name + ' and every site it owns, for good? Type the team name to confirm:');
+      if (typed === null) return;
+      if (typed.trim() !== name) { alert('The name did not match, so nothing was deleted.'); return; }
+      send('DELETE', teamPath(name) + '?confirm_name=' + encodeURIComponent(name)).then(function(res){
+        if (!res.ok) { alert('Could not delete: ' + (res.body.error || 'unknown error')); return; }
+        location.reload();
+      }).catch(function(){ alert('Network error deleting the team.'); });
+    });
+
+    loadMembers();
+  }
+
+  if (createButton) {
+    createButton.addEventListener('click', function(){
+      var n = nameInput.value.trim();
+      if (!n) return;
+      createButton.disabled = true;
+      send('POST', '/api/teams', {name: n}).then(function(res){
+        createButton.disabled = false;
+        if (!res.ok) { alert('Could not create the team: ' + (res.body.error || 'unknown error')); return; }
+        location.reload();
+      }).catch(function(){ createButton.disabled = false; alert('Network error creating the team.'); });
+    });
+  }
 
   load();
 })();

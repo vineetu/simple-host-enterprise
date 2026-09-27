@@ -67,6 +67,7 @@ func TestPageEscapeCoversQuotes(t *testing.T) {
 	for name, script := range map[string]string{
 		"dashboard sites":   dashboardSitesScript,
 		"dashboard deleted": dashboardDeletedScript,
+		"dashboard teams":   dashboardTeamsScript,
 		"admin activity":    adminActivityScript,
 	} {
 		i := strings.Index(script, "function esc(s)")

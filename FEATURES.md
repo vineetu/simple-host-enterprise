@@ -480,7 +480,11 @@ Config names are documented in `docs/configuration.md`; schema in
   `leave_team`.
 - **Skill.** `references/teams.md`; `references/account-recovery.md` (A team
   is not an account).
-- **Pages.** `/admin` orphan-team delete.
+- **Pages.** `/dashboard` "Teams": create a team, and per team its members
+  (pending ones marked), add by username or email, remove, Leave (as the
+  last active member, the server's `confirm_team_delete` is put to the person
+  and the team name typed back), Delete (team name typed back); `/admin`
+  orphan-team delete.
 - **Go.** `internal/handler/team.go` (`teamName`), `admin.go`
   (`deleteOrphanTeam`), `auth.go` (handle prefix), `owner_index.go`,
   `host_gate.go` (`currentOwnerLabel`), `grant_emails.go`;
@@ -651,13 +655,14 @@ Config names are documented in `docs/configuration.md`; schema in
   reload), saved-data history with Restore (the newest is marked current),
   Download site (section 5), rename and hand over (section 5), Delete (the
   site name typed back; it goes to Recently deleted), visitor counts, each namespace's usage against its quota (sites, stored
-  bytes; the same numbers `GET /api/me` returns as `usage`), "Shared with
+  bytes; the same numbers `GET /api/me` returns as `usage`), "Teams"
+  (section 9), "Shared with
   me" (section 5; hidden when empty), "Recently
   deleted" (the person's and their teams' sites deleted in the last 30 days,
   each with Restore; hidden when empty), and a link to sessions. With no
   sites, the list shows the connect step instead: the `/mcp` address,
   `plugin.zip` and the install page. Calls the JSON routes of sections
-  2, 5, 7, 8, 10, 11 and 12 with the session cookie.
+  2, 5, 7, 8, 9, 10, 11 and 12 with the session cookie.
 - **Status.** Built.
 - **Routes.** `GET /dashboard`.
 - **MCP.** None.
