@@ -239,6 +239,28 @@ func ErasePerson(ctx context.Context, tx *sql.Tx, p ErasablePerson, label, issue
 	count := func(dst *int64, query string, args ...any) error {
 		return tx.QueryRowContext(ctx, query, args...).Scan(dst)
 	}
+	// Every label this erasure holds is locked first, so a sign-in taking
+	// one waits and then finds it held (migration 0057).
+	labels := []string{label}
+	rows, err := tx.QueryContext(ctx, `SELECT owner_label FROM renamed_owner_labels WHERE user_id = $1::uuid`, p.ID)
+	if err != nil {
+		return c, fmt.Errorf("erase person: %w", err)
+	}
+	for rows.Next() {
+		var held string
+		if err := rows.Scan(&held); err != nil {
+			rows.Close()
+			return c, fmt.Errorf("erase person: %w", err)
+		}
+		labels = append(labels, held)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return c, fmt.Errorf("erase person: %w", err)
+	}
+	if err := LockOwnerLabels(ctx, tx, labels...); err != nil {
+		return c, fmt.Errorf("erase person: %w", err)
+	}
 	steps := []struct {
 		dst   *int64
 		query string
@@ -280,6 +302,7 @@ func ErasePerson(ctx context.Context, tx *sql.Tx, p ErasablePerson, label, issue
 		// stop redirecting, like their last one.
 		{`DELETE FROM site_redirects WHERE owner_label IN (SELECT owner_label FROM renamed_owner_labels WHERE user_id = $1::uuid)`, []any{p.ID}},
 		{`INSERT INTO erased_owner_labels (owner_label) SELECT owner_label FROM renamed_owner_labels WHERE user_id = $1::uuid ON CONFLICT DO NOTHING`, []any{p.ID}},
+		{`DELETE FROM renamed_owner_labels WHERE user_id = $1::uuid`, []any{p.ID}},
 	} {
 		if _, err := tx.ExecContext(ctx, stmt.query, stmt.args...); err != nil {
 			return c, fmt.Errorf("erase person: %w", err)

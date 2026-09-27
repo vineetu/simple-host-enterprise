@@ -6,14 +6,17 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	db "github.com/vsriram/simple-host/internal/db"
 )
 
 // An admin renames a person's address after a name change: the sites move
 // with the name, old addresses redirect only for people who may open the
-// site, the old owner page redirects for anyone signed in, the old name is
-// held against everyone else, collisions are refused, and it is audited.
+// site, the old owner page is not found (it never names the new name), the
+// old name is held against everyone else, collisions are refused, and it is
+// audited. The handlers run as the application role (appRoleDB), so a
+// statement its grants do not allow fails here as in production.
 func TestAdminRenamePerson(t *testing.T) {
 	w := newAccessWorld(t)
 	w.deploy("alice", "/api/sites/tracker")
@@ -66,9 +69,13 @@ func TestAdminRenamePerson(t *testing.T) {
 	if rec := w.siteRequest("alice", http.MethodGet, "private.alice."+accessBase, "/", ""); rec.Code != http.StatusMovedPermanently || !strings.HasPrefix(rec.Header().Get("Location"), "https://private.alicia.") {
 		t.Fatalf("owner at the old address = %d %q", rec.Code, rec.Header().Get("Location"))
 	}
-	// The old owner page, for someone signed in.
-	if rec := w.hostGet("vera", "alice."+accessBase, "/"); rec.Code != http.StatusMovedPermanently || rec.Header().Get("Location") != "https://alicia."+accessBase+"/" {
-		t.Fatalf("old owner page = %d %q", rec.Code, rec.Header().Get("Location"))
+	// The old owner page answers as a missing one, to everyone (the person
+	// included): it never names the new name.
+	for _, who := range []string{"vera", "alice"} {
+		rec := w.hostGet(who, "alice."+accessBase, "/")
+		if rec.Code != http.StatusNotFound || rec.Header().Get("Location") != "" || strings.Contains(rec.Body.String(), "alicia") {
+			t.Fatalf("old owner page for %q = %d %q", who, rec.Code, rec.Header().Get("Location"))
+		}
 	}
 
 	// Both labels need a certificate: the new one for the sites, the old one
@@ -132,6 +139,58 @@ func TestEraseRenamedPersonHoldsEveryName(t *testing.T) {
 	}
 	if _, err := db.CreateOIDCUser(context.Background(), w.database, "alice", "sub-new-alice", "new-alice@example.com", false); err == nil {
 		t.Fatal("a new sign-in took the erased person's old name")
+	}
+}
+
+// A sign-in that takes the old name while the rename is still uncommitted
+// waits for it and is then refused: it does not slip past the hold check
+// (which cannot see the uncommitted hold) and take the label once the
+// rename commits. Both run as the application role.
+func TestRenameRacesSignIn(t *testing.T) {
+	w := newAccessWorld(t)
+	app := appRoleDB(t, w.database)
+	ctx := context.Background()
+	tx, err := app.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, _, err := db.RenamePerson(ctx, tx, w.users["alice"], "alicia", siteHostPart); err != nil {
+		t.Fatal(err)
+	}
+	signIn := make(chan error, 1)
+	go func() {
+		_, err := db.CreateOIDCUser(ctx, app, "alice", "sub-newcomer", "newcomer@example.com", false)
+		signIn <- err
+	}()
+	// Wait until the sign-in is blocked on a lock, then commit the rename.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting int
+		if err := w.database.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		select {
+		case err := <-signIn:
+			t.Fatalf("the sign-in finished before the rename committed: %v", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the sign-in never waited for the rename")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-signIn; err == nil {
+		t.Fatal("a sign-in took alice while it was being renamed away, and kept it")
+	}
+	if n := w.count(`SELECT count(*) FROM users WHERE username = 'alice'`); n != 0 {
+		t.Fatalf("users named alice = %d, want 0", n)
 	}
 }
 

@@ -757,7 +757,7 @@ Config names are documented in `docs/configuration.md`; schema in
   the new name, their sites (same ids) answer under it, every old
   `<site>.<old>.<base>` address and the pre-v1.3 forms redirect through
   `site_redirects` (only for people who may open the site), the old owner
-  page redirects anyone signed in, the owner-hosts reconciler requests the
+  page answers as a missing one (it never names the new name), the owner-hosts reconciler requests the
   new label's certificate (sites answer at `<new>.<base>/<site>/` until it
   is ready) and keeps the old one's for the redirects, search reindexes
   their sites, and the old label is held in `renamed_owner_labels` so no
@@ -827,8 +827,9 @@ Config names are documented in `docs/configuration.md`; schema in
   `erased_owner_labels`, `erased_identities`, the
   `users_refuse_erased_label` trigger and `access_log_erase_visitor()`
   (0048); definer functions' search path pinned (0049);
-  `renamed_owner_labels` and the `users_refuse_renamed_label` trigger
-  (0057).
+  `renamed_owner_labels` and the `users_refuse_renamed_label` trigger, and
+  the `owner_label_lock` advisory lock both label triggers, renames and
+  erasures take (0057).
 - **Config.** `ADMIN_EMAILS`, `OIDC_ADMIN_CLAIM`, `OIDC_ADMIN_VALUE`. See
   INSTALL.md "Sessions and leavers" and docs/configuration.md "Data subject
   requests".

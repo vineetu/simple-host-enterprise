@@ -216,6 +216,37 @@ func connectorTestDB(t *testing.T) *sql.DB {
 	return database
 }
 
+// appRoleDB is a second pool on database's database whose sessions run as
+// simplehost_app, the least-privilege role production connects as
+// (migration 0020, DB_APP_USER): a statement the role's grants do not allow
+// fails here as it would there. The pool's own sessions SET ROLE at startup
+// (a runtime parameter), which the test superuser may do for a NOLOGIN role.
+func appRoleDB(t *testing.T, database *sql.DB) *sql.DB {
+	t.Helper()
+	var name string
+	if err := database.QueryRow(`SELECT current_database()`).Scan(&name); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(os.Getenv("MIGRATE_TEST_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed.Path = "/" + name
+	q := parsed.Query()
+	q.Set("role", "simplehost_app")
+	parsed.RawQuery = q.Encode()
+	app, err := sql.Open("postgres", parsed.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { app.Close() })
+	var role string
+	if err := app.QueryRow(`SELECT current_user`).Scan(&role); err != nil || role != "simplehost_app" {
+		t.Fatalf("app-role pool runs as %q (%v)", role, err)
+	}
+	return app
+}
+
 type connectorFlow struct {
 	t        *testing.T
 	mux      *http.ServeMux

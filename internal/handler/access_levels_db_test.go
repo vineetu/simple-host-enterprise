@@ -62,7 +62,10 @@ func newAccessWorldWith(t *testing.T, quota UploadQuota, scanner scan.Scanner) *
 
 func newAccessWorldFull(t *testing.T, approvals int, quota UploadQuota, scanner scan.Scanner) *accessWorld {
 	t.Helper()
-	database := connectorTestDB(t)
+	// The handlers use the application role, as in production; the test's
+	// own fixtures and assertions (w.database) use the owner.
+	owner := connectorTestDB(t)
+	database := appRoleDB(t, owner)
 	base := "https://" + accessBase
 	store, err := storage.New(storage.Options{
 		Objects: storage.NewMemoryObjects(), Index: storage.NewDBIndex(database),
@@ -99,7 +102,7 @@ func newAccessWorldFull(t *testing.T, approvals int, quota UploadQuota, scanner 
 	handoff := NewHandoffHandler(database, keys, hosts, recorder, limits)
 	gate := NewHostGate(hosts, files, database, keys, auth.NewNegativeSessionCache(database, time.Hour), handoff, siteAPI, authMW, base)
 
-	w := &accessWorld{t: t, database: database, app: gate(mux), keys: keys, apiKeys: map[string]string{}, users: map[string]string{}, files: files, store: store}
+	w := &accessWorld{t: t, database: owner, app: gate(mux), keys: keys, apiKeys: map[string]string{}, users: map[string]string{}, files: files, store: store}
 	for _, name := range []string{"alice", "vera", "olly", "mo", "root", "ada"} {
 		user, err := db.CreateOIDCUser(context.Background(), database, name, "sub-"+name, name+"@example.com", name == "root" || name == "ada")
 		if err != nil {

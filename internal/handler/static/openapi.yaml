@@ -2742,7 +2742,7 @@ paths:
   /api/admin/users/{username}/rename:
     post:
       summary: Rename a person's address after a name change
-      description: Admin only, browser session only. The username, which is the label in every one of the person's addresses, becomes `name`. Their sites keep their ids, files, saved data, access and viewers and answer under the new name (at `<new>.<base>/<site>/` until the owner-hosts reconciler has the new name's certificate). Each old site address, and its pre-v1.3 forms, redirects to the new one only for someone who may open the site; the old owner page redirects anyone signed in. The old name is held so no sign-in or rename takes it (the person may take it back). Audited as `admin_rename_user` with `from` and `to`.
+      description: Admin only, browser session only. The username, which is the label in every one of the person's addresses, becomes `name`. Their sites keep their ids, files, saved data, access and viewers and answer under the new name (at `<new>.<base>/<site>/` until the owner-hosts reconciler has the new name's certificate). Each old site address, and its pre-v1.3 forms, redirects to the new one only for someone who may open the site; the old owner page answers as a missing one (it never names the new name). The old name is held so no sign-in or rename takes it (the person may take it back). Audited as `admin_rename_user` with `from` and `to`.
       tags: [Admin]
       parameters:
         - name: username

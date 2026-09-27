@@ -606,7 +606,8 @@ func writeUserBlockHeader(b *strings.Builder, hosts HostModel, u db.User, siteCo
 func renameUserAction(username string) string {
 	return promptForm("/api/admin/users/"+url.PathEscape(username)+"/rename",
 		"New name for "+username+"? It becomes the name in every one of their addresses (<site>.<name>.…). "+
-			"Their sites move with it; each old address redirects to the new one for people who can open the site, "+
+			"Their sites move with it; each old site address redirects to the new one for people who can open the site, "+
+			"and their old page of sites is not found (it never shows the new name), "+
 			"and "+username+" stays reserved so nobody else takes over those links. "+
 			"Sites answer at the new name's own addresses once its certificate is issued. Lowercase letters, numbers and hyphens:",
 		"name", "btn-reset", "Rename…")

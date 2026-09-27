@@ -17,8 +17,8 @@ import (
 // username, which is the label in every one of their addresses, becomes
 // the new name. Their sites move with it (same ids, nothing copied), each
 // old site address redirects to the new one for people allowed to open the
-// site, their old owner page redirects for anyone signed in, the old name
-// is held so nobody else inherits the links, and the owner-hosts
+// site, their old owner page answers as a missing one (it never names the
+// new name: name changes are often sensitive), the old name is held so nobody else inherits the links, and the owner-hosts
 // reconciler requests the new name's certificate (sites answer at
 // "<new>.<base>/<site>/" until it is ready). Refused for a team, for a
 // name another person or team has or had (held after a rename or an
@@ -53,6 +53,11 @@ func (h *AdminHandler) renameUser(w http.ResponseWriter, r *http.Request) {
 	}
 	defer audit.Rollback(tx)
 	oldName, sites, err := db.RenamePerson(r.Context(), tx, target.ID, newName, siteHostPart)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Erased between the lookup and the row lock.
+		h.respondAdmin(w, r, http.StatusNotFound, "user not found")
+		return
+	}
 	if err != nil {
 		if msg, refused := db.RenameFailed(err); refused {
 			status := http.StatusConflict
@@ -91,5 +96,5 @@ func (h *AdminHandler) renameUser(w http.ResponseWriter, r *http.Request) {
 	for _, s := range sites {
 		refreshSiteManifest(r.Context(), h.database, h.store, s.ID)
 	}
-	h.respondAdmin(w, r, http.StatusOK, fmt.Sprintf("%s is now %s; their old addresses redirect", oldName, newName))
+	h.respondAdmin(w, r, http.StatusOK, fmt.Sprintf("%s is now %s; their sites' old addresses redirect for people who may open them", oldName, newName))
 }

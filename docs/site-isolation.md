@@ -78,8 +78,8 @@ no sign-in, so it confirms nothing about whether a site exists.
   and name, so unlike the ones above they read the database and are given
   only to someone who may open the site there (anyone while it is open to
   the network); anyone else gets the same 404 as an address nothing ever
-  held. A renamed person's old owner page redirects anyone signed in, and
-  their old name is held (`renamed_owner_labels`) so nobody else takes it
+  held. A renamed person's old owner page answers as a missing one, to
+  everyone, so it never names the new name; their old name is held (`renamed_owner_labels`) so nobody else takes it
   over. The old label keeps its certificate while it has redirects.
 
 ## Certificates

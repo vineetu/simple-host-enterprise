@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/lib/pq"
@@ -62,12 +63,18 @@ func RenamePerson(ctx context.Context, tx *sql.Tx, userID, newName string, siteP
 	if oldName == newName {
 		return "", nil, ErrRenameSameName
 	}
+	oldLabel := strings.ReplaceAll(strings.ToLower(oldName), ".", "-")
+	// Before any check: a sign-in or another rename taking either label
+	// waits for this transaction, then sees what it did (migration 0057).
+	if err := LockOwnerLabels(ctx, tx, oldLabel, newName); err != nil {
+		return "", nil, err
+	}
 	var taken, erased, heldByOther, legacyTeam bool
 	if err := tx.QueryRowContext(ctx, `
 		SELECT
 			EXISTS (SELECT 1 FROM users WHERE lower(replace(username, '.', '-')) = $1 AND id <> $2::uuid),
 			EXISTS (SELECT 1 FROM erased_owner_labels WHERE owner_label = $1),
-			EXISTS (SELECT 1 FROM renamed_owner_labels WHERE owner_label = $1 AND user_id <> $2::uuid),
+			EXISTS (SELECT 1 FROM renamed_owner_labels WHERE owner_label = $1 AND user_id IS DISTINCT FROM $2::uuid),
 			EXISTS (SELECT 1 FROM users WHERE kind = 'team' AND username = 'team-' || $1)`,
 		newName, userID).Scan(&taken, &erased, &heldByOther, &legacyTeam); err != nil {
 		return "", nil, err
@@ -80,7 +87,6 @@ func RenamePerson(ctx context.Context, tx *sql.Tx, userID, newName string, siteP
 	case legacyTeam:
 		return "", nil, ErrRenameLegacyTeam
 	}
-	oldLabel := strings.ReplaceAll(strings.ToLower(oldName), ".", "-")
 	if _, err := tx.ExecContext(ctx, `UPDATE users SET username = $2 WHERE id = $1::uuid`, userID, newName); err != nil {
 		if isUniqueViolationErr(err) {
 			return "", nil, errRenameUniqueRaced
@@ -90,9 +96,12 @@ func RenamePerson(ctx context.Context, tx *sql.Tx, userID, newName string, siteP
 	if _, err := tx.ExecContext(ctx, `DELETE FROM renamed_owner_labels WHERE owner_label = $1 AND user_id = $2::uuid`, newName, userID); err != nil {
 		return "", nil, fmt.Errorf("release held label: %w", err)
 	}
+	// DO NOTHING, not DO UPDATE: the application role has no UPDATE on the
+	// table, and Postgres checks that privilege for any DO UPDATE. The old
+	// label cannot be held already: the trigger refuses a held username.
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO renamed_owner_labels (owner_label, user_id) VALUES ($1, $2::uuid)
-		ON CONFLICT (owner_label) DO UPDATE SET user_id = EXCLUDED.user_id, renamed_at = now()`, oldLabel, userID); err != nil {
+		ON CONFLICT (owner_label) DO NOTHING`, oldLabel, userID); err != nil {
 		return "", nil, fmt.Errorf("hold old label: %w", err)
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT id::text, name, deleted_at IS NOT NULL FROM sites WHERE user_id = $1::uuid ORDER BY name`, userID)
@@ -139,15 +148,20 @@ func isUniqueViolationErr(err error) bool {
 	return errors.As(err, &pqErr) && pqErr.Code == "23505"
 }
 
-// RenamedOwner reports whose address label was before an admin renamed
-// them: that person's current username. ok is false for a label nobody was
-// renamed away from.
-func RenamedOwner(ctx context.Context, q Querier, label string) (username string, ok bool, err error) {
-	err = q.QueryRowContext(ctx, `
-		SELECT u.username FROM renamed_owner_labels h JOIN users u ON u.id = h.user_id
-		WHERE h.owner_label = $1`, label).Scan(&username)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
+// LockOwnerLabels takes the transaction-scoped lock every change to which
+// labels are taken or held takes (owner_label_lock, migration 0057; the
+// users triggers take it on every insert and username change), in a fixed
+// order so two callers cannot deadlock.
+func LockOwnerLabels(ctx context.Context, tx *sql.Tx, labels ...string) error {
+	sorted := append([]string(nil), labels...)
+	sort.Strings(sorted)
+	for i, label := range sorted {
+		if i > 0 && label == sorted[i-1] {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `SELECT owner_label_lock($1)`, label); err != nil {
+			return fmt.Errorf("lock owner label: %w", err)
+		}
 	}
-	return username, err == nil, err
+	return nil
 }
