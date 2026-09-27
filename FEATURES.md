@@ -717,7 +717,10 @@ Config names are documented in `docs/configuration.md`; schema in
   domain, at most 10 each. `access_log.referrer_domain` (0056) is the
   linking page's host only, never its path or query; '' for none or the
   same host; another page on this install is `<base>` or `*.<base>`, so a
-  site's name never reaches another owner (`internal/handler/referrer.go`).
+  site's name never reaches another owner; only hostname characters
+  `[a-z0-9.-]` are kept (punycode for international names, at most 253),
+  an IP address or anything else is `(other)`, and `site_activity` tells
+  the agent these are visitor-supplied data (`internal/handler/referrer.go`).
   Rows (admins; owners under `owner`) and exports carry it too. /admin's Activity card searches with those filters, loads more by
   cursor, and its export links carry them. Admins export either as
   CSV (formula-safe, with the three name columns last) or NDJSON; the export

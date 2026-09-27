@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -17,6 +18,16 @@ func TestReferrerDomain(t *testing.T) {
 		{"demo.alice." + base, "https://" + base + "/search?q=demo", base},
 		{"demo.alice." + base, "android-app://com.slack/", ""},
 		{"demo.alice." + base, "not a url at all", ""},
+		{"demo.alice." + base, "https://bücher.example/", "xn--bcher-kva.example"},
+		{"demo.alice." + base, "https://münchen.de/", "xn--mnchen-3ya.de"},
+		{"demo.alice." + base, "https://例え.テスト/", "xn--r8jz45g.xn--zckzah"},
+		{"demo.alice." + base, "https://a<b>/", otherReferrer},
+		{"demo.alice." + base, "https://a'\"b/", otherReferrer},
+		{"demo.alice." + base, "https://a;b,c(d)/", otherReferrer},
+		{"demo.alice." + base, "https://evil%E2%80%AE.com/", otherReferrer},
+		{"demo.alice." + base, "https://10.1.2.3/", otherReferrer},
+		{"demo.alice." + base, "https://[::1]:8080/", otherReferrer},
+		{"demo.alice." + base, "https://" + strings.Repeat("a.", 130) + "com/", otherReferrer},
 	}
 	for _, c := range cases {
 		r := httptest.NewRequest("GET", "https://"+c.host+"/", nil)

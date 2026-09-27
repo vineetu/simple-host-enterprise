@@ -50,7 +50,8 @@ before deploying. Skills are at 0.15.3.
   people (not bots or asset requests), following `ACCESS_LOG_VISIBILITY`
   like every other count. Only the referring domain is kept
   (`access_log.referrer_domain`, schema 0056, backward-compatible), never
-  its path or query; another site on the same install shows as
+  its path or query, and only as hostname characters (punycode for an
+  international name); an IP address or anything else shows as `(other)`; another site on the same install shows as
   `*.<base>`. `GET /api/access` counts gain `top_pages` and
   `top_referrers`; `site_activity` returns them; rows and the admin export
   gain `referrer_domain`.

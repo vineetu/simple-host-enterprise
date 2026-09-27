@@ -395,9 +395,9 @@ type AccessLogFilter struct {
 	// Aliases are labels the same namespace had before an admin renamed it
 	// (OwnerLabelHistory), matched as well as Owner.
 	Aliases []string
-	Site  string
-	From  time.Time
-	To    time.Time
+	Site    string
+	From    time.Time
+	To      time.Time
 }
 
 // AccessLogPage is one page of ListAccessLog, newest first.
