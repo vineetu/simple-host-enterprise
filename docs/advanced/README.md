@@ -5,11 +5,14 @@ a Postgres database and an S3-compatible bucket. Everything else has a default, 
 default is what a release shipped with before it could be changed. This folder explains each
 advanced feature in plain terms, lists every setting that changes it, and gives recipes.
 
-**Easiest start: the setup helper at https://simple-host.app/setup** (choose Enterprise). It asks
+**Easiest start: the setup helper at https://simple-host.app/setup?product=enterprise.** It asks
 a few questions (or every question, in Advanced mode), keeps the default for anything you skip,
 and writes a `config.env` for the overlay, a `secrets.env` template naming every secret (it never
-asks for a secret's value) and the commands to apply them. It runs entirely in your browser and
-sends nothing anywhere.
+asks for a secret's value) and the commands to apply them. It runs in your browser. Just before
+the files it can check your choices for likely mistakes (uploads the pod's memory or the ingress
+cannot hold, sessions longer than promised, retention cut short), sending only the names and values
+of the numbers, durations, switches and rates you changed; you Apply or Ignore each suggestion, or
+skip the check.
 
 ## Where settings go
 

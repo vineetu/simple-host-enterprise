@@ -2,6 +2,8 @@
 
 Every person in a company gets a place for what their AI agent builds, at `<site>.<person>.<internal-domain>`, behind the company's sign-in.
 
+**Try it in your organization → https://simple-host.app/setup?product=enterprise**
+
 - **Overview:** https://simple-host.app/enterprise
 - **Brief:** https://simple-host.app/enterprise/brief
 - **Architecture:** https://simple-host.app/enterprise/architecture
@@ -73,9 +75,10 @@ Read INSTALL.md in this repository and install Simple Host on our Kubernetes clu
 
 Every setting, grouped by area and explained with recipes (stricter sign-in, shorter retention,
 bigger uploads): [docs/advanced/](docs/advanced/README.md). The setup helper at
-https://simple-host.app/setup (choose Enterprise) asks a few questions, or every one in Advanced
+https://simple-host.app/setup?product=enterprise asks a few questions, or every one in Advanced
 mode, and writes `config.env`, a `secrets.env` template and the apply commands. It runs in your
-browser and sends nothing anywhere.
+browser and never asks for a secret; an optional check of your choices, just before the files,
+sends only the names and values of the numbers, durations, switches and rates you changed.
 
 ## Run it locally
 
