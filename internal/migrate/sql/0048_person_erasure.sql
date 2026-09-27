@@ -1,7 +1,7 @@
--- simple-host: backward-compatible
--- Marked compatible because it only adds tables, a trigger and a function
--- no older code calls. Rolled back, an erased person's name stays held (the
--- trigger still refuses it) and erasure is simply not offered.
+-- Not backward-compatible: it only adds tables, a trigger and a function no
+-- older code calls, but a binary that does not know erased_identities would
+-- let an erased person register again under a new name (0058 corrects the
+-- record on databases migrated before this was said).
 --
 -- Erasing a person (an admin's "Delete person and all data") removes their
 -- users row. Two things outlive it:

@@ -6,6 +6,9 @@ release, commit and schema.
 
 ## Unreleased
 
+Schema 0058 (backward-compatible); run `simple-host migrate` before
+deploying.
+
 ### Security
 - Deleting an uploaded file from the site's own address
   (`DELETE /api/sites/{site}/assets/{id}`, `/api/site/assets/{id}`) now needs
@@ -50,6 +53,15 @@ release, commit and schema.
   when it is used.
 - Idle cleanup marks and unmarks one site at a time under the site's lock,
   so it no longer deadlocks with a bulk move or delete.
+- Migrations 0047 (admin restriction) and 0048 (erasure) are now recorded
+  as not backward-compatible (0058 corrects databases already migrated), so
+  an image built before them is refused at startup instead of letting an
+  owner reopen a restricted site or an erased person register again.
+  Released images before v1.4.0 were already refused.
+- Two audit partition upkeep runs at once (a prune overlapping another
+  prune or a migrate) could deadlock; they now take turns (0058).
+- `owner_label_lock` is no longer executable by every database role, only
+  the application role (0058).
 - A manifest write that started before a site was purged or erased could
   finish after the manifest was deleted and put it back; deletion now
   waits for it.

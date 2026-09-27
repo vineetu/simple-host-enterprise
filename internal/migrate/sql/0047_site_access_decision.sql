@@ -1,6 +1,6 @@
--- simple-host: backward-compatible
--- Marked compatible because it only adds nullable columns no older code
--- reads or writes.
+-- Not backward-compatible: it only adds nullable columns, but a binary that
+-- does not know them would let an owner widen a site an admin restricted
+-- (0058 corrects the record on databases migrated before this was said).
 --
 -- The last admin decision about who can open a site, so its owner can see
 -- it: a network-access request declined, network access revoked, or the site
