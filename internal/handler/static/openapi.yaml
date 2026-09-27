@@ -1769,9 +1769,11 @@ paths:
         day and distinct viewers, the last 30 days unless `from`/`to` say
         otherwise, never who; under `owner` they get rows with user ids but
         no IP or user agent, or `AccessCounts` with `summary=counts`; under
-        `admin` they are refused. Admins always
-        get full rows. API-key callers send `X-Skill-Version` as on the other
-        management routes.
+        `admin` they are refused. Admins get full rows (each with its
+        `referrer_domain`, the linking page's domain only), or `AccessCounts`
+        with `owner` and `summary=counts`. `AccessCounts` includes the top
+        pages and the top referring domains. API-key callers send
+        `X-Skill-Version` as on the other management routes.
       tags: [Audit]
       security:
         - apiKey: []
@@ -1800,7 +1802,7 @@ paths:
             type: string
         - name: summary
           in: query
-          description: '`counts` asks a non-admin for `AccessCounts` whatever the visibility (short of `admin`).'
+          description: '`counts` asks for `AccessCounts` whatever the visibility (short of `admin`, for a non-admin); an admin gets it too when `owner` is given.'
           schema:
             type: string
             enum: [counts]
@@ -3168,7 +3170,8 @@ components:
 
     AccessCounts:
       type: object
-      required: [from, to, unique_viewers, days]
+      description: Counts only, never who. `top_pages` and `top_referrers` count people's page views (GET, answered 2xx/3xx, not bots, not stylesheets, scripts or images), at most 10 each, most first; a referrer is the linking page's domain only, never its path or query, and another page on this install shows as `<base>` or `*.<base>`.
+      required: [from, to, unique_viewers, days, top_pages, top_referrers]
       properties:
         from:
           type: string
@@ -3192,6 +3195,28 @@ components:
                 type: integer
                 format: int64
               unique_viewers:
+                type: integer
+                format: int64
+        top_pages:
+          type: array
+          items:
+            type: object
+            required: [path, views]
+            properties:
+              path:
+                type: string
+              views:
+                type: integer
+                format: int64
+        top_referrers:
+          type: array
+          items:
+            type: object
+            required: [domain, views]
+            properties:
+              domain:
+                type: string
+              views:
                 type: integer
                 format: int64
 

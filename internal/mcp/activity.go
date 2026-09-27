@@ -55,6 +55,14 @@ type activityVisits struct {
 		Views         int64  `json:"views"`
 		UniqueViewers int64  `json:"unique_viewers"`
 	} `json:"days"`
+	TopPages []struct {
+		Path  string `json:"path"`
+		Views int64  `json:"views"`
+	} `json:"top_pages,omitempty"`
+	TopReferrers []struct {
+		Domain string `json:"domain"`
+		Views  int64  `json:"views"`
+	} `json:"top_referrers,omitempty"`
 }
 
 type activityResult struct {

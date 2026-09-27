@@ -625,6 +625,24 @@ const dashboardSitesScript = `<script>
         .catch(function(){ activityList.innerHTML = '<div class="rank-empty">Could not load activity.</div>'; });
     }
 
+    // The top pages and where visitors came from (referring domain only),
+    // counted over the last 30 days; nothing about who.
+    function appendTopLists(target, body) {
+      [['Top pages', body.top_pages, 'path'], ['Where visitors came from', body.top_referrers, 'domain']].forEach(function(list){
+        if (!list[1] || !list[1].length) return;
+        var head = document.createElement('div');
+        head.className = 'rank-row';
+        head.innerHTML = '<span class="rank-name"><strong>' + esc(list[0]) + '</strong> <span class="rank-sub">last 30 days, people only</span></span>';
+        target.appendChild(head);
+        list[1].forEach(function(t){
+          var row = document.createElement('div');
+          row.className = 'rank-row';
+          row.innerHTML = '<span class="rank-name">' + esc(t[list[2]]) + ' <span class="rank-sub">' + esc(t.views) + ' views</span></span>';
+          target.appendChild(row);
+        });
+      });
+    }
+
     function loadVisitors() {
       fetch(accessQuery, {credentials: 'same-origin', headers: CH})
         .then(function(r){ return r.json(); })
@@ -637,6 +655,11 @@ const dashboardSitesScript = `<script>
             total.className = 'rank-row';
             total.innerHTML = '<span class="rank-name">' + esc(body.unique_viewers) + ' people viewed this site in the last 30 days</span>';
             visitorList.appendChild(total);
+            appendTopLists(visitorList, body);
+            var daysHead = document.createElement('div');
+            daysHead.className = 'rank-row';
+            daysHead.innerHTML = '<span class="rank-name"><strong>By day</strong></span>';
+            visitorList.appendChild(daysHead);
             body.days.forEach(function(d){
               var row = document.createElement('div');
               row.className = 'rank-row';
@@ -647,11 +670,18 @@ const dashboardSitesScript = `<script>
           }
           var entries = (body && body.entries) || [];
           if (!entries.length) { visitorList.innerHTML = '<div class="rank-empty">No recorded visits yet.</div>'; return; }
+          // Row-level visibility: the top lists above the recent visits.
+          var tops = document.createElement('div');
+          visitorList.appendChild(tops);
+          fetch(accessQuery + '&summary=counts', {credentials: 'same-origin', headers: CH})
+            .then(function(r){ return r.ok ? r.json() : null; })
+            .then(function(counts){ if (counts) appendTopLists(tops, counts); })
+            .catch(function(){});
           entries.forEach(function(e){
             var row = document.createElement('div');
             row.className = 'rank-row';
             row.innerHTML = '<span class="rank-name">' + esc(e.method) + ' ' + esc(e.path) +
-              ' <span class="rank-sub">' + esc(e.status) + ' · ' + esc(e.client_kind) + ' · ' + esc(new Date(e.at).toLocaleString()) + '</span></span>';
+              ' <span class="rank-sub">' + esc(e.status) + ' · ' + esc(e.client_kind) + (e.referrer_domain ? ' · from ' + esc(e.referrer_domain) : '') + ' · ' + esc(new Date(e.at).toLocaleString()) + '</span></span>';
             visitorList.appendChild(row);
           });
         })

@@ -266,6 +266,14 @@ func outputSchemas() map[string]map[string]any {
 					"views":          outInteger("Page views that day."),
 					"unique_viewers": outInteger("Distinct signed-in people that day."),
 				}, "day", "views", "unique_viewers")),
+				"top_pages": outArray("The most opened pages in the period, by people (not bots), most first, at most 10.", outObject(map[string]any{
+					"path":  outString("The page's path on the site."),
+					"views": outInteger("How many times people opened it."),
+				}, "path", "views")),
+				"top_referrers": outArray("Where visitors came from: the domain of the page that linked to the site (never its full address), most first, at most 10. Another site on this server shows as *.<base>.", outObject(map[string]any{
+					"domain": outString("The linking page's domain."),
+					"views":  outInteger("How many page views came from it."),
+				}, "domain", "views")),
 			}, "from", "to", "unique_viewers", "days"),
 			"visits_note": outString("Why visits are missing, when they are."),
 		}, "owner", "site", "live_version", "versions"),

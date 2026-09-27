@@ -319,18 +319,19 @@ func ListAuditEvents(ctx context.Context, database *sql.DB, filter AuditEventFil
 // below (a row read back) so a write-side caller is not tempted to fill in
 // ID or the fields ListAccessLog redacts for an owner-scoped read.
 type AccessLogEvent struct {
-	At         time.Time
-	UserID     string
-	SessionID  string
-	OwnerLabel string
-	SiteName   string
-	Path       string
-	Method     string
-	Status     int
-	Bytes      int64
-	IP         string
-	UserAgent  string
-	ClientKind string
+	At             time.Time
+	UserID         string
+	SessionID      string
+	OwnerLabel     string
+	SiteName       string
+	Path           string
+	Method         string
+	Status         int
+	Bytes          int64
+	IP             string
+	UserAgent      string
+	ClientKind     string
+	ReferrerDomain string
 }
 
 // InsertAccessLogBatch writes many access_log rows in one statement. Called
@@ -342,22 +343,22 @@ func InsertAccessLogBatch(ctx context.Context, q Querier, entries []AccessLogEve
 	if len(entries) == 0 {
 		return nil
 	}
-	const cols = 12
+	const cols = 13
 	var b strings.Builder
-	b.WriteString(`INSERT INTO access_log (at, user_id, session_id, owner_label, site_name, path, method, status, bytes, ip, user_agent, client_kind) VALUES `)
+	b.WriteString(`INSERT INTO access_log (at, user_id, session_id, owner_label, site_name, path, method, status, bytes, ip, user_agent, client_kind, referrer_domain) VALUES `)
 	args := make([]any, 0, len(entries)*cols)
 	for i, e := range entries {
 		if i > 0 {
 			b.WriteString(",")
 		}
 		base := i * cols
-		fmt.Fprintf(&b, "($%d, NULLIF($%d,'')::uuid, NULLIF($%d,'')::uuid, $%d, $%d, $%d, $%d, $%d, $%d, NULLIF($%d,'')::inet, NULLIF($%d,''), $%d)",
-			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9, base+10, base+11, base+12)
+		fmt.Fprintf(&b, "($%d, NULLIF($%d,'')::uuid, NULLIF($%d,'')::uuid, $%d, $%d, $%d, $%d, $%d, $%d, NULLIF($%d,'')::inet, NULLIF($%d,''), $%d, $%d)",
+			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9, base+10, base+11, base+12, base+13)
 		at := e.At
 		if at.IsZero() {
 			at = time.Now()
 		}
-		args = append(args, at, e.UserID, e.SessionID, e.OwnerLabel, e.SiteName, e.Path, e.Method, e.Status, e.Bytes, e.IP, e.UserAgent, e.ClientKind)
+		args = append(args, at, e.UserID, e.SessionID, e.OwnerLabel, e.SiteName, e.Path, e.Method, e.Status, e.Bytes, e.IP, e.UserAgent, e.ClientKind, e.ReferrerDomain)
 	}
 	_, err := q.ExecContext(ctx, b.String(), args...)
 	return err
@@ -368,19 +369,20 @@ func InsertAccessLogBatch(ctx context.Context, q Querier, entries []AccessLogEve
 // leaves them "" regardless of what the row holds — ip and user_agent go
 // only to admins.
 type AccessLogEntry struct {
-	ID         int64
-	At         time.Time
-	UserID     string
-	SessionID  string
-	OwnerLabel string
-	SiteName   string
-	Path       string
-	Method     string
-	Status     int
-	Bytes      int64
-	IP         string
-	UserAgent  string
-	ClientKind string
+	ID             int64
+	At             time.Time
+	UserID         string
+	SessionID      string
+	OwnerLabel     string
+	SiteName       string
+	Path           string
+	Method         string
+	Status         int
+	Bytes          int64
+	IP             string
+	UserAgent      string
+	ClientKind     string
+	ReferrerDomain string
 }
 
 // AccessLogFilter narrows ListAccessLog. Admin, when false, both restricts
@@ -403,7 +405,7 @@ type AccessLogPage struct {
 
 const listAccessLogQuery = `
 	SELECT id, at, COALESCE(user_id::text, ''), COALESCE(session_id::text, ''), owner_label, site_name,
-	       path, method, status, bytes, COALESCE(host(ip), ''), COALESCE(user_agent, ''), client_kind
+	       path, method, status, bytes, COALESCE(host(ip), ''), COALESCE(user_agent, ''), client_kind, referrer_domain
 	FROM access_log
 	WHERE ($1 = '' OR owner_label = $1)
 	  AND ($2 = '' OR site_name = $2)
@@ -449,7 +451,7 @@ func ListAccessLog(ctx context.Context, database *sql.DB, filter AccessLogFilter
 		var e AccessLogEntry
 		if err := rows.Scan(
 			&e.ID, &e.At, &e.UserID, &e.SessionID, &e.OwnerLabel, &e.SiteName,
-			&e.Path, &e.Method, &e.Status, &e.Bytes, &e.IP, &e.UserAgent, &e.ClientKind,
+			&e.Path, &e.Method, &e.Status, &e.Bytes, &e.IP, &e.UserAgent, &e.ClientKind, &e.ReferrerDomain,
 		); err != nil {
 			return AccessLogPage{}, err
 		}
@@ -484,6 +486,50 @@ type AccessDayCount struct {
 type AccessCounts struct {
 	Days          []AccessDayCount
 	UniqueViewers int64
+	// TopPages and TopReferrers are the most visited pages and the most
+	// common referring domains over the window, by people (not bots), at
+	// most AccessTopN each. Counts only: never who.
+	TopPages     []AccessTopCount
+	TopReferrers []AccessTopCount
+}
+
+// AccessTopCount is one row of a top list: a page path or a referring
+// domain, and how many visits it had.
+type AccessTopCount struct {
+	Key   string
+	Views int64
+}
+
+// AccessTopN is how many rows each top list holds.
+const AccessTopN = 10
+
+// accessPageFilter keeps the rows that are a person opening a page: GET,
+// answered 2xx/3xx, a human client, and a path that is a directory, an
+// .html file or has no extension (not a stylesheet, script or image).
+const accessPageFilter = `method = 'GET' AND status BETWEEN 200 AND 399 AND client_kind = 'human'
+	AND (path LIKE '%/' OR lower(path) LIKE '%.html' OR lower(path) LIKE '%.htm' OR path !~ '\.[A-Za-z0-9]+$')`
+
+// listAccessTop runs one top-list query (col is a trusted column name).
+func listAccessTop(ctx context.Context, q Querier, col, extra, owner, site string, from, to time.Time) ([]AccessTopCount, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT `+col+`, count(*)
+		FROM access_log
+		WHERE owner_label = $1 AND ($2 = '' OR site_name = $2) AND at >= $3 AND at <= $4
+		  AND `+accessPageFilter+extra+`
+		GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT $5`, owner, site, from, to, AccessTopN)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []AccessTopCount{}
+	for rows.Next() {
+		var t AccessTopCount
+		if err := rows.Scan(&t.Key, &t.Views); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }
 
 // ListAccessCounts aggregates access_log for one owner label (and
@@ -513,5 +559,12 @@ func ListAccessCounts(ctx context.Context, q Querier, owner, site string, from, 
 		SELECT count(DISTINCT user_id) FROM access_log
 		WHERE owner_label = $1 AND ($2 = '' OR site_name = $2) AND at >= $3 AND at <= $4`,
 		owner, site, from, to).Scan(&out.UniqueViewers)
+	if err != nil {
+		return out, err
+	}
+	if out.TopPages, err = listAccessTop(ctx, q, "path", "", owner, site, from, to); err != nil {
+		return out, err
+	}
+	out.TopReferrers, err = listAccessTop(ctx, q, "referrer_domain", " AND referrer_domain <> ''", owner, site, from, to)
 	return out, err
 }

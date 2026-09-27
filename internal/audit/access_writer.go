@@ -30,6 +30,8 @@ type AccessEvent struct {
 	IP         string
 	UserAgent  string
 	ClientKind string
+	// ReferrerDomain is the linking page's host only (handler.referrerDomain).
+	ReferrerDomain string
 }
 
 const (
@@ -202,6 +204,8 @@ func toDBAccessLogEvents(events []AccessEvent) []dbstore.AccessLogEvent {
 			IP:         e.IP,
 			UserAgent:  e.UserAgent,
 			ClientKind: e.ClientKind,
+
+			ReferrerDomain: e.ReferrerDomain,
 		}
 	}
 	return out

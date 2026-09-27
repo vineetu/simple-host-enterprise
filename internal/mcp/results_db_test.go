@@ -401,7 +401,8 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	}
 	as("delete_site_asset", map[string]any{"site": "draft", "owner": "carol", "id": asset.ID})
 	if err := db.InsertAccessLogBatch(context.Background(), database, []db.AccessLogEvent{{
-		At: time.Now().UTC(), UserID: carolID, OwnerLabel: "carol", SiteName: "draft", Path: "/", Method: "GET", Status: 200, ClientKind: "browser",
+		At: time.Now().UTC(), UserID: carolID, OwnerLabel: "carol", SiteName: "draft", Path: "/", Method: "GET", Status: 200, ClientKind: "human",
+		ReferrerDomain: "news.example.com",
 	}}); err != nil {
 		t.Fatal(err)
 	}

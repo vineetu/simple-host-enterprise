@@ -107,7 +107,7 @@ var PersonExportQueries = []struct{ File, Query string }{
 // where they were the visitor (the rows an erasure deletes), newest first,
 // streamed rather than aggregated.
 const PersonVisitsQuery = `SELECT row_to_json(t)::text FROM (
-	SELECT at, owner_label, site_name, path, method, status, host(ip) AS ip, user_agent
+	SELECT at, owner_label, site_name, path, method, status, host(ip) AS ip, user_agent, referrer_domain
 	FROM access_log WHERE user_id = $1::uuid ORDER BY at DESC) t`
 
 // SiteExportQueries are the per-site parts, each taking the site id as $1.

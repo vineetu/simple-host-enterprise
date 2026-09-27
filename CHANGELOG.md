@@ -6,6 +6,17 @@ release, commit and schema.
 
 ## Unreleased
 
+### Visitors: top pages and where they came from
+- A site's Visitors view on the dashboard lists its most opened pages and
+  the domains that linked to it over the last 30 days: counts only, by
+  people (not bots or asset requests), following `ACCESS_LOG_VISIBILITY`
+  like every other count. Only the referring domain is kept
+  (`access_log.referrer_domain`, schema 0056, backward-compatible), never
+  its path or query; another site on the same install shows as
+  `*.<base>`. `GET /api/access` counts gain `top_pages` and
+  `top_referrers`; `site_activity` returns them; rows and the admin export
+  gain `referrer_domain`.
+
 ### Deploying from CI
 - One call deploys from a pipeline: `PUT /api/sites/{sitename}?create=true`
   (or the team route `PUT /api/collaboration/sites/{owner}/{sitename}?create=true`)

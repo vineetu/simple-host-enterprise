@@ -21,7 +21,7 @@ var auditEventCSVHeader = []string{
 
 var accessLogCSVHeader = []string{
 	"id", "at", "user_id", "session_id", "owner_label", "site_name",
-	"path", "method", "status", "bytes", "ip", "user_agent", "client_kind",
+	"path", "method", "status", "bytes", "ip", "user_agent", "client_kind", "referrer_domain",
 }
 
 // exportAuditOrAccess answers GET /api/admin/export: admin only, streamed,
@@ -215,7 +215,7 @@ func writeAccessLogCSVRow(w *csv.Writer, e accessLogEntryResponse) error {
 	return writeSafeCSVRow(w, []string{
 		strconv.FormatInt(e.ID, 10), e.At.Format("2006-01-02T15:04:05.000Z07:00"), e.UserID, e.SessionID,
 		e.OwnerLabel, e.SiteName, e.Path, e.Method, strconv.Itoa(e.Status), strconv.FormatInt(e.Bytes, 10),
-		e.IP, e.UserAgent, e.ClientKind,
+		e.IP, e.UserAgent, e.ClientKind, e.ReferrerDomain,
 	})
 }
 

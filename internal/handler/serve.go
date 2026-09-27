@@ -98,6 +98,9 @@ type SiteFiles struct {
 	// use records that a site was opened, for the idle cleanup
 	// (site_use.go).
 	use *stateUsageMarker
+	// baseHost is the install's base host, so referrerDomain can hide the
+	// names of other sites on it. "" in tests that do not set it.
+	baseHost string
 }
 
 // NewSiteFiles builds the shared site file server.
@@ -118,6 +121,13 @@ func NewSiteFiles(store *storage.Store, database *sql.DB, cookies CookiePolicy, 
 // use. Called once from main.go.
 func (s *SiteFiles) WithAccessWriter(access *audit.AccessWriter) *SiteFiles {
 	s.access = access
+	return s
+}
+
+// WithHosts gives the file server the install's base host (for the
+// access log's referrer domain). Called once from main.go.
+func (s *SiteFiles) WithHosts(hosts HostModel) *SiteFiles {
+	s.baseHost = hosts.BaseHost()
 	return s
 }
 
@@ -223,6 +233,8 @@ func (s *SiteFiles) serveSite(w http.ResponseWriter, r *http.Request, user, site
 		IP:         reqlog.ClientIP(r),
 		UserAgent:  r.UserAgent(),
 		ClientKind: classifyClient(r).String(),
+
+		ReferrerDomain: referrerDomain(r, s.baseHost),
 	})
 }
 

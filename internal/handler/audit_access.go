@@ -369,13 +369,15 @@ type accessLogEntryResponse struct {
 	IP         string    `json:"ip,omitempty"`
 	UserAgent  string    `json:"user_agent,omitempty"`
 	ClientKind string    `json:"client_kind"`
+	// ReferrerDomain is the linking page's host only, never its URL.
+	ReferrerDomain string `json:"referrer_domain,omitempty"`
 }
 
 func toAccessLogEntryResponse(e db.AccessLogEntry) accessLogEntryResponse {
 	return accessLogEntryResponse{
 		ID: e.ID, At: e.At, UserID: e.UserID, SessionID: e.SessionID, OwnerLabel: e.OwnerLabel,
 		SiteName: e.SiteName, Path: e.Path, Method: e.Method, Status: e.Status, Bytes: e.Bytes,
-		IP: e.IP, UserAgent: e.UserAgent, ClientKind: e.ClientKind,
+		IP: e.IP, UserAgent: e.UserAgent, ClientKind: e.ClientKind, ReferrerDomain: e.ReferrerDomain,
 	}
 }
 
@@ -430,6 +432,11 @@ func (h *AuditHandler) listAccess(w http.ResponseWriter, r *http.Request) {
 			h.listAccessCounts(w, r, owner, site)
 			return
 		}
+	} else if owner != "" && r.URL.Query().Get("summary") == "counts" {
+		// An admin asking for the aggregate (the dashboard's top pages and
+		// referrers) gets it too.
+		h.listAccessCounts(w, r, owner, site)
+		return
 	}
 
 	from, ok := parseAuditTimeParam(w, r, "from")
@@ -466,6 +473,20 @@ type accessCountsResponse struct {
 	To            time.Time                `json:"to"`
 	UniqueViewers int64                    `json:"unique_viewers"`
 	Days          []accessDayCountResponse `json:"days"`
+	// TopPages and TopReferrers count people's page views by path and by
+	// referring domain (domain only), most first, at most 10 each.
+	TopPages     []accessPageCountResponse     `json:"top_pages"`
+	TopReferrers []accessReferrerCountResponse `json:"top_referrers"`
+}
+
+type accessPageCountResponse struct {
+	Path  string `json:"path"`
+	Views int64  `json:"views"`
+}
+
+type accessReferrerCountResponse struct {
+	Domain string `json:"domain"`
+	Views  int64  `json:"views"`
 }
 
 // listAccessCounts is GET /api/access for a non-admin under the default
@@ -493,9 +514,16 @@ func (h *AuditHandler) listAccessCounts(w http.ResponseWriter, r *http.Request, 
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	out := accessCountsResponse{From: from, To: to, UniqueViewers: counts.UniqueViewers, Days: make([]accessDayCountResponse, 0, len(counts.Days))}
+	out := accessCountsResponse{From: from, To: to, UniqueViewers: counts.UniqueViewers, Days: make([]accessDayCountResponse, 0, len(counts.Days)),
+		TopPages: make([]accessPageCountResponse, 0, len(counts.TopPages)), TopReferrers: make([]accessReferrerCountResponse, 0, len(counts.TopReferrers))}
 	for _, d := range counts.Days {
 		out.Days = append(out.Days, accessDayCountResponse{Day: d.Day.Format("2006-01-02"), Views: d.Views, UniqueViewers: d.UniqueViewers})
+	}
+	for _, p := range counts.TopPages {
+		out.TopPages = append(out.TopPages, accessPageCountResponse{Path: p.Key, Views: p.Views})
+	}
+	for _, ref := range counts.TopReferrers {
+		out.TopReferrers = append(out.TopReferrers, accessReferrerCountResponse{Domain: ref.Key, Views: ref.Views})
 	}
 	writeJSON(w, http.StatusOK, out)
 }

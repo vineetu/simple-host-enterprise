@@ -695,7 +695,14 @@ Config names are documented in `docs/configuration.md`; schema in
   (with `actor_name`) and its visit counts in one call; a part the
   credential cannot read (a publish key; `ACCESS_LOG_VISIBILITY=admin`)
   becomes a note, not a failure. `summary=counts` on `/api/access` asks
-  for the counts shape under `owner` too. /admin's Activity card searches with those filters, loads more by
+  for the counts shape under `owner` too (and, with `owner`, for an admin).
+  The counts shape carries `top_pages` and `top_referrers`: people's page
+  views (GET, 2xx/3xx, not bots, not assets) by path and by referring
+  domain, at most 10 each. `access_log.referrer_domain` (0056) is the
+  linking page's host only, never its path or query; '' for none or the
+  same host; another page on this install is `<base>` or `*.<base>`, so a
+  site's name never reaches another owner (`internal/handler/referrer.go`).
+  Rows (admins; owners under `owner`) and exports carry it too. /admin's Activity card searches with those filters, loads more by
   cursor, and its export links carry them. Admins export either as
   CSV (formula-safe, with the three name columns last) or NDJSON; the export
   takes the same filters (`owner` and `site` for the access log). `simple-host prune` (a daily CronJob) drops
@@ -720,7 +727,8 @@ Config names are documented in `docs/configuration.md`; schema in
   `audit_chain_append()` and trigger `audit_events_chain` (0036, owner-only);
   `audit_chain_entry()` (0040, the app role's read of one event's seq and
   hash for its SIEM line); `audit_ensure_partitions()` rewritten and
-  `audit_ensure_month_partition()` (0046).
+  `audit_ensure_month_partition()` (0046); `access_log.referrer_domain`
+  (0056).
 - **Config.** `AUDIT_RETENTION_DAYS`, `ACCESS_LOG_RETENTION_DAYS`,
   `ACCESS_LOG_VISIBILITY`. The stream and the chain have no settings.
 
@@ -802,7 +810,9 @@ Config names are documented in `docs/configuration.md`; schema in
   versions with Make live (rollback with the listed ETag; a 412 says to
   reload), saved-data history with Restore (the newest is marked current),
   Download site (section 5), rename and hand over (section 5), Delete (the
-  site name typed back; it goes to Recently deleted), visitor counts, each namespace's usage against its quota (sites, stored
+  site name typed back; it goes to Recently deleted), Visitors (counts per
+  day, the top pages and where visitors came from by domain, over 30 days;
+  rows too where `ACCESS_LOG_VISIBILITY` shows them), each namespace's usage against its quota (sites, stored
   bytes; the same numbers `GET /api/me` returns as `usage`), "Teams"
   (section 9), "Shared with
   me" (section 5; hidden when empty), "Recently
