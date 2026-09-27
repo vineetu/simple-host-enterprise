@@ -1105,6 +1105,8 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Asset'
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1135,6 +1137,8 @@ paths:
       responses:
         '204':
           description: Deleted
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1496,13 +1500,36 @@ paths:
       security:
         - apiKey: []
       parameters:
-        - {name: owner, in: query, schema: {type: string}}
-        - {name: site, in: query, schema: {type: string}}
-        - {name: actor, in: query, schema: {type: string}}
-        - {name: action, in: query, schema: {type: string}}
-        - {name: from, in: query, schema: {type: string, format: date-time}}
-        - {name: to, in: query, schema: {type: string, format: date-time}}
-        - {name: cursor, in: query, schema: {type: string}}
+        - name: owner
+          in: query
+          schema:
+            type: string
+        - name: site
+          in: query
+          schema:
+            type: string
+        - name: actor
+          in: query
+          schema:
+            type: string
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: cursor
+          in: query
+          schema:
+            type: string
       responses:
         '200':
           description: A page of events
@@ -1516,12 +1543,21 @@ paths:
                     items:
                       type: object
                       properties:
-                        id: {type: integer}
-                        at: {type: string, format: date-time}
-                        actor: {type: string, description: The actor's username}
-                        actor_kind: {type: string, enum: [person, key, system]}
-                        action: {type: string}
-                        detail: {type: object}
+                        id:
+                          type: integer
+                        at:
+                          type: string
+                          format: date-time
+                        actor:
+                          type: string
+                          description: The actor's username
+                        actor_kind:
+                          type: string
+                          enum: [person, key, system]
+                        action:
+                          type: string
+                        detail:
+                          type: object
                   next_cursor:
                     type: string
         '400':
