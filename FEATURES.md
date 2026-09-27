@@ -322,15 +322,23 @@ Config names are documented in `docs/configuration.md`; schema in
   row names it). `restore`, `migrate-storage` and `reencrypt` each record
   one `system` audit event per run (`site_restore`, `storage_migrate`,
   `storage_reencrypt`, with counts; not for `-dry-run`); a failed audit
-  write makes the command exit non-zero. A bucket fault does not fail `/readyz`
-  (`simplehost_bucket_ok` instead).
+  write makes the command exit non-zero. `simple-host verify-storage`
+  (read-only) lists every live version and live uploaded file of sites in
+  use and in Recently deleted that is missing from the bucket, by object
+  key, and exits non-zero when any is: the check after a database
+  point-in-time restore. The restore drill (`docs/install.md`, "Restore
+  drill") is tested end to end (`cmd/server/restore_drill_db_test.go`:
+  publish, delete, `restore`, serves; purge, `restore`, serves;
+  `verify-storage` names a lost object) and run by `make smoke`. A bucket
+  fault does not fail `/readyz` (`simplehost_bucket_ok` instead).
 - **Status.** Built.
 - **Routes.** None of its own. **MCP.** None.
 - **Skill.** None.
 - **Go.** `internal/storage/` (`store.go`, `cache.go`, `sweep.go`,
   `objects.go`, `objects_s3.go`, `envelope.go`, `archive.go`, `keys.go`,
   `migrate.go`, `reencrypt.go`, `sizes.go`); `internal/db/storage.go`,
-  `quota.go`, `db.VersionExists`; `cmd/server/subcommands.go`.
+  `quota.go`, `storage_check.go`, `db.VersionExists`;
+  `cmd/server/subcommands.go`, `verify_storage.go`.
 - **DB.** `storage_retired` (0032), `versions.size_bytes` (0037).
 - **Config.** `BACKUP_STORAGE_ENDPOINT`, `BACKUP_STORAGE_BUCKET`,
   `BACKUP_STORAGE_PREFIX`, `BACKUP_STORAGE_REGION`,

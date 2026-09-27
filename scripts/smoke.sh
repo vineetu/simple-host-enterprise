@@ -212,6 +212,7 @@ expect 200 "$BASE" /api/sites -H "X-API-Key: $key" -H "X-Skill-Version: $SKILL_V
 expect 401 "$BASE" /api/sites -H "X-API-Key: not-the-key" -H "X-Skill-Version: $SKILL_VERSION"
 curl -sS -b "$admin_jar" -H "Origin: https://$BASE" -X DELETE "https://$BASE/api/keys/$key_id" >/dev/null
 expect 401 "$BASE" /api/sites -H "X-API-Key: $key" -H "X-Skill-Version: $SKILL_VERSION"
+check "a revoked key's 401 says key_revoked" bash -c "grep -q '\"code\":\"key_revoked\"' '$work/body'"
 
 echo "== a session cookie authenticates the same X-API-Key-shaped routes"
 expect 200 "$BASE" /api/sites -b "$admin_jar"
@@ -557,6 +558,29 @@ for line in sys.stdin:
 if [ -n "$site_id" ] && db_query "SELECT 1" >/dev/null 2>&1; then
   admin_export_rows="$(db_query "SELECT count(*) FROM audit_events WHERE action = 'admin_export'")"
   check "the export itself is audited as admin_export" bash -c "[ '$admin_export_rows' -ge 1 ]"
+fi
+
+echo "== restore drill: delete a site, bring it back with simple-host restore, it serves; verify-storage finds every object"
+drill="drill-$$"
+drill_host="$drill.$label.$BASE"
+printf '<!doctype html><title>%s</title><h1>restore drill</h1>\n' "$drill" > "$work/site/index.html"
+tar -czf "$work/drill.tar.gz" -C "$work/site" .
+expect 201 "$BASE" "/api/collaboration/sites/$owner/$drill" -X POST \
+  -H "X-API-Key: $key" -H "X-Skill-Version: $SKILL_VERSION" -H "Content-Type: application/gzip" \
+  --data-binary "@$work/drill.tar.gz"
+drill_id="$(db_query "SELECT id FROM sites WHERE user_id = '$owner_id'::uuid AND name = '$drill'" 2>/dev/null)"
+expect 204 "$BASE" "/api/collaboration/sites/$owner/$drill" -X DELETE -b "$admin_jar" -H "Origin: https://$BASE" -H "X-Simple-Host-Client: control-ui"
+if [ -n "$drill_id" ]; then
+  restore_log="$(kubectl --context "$CLUSTER_CONTEXT" -n "$NAMESPACE" exec deploy/simple-host -c simple-host -- \
+    /simple-host restore -from-site-id "$drill_id" -version 1 -owner "$owner" -site "$drill" 2>&1)"
+  check "simple-host restore brings the deleted site back" bash -c "printf '%s' '$restore_log' | grep -q 'restored'"
+  drill_jar="$work/cj-drill"
+  check "hand-off mints a session on $drill_host" hand_off_session "$admin_jar" "$drill_jar" "$drill_host" "/"
+  expect 200 "$drill_host" "/" -b "$drill_jar"
+  verify_log="$(kubectl --context "$CLUSTER_CONTEXT" -n "$NAMESPACE" exec deploy/simple-host -c simple-host -- /simple-host verify-storage 2>&1)"
+  check "simple-host verify-storage finds every live object in the bucket" bash -c "printf '%s' '$verify_log' | grep -q '^storage OK'"
+else
+  echo "  (skipped: could not read the drill site's id from the database)"
 fi
 
 echo "== simple-host prune -dry-run lists partitions without dropping them"

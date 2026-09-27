@@ -673,6 +673,47 @@ preflight` refuses it in any overlay other than `deploy/overlays/local`
 (override with `ALLOW_INCLUSTER_POSTGRES=1`), and the server logs a warning
 at every start while it runs against it.
 
+### Restore drill
+
+Run this once before go-live and after any change to the database or bucket
+setup, so "have you tested restoring this?" has an answer. `make smoke`
+runs the site half against the local overlay.
+
+**A site** (minutes, no downtime):
+
+1. Publish a throwaway site, note its id
+   (`GET /api/collaboration/sites/<owner>/<site>` or the `site_create` audit
+   event), and delete it from the dashboard.
+2. `kubectl -n simple-host exec deploy/simple-host -- /simple-host restore -from-site-id <id> -version 1 -owner <owner> -site <site>`
+3. Open the site: it serves again. Delete it for good when you are done.
+
+**The database** (point-in-time recovery to a new instance; the live one
+is never touched):
+
+1. In your cloud's console, restore the managed Postgres to a time a few
+   minutes ago **as a new instance** (`docs/cloud/<your cloud>.md`, section
+   3, names the setting).
+2. Copy your overlay (for example `deploy/overlays/drill`), point its
+   `DB_DSN` Secret at the new instance, give it its own namespace and base
+   hostname, and scale it to one replica. It reads the same bucket; it does
+   not write to it unless someone publishes, so leave it unannounced.
+3. `kubectl -n simple-host-drill exec deploy/simple-host -- /simple-host migrate -status`
+   says the schema is current, and `/readyz` answers 200.
+4. `kubectl -n simple-host-drill exec deploy/simple-host -- /simple-host verify-storage`
+   checks every live version and uploaded file the restored database
+   depends on is in the bucket. It prints `storage OK` or one
+   `missing <key>` line per object (keys are relative to `BACKUP_STORAGE_PREFIX`)
+   and exits non-zero. After a real point-in-time restore, a missing key is
+   one the sweeper retired after the restore time: bring it back from the
+   bucket's noncurrent versions (`docs/storage.md`, "Bucket requirements"),
+   then run `verify-storage` again.
+5. Sign in to the drill's hostname and open a few sites; then delete the
+   namespace and the new database instance.
+
+For a real recovery, step 2 is instead: point the production overlay's
+`DB_DSN` at the restored instance and apply, then run `verify-storage`
+before announcing the service is back.
+
 ## 10. Upgrade
 
 A deploy is: pick the release (`CHANGELOG.md` lists them), resolve and

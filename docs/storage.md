@@ -427,3 +427,21 @@ bucket's own tools, for example on AWS: find it with
 copy it back with
 `aws s3api copy-object --bucket <bucket> --key <key> --copy-source "<bucket>/<key>?versionId=<id>" --server-side-encryption AES256`,
 then run `restore`. Assets are not restored once the site has been purged.
+
+## Checking the bucket against the database
+
+`verify-storage` checks that every object the database depends on is in
+the bucket: each site's live version and each live uploaded file, for sites
+in use and in Recently deleted. It only reads.
+
+```sh
+kubectl -n simple-host exec deploy/simple-host -- /simple-host verify-storage
+```
+
+It prints `storage OK: all <n> objects ...`, or one line per missing object,
+`missing sites/<uuid>/v<n>.tar.gz  <owner>/<site> live version v<n>`
+(keys relative to `BACKUP_STORAGE_PREFIX`), and exits non-zero. Run it after a
+database point-in-time restore: the restored database can point at objects
+the sweeper retired after the restore time. Bring each key back from the
+bucket's noncurrent versions as above, then run it again. The full drill is
+in `docs/install.md`, "Restore drill".

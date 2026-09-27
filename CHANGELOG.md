@@ -25,6 +25,14 @@ Schema 0050 (backward-compatible: nullable `api_keys.last4`).
   (each waiting owner with how long), and the limits in force.
 - New metric `simplehost_owner_hosts_not_ready`.
 
+### Recovery
+- `simple-host verify-storage` lists every live version and uploaded file
+  the database depends on that is missing from the bucket (by key) and exits
+  non-zero: run it after a database point-in-time restore.
+- The restore drill is documented (`docs/install.md`, "Restore drill": a
+  site with `restore`, and the database by PITR to a new instance), tested
+  end to end against a real database, and run by `make smoke`.
+
 ### Audit log
 - /admin's Activity card searches by owner, site, person, action and date,
   shows names instead of ids, loads more, and its export links carry the
