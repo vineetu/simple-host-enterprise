@@ -1711,7 +1711,7 @@ paths:
   /api/site-export/{token}:
     get:
       summary: Download a whole site
-      description: The address `export-link` returns. One zip of `site.json`, `saved-data.json`, `saved-data-history.json`, `versions.json`, `assets.json`, the live version's files under `files/` and each uploaded file under `assets/<id>`. No key or cookie; the person who asked for the link must still own the site or be in its team, and the site must be the same one. The link works once: the first download to start uses it up. HEAD answers the headers only (no zip, no audit, the link stays unused). Audited as `site_export`.
+      description: The address `export-link` returns. One zip of `site.json`, `saved-data.json`, `saved-data-history.json`, `versions.json`, `assets.json`, the live version's files under `files/` and each uploaded file under `assets/<id>`. No key or cookie; the person who asked for the link must still own the site or be in its team, and the site must be the same one. The link works once; the first download to start uses it up. HEAD answers the headers only (no zip, no audit, the link stays unused). Audited as `site_export`.
       tags: [Sites]
       security: []
       parameters:
