@@ -92,7 +92,7 @@ Required, with no default: the public base URL, the OIDC provider, the database,
 
 ## Layout
 
-- `cmd/server`: the binary and its subcommands (`migrate`, `restore`, `reencrypt`, `verify-storage`, `audit-verify`, `prune`, `owner-hosts`, `version`).
+- `cmd/server`: the binary and its subcommands (`migrate`, `restore`, `reencrypt`, `verify-storage`, `rebuild-index`, `audit-verify`, `prune`, `owner-hosts`, `version`).
 - `internal/`: one package per concern (`handler`, `db`, `storage`, `migrate`, `oidc`, `audit`, `mcp`).
 - `deploy/`: the manifests, optional components and environment overlays.
 - `simple-host-plugin/`: the skills and plugin agents install.

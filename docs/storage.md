@@ -9,6 +9,11 @@ target. Under `BACKUP_STORAGE_PREFIX`:
 ```
 sites/<site-id>/v<N>.tar.gz     one deployed version, written once, never changed
 sites/<site-id>/assets/<id>     one uploaded asset, written once, never changed
+sites/<site-id>/manifest.json   whose the site is: owner, name, live version and
+                                uploaded files' names and types, rewritten on
+                                each deploy, rollback, rename, hand-over and
+                                file change (for `rebuild-index`; nothing
+                                serving reads it)
 ```
 
 Postgres decides what is served: `sites.active_version` names the live
@@ -447,3 +452,36 @@ database point-in-time restore: the restored database can point at objects
 the sweeper retired after the restore time. Bring each key back from the
 bucket's noncurrent versions as above, then run it again. The full drill is
 in `docs/install.md`, "Restore drill".
+
+## Rebuilding from the bucket alone
+
+If the database is lost together with its point-in-time recovery, each
+site's `manifest.json` still says whose it is. `simple-host rebuild-index`
+lists every site in the bucket with its owner, name, versions and uploaded
+files, and what it would do; `-apply` recreates each one whose owner is in
+the database again, under the same site id (so the objects' keys still
+match), with every kept version, the version that was live, and its
+uploaded files. It audits each as `site_restore` with `from:
+bucket_rebuild`. Run it again as more people sign in; a site already in
+the database is left alone.
+
+What comes back and what does not:
+
+- **Back:** pages (every kept version, the live one live again) and
+  uploaded files, under the same owner and name.
+- **Not back:** saved data and its history, access levels (a recreated
+  site opens only for its owner or team), viewers, network approvals,
+  team members, API keys, sessions, connected apps, the audit log and the
+  access log. They were only ever in Postgres.
+- A person comes back when they sign in again (the account is created from
+  the identity provider as on day one). A team comes back when one of its
+  former members creates it again with the same name, then adds the
+  others.
+- A site deployed before manifests were written (before this release) has
+  no manifest until its next deploy; rebuild-index lists its id and
+  newest version, and `restore -from-site-id <id> -version <n> -owner
+  <owner> -site <name>` brings its pages back once you know whose it was.
+- A site in Recently deleted still has its manifest until it is purged,
+  so it is listed and recreated too; delete it again if it should stay
+  gone.
+

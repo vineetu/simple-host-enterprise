@@ -714,6 +714,30 @@ For a real recovery, step 2 is instead: point the production overlay's
 `DB_DSN` at the restored instance and apply, then run `verify-storage`
 before announcing the service is back.
 
+### If the database is gone for good
+
+When the database and its point-in-time recovery are both lost (a deleted
+instance, a lapsed retention), the sites' pages and uploaded files are
+still in the bucket, and each site's manifest says whose it is.
+
+1. Create an empty database and apply the overlay against it (the migrate
+   init container builds the schema).
+2. People sign in again; accounts are created from the identity provider as
+   on day one. Former team members create their teams again with the same
+   names.
+3. `kubectl -n simple-host exec deploy/simple-host -- /simple-host rebuild-index`
+   lists every site in the bucket: owner, name, versions, uploaded files,
+   and whether it is recoverable now or waiting for its owner. It changes
+   nothing.
+4. `kubectl -n simple-host exec deploy/simple-host -- /simple-host rebuild-index -apply`
+   recreates the recoverable ones (same site id, every kept version, the
+   live one live, uploaded files). Run it again as more people sign in.
+
+Saved data, its history, access levels, viewers, keys and the audit log
+were only in the database and do not come back; recreated sites open only
+for their owner or team until the access level is set again.
+`docs/storage.md`, "Rebuilding from the bucket alone", has the details.
+
 ## 10. Upgrade
 
 A deploy is: pick the release (`CHANGELOG.md` lists them), resolve and

@@ -32,7 +32,7 @@ func (h *AdminHandler) registerMoveRoutes(mux *http.ServeMux, adminAPI, dashboar
 }
 
 func (h *AdminHandler) mover() siteMover {
-	return siteMover{database: h.database, hosts: h.hosts, audit: h.audit, quota: h.quota, admin: true}
+	return siteMover{database: h.database, store: h.store, hosts: h.hosts, audit: h.audit, quota: h.quota, admin: true}
 }
 
 // leaverOwner resolves username and checks it is a namespace nobody can act

@@ -6,6 +6,18 @@ release, commit and schema.
 
 ## Unreleased
 
+### Rebuilding from the bucket
+- Each site now keeps `sites/<id>/manifest.json` in the bucket: its owner,
+  name, live version and uploaded files' names and types, rewritten after
+  every deploy, rollback, rename, hand-over and file change. If the
+  database is lost together with its point-in-time recovery,
+  `simple-host rebuild-index` lists every site the bucket can bring back,
+  and `-apply` recreates each whose owner has signed in again: same site
+  id, every kept version, the live one live, uploaded files. Saved data,
+  access levels, viewers and team members were only in the database and
+  are not recovered. A site gets its manifest at its next deploy (or
+  rollback, rename or file change) after this release.
+
 ### Visitors: top pages and where they came from
 - A site's Visitors view on the dashboard lists its most opened pages and
   the domains that linked to it over the last 30 days: counts only, by

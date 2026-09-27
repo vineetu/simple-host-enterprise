@@ -121,5 +121,6 @@ func (h *SiteHandler) deleteCollaborationAsset(w http.ResponseWriter, r *http.Re
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
+	refreshSiteManifest(r.Context(), h.database, h.store, access.Site.ID)
 	w.WriteHeader(http.StatusNoContent)
 }

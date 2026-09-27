@@ -565,6 +565,7 @@ func (h *SiteHandler) createSiteForTarget(w http.ResponseWriter, r *http.Request
 		}
 	}
 	keepObject = true
+	refreshSiteManifest(r.Context(), h.database, h.store, site.ID)
 
 	site.ActiveVersion = versionNumber
 	url := h.siteURL(r.Context(), target.OwnerUsername, siteName, site.ID)
@@ -745,6 +746,7 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	keepObject = true
+	refreshSiteManifest(r.Context(), h.database, h.store, site.ID)
 
 	site.ActiveVersion = liveVersion
 
@@ -1096,6 +1098,7 @@ func (h *SiteHandler) rollbackSite(w http.ResponseWriter, r *http.Request) {
 
 	site.ActiveVersion = req.Version
 	site.UpdatedAt = time.Now().UTC()
+	refreshSiteManifest(r.Context(), h.database, h.store, site.ID)
 
 	url := h.siteURL(r.Context(), target.OwnerUsername, siteName, site.ID)
 	setSiteETag(w, site)

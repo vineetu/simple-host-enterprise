@@ -18,6 +18,8 @@ import (
 //
 //	sites/<site-id>/v<N>.tar.gz      one immutable deployed version
 //	sites/<site-id>/assets/<id>      one immutable uploaded asset
+//	sites/<site-id>/manifest.json    whose the site is (manifest.go), for
+//	                                 rebuilding a lost database
 //
 // Keying by site id rather than owner and site name means a deleted and
 // re-created site never shares a key with its predecessor, so retiring the

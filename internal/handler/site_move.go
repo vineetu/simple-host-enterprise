@@ -16,6 +16,7 @@ import (
 	"github.com/vsriram/simple-host/internal/audit"
 	"github.com/vsriram/simple-host/internal/auth"
 	db "github.com/vsriram/simple-host/internal/db"
+	"github.com/vsriram/simple-host/internal/storage"
 )
 
 // Handing a site over and renaming it are one operation: the site's row
@@ -35,9 +36,12 @@ type ownerRef struct {
 // owners and team members, the admin handler for leavers' sites.
 type siteMover struct {
 	database *sql.DB
-	hosts    HostModel
-	audit    audit.Recorder
-	quota    UploadQuota
+	// store, when set, has each moved site's bucket manifest rewritten
+	// with its new owner or name.
+	store *storage.Store
+	hosts HostModel
+	audit audit.Recorder
+	quota UploadQuota
 	// admin is the leaver flow: the actor need not be in either namespace,
 	// may hand sites to a person, and may move a site an admin restricted.
 	admin bool
@@ -343,7 +347,13 @@ func (s siteMover) run(ctx context.Context, actorID, action string, moves []plan
 			return nil, err
 		}
 	}
-	return nil, audit.Commit(tx)
+	if err := audit.Commit(tx); err != nil {
+		return nil, err
+	}
+	for _, m := range moves {
+		refreshSiteManifest(ctx, s.database, s.store, m.SiteID)
+	}
+	return nil, nil
 }
 
 func (s siteMover) response(m plannedMove) siteMoveResponse {
@@ -409,7 +419,7 @@ func destinationNotFound(typed string) *moveRefusal {
 }
 
 func (h *SiteHandler) mover() siteMover {
-	return siteMover{database: h.database, hosts: h.hosts, audit: h.audit, quota: h.quota}
+	return siteMover{database: h.database, store: h.store, hosts: h.hosts, audit: h.audit, quota: h.quota}
 }
 
 func (h *SiteHandler) registerMoveRoutes(mux *http.ServeMux, ownerMutation, browserWrite func(http.Handler) http.Handler) {

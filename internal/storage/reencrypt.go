@@ -261,6 +261,11 @@ func parseStoreKey(key string) (siteID string, version int, isAsset bool, ok boo
 		return "", 0, false, false
 	}
 	siteID, name := rest[:36], rest[37:]
+	// The manifest (manifest.go), like an asset, has no version row to
+	// check against; it is rewritten under the new key like the rest.
+	if name == manifestName {
+		return siteID, 0, true, true
+	}
 	if assetID, found := strings.CutPrefix(name, "assets/"); found {
 		return siteID, 0, true, isUUID(assetID)
 	}

@@ -49,7 +49,8 @@ anything: they say what exists and what is deliberately unfinished.
   gate, the request log, and the servers. `subcommands.go` is `migrate`,
   `restore`, `migrate-storage`, `reencrypt`, `prune`, `audit-verify`,
   `owner-hosts` (the per-owner certificate reconciler in `internal/ownerhosts`),
-  and `verify-storage` (`verify_storage.go`).
+  `verify-storage` (`verify_storage.go`) and `rebuild-index`
+  (`rebuild_index.go`, sites back from the bucket's per-site manifests).
 - `internal/config` reads the environment. Required values have no default;
   the database DSN and the bucket endpoint are additionally refused if their
   TLS is weaker than required, unless the local-evaluation

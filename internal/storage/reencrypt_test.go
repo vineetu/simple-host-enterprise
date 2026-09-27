@@ -184,6 +184,7 @@ func TestParseStoreKey(t *testing.T) {
 		{"sites/" + testSiteA + "/v012.tar.gz", 0, false, false},
 		{"sites/" + testSiteA + "/v0.tar.gz", 0, false, false},
 		{"sites/" + testSiteA + "/assets/x", 0, true, false},
+		{"sites/" + testSiteA + "/manifest.json", 0, true, true},
 		{"sites/not-a-uuid/v1.tar.gz", 0, false, false},
 		{"readyz-probe", 0, false, false},
 	} {

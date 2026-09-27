@@ -769,7 +769,9 @@ of `docs/configuration.md`.
   audit trail; the managed database's PITR is its whole backup. Confirm PITR
   retention with the human, and run the restore drill once
   (`docs/install.md`, "Restore drill"; `simple-host verify-storage` checks
-  the bucket against the database).
+  the bucket against the database). If the database is ever lost for good,
+  `simple-host rebuild-index` brings sites' pages and files back from the
+  bucket alone (`docs/install.md`, "If the database is gone for good").
 - **Idle sites** (optional, off by default): `IDLE_CLEANUP_DAYS` in
   `config.env` marks sites nobody has used for that many days and moves them
   to Recently deleted `IDLE_CLEANUP_GRACE_DAYS` (30) days later unless kept; `SMTP_URL` (in

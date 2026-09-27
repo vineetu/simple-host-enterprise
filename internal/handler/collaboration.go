@@ -502,6 +502,7 @@ func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Req
 		}
 	}
 	keepObject = true
+	refreshSiteManifest(r.Context(), h.database, h.store, access.Site.ID)
 	access.Site.ActiveVersion = liveVersion
 	access.Site.UpdatedAt = time.Now().UTC()
 	setSiteETag(w, access.Site)
@@ -608,6 +609,7 @@ func (h *SiteHandler) rollbackCollaborationSite(w http.ResponseWriter, r *http.R
 	}
 	access.Site.ActiveVersion = request.Version
 	access.Site.UpdatedAt = time.Now().UTC()
+	refreshSiteManifest(r.Context(), h.database, h.store, access.Site.ID)
 	setSiteETag(w, access.Site)
 	writeJSON(w, http.StatusOK, h.collaborationSiteResponse(
 		r, access.Site, access.OwnerUsername, access.Role, db.SiteAnalyticsSummary{}, nil,

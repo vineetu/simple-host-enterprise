@@ -33,6 +33,7 @@ type accessWorld struct {
 	// files is the site file server, for a test that attaches an access
 	// log writer to it.
 	files *SiteFiles
+	store *storage.Store
 }
 
 const accessBase = "hosting.corp.test"
@@ -98,7 +99,7 @@ func newAccessWorldFull(t *testing.T, approvals int, quota UploadQuota, scanner 
 	handoff := NewHandoffHandler(database, keys, hosts, recorder, limits)
 	gate := NewHostGate(hosts, files, database, keys, auth.NewNegativeSessionCache(database, time.Hour), handoff, siteAPI, authMW, base)
 
-	w := &accessWorld{t: t, database: database, app: gate(mux), keys: keys, apiKeys: map[string]string{}, users: map[string]string{}, files: files}
+	w := &accessWorld{t: t, database: database, app: gate(mux), keys: keys, apiKeys: map[string]string{}, users: map[string]string{}, files: files, store: store}
 	for _, name := range []string{"alice", "vera", "olly", "mo", "root", "ada"} {
 		user, err := db.CreateOIDCUser(context.Background(), database, name, "sub-"+name, name+"@example.com", name == "root" || name == "ada")
 		if err != nil {

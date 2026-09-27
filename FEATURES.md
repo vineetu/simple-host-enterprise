@@ -450,15 +450,29 @@ Config names are documented in `docs/configuration.md`; schema in
   drill") is tested end to end (`cmd/server/restore_drill_db_test.go`:
   publish, delete, `restore`, serves; purge, `restore`, serves;
   `verify-storage` names a lost object) and run by `make smoke`. A bucket
-  fault does not fail `/readyz` (`simplehost_bucket_ok` instead).
+  fault does not fail `/readyz` (`simplehost_bucket_ok` instead). Each site
+  also has `sites/<id>/manifest.json` (owner label, site name, live
+  version, its uploaded files' names, types, sizes and digests), rewritten
+  best effort after every deploy, rollback, rename, hand-over, file upload
+  and file delete, and by `restore` (`internal/storage/manifest.go`,
+  `internal/handler/site_manifest.go`); `reencrypt` rewrites it like the
+  rest. `simple-host rebuild-index` (read-only; `-apply` to act) lists every
+  site the bucket alone can bring back after the database is lost, and
+  recreates, under the same site id, each whose owner is back in the
+  database: site row, every kept version (the manifest's live one live),
+  and uploaded files; audited `site_restore` with `from: bucket_rebuild`.
+  Saved data, access, viewers and team members are database-only and are
+  not recovered (`docs/storage.md`, "Rebuilding from the bucket alone";
+  `cmd/server/rebuild_index_db_test.go`).
 - **Status.** Built.
 - **Routes.** None of its own. **MCP.** None.
 - **Skill.** None.
 - **Go.** `internal/storage/` (`store.go`, `cache.go`, `sweep.go`,
   `objects.go`, `objects_s3.go`, `envelope.go`, `archive.go`, `keys.go`,
-  `migrate.go`, `reencrypt.go`, `sizes.go`); `internal/db/storage.go`,
-  `quota.go`, `storage_check.go`, `db.VersionExists`;
-  `cmd/server/subcommands.go`, `verify_storage.go`.
+  `migrate.go`, `reencrypt.go`, `sizes.go`, `manifest.go`); `internal/db/storage.go`,
+  `quota.go`, `storage_check.go`, `site_manifest.go`, `db.VersionExists`;
+  `internal/handler/site_manifest.go`;
+  `cmd/server/subcommands.go`, `verify_storage.go`, `rebuild_index.go`.
 - **DB.** `storage_retired` (0032), `versions.size_bytes` (0037).
 - **Config.** `BACKUP_STORAGE_ENDPOINT`, `BACKUP_STORAGE_BUCKET`,
   `BACKUP_STORAGE_PREFIX`, `BACKUP_STORAGE_REGION`,

@@ -572,6 +572,7 @@ func (h *SiteAPIHandler) CreateAsset(w http.ResponseWriter, r *http.Request, cal
 	}
 	keepObject = true
 	markSiteUsed(h.use, h.database, call.Owner, call.SiteName)
+	refreshSiteManifest(r.Context(), h.database, h.store, call.SiteID)
 	writeJSON(w, http.StatusCreated, createAssetResponse{
 		ID:  stored.ID,
 		URL: h.siteURL(call) + "_assets/" + url.PathEscape(stored.ID) + "/" + url.PathEscape(name),
@@ -654,6 +655,7 @@ func (h *SiteAPIHandler) DeleteAsset(w http.ResponseWriter, r *http.Request, cal
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
+	refreshSiteManifest(r.Context(), h.database, h.store, call.SiteID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

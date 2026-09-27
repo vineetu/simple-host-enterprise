@@ -47,11 +47,13 @@ func runSubcommand(name string, args []string) error {
 		return runOwnerHosts(args)
 	case "verify-storage":
 		return runVerifyStorage(args)
+	case "rebuild-index":
+		return runRebuildIndex(args)
 	case "version":
 		fmt.Println(versionString())
 		return nil
 	default:
-		return fmt.Errorf("unknown subcommand %q (expected: migrate, restore, migrate-storage, reencrypt, prune, audit-verify, owner-hosts, verify-storage, version)", name)
+		return fmt.Errorf("unknown subcommand %q (expected: migrate, restore, migrate-storage, reencrypt, prune, audit-verify, owner-hosts, verify-storage, rebuild-index, version)", name)
 	}
 }
 
@@ -304,6 +306,9 @@ func restoreVersion(ctx context.Context, database *sql.DB, objects storage.Objec
 	}
 	if err := audit.Commit(tx); err != nil {
 		return fmt.Errorf("commit: %w", err)
+	}
+	if err := handler.WriteSiteManifest(ctx, database, objects, target.ID); err != nil {
+		log.Printf("restore: write the site's bucket manifest: %v (the next deploy writes it)", err)
 	}
 	log.Printf("restored %s v%d into %s/%s as v%d (site %s, live=%t)", *fromSiteID, *version, *owner, *site, newVersion, target.ID, *setCurrent || created)
 	return nil
