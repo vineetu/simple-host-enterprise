@@ -61,6 +61,9 @@ deploying.
 - An erasure that found a team membership added a moment earlier could
   lock rows out of order and deadlock with a site move; it now starts its
   locks over in order.
+- Renaming a person is refused (400) when one of their sites, Recently
+  deleted included, would have an address longer than a hostname may be;
+  it used to succeed and leave the site with no address.
 - Migrations 0047 (admin restriction) and 0048 (erasure) are now recorded
   as not backward-compatible (0058 corrects databases already migrated), so
   an image built before them is refused at startup instead of letting an

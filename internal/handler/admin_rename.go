@@ -71,6 +71,10 @@ func (h *AdminHandler) renameUser(w http.ResponseWriter, r *http.Request) {
 		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
 		return
 	}
+	if site := siteWithoutHost(h.hosts, newName, sites); site != "" {
+		h.respondAdmin(w, r, http.StatusBadRequest, fmt.Sprintf("%q would make the address of their site %q longer than a hostname may be; choose a shorter name", newName, site))
+		return
+	}
 	for _, s := range sites {
 		if s.Deleted {
 			continue
@@ -97,4 +101,19 @@ func (h *AdminHandler) renameUser(w http.ResponseWriter, r *http.Request) {
 		refreshSiteManifest(r.Context(), h.database, h.store, s.ID)
 	}
 	h.respondAdmin(w, r, http.StatusOK, fmt.Sprintf("%s is now %s; their sites' old addresses redirect for people who may open them", oldName, newName))
+}
+
+// siteWithoutHost names the first of sites that would have no address
+// under owner (its hostname too long), or "". Recently deleted sites count:
+// a restore must still have an address.
+func siteWithoutHost(hosts HostModel, owner string, sites []db.RenamedSite) string {
+	if hosts.base == "" {
+		return ""
+	}
+	for _, s := range sites {
+		if hosts.SiteHost(owner, s.Name) == "" {
+			return s.Name
+		}
+	}
+	return ""
 }

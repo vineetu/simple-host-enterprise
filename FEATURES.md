@@ -832,7 +832,8 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Routes.** `GET /admin`, `POST /api/admin/users/{username}/disable`,
   `POST /api/admin/users/{username}/enable`,
   `POST /api/admin/users/{username}/rename` (form or JSON `name`; 409 on a
-  collision, 400 for a name that cannot be an address),
+  collision, 400 for a name that cannot be an address or would make one of
+  their sites' addresses too long for a hostname),
   `POST /api/admin/users/disable` (offboarding by `{"email"}`: every person
   account with that address, idempotent, 404 when none; an admin's session
   or an admin's `offboard` key);

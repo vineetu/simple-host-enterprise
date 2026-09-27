@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/vsriram/simple-host/internal/auth"
+	db "github.com/vsriram/simple-host/internal/db"
 )
 
 func TestSecurityHeaders(t *testing.T) {
@@ -183,4 +184,18 @@ func requireCookie(t *testing.T, response *httptest.ResponseRecorder, name strin
 	}
 	t.Fatalf("response did not set %s", name)
 	return nil
+}
+
+// A person's rename is refused when a site of theirs would no longer fit in
+// a hostname under the new name (a long base domain, a long site name).
+func TestRenameKeepsEverySiteAddressable(t *testing.T) {
+	hosts := newTestHostModel(t, "https://"+strings.Repeat("b", 60)+"."+strings.Repeat("c", 60)+".example.com")
+	longSite := strings.Repeat("s", 63)
+	sites := []db.RenamedSite{{Name: "short"}, {Name: longSite, Deleted: true}}
+	if got := siteWithoutHost(hosts, "al", sites); got != "" {
+		t.Fatalf("short owner: %q has no address", got)
+	}
+	if got := siteWithoutHost(hosts, strings.Repeat("a", 63), sites); got != longSite {
+		t.Fatalf("long owner: got %q, want the long (deleted) site refused", got)
+	}
 }
