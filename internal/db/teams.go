@@ -405,6 +405,24 @@ func LockNamespacesShared(ctx context.Context, tx *sql.Tx, ids ...string) error 
 	return nil
 }
 
+// UsernamesByID maps each of ids that names an account to its username now.
+func UsernamesByID(ctx context.Context, q Querier, ids []string) (map[string]string, error) {
+	rows, err := q.QueryContext(ctx, `SELECT id::text, username FROM users WHERE id = ANY($1::uuid[])`, pq.Array(ids))
+	if err != nil {
+		return nil, fmt.Errorf("usernames by id: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]string, len(ids))
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, fmt.Errorf("usernames by id: %w", err)
+		}
+		out[id] = name
+	}
+	return out, rows.Err()
+}
+
 const countTeamSitesQuery = `
 	SELECT count(*)::int
 	FROM sites

@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/vsriram/simple-host/internal/audit"
 
 	db "github.com/vsriram/simple-host/internal/db"
 )
@@ -297,4 +300,28 @@ func (w *accessWorld) adminAsPost(user, path, form string) *httptest.ResponseRec
 	r.Header.Set("X-Simple-Host-Client", "control-ui")
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	return w.do(r)
+}
+
+// A move planned before its owner was renamed uses the names as they are
+// under its locks: the redirect is recorded for the address the site
+// actually had, and the answer names the current owner.
+func TestMoveUsesNamesReadUnderLocks(t *testing.T) {
+	w := newAccessWorld(t)
+	w.deploy("alice", "/api/sites/demo")
+	id := w.siteID("alice", "demo")
+	stale := ownerRef{ID: w.users["alice"], Username: "alice"}
+	if rec := w.adminForm("/api/admin/users/alice/rename", url.Values{"name": {"alicia"}}); rec.Code != http.StatusOK {
+		t.Fatalf("rename = %d %s", rec.Code, rec.Body)
+	}
+	mover := siteMover{database: w.database, hosts: newTestHostModel(t, "https://"+accessBase), audit: audit.NoOp{}}
+	planned := []plannedMove{{SiteID: id, OldName: "demo", NewName: "fresh", From: stale, To: stale}}
+	if refusal, err := mover.run(context.Background(), w.users["alice"], "site_rename", planned, nil); refusal != nil || err != nil {
+		t.Fatalf("move = %+v, %v", refusal, err)
+	}
+	if n := w.count(`SELECT count(*) FROM site_redirects WHERE owner_label = 'alicia' AND site_part = 'demo'`); n != 1 {
+		t.Errorf("redirect for demo.alicia = %d rows, want 1", n)
+	}
+	if got := mover.response(planned[0]); got.Owner != "alicia" || got.PreviousOwner != "alicia" {
+		t.Errorf("answer names %q (was %q), want alicia", got.Owner, got.PreviousOwner)
+	}
 }

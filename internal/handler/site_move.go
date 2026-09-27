@@ -135,6 +135,21 @@ func (s siteMover) applyMoves(ctx context.Context, tx *sql.Tx, actorID, action s
 	if err := db.LockNamespacesShared(ctx, tx, namespaces...); err != nil {
 		return nil, nil, err
 	}
+	// A person renamed while this waited for their row has a new name: the
+	// moves (their redirects, held-name checks, answers) use the names as
+	// they are now, read under the locks.
+	current, err := db.UsernamesByID(ctx, tx, namespaces)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i := range moves {
+		if name, ok := current[moves[i].From.ID]; ok {
+			moves[i].From.Username = name
+		}
+		if name, ok := current[moves[i].To.ID]; ok {
+			moves[i].To.Username = name
+		}
+	}
 	if err := lockMoves(ctx, tx, moves); err != nil {
 		return nil, nil, err
 	}
@@ -548,7 +563,9 @@ func (h *SiteHandler) renameSite(w http.ResponseWriter, r *http.Request) {
 
 func (h *SiteHandler) finishMove(w http.ResponseWriter, r *http.Request, actorID, action string, move plannedMove) {
 	mover := h.mover()
-	refusal, err := mover.run(r.Context(), actorID, action, []plannedMove{move}, nil)
+	planned := []plannedMove{move}
+	refusal, err := mover.run(r.Context(), actorID, action, planned, nil)
+	move = planned[0] // with the names as they were under the locks
 	if refusal != nil {
 		refusal.write(w)
 		return

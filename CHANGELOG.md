@@ -64,6 +64,10 @@ deploying.
 - Renaming a person is refused (400) when one of their sites, Recently
   deleted included, would have an address longer than a hostname may be;
   it used to succeed and leave the site with no address.
+- A site rename or hand-over that waited on a person being renamed used
+  the name from before: the redirect was recorded for an address the site
+  no longer had and the answer named the old owner. Names are now read
+  under the move's locks.
 - Migrations 0047 (admin restriction) and 0048 (erasure) are now recorded
   as not backward-compatible (0058 corrects databases already migrated), so
   an image built before them is refused at startup instead of letting an
