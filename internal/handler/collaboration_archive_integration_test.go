@@ -156,7 +156,7 @@ func (s *collaborationArchiveDBState) query(query string, args []driver.NamedVal
 func (s *collaborationArchiveDBState) exec(query string, args []driver.NamedValue) (driver.Result, error) {
 	normalized := strings.Join(strings.Fields(query), " ")
 	switch {
-	case strings.Contains(normalized, "pg_advisory_xact_lock"):
+	case strings.Contains(normalized, "pg_advisory_xact_lock"), strings.Contains(normalized, "FOR KEY SHARE"):
 		return driver.RowsAffected(1), nil
 	case strings.Contains(normalized, "UPDATE sites SET active_version"):
 		s.mu.Lock()

@@ -93,7 +93,7 @@ func (s *siteDeleteAuditState) query(query string, args []driver.NamedValue) (dr
 func (s *siteDeleteAuditState) exec(query string, args []driver.NamedValue) (driver.Result, error) {
 	normalized := strings.Join(strings.Fields(query), " ")
 	switch {
-	case strings.Contains(normalized, "pg_advisory_xact_lock"):
+	case strings.Contains(normalized, "pg_advisory_xact_lock"), strings.Contains(normalized, "FOR KEY SHARE"):
 		// db.LockSiteCollaboration.
 		return driver.RowsAffected(1), nil
 	case strings.Contains(normalized, "INSERT INTO storage_retired"):

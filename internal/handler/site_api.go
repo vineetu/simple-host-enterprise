@@ -229,6 +229,10 @@ func (h *SiteAPIHandler) PutState(w http.ResponseWriter, r *http.Request, call s
 		return
 	}
 	defer audit.Rollback(tx)
+	if err := lockWriter(r.Context(), tx, call.ActorUserID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
 	if err := db.UpdateSiteState(r.Context(), tx, call.Owner, call.SiteName, state); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, errorResponse{Error: "site not found"})
@@ -330,6 +334,10 @@ func (h *SiteAPIHandler) PutStateVersioned(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	defer audit.Rollback(tx)
+	if err := lockWriter(r.Context(), tx, call.ActorUserID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
 	newVersion, err := db.UpdateSiteStateCAS(r.Context(), tx, call.Owner, call.SiteName, req.State, *req.Version)
 	if err != nil {
 		if errors.Is(err, db.ErrVersionConflict) {
@@ -536,6 +544,10 @@ func (h *SiteAPIHandler) CreateAsset(w http.ResponseWriter, r *http.Request, cal
 		return
 	}
 	defer audit.Rollback(tx)
+	if err := lockWriter(r.Context(), tx, call.ActorUserID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
 	if h.quota.MaxBytes > 0 {
 		refusal, err := h.checkAssetQuota(r.Context(), tx, call.Owner, stored.Size)
 		if err != nil {
@@ -676,6 +688,19 @@ func (h *SiteAPIHandler) DeleteAsset(w http.ResponseWriter, r *http.Request, cal
 	}
 	refreshSiteManifest(r.Context(), h.database, h.store, call.SiteID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// lockWriter takes the writing person's row (FOR KEY SHARE, as
+// db.LockNamespacesShared does) before any site lock or site row: the rows a
+// write inserts name them (a version's uploader, a saved-data version's
+// writer, an upload's creator), and a rename or erasure holding their row
+// while it takes their sites' rows would otherwise deadlock with a write
+// that took the site first. An anonymous write names nobody.
+func lockWriter(ctx context.Context, tx *sql.Tx, actorID string) error {
+	if actorID == "" {
+		return nil
+	}
+	return db.LockNamespacesShared(ctx, tx, actorID)
 }
 
 // retireAssetObject queues an asset's object for deletion in tx, the same

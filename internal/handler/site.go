@@ -472,6 +472,10 @@ func (h *SiteHandler) createSiteForTarget(w http.ResponseWriter, r *http.Request
 		return
 	}
 	defer audit.Rollback(tx)
+	if err := lockWriter(r.Context(), tx, target.ActorID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
 	if err := db.LockSiteCollaboration(r.Context(), tx, target.OwnerID, siteName); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -626,6 +630,10 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer audit.Rollback(tx)
+	if err := lockWriter(r.Context(), tx, target.ActorID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
 	if err := db.LockSiteCollaboration(r.Context(), tx, target.OwnerID, siteName); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -930,6 +938,10 @@ func (h *SiteHandler) deleteSiteForTarget(w http.ResponseWriter, r *http.Request
 		return
 	}
 	defer audit.Rollback(tx)
+	if err := lockWriter(r.Context(), tx, target.ActorID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
 	if err := db.LockSiteCollaboration(r.Context(), tx, target.OwnerID, siteName); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -1028,6 +1040,10 @@ func (h *SiteHandler) rollbackSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer audit.Rollback(tx)
+	if err := lockWriter(r.Context(), tx, target.ActorID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
 	if err := db.LockSiteCollaboration(r.Context(), tx, target.OwnerID, siteName); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return

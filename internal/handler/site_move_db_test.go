@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -8,9 +10,9 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vsriram/simple-host/internal/audit"
-
 	db "github.com/vsriram/simple-host/internal/db"
 )
 
@@ -323,5 +325,49 @@ func TestMoveUsesNamesReadUnderLocks(t *testing.T) {
 	}
 	if got := mover.response(planned[0]); got.Owner != "alicia" || got.PreviousOwner != "alicia" {
 		t.Errorf("answer names %q (was %q), want alicia", got.Owner, got.PreviousOwner)
+	}
+}
+
+// A deploy takes the uploader's row before its site, so a rename holding
+// the person's row while it takes their sites' rows waits for nothing the
+// deploy holds (they used to deadlock: the deploy held the site and waited
+// for the person, the rename the other way round).
+func TestDeployWaitsForRenameWithoutDeadlock(t *testing.T) {
+	w := newAccessWorld(t)
+	w.deploy("alice", "/api/sites/demo")
+	rename, err := w.database.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rename.Rollback()
+	if _, err := rename.Exec(`SELECT 1 FROM users WHERE id = $1::uuid FOR UPDATE`, w.users["alice"]); err != nil {
+		t.Fatal(err)
+	}
+	var zipped bytes.Buffer
+	zw := zip.NewWriter(&zipped)
+	f, _ := zw.Create("index.html")
+	_, _ = f.Write([]byte("<h1>v2</h1>"))
+	_ = zw.Close()
+	done := make(chan int, 1)
+	go func() { done <- w.api("alice", http.MethodPut, "/api/sites/demo", zipped.Bytes()).Code }()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var waiting int
+		_ = w.database.QueryRow(`SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&waiting)
+		if waiting > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := rename.ExecContext(ctx, `SELECT 1 FROM sites WHERE user_id = $1::uuid FOR UPDATE`, w.users["alice"]); err != nil {
+		t.Fatalf("rename taking the sites while a deploy waits: %v", err)
+	}
+	if err := rename.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if code := <-done; code != http.StatusOK && code != http.StatusCreated {
+		t.Fatalf("deploy after the rename = %d", code)
 	}
 }

@@ -68,6 +68,9 @@ deploying.
   the name from before: the redirect was recorded for an address the site
   no longer had and the answer named the old owner. Names are now read
   under the move's locks.
+- A deploy, rollback, saved-data write or upload by a person being renamed
+  or erased at that moment could deadlock with the rename or erasure; each
+  now takes the writer's row before the site's.
 - Migrations 0047 (admin restriction) and 0048 (erasure) are now recorded
   as not backward-compatible (0058 corrects databases already migrated), so
   an image built before them is refused at startup instead of letting an

@@ -208,6 +208,10 @@ func (c *siteAPITestConn) ExecContext(_ context.Context, query string, args []dr
 	case strings.Contains(normalized, "pg_advisory_xact_lock"):
 		return driver.RowsAffected(1), nil
 
+	case strings.Contains(normalized, "FOR KEY SHARE"):
+		// lockWriter's row lock on the writing person.
+		return driver.RowsAffected(1), nil
+
 	case strings.Contains(normalized, "INSERT INTO storage_retired"):
 		s.retired = append(s.retired, args[0].Value.(string))
 		return driver.RowsAffected(1), nil
