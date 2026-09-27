@@ -142,6 +142,8 @@ var routeKeyAccess = map[string]keyAccess{
 	"POST /api/admin/sites/{owner}/{sitename}/restrict":          keyNever,
 	"POST /api/admin/sites/{owner}/{sitename}/unrestrict":        keyNever,
 	"GET /":                                  keyNever,
+	"GET /{$}":                               keyNever,
+	"GET /openapi.yaml":                      keyNever,
 	"GET /healthz":                           keyNever,
 	"GET /readyz":                            keyNever,
 	"GET /metrics":                           keyNever,

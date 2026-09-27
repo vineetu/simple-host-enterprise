@@ -869,9 +869,10 @@ Config names are documented in `docs/configuration.md`; schema in
 ## 17. Landing and static pages
 
 - **What.** The base host serves embedded static pages and the API spec.
-- **Routes.** `GET /` (file server: `index.html`, `docs.html`,
-  `capabilities.html`, `install.html`, `changelog.html`, `openapi.yaml`,
-  fonts, CSS).
+- **Routes.** `GET /` (file server: `docs.html`,
+  `capabilities.html`, `install.html`, `changelog.html`, fonts, CSS);
+  `GET /{$}` (`index.html`) and `GET /openapi.yaml`, served with the
+  installation's operational values filled in (section 18).
 - **Go.** `internal/handler/ui.go`, `internal/handler/static/`.
   `changelog.html` is the owner's to edit (see `CLAUDE.md`).
 
