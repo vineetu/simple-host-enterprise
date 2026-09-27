@@ -735,7 +735,9 @@ still in the bucket, and each site's manifest says whose it is.
    live one live, uploaded files; deleted and restricted sites as they
    were). A person's sites go to the account with the same sign-in
    identity; a team's need `-map <old team>=<team now>` once the team is
-   back. Run it again as more people sign in, with `-force-live-db` (the
+   back. Manifests are signed; ones written before v1.8 need
+   `-accept-unsigned`, and ones signed under a retired
+   `SESSION_SIGNING_KEY` need that key back as the second entry. Run it again as more people sign in, with `-force-live-db` (the
    first `-apply` needs an empty database).
 
 Saved data, its history, access levels, viewers, keys and the audit log

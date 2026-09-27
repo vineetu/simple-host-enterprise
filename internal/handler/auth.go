@@ -453,7 +453,7 @@ func (h *AuthHandler) resolveUser(ctx context.Context, sub, email, usernameHint 
 	// No account has this subject. An admin may have erased the person it
 	// (or this verified email) belonged to: they stay out until an admin
 	// allows sign-in again, rather than getting a fresh account.
-	erased, err := db.IsIdentityErased(ctx, h.database, db.ErasedSubjectHash(h.claims.Issuer, sub), db.ErasedEmailHash(email))
+	erased, err := db.IsIdentityErased(ctx, h.database, h.claims.Issuer, sub, email)
 	if err != nil {
 		return db.User{}, "", err
 	}

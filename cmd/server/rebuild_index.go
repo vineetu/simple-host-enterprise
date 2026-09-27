@@ -17,6 +17,7 @@ import (
 	"github.com/vsriram/simple-host/internal/audit"
 	db "github.com/vsriram/simple-host/internal/db"
 	"github.com/vsriram/simple-host/internal/handler"
+	"github.com/vsriram/simple-host/internal/identityhash"
 	"github.com/vsriram/simple-host/internal/storage"
 )
 
@@ -41,6 +42,7 @@ func runRebuildIndex(args []string) error {
 	fs := flag.NewFlagSet("rebuild-index", flag.ContinueOnError)
 	apply := fs.Bool("apply", false, "recreate the sites listed as recoverable (default: list only)")
 	forceLive := fs.Bool("force-live-db", false, "allow -apply against a database that already has sites (default: refused; a rebuild is for an empty database)")
+	acceptUnsigned := fs.Bool("accept-unsigned", false, "also recover sites whose manifest has no signature (written before v1.8); anyone who could write to the bucket could have written one")
 	maps := ownerMap{}
 	fs.Var(maps, "map", "`owner=account`: give the sites whose manifest names owner to that existing account or team, when no sign-in identity or team id matches; repeatable")
 	if err := fs.Parse(args); err != nil {
@@ -56,7 +58,7 @@ func runRebuildIndex(args []string) error {
 	}
 	defer database.Close()
 	_, err = rebuildIndex(context.Background(), database, objects, os.Stdout, rebuildOptions{
-		Apply: *apply, ForceLiveDB: *forceLive, Issuer: cfg.OIDC.Issuer, Map: maps,
+		Apply: *apply, ForceLiveDB: *forceLive, AcceptUnsigned: *acceptUnsigned, Issuer: cfg.OIDC.Issuer, Map: maps,
 	})
 	return err
 }
@@ -79,6 +81,8 @@ func (m ownerMap) Set(value string) error {
 type rebuildOptions struct {
 	Apply       bool
 	ForceLiveDB bool
+	// AcceptUnsigned recovers sites whose manifest predates signing.
+	AcceptUnsigned bool
 	// Issuer is OIDC_ISSUER, which the manifest's owner identity hashes.
 	Issuer string
 	Map    map[string]string
@@ -131,8 +135,11 @@ func rebuildIndex(ctx context.Context, database *sql.DB, objects storage.Objects
 		return res, err
 	}
 	for _, p := range people {
-		hash := db.ErasedSubjectHash(opts.Issuer, p.Subject)
-		run.byIdentity[hash] = append(run.byIdentity[hash], rebuildOwner{ID: p.ID, Username: p.Username, Kind: "person", How: "sign-in identity"})
+		// Every form the hash may have been written in: under each
+		// configured signing key, and the plain SHA-256 of before v1.8.
+		for _, hash := range identityhash.SubjectCandidates(opts.Issuer, p.Subject) {
+			run.byIdentity[hash] = append(run.byIdentity[hash], rebuildOwner{ID: p.ID, Username: p.Username, Kind: "person", How: "sign-in identity"})
+		}
 	}
 	who := map[string]string{}
 	for _, s := range sites {
@@ -140,7 +147,17 @@ func rebuildIndex(ctx context.Context, database *sql.DB, objects storage.Objects
 			continue
 		}
 		m := s.Manifest
-		key := m.OwnerKind + "|" + m.OwnerIdentity + "|" + m.TeamID
+		// Only manifests a rebuild would trust decide who an owner is: a
+		// forged or stale one must not make a real owner ambiguous.
+		if sig := m.VerifySignature(); sig != storage.ManifestSigned && (sig != storage.ManifestUnsigned || !opts.AcceptUnsigned) {
+			continue
+		}
+		identity := m.OwnerIdentity
+		if found := run.byIdentity[identity]; len(found) == 1 {
+			// The same person under an older and a newer hash form.
+			identity = "account:" + found[0].ID
+		}
+		key := m.OwnerKind + "|" + identity + "|" + m.TeamID
 		if prev, seen := who[m.Owner]; seen && prev != key {
 			run.ambiguous[m.Owner] = true
 		}
@@ -216,12 +233,28 @@ func (run *rebuildRun) one(ctx context.Context, s storage.RecoverableSite, res *
 	if err := handler.ValidateRebuiltNames(m.Owner, m.OwnerKind, m.Site); err != nil {
 		return refuse(err.Error())
 	}
+	switch m.VerifySignature() {
+	case storage.ManifestSigned:
+	case storage.ManifestUnsigned:
+		if !run.opts.AcceptUnsigned {
+			return refuse("the manifest is not signed (written before v1.8, or not by this install); check the bucket, then run with -accept-unsigned to recover such sites")
+		}
+	case storage.ManifestUnknownKey:
+		return refuse("the manifest is signed with a session signing key this install does not have; add that key to SESSION_SIGNING_KEY as the second entry for the rebuild")
+	default:
+		return refuse("the manifest's signature does not match: it was changed after it was written")
+	}
 	if !s.LiveArchive() {
 		return refuse(fmt.Sprintf("the live version v%d's archive is not in the bucket, and no other version is made live without its owner; restore the one they approved by hand: simple-host restore -from-site-id %s -version <n> -owner <owner> -site %s", m.LiveVersion, s.SiteID, m.Site))
 	}
 	var purgeAt time.Time
 	if m.DeletedAt != nil {
+		// The date promised when it was deleted; a manifest from before it
+		// was recorded falls back to the current retention.
 		purgeAt = m.DeletedAt.Add(db.DeletedSiteRetention())
+		if m.PurgeAt != nil {
+			purgeAt = *m.PurgeAt
+		}
 		if !purgeAt.After(time.Now()) {
 			return refuse("it was deleted on " + m.DeletedAt.Format("2006-01-02") + " and its recovery window has ended")
 		}

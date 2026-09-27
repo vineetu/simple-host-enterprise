@@ -21,6 +21,20 @@ release, commit and schema.
   before this release stop working (they last 10 minutes by default).
 - Idle cleanup never marks or deletes a site an admin has restricted (a
   takedown often held as evidence); a mark it had is cleared.
+- Erased people's sign-in identities and emails, and the owner identity in
+  each site's bucket manifest, are now kept as HMACs under a key derived
+  from `SESSION_SIGNING_KEY`, not plain SHA-256 values anyone with the
+  database or a backup could match against the company directory. Rows and
+  manifests written before still match. Keep retired signing keys in your
+  secret store: an erased person recorded under a key you remove is no
+  longer recognised at sign-in.
+- Site manifests are signed. `simple-host rebuild-index` refuses one that
+  was changed in the bucket, one signed under a key no longer configured
+  (add it back as the second `SESSION_SIGNING_KEY` entry for the rebuild),
+  and one written before this release unless you pass `-accept-unsigned`
+  after reading the list. A manifest now records when a deleted site is
+  purged, and a rebuild keeps that date instead of recomputing it from
+  today's retention.
 
 ### Configuration
 - Safer lower bounds, refused at startup with a message naming the range:
@@ -36,6 +50,9 @@ release, commit and schema.
   when it is used.
 - Idle cleanup marks and unmarks one site at a time under the site's lock,
   so it no longer deadlocks with a bulk move or delete.
+- A manifest write that started before a site was purged or erased could
+  finish after the manifest was deleted and put it back; deletion now
+  waits for it.
 
 ## v1.7.0 — 2026-09-27
 

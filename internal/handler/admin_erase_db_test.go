@@ -4,6 +4,8 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/vsriram/simple-host/internal/audit"
 	db "github.com/vsriram/simple-host/internal/db"
+	"github.com/vsriram/simple-host/internal/identityhash"
 )
 
 // personWithData gives alice a live site with saved data and an asset, a
@@ -426,5 +429,41 @@ func TestErasedLabelDoesNotResolveToALegacyTeam(t *testing.T) {
 	}
 	if name, ok, _ := db.LegacyTeamName(context.Background(), w.database, "nobody"); ok {
 		t.Errorf("legacy team for an unheld label = %q", name)
+	}
+}
+
+// Identity hashes are keyed: an erasure stores an HMAC under a key derived
+// from the session signing key, not a plain SHA-256 anyone could compute
+// from a company directory, and a plain SHA-256 row written before the
+// change still blocks sign-in.
+func TestErasedIdentityHashesAreKeyed(t *testing.T) {
+	if err := identityhash.Configure([]identityhash.Key{{ID: "k1", Key: bytes.Repeat([]byte{7}, 32)}}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = identityhash.Configure(nil) })
+	w := newAccessWorld(t)
+	w.disable("alice")
+	if rec := w.adminPost("/api/admin/users/alice/erase", "confirm=alice"); rec.Code != http.StatusOK {
+		t.Fatalf("erase = %d %s", rec.Code, rec.Body)
+	}
+	plain := func(s string) string { sum := sha256.Sum256([]byte(s)); return hex.EncodeToString(sum[:]) }
+	var subjectHash, emailHash string
+	if err := w.database.QueryRow(`SELECT subject_hash, email_hash FROM erased_identities`).Scan(&subjectHash, &emailHash); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(subjectHash, "k1:") || !strings.HasPrefix(emailHash, "k1:") ||
+		strings.Contains(subjectHash, plain(accessIssuer+"\nsub-alice")) || strings.Contains(emailHash, plain("alice@example.com")) {
+		t.Fatalf("stored hashes %q %q are not keyed", subjectHash, emailHash)
+	}
+	if _, err := w.database.Exec(`INSERT INTO erased_identities (subject_hash, email_hash) VALUES ($1, $2)`,
+		plain(accessIssuer+"\nsub-legacy"), plain("legacy@example.com")); err != nil {
+		t.Fatal(err)
+	}
+	h := &AuthHandler{database: w.database, audit: audit.NewDBRecorder(w.database), claims: OIDCClaimConfig{Issuer: accessIssuer}}
+	ctx := context.Background()
+	for _, c := range [][2]string{{"sub-alice", "x@example.com"}, {"sub-new", "alice@example.com"}, {"sub-legacy", "y@example.com"}, {"sub-new2", "Legacy@Example.com"}} {
+		if _, _, err := h.resolveUser(ctx, c[0], c[1], "", false); !errors.Is(err, db.ErrIdentityErased) {
+			t.Errorf("sign-in %v = %v, want refused", c, err)
+		}
 	}
 }

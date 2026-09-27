@@ -371,7 +371,7 @@ func (h *AdminHandler) erasePerson(w http.ResponseWriter, r *http.Request) {
 	// Their sites' manifests go now, not with the retire sweep: a rebuild
 	// from the bucket in between must not bring an erased person's sites
 	// back.
-	dropSiteManifests(r.Context(), h.store, erasedSites)
+	dropSiteManifests(r.Context(), h.database, h.store, erasedSites)
 	h.respondAdmin(w, r, http.StatusOK, person.Username+" and all their data deleted ("+
 		pluralize(sitesDeleted, "1 site", formatCount(int64(sitesDeleted))+" sites")+")")
 }

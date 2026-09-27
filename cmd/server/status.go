@@ -10,6 +10,7 @@ import (
 
 	"github.com/vsriram/simple-host/internal/config"
 	"github.com/vsriram/simple-host/internal/handler"
+	"github.com/vsriram/simple-host/internal/identityhash"
 	"github.com/vsriram/simple-host/internal/metrics"
 	"github.com/vsriram/simple-host/internal/migrate"
 )
@@ -137,5 +138,12 @@ func loadConfig() (config.Config, error) {
 		log.Printf("WARNING: %s", w)
 	}
 	oplimits.Set(cfg.Limits)
+	identityKeys := make([]identityhash.Key, 0, len(cfg.Session.SigningKeys))
+	for _, k := range cfg.Session.SigningKeys {
+		identityKeys = append(identityKeys, identityhash.Key{ID: k.ID, Key: k.Key})
+	}
+	if err := identityhash.Configure(identityKeys); err != nil {
+		return config.Config{}, err
+	}
 	return cfg, nil
 }

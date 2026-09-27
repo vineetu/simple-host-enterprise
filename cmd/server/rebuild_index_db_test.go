@@ -10,8 +10,23 @@ import (
 
 	db "github.com/vsriram/simple-host/internal/db"
 	"github.com/vsriram/simple-host/internal/handler"
+	"github.com/vsriram/simple-host/internal/identityhash"
 	"github.com/vsriram/simple-host/internal/storage"
 )
+
+// withIdentityKeys configures the session signing keys the identity hashes
+// and manifest signatures derive from, for one test.
+func withIdentityKeys(t *testing.T, ids ...string) {
+	t.Helper()
+	var keys []identityhash.Key
+	for _, id := range ids {
+		keys = append(keys, identityhash.Key{ID: id, Key: bytes.Repeat([]byte(id[:1]), 32)})
+	}
+	if err := identityhash.Configure(keys); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = identityhash.Configure(nil) })
+}
 
 const rebuildIssuer = "https://issuer.example.test"
 
@@ -20,6 +35,7 @@ const rebuildIssuer = "https://issuer.example.test"
 // same sign-in identity (not whoever took the username), under the same
 // id, with its versions and uploaded files, and it serves.
 func TestRebuildIndexFromBucket(t *testing.T) {
+	withIdentityKeys(t, "k1")
 	ctx := context.Background()
 	objects := storage.NewMemoryObjects()
 
@@ -144,6 +160,7 @@ func TestRebuildIndexFromBucket(t *testing.T) {
 // a newer one nobody made live), and a site deleted or restricted comes
 // back that way.
 func TestRebuildIndexRefusesAndKeepsState(t *testing.T) {
+	withIdentityKeys(t, "k1")
 	ctx := context.Background()
 	objects := storage.NewMemoryObjects()
 	database := operatorTestDB(t)
@@ -243,6 +260,7 @@ func TestRebuildIndexRefusesAndKeepsState(t *testing.T) {
 // Two manifests naming one owner with different identities are refused,
 // not settled by whoever has the name.
 func TestRebuildIndexAmbiguousOwner(t *testing.T) {
+	withIdentityKeys(t, "k1")
 	ctx := context.Background()
 	objects := storage.NewMemoryObjects()
 	database := operatorTestDB(t)
@@ -281,4 +299,75 @@ func countRows(t *testing.T, database *sql.DB, query string, args ...any) int {
 		t.Fatal(err)
 	}
 	return n
+}
+
+// Manifests are signed: one changed in the bucket is refused, one from
+// before signing (with the plain SHA-256 identity of then) only with
+// -accept-unsigned, and one signed under a key no longer configured says
+// which setting to fix. A deleted site comes back with the purge date it
+// was promised, not one recomputed from today's retention.
+func TestRebuildIndexManifestSignatures(t *testing.T) {
+	ctx := context.Background()
+	objects := storage.NewMemoryObjects()
+	database := operatorTestDB(t)
+	if _, err := db.CreateOIDCUser(ctx, database, "pat", "sub-pat", "pat@example.com", false); err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]string{}
+	put := func(label string, m storage.SiteManifest) {
+		t.Helper()
+		id := newUUID(t, database)
+		ids[label] = id
+		key, _ := storage.VersionKey(id, 1)
+		if err := objects.Put(ctx, key, []byte("x"), "application/octet-stream"); err != nil {
+			t.Fatal(err)
+		}
+		m.SiteID, m.Owner, m.OwnerKind, m.LiveVersion = id, "pat", "person", 1
+		if m.OwnerIdentity == "" {
+			m.OwnerIdentity = db.ErasedSubjectHash(rebuildIssuer, "sub-pat")
+		}
+		if err := storage.PutSiteManifest(ctx, objects, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Before the upgrade: unsigned, plain SHA-256 identity.
+	_ = identityhash.Configure(nil)
+	put("legacy", storage.SiteManifest{Site: "legacy"})
+	// Under a key since retired.
+	withIdentityKeys(t, "old")
+	put("retired", storage.SiteManifest{Site: "retired"})
+	withIdentityKeys(t, "k1")
+	longAgo := time.Now().Add(-400 * 24 * time.Hour).UTC()
+	promised := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
+	put("promised", storage.SiteManifest{Site: "promised", DeletedAt: &longAgo, PurgeAt: &promised})
+	recent := time.Now().Add(-time.Hour).UTC()
+	lapsed := time.Now().Add(-time.Minute).UTC()
+	put("lapsed", storage.SiteManifest{Site: "lapsed", DeletedAt: &recent, PurgeAt: &lapsed})
+	put("tampered", storage.SiteManifest{Site: "tampered"})
+	key, _ := storage.ManifestKey(ids["tampered"])
+	raw, _ := objects.Get(ctx, key, 1<<20)
+	if err := objects.Put(ctx, key, bytes.Replace(raw, []byte(`"tampered"`), []byte(`"planted"`), 1), "application/json"); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	res, err := rebuildIndex(ctx, database, objects, &out, rebuildOptions{Apply: true, Issuer: rebuildIssuer})
+	text := out.String()
+	if err != nil || res.Recreated != 1 || res.Refused != 4 {
+		t.Fatalf("signed run: %+v %v, want promised recreated and four refused\n%s", res, err, text)
+	}
+	for _, want := range []string{"not signed", "SESSION_SIGNING_KEY", "signature does not match", "recovery window has ended"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("listing does not say %q:\n%s", want, text)
+		}
+	}
+	var purgeAt time.Time
+	if err := database.QueryRow(`SELECT purge_at FROM sites WHERE id = $1::uuid`, ids["promised"]).Scan(&purgeAt); err != nil || !purgeAt.Equal(promised) {
+		t.Fatalf("purge_at = %v (%v), want the promised %v", purgeAt, err, promised)
+	}
+	out.Reset()
+	res, err = rebuildIndex(ctx, database, objects, &out, rebuildOptions{Apply: true, ForceLiveDB: true, AcceptUnsigned: true, Issuer: rebuildIssuer})
+	if err != nil || res.Recreated != 1 || countRows(t, database, `SELECT count(*) FROM sites WHERE id = $1::uuid`, ids["legacy"]) != 1 {
+		t.Fatalf("accept-unsigned run: %+v %v, want the legacy site back by its old identity hash\n%s", res, err, out.String())
+	}
 }

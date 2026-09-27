@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,9 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/vsriram/simple-host/internal/db"
+	"github.com/vsriram/simple-host/internal/identityhash"
 )
 
 // A site's manifest, sites/<site-id>/manifest.json, is the one object that
@@ -42,20 +46,74 @@ type SiteManifest struct {
 	Owner string `json:"owner"`
 	// OwnerKind is "person" or "team".
 	OwnerKind string `json:"owner_kind"`
-	// OwnerIdentity is a person's sign-in identity as hex SHA-256 of issuer
-	// and subject (db.ErasedSubjectHash), "" for an account with none.
+	// OwnerIdentity is a person's sign-in identity as a keyed hash of issuer
+	// and subject (db.ErasedSubjectHash: "<key id>:<hex>", or a plain hex
+	// SHA-256 in a manifest from before v1.8), "" for an account with none.
 	OwnerIdentity string `json:"owner_identity,omitempty"`
 	// TeamID is a team owner's id.
 	TeamID      string     `json:"team_id,omitempty"`
 	Site        string     `json:"site"`
 	LiveVersion int        `json:"live_version"`
 	DeletedAt   *time.Time `json:"deleted_at,omitempty"`
+	// PurgeAt is when a deleted site stops being recoverable, as promised
+	// when it was deleted (sites.purge_at); absent in older manifests.
+	PurgeAt *time.Time `json:"purge_at,omitempty"`
 	// Restricted is an admin's take-down (access_decision 'restricted'),
 	// with the admin's reason.
 	Restricted       bool            `json:"restricted,omitempty"`
 	RestrictedReason string          `json:"restricted_reason,omitempty"`
 	WrittenAt        time.Time       `json:"written_at"`
 	Assets           []ManifestAsset `json:"assets"`
+	// Sig is an HMAC of the manifest with Sig empty, under a key derived
+	// from the session signing key (identityhash.SignManifest):
+	// "<key id>:<hex>". rebuild-index refuses a manifest whose signature does
+	// not verify, and one without (written before v1.8) unless told to
+	// accept it.
+	Sig string `json:"sig,omitempty"`
+}
+
+// canonical is the manifest's bytes as signed: its JSON with Sig empty and
+// every time in UTC.
+func (m SiteManifest) canonical() ([]byte, error) {
+	m.Sig = ""
+	if m.Assets == nil {
+		m.Assets = []ManifestAsset{}
+	}
+	m.WrittenAt = m.WrittenAt.UTC()
+	for _, t := range []**time.Time{&m.DeletedAt, &m.PurgeAt} {
+		if *t != nil {
+			u := (*t).UTC()
+			*t = &u
+		}
+	}
+	return json.Marshal(m)
+}
+
+// Signature states of a manifest (VerifySignature).
+const (
+	ManifestSigned     = "signed"
+	ManifestUnsigned   = "unsigned"
+	ManifestUnknownKey = "unknown_key"
+	ManifestBadSig     = "bad_signature"
+)
+
+// VerifySignature checks Sig against the configured keys.
+func (m SiteManifest) VerifySignature() string {
+	if m.Sig == "" {
+		return ManifestUnsigned
+	}
+	body, err := m.canonical()
+	if err != nil {
+		return ManifestBadSig
+	}
+	ok, known := identityhash.VerifyManifest(body, m.Sig)
+	switch {
+	case !known:
+		return ManifestUnknownKey
+	case !ok:
+		return ManifestBadSig
+	}
+	return ManifestSigned
 }
 
 // Owner kinds a manifest records.
@@ -83,8 +141,8 @@ func (m SiteManifest) Validate() error {
 	}
 	switch m.OwnerKind {
 	case ManifestOwnerPerson:
-		if m.TeamID != "" || (m.OwnerIdentity != "" && !isHex(m.OwnerIdentity, 64)) {
-			return errors.New("a person's owner_identity is not a SHA-256, or a team_id is set")
+		if m.TeamID != "" || (m.OwnerIdentity != "" && !identityhash.Valid(m.OwnerIdentity)) {
+			return errors.New("a person's owner_identity is not an identity hash, or a team_id is set")
 		}
 	case ManifestOwnerTeam:
 		if !isUUID(m.TeamID) || m.OwnerIdentity != "" {
@@ -92,6 +150,9 @@ func (m SiteManifest) Validate() error {
 		}
 	default:
 		return fmt.Errorf("owner_kind %q is neither person nor team", m.OwnerKind)
+	}
+	if m.PurgeAt != nil && m.DeletedAt == nil {
+		return errors.New("purge_at without deleted_at")
 	}
 	if !m.Restricted && m.RestrictedReason != "" {
 		return errors.New("restricted_reason without restricted")
@@ -169,14 +230,43 @@ func PutSiteManifest(ctx context.Context, objects Objects, m SiteManifest) error
 	if err != nil {
 		return err
 	}
-	if m.Assets == nil {
-		m.Assets = []ManifestAsset{}
+	canonical, err := m.canonical()
+	if err != nil {
+		return err
 	}
-	body, err := json.Marshal(m)
+	// Re-read from the canonical bytes, so what is written is exactly what
+	// was signed.
+	var signed SiteManifest
+	if err := json.Unmarshal(canonical, &signed); err != nil {
+		return err
+	}
+	signed.Sig = identityhash.SignManifest(canonical)
+	body, err := json.Marshal(signed)
 	if err != nil {
 		return err
 	}
 	return objects.Put(ctx, key, body, "application/json")
+}
+
+// DeleteSiteManifestInTurn deletes a site's manifest in turn with every
+// write of it (db.LockSiteManifest, held until the object is gone), after
+// the site's removal has committed: a write that read the site before it
+// went finishes its PUT first, and every later write finds the site gone
+// and writes nothing, so a purged or erased site's manifest never comes
+// back.
+func DeleteSiteManifestInTurn(ctx context.Context, database *sql.DB, objects Objects, siteID string) error {
+	tx, err := database.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := db.LockSiteManifest(ctx, tx, siteID); err != nil {
+		return err
+	}
+	if err := DeleteSiteManifest(ctx, objects, siteID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // DeleteSiteManifest deletes a site's manifest, for a site gone for good

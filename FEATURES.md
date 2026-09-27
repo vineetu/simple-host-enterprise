@@ -461,13 +461,17 @@ Config names are documented in `docs/configuration.md`; schema in
   `verify-storage` names a lost object) and run by `make smoke`. A bucket
   fault does not fail `/readyz` (`simplehost_bucket_ok` instead). Each site
   also has `sites/<id>/manifest.json` (owner label and kind, a person's
-  sign-in identity as a SHA-256 of issuer and subject or a team's id, never
-  an email; site name, live version, deleted and admin-restricted state,
-  its uploaded files' names, types, sizes and digests; a write number),
+  sign-in identity as a keyed hash of issuer and subject
+  (`internal/identityhash`: HMAC under a key derived from
+  `SESSION_SIGNING_KEY`) or a team's id, never an email; site name, live
+  version, deleted and admin-restricted state with the promised purge date,
+  its uploaded files' names, types, sizes and digests; a write number; an
+  HMAC signature over the rest),
   rewritten best effort after every deploy, rollback, rename, hand-over,
   delete, restore, restriction, file upload and file delete, and by
   `restore`, one write at a time per site (an advisory lock) from committed
-  state; deleted at once when a site is purged or its person erased
+  state; deleted when a site is purged or its person erased, in turn with
+  any write still in flight, so none can put it back
   (`internal/storage/manifest.go`, `internal/handler/site_manifest.go`);
   `reencrypt` rewrites it through the same path, never from stale bytes.
   `simple-host rebuild-index` (read-only; `-apply` to act) lists every
@@ -475,9 +479,13 @@ Config names are documented in `docs/configuration.md`; schema in
   recreates, under the same site id, each whose owner is found: a person
   by sign-in identity (never by username), a team by id or an explicit
   `-map <owner>=<account>`; after validating every field as a create would
-  (refused and listed otherwise), only with the manifest's own live version
+  and checking the signature (a changed manifest is refused; one signed
+  under a key no longer configured is refused with the setting to fix; one
+  from before signing only with `-accept-unsigned`; refused and listed
+  otherwise), only with the manifest's own live version
   (a site whose live archive is missing is refused, never given a newer
-  one), deleted sites back in Recently deleted and restricted ones
+  one), deleted sites back in Recently deleted until the purge date they
+  were promised, and restricted ones
   restricted; `-apply` refuses a database that has sites unless
   `-force-live-db`. Site row, every kept version, and uploaded files;
   audited `site_restore` with `from: bucket_rebuild`.
@@ -799,7 +807,9 @@ Config names are documented in `docs/configuration.md`; schema in
   typed-username confirm, everything erased for good except audit rows,
   name held, old addresses of sites they handed on stop redirecting, and
   sign-in refused until an admin allows it again from the "Erased people"
-  card), access requests, recently
+  card; the identity and email are held as HMACs under a key derived from
+  `SESSION_SIGNING_KEY`, `internal/identityhash`, and rows from before
+  v1.8, plain SHA-256, still match), access requests, recently
   deleted sites (Restore, section 5), rankings of users
   and sites (views, storage from a cached bucket measurement, updated; each
   site links to its current address), new

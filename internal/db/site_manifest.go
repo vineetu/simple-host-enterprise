@@ -20,6 +20,7 @@ type SiteManifestData struct {
 	Site             string
 	LiveVersion      int
 	DeletedAt        *time.Time
+	PurgeAt          *time.Time
 	Restricted       bool
 	RestrictedReason string
 	Assets           []SiteManifestAsset
@@ -39,22 +40,26 @@ type SiteManifestAsset struct {
 func LoadSiteManifestData(ctx context.Context, q Querier, siteID string) (SiteManifestData, error) {
 	var out SiteManifestData
 	var assets []byte
-	var deleted sql.NullTime
+	var deleted, purge sql.NullTime
 	err := q.QueryRowContext(ctx, `
 		SELECT u.id::text, u.username, u.kind, COALESCE(u.oidc_sub, ''), s.name, s.active_version,
-		       s.deleted_at, COALESCE(s.access_decision = 'restricted', false), COALESCE(s.access_decision_reason, ''),
+		       s.deleted_at, s.purge_at, COALESCE(s.access_decision = 'restricted', false), COALESCE(s.access_decision_reason, ''),
 		       COALESCE((SELECT json_agg(json_build_object('id', a.id::text, 'name', a.name, 'content_type', a.content_type,
 		                                                   'size', a.size, 'sha256', encode(a.sha256, 'hex')) ORDER BY a.created_at, a.id)
 		                 FROM site_assets a WHERE a.site_id = s.id AND a.deleted_at IS NULL), '[]')
 		FROM sites s JOIN users u ON u.id = s.user_id
 		WHERE s.id = $1::uuid`, siteID).Scan(&out.OwnerID, &out.Owner, &out.OwnerKind, &out.OwnerSubject, &out.Site, &out.LiveVersion,
-		&deleted, &out.Restricted, &out.RestrictedReason, &assets)
+		&deleted, &purge, &out.Restricted, &out.RestrictedReason, &assets)
 	if err != nil {
 		return out, err
 	}
 	if deleted.Valid {
 		at := deleted.Time.UTC()
 		out.DeletedAt = &at
+	}
+	if purge.Valid && deleted.Valid {
+		at := purge.Time.UTC()
+		out.PurgeAt = &at
 	}
 	err = json.Unmarshal(assets, &out.Assets)
 	return out, err

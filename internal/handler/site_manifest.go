@@ -110,7 +110,7 @@ func writeSiteManifestLocked(ctx context.Context, tx *sql.Tx, objects storage.Ob
 	}
 	m := storage.SiteManifest{
 		SiteID: siteID, Seq: seq + 1, Owner: data.Owner, OwnerKind: data.OwnerKind,
-		Site: data.Site, LiveVersion: data.LiveVersion, DeletedAt: data.DeletedAt,
+		Site: data.Site, LiveVersion: data.LiveVersion, DeletedAt: data.DeletedAt, PurgeAt: data.PurgeAt,
 		Restricted: data.Restricted, RestrictedReason: data.RestrictedReason, WrittenAt: time.Now().UTC(),
 	}
 	switch data.OwnerKind {
@@ -151,14 +151,14 @@ func ValidateRebuiltNames(owner, kind, site string) error {
 // dropSiteManifests deletes the manifests of sites that are gone for good,
 // once their deletion has committed. Best effort, like every manifest
 // write.
-func dropSiteManifests(ctx context.Context, store *storage.Store, siteIDs []string) {
-	if store == nil {
+func dropSiteManifests(ctx context.Context, database *sql.DB, store *storage.Store, siteIDs []string) {
+	if store == nil || database == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), siteManifestTimeout)
 	defer cancel()
 	for _, id := range siteIDs {
-		if err := storage.DeleteSiteManifest(ctx, store.Objects(), id); err != nil {
+		if err := storage.DeleteSiteManifestInTurn(ctx, database, store.Objects(), id); err != nil {
 			log.Printf("site manifest %s: delete: %v", id, err)
 		}
 	}

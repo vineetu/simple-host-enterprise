@@ -200,3 +200,41 @@ func TestSweepDeletesDueObjects(t *testing.T) {
 		t.Fatalf("queue after retry = %v", queued)
 	}
 }
+
+// Deleting a purged site's manifest waits for a manifest write already in
+// flight (it holds db.LockSiteManifest through its PUT), so that write can
+// never put the manifest back after the delete.
+func TestDeleteSiteManifestWaitsForWriter(t *testing.T) {
+	database := sweepTestDB(t)
+	ctx := context.Background()
+	objects := NewMemoryObjects()
+	siteID := "0a0a0a0a-0000-4000-8000-00000000c0de"
+	key, _ := ManifestKey(siteID)
+	writer, err := database.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.LockSiteManifest(ctx, writer, siteID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- DeleteSiteManifestInTurn(ctx, database, objects, siteID) }()
+	select {
+	case err := <-done:
+		t.Fatalf("delete did not wait for the writer: %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	// The slow writer's PUT lands, then it releases the lock.
+	if err := objects.Put(ctx, key, []byte(`{}`), "application/json"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := objects.Get(ctx, key, 1<<20); !errors.Is(err, ErrObjectNotFound) {
+		t.Fatalf("manifest after delete: %v, want gone", err)
+	}
+}

@@ -457,10 +457,12 @@ in `docs/install.md`, "Restore drill".
 
 If the database is lost together with its point-in-time recovery, each
 site's `manifest.json` still says whose it is: the owner's name and, for a
-person, a SHA-256 of their sign-in identity (`OIDC_ISSUER` and subject,
-hashed as `erased_identities` hashes it; never an email), for a team, the
-team's id; whether the site was in Recently deleted or restricted by an
-admin (with the reason). Each write is numbered one past the last and
+person, a keyed hash of their sign-in identity (`OIDC_ISSUER` and subject,
+an HMAC under a key derived from `SESSION_SIGNING_KEY`, as
+`erased_identities` keeps it; never an email), for a team, the team's id;
+whether the site was in Recently deleted (with the date it is purged) or
+restricted by an admin (with the reason); and a signature over all of it,
+under another key derived from `SESSION_SIGNING_KEY`. Each write is numbered one past the last and
 writes of one site take turns, so an older manifest never replaces a newer
 one (`reencrypt` rewrites manifests the same way).
 
@@ -483,17 +485,24 @@ the database is left alone.
   and listed; restore those by hand.
 - **Checked first.** The owner and site names must be ones a create would
   accept, every uploaded file's id, name, type, size and digest must be
-  well formed; a manifest that fails is refused and listed. The manifests
-  come from the bucket, so anyone who could write to it could have edited
-  one: read the list before `-apply`.
+  well formed; a manifest that fails is refused and listed. Its signature
+  must verify: a manifest changed in the bucket is refused, and so is one
+  written before signing (v1.8) unless you pass `-accept-unsigned` after
+  reading the list (anyone who could write to the bucket could have
+  written one). A manifest signed under a `SESSION_SIGNING_KEY` entry you
+  have since removed is refused until you add that key back as the second
+  entry for the rebuild, so keep retired signing keys somewhere safe.
 - **Only the approved version goes live.** A site whose live version's
   archive is missing is refused and listed rather than given a newer one,
   which may have been stored without ever being made live.
 - **Deleted and restricted.** A site that was in Recently deleted comes
-  back there, with its recovery window counted from the original delete
-  (one whose window has ended is refused); a site an admin restricted comes
+  back there until the purge date it was given when it was deleted (a
+  manifest from before that date was recorded counts the current
+  `DELETED_RETENTION_DAYS` from the delete; one whose window has ended is
+  refused); a site an admin restricted comes
   back restricted, with the reason. A purged or erased site's manifest is
-  deleted when it goes, so it is never brought back.
+  deleted when it goes, after any write of it still in flight, so it is
+  never brought back.
 - **Only into an empty database.** `-apply` refuses a database that
   already has sites, where a site deleted or purged since the bucket was
   written could come back; `-force-live-db` overrides that for a run that

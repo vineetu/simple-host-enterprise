@@ -2,15 +2,16 @@ package db
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
+
+	"github.com/lib/pq"
+
+	"github.com/vsriram/simple-host/internal/identityhash"
 )
 
 // A person's data, for an admin's "Export this person's data" and "Delete
@@ -340,24 +341,25 @@ func ErasePerson(ctx context.Context, tx *sql.Tx, p ErasablePerson, label, issue
 // ErrIdentityErased refuses a sign-in whose identity an admin erased.
 var ErrIdentityErased = errors.New("this identity was erased")
 
-// ErasedSubjectHash is the hex SHA-256 of an issuer and a subject, the
-// form erased_identities keeps a sign-in identity in.
+// ErasedSubjectHash is the keyed hash of an issuer and a subject
+// (identityhash.Subject), the form erased_identities and site manifests keep
+// a sign-in identity in.
 func ErasedSubjectHash(issuer, subject string) string {
-	sum := sha256.Sum256([]byte(strings.TrimRight(issuer, "/") + "\n" + subject))
-	return hex.EncodeToString(sum[:])
+	return identityhash.Subject(issuer, subject)
 }
 
-// ErasedEmailHash is the hex SHA-256 of a lower-cased email.
+// ErasedEmailHash is the keyed hash of a lower-cased email.
 func ErasedEmailHash(email string) string {
-	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(email))))
-	return hex.EncodeToString(sum[:])
+	return identityhash.Email(email)
 }
 
-// IsIdentityErased reports whether either hash names an erased person.
-func IsIdentityErased(ctx context.Context, q Querier, subjectHash, emailHash string) (bool, error) {
+// IsIdentityErased reports whether a sign-in identity or its email names an
+// erased person, under any configured key or the plain SHA-256 rows from
+// before identity hashes were keyed.
+func IsIdentityErased(ctx context.Context, q Querier, issuer, subject, email string) (bool, error) {
 	var erased bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM erased_identities WHERE subject_hash = $1 OR email_hash = $2)`,
-		subjectHash, emailHash).Scan(&erased)
+	err := q.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM erased_identities WHERE subject_hash = ANY($1) OR email_hash = ANY($2))`,
+		pq.Array(identityhash.SubjectCandidates(issuer, subject)), pq.Array(identityhash.EmailCandidates(email))).Scan(&erased)
 	return erased, err
 }
 
@@ -373,7 +375,7 @@ type ErasedIdentity struct {
 // ListErasedIdentities returns every held identity, newest first.
 func ListErasedIdentities(ctx context.Context, q Querier) ([]ErasedIdentity, error) {
 	rows, err := q.QueryContext(ctx, `
-		SELECT e.id::text, left(COALESCE(e.subject_hash, e.email_hash), 12), e.erased_at, COALESCE(u.username, '')
+		SELECT e.id::text, left(right(COALESCE(e.subject_hash, e.email_hash), 64), 12), e.erased_at, COALESCE(u.username, '')
 		FROM erased_identities e LEFT JOIN users u ON u.id = e.erased_by
 		ORDER BY e.erased_at DESC`)
 	if err != nil {
@@ -397,6 +399,6 @@ func AllowErasedIdentity(ctx context.Context, q Querier, id string) (ErasedIdent
 	var e ErasedIdentity
 	err := q.QueryRowContext(ctx, `
 		DELETE FROM erased_identities WHERE id::text = $1
-		RETURNING id::text, left(COALESCE(subject_hash, email_hash), 12), erased_at`, id).Scan(&e.ID, &e.HashPrefix, &e.ErasedAt)
+		RETURNING id::text, left(right(COALESCE(subject_hash, email_hash), 64), 12), erased_at`, id).Scan(&e.ID, &e.HashPrefix, &e.ErasedAt)
 	return e, err
 }
