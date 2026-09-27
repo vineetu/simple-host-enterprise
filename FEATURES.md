@@ -909,14 +909,26 @@ Config names are documented in `docs/configuration.md`; schema in
   `simplehost_app` role's password; the server connects as that role.
 - **Subcommands.** No argument runs the server. Others: `migrate`, `restore`, `migrate-storage`,
   `reencrypt` (section 6), `prune`, `audit-verify` (section 12), `owner-hosts`
-  (section 19), `version`.
+  (section 19), `settings --json` (below), `version`.
+- **Settings registry and advanced docs.** `internal/config/settings.go` lists
+  every variable `internal/config` reads with its area, a plain description,
+  type, default, range, whether it is security-sensitive, required, or asked
+  in basic setup (a test fails when a read variable is missing);
+  `simple-host settings --json` prints it with the rate-limit defaults from
+  `internal/handler`, and `docs/advanced/settings.json` is that output (a
+  `cmd/server` test fails on drift). `docs/advanced/` explains each area with
+  recipes; its tables are filled from that file and `docs/configuration.md` is
+  checked against it (`scripts/settings_docs.py --check`, in `make test` and
+  CI). The hosted repo's setup helper (simple-host.app/setup, Enterprise)
+  reads a copy of the file to write `config.env`, a `secrets.env` template and
+  the apply commands.
   The operational values live in `internal/oplimits`, set once at startup
   (`cmd/server` `loadConfig`); every surface that states one (dashboard,
   `/admin`, idle email, refusals, MCP descriptions, served skills,
   `/openapi.yaml`, the home page) reads it there, the static documents
   through `{{NAME}}` placeholders.
-- **Go.** `internal/config/config.go`, `oplimits.go`; `internal/oplimits/`; `internal/migrate/`;
-  `cmd/server/main.go`, `subcommands.go`.
+- **Go.** `internal/config/config.go`, `oplimits.go`, `settings.go`; `internal/oplimits/`; `internal/migrate/`;
+  `cmd/server/main.go`, `subcommands.go`, `settings.go`.
 - **DB.** `simplehost_app` grants (0020); every migration.
 - **Config.** `DB_DSN` or `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`,
   `DB_PASSWORD`, `DB_SSLMODE`, `DB_SSL_ROOT_CERT`, `DB_APP_USER`,

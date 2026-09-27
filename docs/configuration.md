@@ -1,5 +1,14 @@
 # Configuration reference
 
+Every setting grouped by area, in product terms and with recipes, is in
+[advanced/](advanced/README.md); the setup helper at
+https://simple-host.app/setup (choose Enterprise) builds `config.env` and a
+`secrets.env` template from the same list
+([advanced/settings.json](advanced/settings.json), generated from the code by
+`simple-host settings --json`). `scripts/settings_docs.py --check` fails
+when a row below names a variable the server does not read, misses one it
+does, or states a different default. This page is the full reference.
+
 Every variable `internal/config/config.go` reads.
 Everything under "Public address" through "Retention" is read by
 `config.Load()` (the server) or `config.LoadDatabase()` /

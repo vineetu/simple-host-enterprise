@@ -50,8 +50,10 @@ func runSubcommand(name string, args []string) error {
 	case "version":
 		fmt.Println(versionString())
 		return nil
+	case "settings":
+		return runSettings(args)
 	default:
-		return fmt.Errorf("unknown subcommand %q (expected: migrate, restore, migrate-storage, reencrypt, prune, audit-verify, owner-hosts, verify-storage, version)", name)
+		return fmt.Errorf("unknown subcommand %q (expected: migrate, restore, migrate-storage, reencrypt, prune, audit-verify, owner-hosts, verify-storage, settings, version)", name)
 	}
 }
 

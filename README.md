@@ -69,6 +69,14 @@ Read INSTALL.md in this repository and install Simple Host on our Kubernetes clu
 - Health, readiness and metrics endpoints; rate limits shared across replicas.
 - Per-cloud checklists in [docs/cloud/](docs/cloud/) (AWS, GCP, Azure, Oracle Cloud, UpCloud).
 
+## Advanced settings
+
+Every setting, grouped by area and explained with recipes (stricter sign-in, shorter retention,
+bigger uploads): [docs/advanced/](docs/advanced/README.md). The setup helper at
+https://simple-host.app/setup (choose Enterprise) asks a few questions, or every one in Advanced
+mode, and writes `config.env`, a `secrets.env` template and the apply commands. It runs in your
+browser and sends nothing anywhere.
+
 ## Run it locally
 
 Docker Desktop with Kubernetes enabled (or minikube), `kubectl`, `kustomize` and `mkcert`. Then:

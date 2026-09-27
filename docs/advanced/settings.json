@@ -1,0 +1,1189 @@
+{
+  "product": "enterprise",
+  "rate_format": "<burst>/<interval>",
+  "groups": [
+    {
+      "id": "server",
+      "name": "Server and addresses",
+      "page": "server-and-addresses.md"
+    },
+    {
+      "id": "accounts",
+      "name": "Accounts and sign-in",
+      "page": "accounts-and-sign-in.md"
+    },
+    {
+      "id": "access",
+      "name": "Access and teams",
+      "page": "access-and-teams.md"
+    },
+    {
+      "id": "sites",
+      "name": "Sites and versions",
+      "page": "sites-and-versions.md"
+    },
+    {
+      "id": "data",
+      "name": "Saved data",
+      "page": "saved-data.md"
+    },
+    {
+      "id": "cleanup",
+      "name": "Cleanup and retention",
+      "page": "cleanup-and-retention.md"
+    },
+    {
+      "id": "email",
+      "name": "Email",
+      "page": "email.md"
+    },
+    {
+      "id": "storage",
+      "name": "Storage and backups",
+      "page": "storage-and-backups.md"
+    },
+    {
+      "id": "observability",
+      "name": "Observability",
+      "page": "observability.md"
+    }
+  ],
+  "settings": [
+    {
+      "name": "PUBLIC_BASE_URL",
+      "group": "server",
+      "description": "The address people open, like https://sites.example.com: its own registrable domain, never a subdomain of the company's main one. Every site is served at <site>.<owner>.<host>.",
+      "type": "string",
+      "default": "",
+      "security_sensitive": false,
+      "required": true,
+      "basic": true
+    },
+    {
+      "name": "SECURE_MODE",
+      "group": "server",
+      "description": "true requires HTTPS for PUBLIC_BASE_URL and a separate redirect port. Every real install sets it.",
+      "type": "bool",
+      "default": "false",
+      "allowed": [
+        "true",
+        "false"
+      ],
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "PORT",
+      "group": "server",
+      "description": "The port the server listens on.",
+      "type": "int",
+      "default": "8080",
+      "min": 1,
+      "max": 65535,
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "HTTPS_REDIRECT_PORT",
+      "group": "server",
+      "description": "The port that redirects plain HTTP to HTTPS. Must differ from PORT with SECURE_MODE.",
+      "type": "int",
+      "default": "8081",
+      "min": 1,
+      "max": 65535,
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "TRUSTED_PROXY_CIDRS",
+      "group": "server",
+      "description": "The proxies in front of the server (the ingress controller's pods), so the client address comes from X-Forwarded-For. Empty trusts none.",
+      "type": "string",
+      "default": "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,fc00::/7",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "OWNER_CERTS",
+      "group": "server",
+      "description": "auto: each owner's sites move to their own hosts once the owner-hosts reconciler has their certificate. manual: you issue those certificates yourself.",
+      "type": "enum",
+      "default": "auto",
+      "allowed": [
+        "auto",
+        "manual"
+      ],
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "OWNER_CERT_ISSUER",
+      "group": "server",
+      "description": "The cert-manager ClusterIssuer that signs each owner's *.<owner>.<host> certificate (an internal CA, or ACME with DNS-01). Needed by the reconciler.",
+      "type": "string",
+      "default": "",
+      "security_sensitive": false,
+      "required": false,
+      "basic": true
+    },
+    {
+      "name": "OWNER_INGRESS_TEMPLATE",
+      "group": "server",
+      "description": "The install's own Ingress, which each owner's Ingress copies its class and annotations from.",
+      "type": "string",
+      "default": "simple-host",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "OWNER_HOSTS_INTERVAL",
+      "group": "server",
+      "description": "How often the reconciler applies owner Ingresses and records certificate readiness.",
+      "type": "duration",
+      "default": "15s",
+      "unit": "Go duration",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "RESERVED_LABELS",
+      "group": "server",
+      "description": "Extra hostnames (comma-separated) no person or team may take as a name, on top of the built-in ones.",
+      "type": "string",
+      "default": "",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "OIDC_ISSUER",
+      "group": "accounts",
+      "description": "Your identity provider's issuer URL (Okta, Entra ID tenant, Google, Keycloak, ...). People sign in only through it.",
+      "type": "string",
+      "default": "",
+      "security_sensitive": true,
+      "required": true,
+      "basic": true
+    },
+    {
+      "name": "OIDC_CLIENT_ID",
+      "group": "accounts",
+      "description": "The OIDC client ID registered for this install.",
+      "type": "string",
+      "default": "",
+      "security_sensitive": false,
+      "required": true,
+      "basic": true
+    },
+    {
+      "name": "OIDC_CLIENT_SECRET",
+      "group": "accounts",
+      "description": "The OIDC client secret.",
+      "type": "secret",
+      "default": "",
+      "security_sensitive": true,
+      "required": true,
+      "basic": true
+    },
+    {
+      "name": "OIDC_SCOPES",
+      "group": "accounts",
+      "description": "Scopes asked for at sign-in, space-separated.",
+      "type": "string",
+      "default": "openid email profile",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "OIDC_EMAIL_CLAIM",
+      "group": "accounts",
+      "description": "The ID token claim read as the person's email address. The provider must vouch that it is verified.",
+      "type": "string",
+      "default": "email",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "OIDC_USERNAME_CLAIM",
+      "group": "accounts",
+      "description": "A claim to derive usernames from. Empty: the part of the email before the @.",
+      "type": "string",
+      "default": "",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "OIDC_ADMIN_CLAIM",
+      "group": "accounts",
+      "description": "A claim that makes someone an admin when it holds OIDC_ADMIN_VALUE. Set both or neither.",
+      "type": "string",
+      "default": "",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "OIDC_ADMIN_VALUE",
+      "group": "accounts",
+      "description": "The value of OIDC_ADMIN_CLAIM that makes someone an admin.",
+      "type": "string",
+      "default": "",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "OIDC_INSECURE_ALLOWED",
+      "group": "accounts",
+      "description": "Allows a plain-HTTP identity provider. Local evaluation only; never on a real install.",
+      "type": "bool",
+      "default": "false",
+      "allowed": [
+        "true",
+        "false"
+      ],
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "ADMIN_EMAILS",
+      "group": "accounts",
+      "description": "Admins' email addresses, comma-separated. Removing one demotes them on the next deploy.",
+      "type": "string",
+      "default": "",
+      "security_sensitive": true,
+      "required": false,
+      "basic": true
+    },
+    {
+      "name": "ALLOWED_EMAIL_DOMAINS",
+      "group": "accounts",
+      "description": "Email domains that may sign in, comma-separated. Required with Google, where anyone has an account.",
+      "type": "string",
+      "default": "",
+      "security_sensitive": true,
+      "required": false,
+      "basic": true
+    },
+    {
+      "name": "OIDC_HINT_DOMAIN",
+      "group": "accounts",
+      "description": "The domain hint sent to the provider, to narrow its account chooser. It never authorizes anyone.",
+      "type": "string",
+      "default": "<the only ALLOWED_EMAIL_DOMAINS entry>",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "OAUTH_REDIRECT_HOSTS",
+      "group": "accounts",
+      "description": "Where an AI app connecting to /mcp may be sent back after sign-in, comma-separated.",
+      "type": "string",
+      "default": "chatgpt.com,claude.ai,vscode.dev,localhost,cursor://anysphere.cursor-mcp",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "SESSION_SIGNING_KEY",
+      "group": "accounts",
+      "description": "Signs the sign-in cookie: one or two <id>:<base64 32-byte key> entries, the first signing. Generate with echo \"k1:$(openssl rand -base64 32)\".",
+      "type": "secret",
+      "default": "",
+      "security_sensitive": true,
+      "required": true,
+      "basic": false
+    },
+    {
+      "name": "SESSION_TTL",
+      "group": "accounts",
+      "description": "How long a sign-in lasts, however active. Match your identity provider's session policy.",
+      "type": "duration",
+      "default": "8h",
+      "max": "24h",
+      "unit": "Go duration",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "SESSION_IDLE",
+      "group": "accounts",
+      "description": "How long a sign-in survives unused. Not longer than SESSION_TTL.",
+      "type": "duration",
+      "default": "30m",
+      "max": "8h",
+      "unit": "Go duration",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "OAUTH_ACCESS_TTL",
+      "group": "accounts",
+      "description": "How long an AI app's access token works before it refreshes.",
+      "type": "duration",
+      "default": "1h",
+      "max": "24h",
+      "unit": "Go duration",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "OAUTH_REFRESH_TTL",
+      "group": "accounts",
+      "description": "How long an AI app stays connected before the person signs in at the identity provider again.",
+      "type": "duration",
+      "default": "720h",
+      "max": "2160h",
+      "unit": "Go duration",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "API_KEY_MAX_DAYS",
+      "group": "accounts",
+      "description": "The longest lifetime an API key (for CI and automation) may be minted with.",
+      "type": "int",
+      "default": "365",
+      "min": 1,
+      "max": 365,
+      "unit": "days",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "API_KEY_DEFAULT_DAYS",
+      "group": "accounts",
+      "description": "A new API key's lifetime when none is asked for. At most API_KEY_MAX_DAYS.",
+      "type": "int",
+      "default": "90",
+      "min": 1,
+      "max": 365,
+      "unit": "days",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "API_KEY_EXPIRY_WARNING_DAYS",
+      "group": "accounts",
+      "description": "A key this close to expiry shows \"expires soon\" and warns on every call.",
+      "type": "int",
+      "default": "14",
+      "min": 1,
+      "max": 365,
+      "unit": "days",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "RATE_LIMIT_AUTH_CLIENT",
+      "group": "accounts",
+      "description": "Sign-in, the session hand-off and AI app authorization, per client address (counted across replicas).",
+      "type": "rate",
+      "default": "20/5s",
+      "loosest": "80/1.25s",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "RATE_LIMIT_AUTH_EMAIL",
+      "group": "accounts",
+      "description": "Sign-in attempts per email address.",
+      "type": "rate",
+      "default": "5/50s",
+      "loosest": "20/12.5s",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "RATE_LIMIT_API_KEY_MINT",
+      "group": "accounts",
+      "description": "API keys minted per person (counted across replicas).",
+      "type": "rate",
+      "default": "30/10s",
+      "loosest": "120/2.5s",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "RATE_LIMIT_OAUTH_REGISTER",
+      "group": "accounts",
+      "description": "AI app registrations per client address (counted across replicas).",
+      "type": "rate",
+      "default": "30/10s",
+      "loosest": "120/2.5s",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "RATE_LIMIT_OAUTH_TOKEN",
+      "group": "accounts",
+      "description": "AI app token requests per client address (counted across replicas).",
+      "type": "rate",
+      "default": "120/500ms",
+      "loosest": "480/125ms",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "NETWORK_ACCESS_APPROVALS",
+      "group": "access",
+      "description": "How many different admins must approve opening a site to the network (no sign-in).",
+      "type": "enum",
+      "default": "1",
+      "allowed": [
+        "1",
+        "2"
+      ],
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "MAX_TEAMS_PER_PERSON",
+      "group": "access",
+      "description": "Teams one person may belong to before they can create another.",
+      "type": "int",
+      "default": "10",
+      "min": 1,
+      "max": 1000,
+      "unit": "teams",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "MAX_TEAM_MEMBERS",
+      "group": "access",
+      "description": "Members of one team, pending ones included.",
+      "type": "int",
+      "default": "50",
+      "min": 1,
+      "max": 1000,
+      "unit": "members",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "MAX_SITE_VIEWERS",
+      "group": "access",
+      "description": "People and teams on one site's viewer list.",
+      "type": "int",
+      "default": "50",
+      "min": 1,
+      "max": 1000,
+      "unit": "entries",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "ACCESS_LOG_VISIBILITY",
+      "group": "access",
+      "description": "What a site's owner sees of its visits: counts (views and distinct viewers), owner (each visit and who), or admin (nothing; admins only).",
+      "type": "enum",
+      "default": "counts",
+      "allowed": [
+        "counts",
+        "owner",
+        "admin"
+      ],
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "RATE_LIMIT_ADMIN_CLIENT",
+      "group": "access",
+      "description": "Admin actions per client address.",
+      "type": "rate",
+      "default": "10/10s",
+      "loosest": "40/2.5s",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "RATE_LIMIT_ADMIN_IDENTITY",
+      "group": "access",
+      "description": "Admin actions per admin.",
+      "type": "rate",
+      "default": "10/10s",
+      "loosest": "40/2.5s",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "MAX_ARCHIVE_BYTES",
+      "group": "sites",
+      "description": "The largest archive one deploy may send. Raise the ingress body-size limit with it.",
+      "type": "int",
+      "default": "104857600",
+      "min": 1048576,
+      "max": 524288000,
+      "unit": "bytes",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "MAX_FILES_PER_SITE",
+      "group": "sites",
+      "description": "Files one deploy may hold.",
+      "type": "int",
+      "default": "50000",
+      "min": 1,
+      "max": 100000,
+      "unit": "files",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "UPLOAD_CONCURRENCY",
+      "group": "sites",
+      "description": "Uploads (and, separately, downloads) one replica processes at once. Raise the pod's memory with it.",
+      "type": "int",
+      "default": "2",
+      "min": 1,
+      "max": 64,
+      "unit": "uploads",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "QUOTA_MAX_SITES",
+      "group": "sites",
+      "description": "Sites one person or team may have. 0 is unlimited.",
+      "type": "int",
+      "default": "1000",
+      "min": 0,
+      "unit": "sites",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "QUOTA_MAX_BYTES",
+      "group": "sites",
+      "description": "Storage one person or team may use, every kept version and uploaded file included. 0 is unlimited.",
+      "type": "int",
+      "default": "10737418240",
+      "min": 0,
+      "unit": "bytes",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "QUOTA_MAX_VERSIONS",
+      "group": "sites",
+      "description": "Versions kept per site; older ones are removed after each deploy.",
+      "type": "int",
+      "default": "5",
+      "min": 1,
+      "max": 100,
+      "unit": "versions",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "PREVIEW_LINK_TTL",
+      "group": "sites",
+      "description": "How long a preview link to a kept version works.",
+      "type": "duration",
+      "default": "1h",
+      "min": "1m",
+      "max": "24h",
+      "unit": "Go duration",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "EXPORT_LINK_TTL",
+      "group": "sites",
+      "description": "How long a whole-site download link works (once).",
+      "type": "duration",
+      "default": "10m",
+      "min": "1m",
+      "max": "24h",
+      "unit": "Go duration",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "CLAMD_ADDR",
+      "group": "sites",
+      "description": "A clamd scanner (host:port) that checks every uploaded file before it is stored. A scanner that is down refuses uploads.",
+      "type": "string",
+      "default": "",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "CLAMD_TIMEOUT",
+      "group": "sites",
+      "description": "How long the scan of one file may take.",
+      "type": "duration",
+      "default": "30s",
+      "unit": "Go duration",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "ASSET_MAX_FILE_BYTES",
+      "group": "sites",
+      "description": "The largest file a page may upload.",
+      "type": "int",
+      "default": "26214400",
+      "min": 1,
+      "unit": "bytes",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "ASSET_MAX_SITE_BYTES",
+      "group": "sites",
+      "description": "Uploaded files one site may hold, in bytes.",
+      "type": "int",
+      "default": "524288000",
+      "min": 1,
+      "unit": "bytes",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "ASSET_MAX_SITE_COUNT",
+      "group": "sites",
+      "description": "Uploaded files one site may hold.",
+      "type": "int",
+      "default": "5000",
+      "min": 1,
+      "unit": "files",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "SEARCH_SESSION_MAX_AGE",
+      "group": "sites",
+      "description": "Lifetime of the anonymous cookie site search uses for its limits and counts.",
+      "type": "duration",
+      "default": "4320h",
+      "min": "1h",
+      "max": "9600h",
+      "unit": "Go duration",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "RATE_LIMIT_MANAGEMENT_CLIENT",
+      "group": "sites",
+      "description": "Management API calls per client address.",
+      "type": "rate",
+      "default": "60/1s",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "RATE_LIMIT_MANAGEMENT_USER",
+      "group": "sites",
+      "description": "Management changes per person.",
+      "type": "rate",
+      "default": "30/10s",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "RATE_LIMIT_SEARCH_QUERY_PEER",
+      "group": "sites",
+      "description": "Site searches per network peer.",
+      "type": "rate",
+      "default": "200/50ms",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "RATE_LIMIT_SEARCH_QUERY_SESSION",
+      "group": "sites",
+      "description": "Site searches per search session.",
+      "type": "rate",
+      "default": "60/1s",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "RATE_LIMIT_STATE_CLIENT",
+      "group": "data",
+      "description": "Saved-data writes per client.",
+      "type": "rate",
+      "default": "60/1s",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "RATE_LIMIT_STATE_SITE",
+      "group": "data",
+      "description": "Saved-data writes per site.",
+      "type": "rate",
+      "default": "60/1s",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "RATE_LIMIT_STATE_READ_CLIENT",
+      "group": "data",
+      "description": "Saved-data reads per client.",
+      "type": "rate",
+      "default": "120/500ms",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "RATE_LIMIT_STATE_READ_SITE",
+      "group": "data",
+      "description": "Saved-data reads per site.",
+      "type": "rate",
+      "default": "300/200ms",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "DELETED_RETENTION_DAYS",
+      "group": "cleanup",
+      "description": "How long a deleted site stays restorable in Recently deleted. Keep the bucket's old-version retention at least this long.",
+      "type": "int",
+      "default": "30",
+      "min": 1,
+      "max": 365,
+      "unit": "days",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "IDLE_CLEANUP_DAYS",
+      "group": "cleanup",
+      "description": "Idle cleanup: a site nobody opened, deployed to or saved to for this many days is marked. 0 turns it off.",
+      "type": "int",
+      "default": "0",
+      "min": 0,
+      "max": 3650,
+      "unit": "days",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "IDLE_CLEANUP_GRACE_DAYS",
+      "group": "cleanup",
+      "description": "Idle cleanup: how long a marked site waits before it moves to Recently deleted.",
+      "type": "int",
+      "default": "30",
+      "min": 1,
+      "max": 365,
+      "unit": "days",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "IDLE_CLEANUP_MAX_EMAILS",
+      "group": "cleanup",
+      "description": "Idle cleanup: sites one hourly run marks and emails about. 0 is no limit.",
+      "type": "int",
+      "default": "0",
+      "min": 0,
+      "max": 100000,
+      "unit": "emails",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "AUDIT_RETENTION_DAYS",
+      "group": "cleanup",
+      "description": "How long the audit log is kept.",
+      "type": "int",
+      "default": "400",
+      "min": 1,
+      "unit": "days",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "ACCESS_LOG_RETENTION_DAYS",
+      "group": "cleanup",
+      "description": "How long the access log, and ended sessions with their IP and browser, are kept.",
+      "type": "int",
+      "default": "90",
+      "min": 1,
+      "unit": "days",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "SEARCH_TELEMETRY_RETENTION_DAYS",
+      "group": "cleanup",
+      "description": "How long search queries and clicks are kept.",
+      "type": "int",
+      "default": "180",
+      "min": 1,
+      "max": 3650,
+      "unit": "days",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "SMTP_URL",
+      "group": "email",
+      "description": "Your mail relay, smtp://user:password@host:587 (STARTTLS) or smtps://host:465. It carries a password, so it goes in the Secret.",
+      "type": "secret",
+      "default": "",
+      "security_sensitive": true,
+      "required": false,
+      "basic": true
+    },
+    {
+      "name": "SMTP_FROM",
+      "group": "email",
+      "description": "The sender, like Simple Host <hosting@example.com>. Required with SMTP_URL.",
+      "type": "string",
+      "default": "",
+      "security_sensitive": false,
+      "required": false,
+      "basic": true
+    },
+    {
+      "name": "DB_HOST",
+      "group": "storage",
+      "description": "Your managed Postgres host. Or give DB_DSN instead of the parts.",
+      "type": "string",
+      "default": "",
+      "security_sensitive": false,
+      "required": true,
+      "basic": true
+    },
+    {
+      "name": "DB_PORT",
+      "group": "storage",
+      "description": "Its port.",
+      "type": "int",
+      "default": "5432",
+      "min": 1,
+      "max": 65535,
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "DB_NAME",
+      "group": "storage",
+      "description": "The database name.",
+      "type": "string",
+      "default": "",
+      "security_sensitive": false,
+      "required": true,
+      "basic": true
+    },
+    {
+      "name": "DB_USER",
+      "group": "storage",
+      "description": "The owning role the migrate and prune jobs connect as.",
+      "type": "string",
+      "default": "",
+      "security_sensitive": false,
+      "required": true,
+      "basic": true
+    },
+    {
+      "name": "DB_PASSWORD",
+      "group": "storage",
+      "description": "The owning role's password. Never the same as DB_APP_PASSWORD.",
+      "type": "secret",
+      "default": "",
+      "security_sensitive": true,
+      "required": true,
+      "basic": true
+    },
+    {
+      "name": "DB_APP_USER",
+      "group": "storage",
+      "description": "The least-privilege role the server connects as (the manifest sets simplehost_app).",
+      "type": "string",
+      "default": "",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "DB_APP_PASSWORD",
+      "group": "storage",
+      "description": "That role's password; migrate sets it on every run.",
+      "type": "secret",
+      "default": "",
+      "security_sensitive": true,
+      "required": true,
+      "basic": true
+    },
+    {
+      "name": "DB_DSN",
+      "group": "storage",
+      "description": "A complete postgres:// URL, instead of the parts above.",
+      "type": "secret",
+      "default": "",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "DB_SSLMODE",
+      "group": "storage",
+      "description": "TLS to the database. Anything but verify-full needs DB_INSECURE_ALLOWED.",
+      "type": "string",
+      "default": "verify-full",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "DB_SSL_ROOT_CERT",
+      "group": "storage",
+      "description": "The database's CA bundle, mounted from the simple-host-db-ca Secret.",
+      "type": "string",
+      "default": "",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "DB_INSECURE_ALLOWED",
+      "group": "storage",
+      "description": "Allows a database without verified TLS. Local evaluation only.",
+      "type": "bool",
+      "default": "false",
+      "allowed": [
+        "true",
+        "false"
+      ],
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "DB_INCLUSTER_EVALUATION",
+      "group": "storage",
+      "description": "Set by the in-cluster evaluation Postgres, which nothing backs up; logs a warning at every start.",
+      "type": "bool",
+      "default": "false",
+      "allowed": [
+        "true",
+        "false"
+      ],
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "BACKUP_STORAGE_ENDPOINT",
+      "group": "storage",
+      "description": "The S3-compatible bucket's endpoint, over HTTPS.",
+      "type": "string",
+      "default": "",
+      "security_sensitive": false,
+      "required": true,
+      "basic": true
+    },
+    {
+      "name": "BACKUP_STORAGE_REGION",
+      "group": "storage",
+      "description": "The bucket's region, where the provider needs one.",
+      "type": "string",
+      "default": "us-east-1",
+      "security_sensitive": false,
+      "required": false,
+      "basic": true
+    },
+    {
+      "name": "BACKUP_STORAGE_BUCKET",
+      "group": "storage",
+      "description": "The bucket that stores every site. Turn its versioning on.",
+      "type": "string",
+      "default": "",
+      "security_sensitive": false,
+      "required": true,
+      "basic": true
+    },
+    {
+      "name": "BACKUP_STORAGE_PREFIX",
+      "group": "storage",
+      "description": "The folder inside the bucket.",
+      "type": "string",
+      "default": "backups/",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "BACKUP_STORAGE_ACCESS_KEY_ID",
+      "group": "storage",
+      "description": "The bucket's access key. Leave both keys out when a workload identity supplies credentials.",
+      "type": "secret",
+      "default": "",
+      "security_sensitive": true,
+      "required": false,
+      "basic": true
+    },
+    {
+      "name": "BACKUP_STORAGE_SECRET_ACCESS_KEY",
+      "group": "storage",
+      "description": "The bucket's secret key.",
+      "type": "secret",
+      "default": "",
+      "security_sensitive": true,
+      "required": false,
+      "basic": true
+    },
+    {
+      "name": "BACKUP_STORAGE_INSECURE_ALLOWED",
+      "group": "storage",
+      "description": "Allows a plain-HTTP bucket endpoint. Local evaluation only.",
+      "type": "bool",
+      "default": "false",
+      "allowed": [
+        "true",
+        "false"
+      ],
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "BACKUP_SSE",
+      "group": "storage",
+      "description": "Server-side encryption on every stored object.",
+      "type": "enum",
+      "default": "AES256",
+      "allowed": [
+        "AES256",
+        "aws:kms"
+      ],
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "BACKUP_SSE_KEY_ID",
+      "group": "storage",
+      "description": "The KMS key, with BACKUP_SSE=aws:kms.",
+      "type": "string",
+      "default": "",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "BACKUP_ENVELOPE_KEY",
+      "group": "storage",
+      "description": "Optional encryption of every object before it leaves the pod: <id>:<base64 32-byte key> entries. Escrow it: sites are unreadable without it.",
+      "type": "secret",
+      "default": "",
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "BACKUP_ENVELOPE_PLAINTEXT_ALLOWED",
+      "group": "storage",
+      "description": "Keeps reading objects written before the envelope key was added, until reencrypt has covered them.",
+      "type": "bool",
+      "default": "false",
+      "allowed": [
+        "true",
+        "false"
+      ],
+      "security_sensitive": true,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "CACHE_DIR",
+      "group": "storage",
+      "description": "The pod-local cache of site versions, emptied on start.",
+      "type": "string",
+      "default": "/var/cache/simple-host",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "CACHE_MAX_BYTES",
+      "group": "storage",
+      "description": "Size of that cache. Size its volume at about three times this.",
+      "type": "int",
+      "default": "1073741824",
+      "min": 1,
+      "unit": "bytes",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "METRICS_PORT",
+      "group": "observability",
+      "description": "The port of the separate /metrics listener (Prometheus); not exposed by the Service or Ingress.",
+      "type": "int",
+      "default": "9090",
+      "min": 1,
+      "max": 65535,
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    }
+  ]
+}
