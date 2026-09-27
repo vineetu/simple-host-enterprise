@@ -567,11 +567,13 @@ Config names are documented in `docs/configuration.md`; schema in
   team's sites ("Move to team…" moves them all to a team or person, all or
   none; "Delete sites" for a disabled person), a disabled person's data
   ("Export data": one zip of their account, teams, viewer grants, key,
-  connected-app and session metadata, every site with its live files, saved
-  data and history, versions and assets, and their audit events; "Delete
-  person and all data": typed-username confirm, everything erased for good
-  except audit rows, name held, old addresses of sites they handed on stop
-  redirecting), access requests, recently
+  connected-app and session metadata, grants waiting for their email, their
+  own visits, every site with its live files, saved data and history,
+  versions and assets, and their audit events; "Delete person and all data":
+  typed-username confirm, everything erased for good except audit rows,
+  name held, old addresses of sites they handed on stop redirecting, and
+  sign-in refused until an admin allows it again from the "Erased people"
+  card), access requests, recently
   deleted sites (Restore, section 5), rankings of users
   and sites (views, storage from a cached bucket measurement, updated; each
   site links to its current address), new
@@ -592,7 +594,10 @@ Config names are documented in `docs/configuration.md`; schema in
   `admin_user_export`), `POST /api/admin/users/{username}/erase` (form or
   JSON `confirm` = the username; only for a disabled person, 409 otherwise
   or while they are a team's last member; audited `user_erased` by id only,
-  plus `site_delete` with `erasure` per site); plus the admin
+  plus `site_delete` with `erasure` per site);
+  `GET /api/admin/erased-identities`,
+  `POST /api/admin/erased-identities/{id}/allow` (audited
+  `erased_identity_allowed`); plus the admin
   routes in sections 7, 9, 12 (section 7 has restrict and unrestrict).
 - **MCP.** None.
 - **Pages.** `/admin`.
@@ -601,8 +606,9 @@ Config names are documented in `docs/configuration.md`; schema in
   `admin_rankings.go`, `admin_disk_usage.go`, `access.go`
   (`renderAccessRequests`), `site_restore.go` (`renderDeletedSites`).
 - **DB.** `users.disabled_at` (0023), `site_daily_analytics` (0003, 0013),
-  `erased_owner_labels`, the `users_refuse_erased_label` trigger and
-  `access_log_erase_visitor()` (0048).
+  `erased_owner_labels`, `erased_identities`, the
+  `users_refuse_erased_label` trigger and `access_log_erase_visitor()`
+  (0048); definer functions' search path pinned (0049).
 - **Config.** `ADMIN_EMAILS`, `OIDC_ADMIN_CLAIM`, `OIDC_ADMIN_VALUE`. See
   INSTALL.md "Sessions and leavers" and docs/configuration.md "Data subject
   requests".

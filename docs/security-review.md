@@ -105,7 +105,8 @@ Controls added on top of the 21 findings above.
 | Upload quotas and malware scan | Per-owner limits (`QUOTA_MAX_SITES`, `QUOTA_MAX_BYTES`, `QUOTA_MAX_VERSIONS`) are checked inside the deploy and asset-upload transactions under a lock on the owner's row, so parallel uploads cannot slip past them together; versions beyond the limit go to the retire queue. With `CLAMD_ADDR` set every file of a deploy and every asset is streamed to clamd before anything is stored; an infected upload is refused (`422`) and a scanner that is down refuses uploads (`503`) rather than letting them through | Built |
 | Envelope key rotation | `simple-host reencrypt` rewrites every stored object under the first `BACKUP_ENVELOPE_KEY` in the key-bound form, verified by reading it back, skipping what is already current, never overwriting an object it could not decrypt; after a clean run the old key can be removed (`docs/storage.md`, "Rotating the envelope key") | Built |
 | Streaming archive size checks | `internal/tarball`'s extraction now checks each entry's own declared size against the remaining per-file/aggregate budget *before* allocating or decompressing it (`checkDeclaredSize`), so a refused entry costs zero allocation instead of up to the full 500 MiB cap; an accepted entry is read once at its own declared size rather than `io.ReadAll`'s doubling growth. A one-byte probe after the declared bytes catches a declared-small/actual-large decompression bomb at the cost of one byte read, not the hidden payload's size. Found and fixed after `TestArchiveBombs` OOM-killed the pod at the documented per-file ceiling on a 1Gi memory limit | Built |
-| Data subject requests | An admin can export everything held about a disabled person and erase it (`internal/handler/admin_erase.go`, `internal/db/erase.go`). Erasure is one transaction: sites deleted without a recovery window and their bucket prefixes queued for the retire sweep, the users row deleted (keys, connected apps, sessions, memberships and viewer grants cascade; attribution columns go NULL), pending grants for their provider-vouched email, redirects from their old addresses and their own access-log rows deleted. It locks the person's and their teams' rows before any site name, the order moves and team deletions use, so a concurrent hand-over waits. The app role still has no `DELETE` on `access_log`: migration 0048's `SECURITY DEFINER` `access_log_erase_visitor(uuid)` is the one delete it gets. Audit rows are not touched, so `audit-verify` still passes; they keep the opaque id until retention, and the `user_erased` row carries no name or email. The address label is held (`erased_owner_labels`, enforced by a trigger raising the owner-label unique violation), so nobody inherits the erased person's links. Export never includes a key hash, token or client secret. | Built |
+| Data subject requests | An admin can export everything held about a disabled person and erase it (`internal/handler/admin_erase.go`, `internal/db/erase.go`). Erasure is one transaction: sites deleted without a recovery window and their bucket prefixes queued for the retire sweep, the users row deleted (keys, connected apps, sessions, memberships and viewer grants cascade; attribution columns go NULL), pending grants for their provider-vouched email, redirects from their old addresses and their own access-log rows deleted. It locks the person's and their teams' rows before any site name, the order moves and team deletions use, so a concurrent hand-over waits. The app role still has no `DELETE` on `access_log`: migration 0048's `SECURITY DEFINER` `access_log_erase_visitor(uuid)` is the one delete it gets, and it refuses the id of an account that still exists (it runs after the users row is deleted). Audit rows are not touched, so `audit-verify` still passes; they keep the opaque id, and some their username or email in the detail, until retention, and the `user_erased` row carries no name or email. The address label is held (`erased_owner_labels`, enforced by a trigger raising the owner-label unique violation; the pre-v1.3 team-address mapping skips a held label too), so nobody inherits the erased person's links. The sign-in identity is held as SHA-256 hashes (`erased_identities`), so an erased person still in the IdP is refused until an admin allows sign-in again. Export never includes a key hash, token or client secret. | Built |
+| SECURITY DEFINER search path | Every `SECURITY DEFINER` function (`audit_bump_state_write`, `audit_chain_append`, `audit_chain_entry`, `access_log_erase_visitor`) sets `search_path = pg_catalog, public, pg_temp` and names its tables schema-qualified; before migration 0049 they set `search_path = public`, which Postgres searches after `pg_temp`, so the app role could shadow a table with a temporary one and run its trigger as the migration owner. 0049 also revokes `TEMPORARY` on the database and `CREATE` on `public` from `PUBLIC`. `internal/migrate/definer_test.go` reproduces the attack as the app role against the old definition and proves it fails against the new one, and fails if any definer function lacks the pinned path | Built |
 
 ### (e) Audit tamper evidence and the SIEM stream
 
@@ -407,6 +408,46 @@ restore past the 30-day window. What was left, and why:
   number of accounts.
 - **No `script-src` CSP on the base host.** The pages' inline scripts would
   need nonces first; escaping is the control today.
+
+### Review of person export and erasure (2026-09-27, second pass)
+
+Fixed in the same release:
+
+- **High: SECURITY DEFINER functions could be hijacked through `pg_temp`.**
+  This affects every released version since 0027 (`audit_bump_state_write`),
+  0036 (`audit_chain_append`) and 0040 (`audit_chain_entry`). Whoever could
+  run SQL as the application role (SQL injection, or a leaked
+  `DB_APP_PASSWORD`) could run SQL as the migration owner, often a superuser,
+  and rewrite the audit trail. Upgrading applies migration 0049, which
+  closes it; see the table above.
+- **An erased person could sign straight back in** while the identity
+  provider still admitted them. Their identity is now held (hashed) until an
+  admin allows sign-in again.
+- **The access-log eraser took any user id**; it now refuses a live account.
+- **An erased label passed to a same-named pre-v1.3 team**; it now answers
+  not found.
+- **The export missed visits and pending grants**; `visits.jsonl` and
+  `pending-grants.json` now carry them.
+- **The erase prompt called the audit rows anonymous**; it now says they keep
+  the id and, in some rows, the name or email until retention.
+- **The erase path did not check the re-read account was the one it
+  locked**; it now refuses (409) if the name moved to another account.
+
+Accepted, and why:
+
+- **A team member can add people to a team that owns a restricted site.**
+  An admin's restriction sets who may open the site (the owning team);
+  membership of the team is the team's own business, as for every other
+  team site. Adding someone to a team is audited (`member_add`).
+- **The export carries other people's data.** Saved data holds what visitors
+  submitted, and audit details and version lists name other people. The
+  archive is for the company answering a request, not to hand over as it is
+  (`docs/configuration.md` says so); splitting it is not built.
+- **Zip entry names rely on site-name validation.** `sites/<name>/` uses
+  names that pass `safepath.ValidateSegment` today (no `/`, `\`, `.` or
+  `..`), so there is no traversal. The column has no CHECK constraint, and
+  names differing only in case would collide when unpacked on a
+  case-insensitive filesystem.
 
 ## 5. What this review did not cover
 

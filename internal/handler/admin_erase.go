@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"mime"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -27,9 +29,18 @@ import (
 // assets can take a while, but not forever.
 const personExportTimeout = 30 * time.Minute
 
+// WithOIDCIssuer sets OIDC_ISSUER, which an erased person's held identity
+// is hashed with (the sign-in side uses the same value).
+func (h *AdminHandler) WithOIDCIssuer(issuer string) *AdminHandler {
+	h.oidcIssuer = issuer
+	return h
+}
+
 func (h *AdminHandler) registerEraseRoutes(mux *http.ServeMux, adminAPI, dashboardCheck func(http.Handler) http.Handler) {
 	mux.Handle("GET /api/admin/users/{username}/export", adminAPI(http.HandlerFunc(h.exportPerson)))
 	mux.Handle("POST /api/admin/users/{username}/erase", dashboardCheck(adminAPI(http.HandlerFunc(h.erasePerson))))
+	mux.Handle("GET /api/admin/erased-identities", adminAPI(http.HandlerFunc(h.listErasedIdentities)))
+	mux.Handle("POST /api/admin/erased-identities/{id}/allow", dashboardCheck(adminAPI(http.HandlerFunc(h.allowErasedIdentity))))
 }
 
 // erasablePerson resolves username to a disabled person, or writes the
@@ -57,9 +68,10 @@ func (h *AdminHandler) erasablePerson(w http.ResponseWriter, r *http.Request, q 
 
 // exportPerson streams one zip of everything held about a disabled person:
 // account.json, teams, viewer grants, key/connected-app/session metadata
-// (never a secret), every site they own (recently deleted ones too) with its
-// live files, saved data and its history, version list and assets, and
-// audit-events.jsonl (every audited action they took).
+// (never a secret), grants waiting for their email, every site they own
+// (recently deleted ones too) with its live files, saved data and its
+// history, version list and assets, visits.jsonl (their own visits in the
+// access log) and audit-events.jsonl (every audited action they took).
 func (h *AdminHandler) exportPerson(w http.ResponseWriter, r *http.Request) {
 	person, ok := h.erasablePerson(w, r, h.database, false)
 	if !ok {
@@ -116,6 +128,9 @@ func (h *AdminHandler) writePersonExport(ctx context.Context, zw *zip.Writer, pe
 		if err := writeJSONEntry(part.File, part.Query, person.ID); err != nil {
 			return err
 		}
+	}
+	if err := h.exportVisits(ctx, zw, person.ID); err != nil {
+		return err
 	}
 	sites, err := db.ListAllOwnerSites(ctx, h.database, person.ID)
 	if err != nil {
@@ -176,6 +191,29 @@ func (h *AdminHandler) exportSiteFiles(ctx context.Context, zw *zip.Writer, site
 	return nil
 }
 
+// exportVisits adds visits.jsonl, one access-log row per line.
+func (h *AdminHandler) exportVisits(ctx context.Context, zw *zip.Writer, userID string) error {
+	rows, err := h.database.QueryContext(ctx, db.PersonVisitsQuery, userID)
+	if err != nil {
+		return fmt.Errorf("visits: %w", err)
+	}
+	defer rows.Close()
+	f, err := zw.Create("visits.jsonl")
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			return fmt.Errorf("visits: %w", err)
+		}
+		if _, err := io.WriteString(f, line+"\n"); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
 // exportActorAudit adds audit-events.jsonl: every audit row they are the
 // actor of, newest first, in the shape GET /api/admin/export writes.
 func (h *AdminHandler) exportActorAudit(ctx context.Context, zw *zip.Writer, userID string) error {
@@ -217,11 +255,14 @@ func (e errLastTeamMember) Error() string { return "last member of " + strings.J
 // they hold, pending grants naming their (provider-vouched) email, team
 // memberships, the access-log rows of their visits, the redirects their old
 // addresses still had to sites they handed on, and the account. The address
-// label stays held, so those old addresses answer not found. The admin confirms by typing the username (`confirm`).
+// label stays held, so those old addresses answer not found, and their
+// sign-in identity is held (hashed) so they cannot sign straight back in
+// until an admin allows it. The admin confirms by typing the username
+// (`confirm`).
 //
 // Audit rows stay: the chain must keep verifying. They keep the opaque user
-// id until retention prunes them, and the user_erased row written here names
-// the person by that id only.
+// id, and some keep their username or email in the detail, until retention
+// prunes them; the user_erased row written here names the person by id only.
 func (h *AdminHandler) erasePerson(w http.ResponseWriter, r *http.Request) {
 	confirm := strings.ToLower(strings.TrimSpace(adminFormField(w, r, "confirm")))
 	if confirm == "" || confirm != strings.ToLower(strings.TrimSpace(r.PathValue("username"))) {
@@ -248,10 +289,17 @@ func (h *AdminHandler) erasePerson(w http.ResponseWriter, r *http.Request) {
 		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	// Checked again under the lock: an enable in between wins.
-	if person, ok = h.erasablePerson(w, r, tx, true); !ok {
+	// Checked again under the lock: an enable in between wins, and the name
+	// must still be the account that was locked.
+	again, ok := h.erasablePerson(w, r, tx, true)
+	if !ok {
 		return
 	}
+	if again.ID != person.ID {
+		h.respondAdmin(w, r, http.StatusConflict, person.Username+" changed while it was being deleted; try again")
+		return
+	}
+	person = again
 	var sitesDeleted int
 	err = func() error {
 		if len(lastOf) > 0 {
@@ -270,7 +318,7 @@ func (h *AdminHandler) erasePerson(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		sitesDeleted = len(events)
-		counts, err := db.ErasePerson(r.Context(), tx, person, ownerLabel(person.Username))
+		counts, err := db.ErasePerson(r.Context(), tx, person, ownerLabel(person.Username), h.oidcIssuer, adminActorID(r))
 		if err != nil {
 			return err
 		}
@@ -302,4 +350,74 @@ func (h *AdminHandler) erasePerson(w http.ResponseWriter, r *http.Request) {
 	}
 	h.respondAdmin(w, r, http.StatusOK, person.Username+" and all their data deleted ("+
 		pluralize(sitesDeleted, "1 site", formatCount(int64(sitesDeleted))+" sites")+")")
+}
+
+// listErasedIdentities is GET /api/admin/erased-identities: every erased
+// person still refused at sign-in, by hash prefix only.
+func (h *AdminHandler) listErasedIdentities(w http.ResponseWriter, r *http.Request) {
+	list, err := db.ListErasedIdentities(r.Context(), h.database)
+	if err != nil {
+		log.Printf("admin: %v", err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"erased_identities": list})
+}
+
+// allowErasedIdentity lets an erased person sign in again: the held identity
+// is deleted (audited as erased_identity_allowed), and their next sign-in
+// makes a new account.
+func (h *AdminHandler) allowErasedIdentity(w http.ResponseWriter, r *http.Request) {
+	tx, err := h.database.BeginTx(r.Context(), nil)
+	if err != nil {
+		log.Printf("admin: allow erased identity: begin: %v", err)
+		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	defer audit.Rollback(tx)
+	held, err := db.AllowErasedIdentity(r.Context(), tx, r.PathValue("id"))
+	if errors.Is(err, sql.ErrNoRows) {
+		h.respondAdmin(w, r, http.StatusNotFound, "no erased identity has that id")
+		return
+	}
+	if err == nil {
+		err = h.audit.RecordTx(r.Context(), tx, h.userAuditEvent(r, "erased_identity_allowed", "", "",
+			map[string]any{"hash_prefix": held.HashPrefix, "erased_at": held.ErasedAt}))
+	}
+	if err == nil {
+		err = audit.Commit(tx)
+	}
+	if err != nil {
+		log.Printf("admin: allow erased identity: %v", err)
+		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	h.respondAdmin(w, r, http.StatusOK, "sign-in allowed again for "+held.HashPrefix)
+}
+
+// renderErasedIdentities is the admin page's "Erased people" card, shown
+// while any erased person is still refused at sign-in.
+func (h *AdminHandler) renderErasedIdentities(r *http.Request, b *strings.Builder) {
+	list, err := db.ListErasedIdentities(r.Context(), h.database)
+	if err != nil {
+		log.Printf("admin: %v", err)
+		return
+	}
+	if len(list) == 0 {
+		return
+	}
+	b.WriteString(`<section id="erased-people" class="overview"><div class="overview-card"><h2 class="section-title">Erased people</h2>
+<p class="login-copy">People deleted with all their data cannot sign in again, even while the identity provider still lets them. Only a fingerprint of their sign-in is kept, never a name or address. Allow sign-in again and their next sign-in makes a new, empty account.</p>
+<div class="rank-list" role="region" aria-label="Erased people">`)
+	for _, e := range list {
+		by := "erased"
+		if e.ErasedBy != "" {
+			by = "erased by " + html.EscapeString(e.ErasedBy)
+		}
+		fmt.Fprintf(b, `<div class="rank-row"><span class="rank-name">%s <span class="rank-sub">%s %s</span></span><span class="rank-metric">%s</span></div>`,
+			html.EscapeString(e.HashPrefix), by, localTimeHTML(e.ErasedAt, "datetime"),
+			confirmForm("/api/admin/erased-identities/"+url.PathEscape(e.ID)+"/allow",
+				"Allow this erased person to sign in again? Their next sign-in makes a new account.", "Allow sign-in again"))
+	}
+	b.WriteString(`</div></div></section>`)
 }

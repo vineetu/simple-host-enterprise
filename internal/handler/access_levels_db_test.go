@@ -34,6 +34,9 @@ type accessWorld struct {
 
 const accessBase = "hosting.corp.test"
 
+// accessIssuer is the test world's OIDC_ISSUER.
+const accessIssuer = "https://idp.corp.test"
+
 func newAccessWorld(t *testing.T) *accessWorld {
 	t.Helper()
 	return newAccessWorldFull(t, 1, UploadQuota{}, nil)
@@ -84,7 +87,7 @@ func newAccessWorldFull(t *testing.T, approvals int, quota UploadQuota, scanner 
 	mux := http.NewServeMux()
 	NewSiteHandler(database, store, base, hosts, limits).WithAudit(recorder).WithNetworkAccessApprovals(approvals).WithUploadLimits(quota, scanner).Register(mux, authMW, skillMW)
 	NewUserHandler(database, limits).WithQuota(quota).Register(mux, authMW, skillMW)
-	NewAdminHandler(database, base, hosts, CookiePolicy{Secure: true}, keys, time.Hour, recorder, limits).WithNetworkAccessApprovals(approvals).WithStore(store).WithAuditReader(audit.NewReader(database)).Register(mux, authMW, skillMW)
+	NewAdminHandler(database, base, hosts, CookiePolicy{Secure: true}, keys, time.Hour, recorder, limits).WithNetworkAccessApprovals(approvals).WithStore(store).WithAuditReader(audit.NewReader(database)).WithOIDCIssuer(accessIssuer).Register(mux, authMW, skillMW)
 	NewAuditHandler(database, audit.NewReader(database), "", limits).Register(mux, authMW, skillMW)
 	NewTeamHandler(database, limits).WithAudit(recorder).Register(mux, authMW, skillMW, hosts, base)
 	files := NewSiteFiles(store, database, CookiePolicy{Secure: true}, keys, time.Hour)

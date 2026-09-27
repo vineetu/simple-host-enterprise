@@ -39,6 +39,8 @@ type AdminHandler struct {
 	// destination (admin_move.go), and what restoring a deleted site is
 	// checked against (WithQuota).
 	quota UploadQuota
+	// oidcIssuer is OIDC_ISSUER, which erased identities are hashed with.
+	oidcIssuer string
 }
 
 // WithAuditReader attaches the reader GET /api/admin/export streams from.
@@ -394,6 +396,7 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 
 	h.renderAccessRequests(r, &b, user)
 	h.renderDeletedSites(r, &b)
+	h.renderErasedIdentities(r, &b)
 
 	if len(users) == 0 {
 		b.WriteString(`<div class="empty">No users yet.</div>`)
@@ -606,7 +609,8 @@ func personDataActions(username string) string {
 		"their API keys, connected apps, sessions, team memberships, the viewer access they hold, " +
 		"grants waiting for their email, and the record of their visits are deleted for good; " +
 		"old addresses of sites they handed on stop redirecting. " +
-		"The audit log keeps its rows under an anonymous id. Their name stays reserved so nobody inherits their links. " +
+		"The audit log keeps its rows under their id, and some rows keep their name or email, until retention removes them. " +
+		"Their name stays reserved so nobody inherits their links, and they cannot sign in again until an admin allows it. " +
 		"Type " + username + " to confirm:"
 	return fmt.Sprintf(`<a class="btn-view" href="%s/export" download>Export data</a>`, html.EscapeString(base)) +
 		promptForm(base+"/erase", question, "confirm", "btn-reject", "Delete person and all data")

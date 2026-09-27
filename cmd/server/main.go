@@ -229,7 +229,7 @@ func run() (runErr error) {
 	// after the routes are wired, and the handler is given it once it exists.
 	// The route closures capture this pointer, so attaching later is enough.
 	auditReader := audit.NewReader(database)
-	adminHandler := handler.NewAdminHandler(database, cfg.PublicBaseURL, hosts, cookiePolicy, signingKeys, cfg.Session.Idle, auditRecorder, abuseLimits).WithStore(siteStore).WithAuditReader(auditReader).WithNetworkAccessApprovals(cfg.NetworkAccessApprovals).WithQuota(quota)
+	adminHandler := handler.NewAdminHandler(database, cfg.PublicBaseURL, hosts, cookiePolicy, signingKeys, cfg.Session.Idle, auditRecorder, abuseLimits).WithStore(siteStore).WithAuditReader(auditReader).WithNetworkAccessApprovals(cfg.NetworkAccessApprovals).WithQuota(quota).WithOIDCIssuer(cfg.OIDC.Issuer)
 	adminHandler.Register(mux, authMW, skillVersionMW)
 	handler.NewAuditHandler(database, auditReader, cfg.Audit.AccessLogVisibility, abuseLimits).Register(mux, authMW, skillVersionMW)
 	handler.NewShowcaseHandler(database, hosts, signingKeys, cfg.Session.Idle).Register(mux)

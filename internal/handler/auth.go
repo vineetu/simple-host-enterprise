@@ -337,6 +337,11 @@ func (h *AuthHandler) callback(w http.ResponseWriter, r *http.Request) {
 			writeAuthError(w, http.StatusForbidden, "this account has been disabled")
 			return
 		}
+		if errors.Is(err, db.ErrIdentityErased) {
+			h.signInFailed(r, "identity_erased", "")
+			writeAuthError(w, http.StatusForbidden, "This account was erased by an administrator. Ask an administrator to allow sign-in again.")
+			return
+		}
 		log.Printf("auth: resolve user for sub %s: %v", claims.Subject, err)
 		writeAuthError(w, http.StatusInternalServerError, "internal server error")
 		return
@@ -443,6 +448,17 @@ func (h *AuthHandler) resolveUser(ctx context.Context, sub, email, usernameHint 
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return db.User{}, "", err
+	}
+
+	// No account has this subject. An admin may have erased the person it
+	// (or this verified email) belonged to: they stay out until an admin
+	// allows sign-in again, rather than getting a fresh account.
+	erased, err := db.IsIdentityErased(ctx, h.database, db.ErasedSubjectHash(h.claims.Issuer, sub), db.ErasedEmailHash(email))
+	if err != nil {
+		return db.User{}, "", err
+	}
+	if erased {
+		return db.User{}, "", db.ErrIdentityErased
 	}
 
 	// Not bound yet. Try binding an existing account by email, but only

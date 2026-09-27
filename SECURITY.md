@@ -15,7 +15,9 @@ reproduce, and what an attacker gains.
 
 Only the latest release is supported. Fixes are made on `main` and shipped in
 a new release; older releases are not patched. Build from a release tag, or
-pin the release image by digest, and upgrade to take a fix.
+pin the release image by digest, and upgrade to take a fix. Security fixes
+are listed under "Security" in `CHANGELOG.md`; a fix that ships as a
+migration (such as 0049) takes effect when `simple-host migrate` runs.
 
 ## Scope
 

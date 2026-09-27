@@ -159,6 +159,9 @@ func (c *emailLookupConn) QueryContext(_ context.Context, query string, args []d
 		return rows, nil
 	case strings.Contains(query, "disabled_at IS NOT NULL"):
 		return &boolRow{value: false}, nil
+	case strings.Contains(query, "FROM erased_identities"):
+		// Nobody here was erased.
+		return &boolRow{value: false}, nil
 	case strings.Contains(query, "SELECT COALESCE(email, '') FROM users WHERE id = $1"):
 		// RefreshUserEmail reading the stored address: the one the account
 		// was found by, so the refresh has nothing to change.

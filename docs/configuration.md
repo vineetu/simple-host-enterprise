@@ -237,11 +237,16 @@ employees do not delete their own work accounts. Disable the person first
 - **Export data** (`GET /api/admin/users/{username}/export`) streams one zip:
   `account.json`, `teams.json`, `viewer-grants.json`, `api-keys.json`,
   `connected-apps.json` and `sessions.json` (names, dates, IPs and user
-  agents; never a key, token or secret), then for every site they own,
+  agents; never a key, token or secret), `pending-grants.json` (viewer and
+  team grants waiting for their provider-vouched email), `visits.jsonl` (the
+  access-log rows of their own visits), then for every site they own,
   recently deleted ones included, `sites/<name>/` with the live version's
   files, `saved-data.json` and its history, `versions.json`, `assets.json`
   and each asset's bytes, and `audit-events.jsonl` (every audited action
-  they took). Audited as `admin_user_export`.
+  they took). Audited as `admin_user_export`. The archive is for the
+  company, not something to hand the person as it is: saved data holds what
+  visitors submitted to their sites, and audit details and version lists
+  name other people.
 - **Delete person and all data** (`POST /api/admin/users/{username}/erase`,
   the username typed again as `confirm`) deletes for good, skipping Recently
   deleted: their sites with files, saved data and its history, versions and
@@ -257,12 +262,25 @@ employees do not delete their own work accounts. Disable the person first
   Refused while they are the last member of a team: move or delete that
   team's sites, or delete the team, first. Audited as one `user_erased` row
   (plus a `site_delete` per site) that names them by id only.
+- **They cannot sign back in.** Erasure keeps a SHA-256 of their sign-in
+  identity (`OIDC_ISSUER` and subject) and of their provider-vouched email
+  in `erased_identities`, and sign-in refuses a match with "This account was
+  erased by an administrator. Ask an administrator to allow sign-in again."
+  (audited `sign_in_failed`, reason `identity_erased`), even while the
+  identity provider still admits them. `/admin`'s "Erased people" card lists
+  each by hash prefix, date and the admin who erased them; "Allow sign-in
+  again" (`POST /api/admin/erased-identities/{id}/allow`, audited
+  `erased_identity_allowed`) deletes the row, and their next sign-in makes a
+  new, empty account. A new person given the same email address is refused
+  the same way until an admin allows it. Changing `OIDC_ISSUER` releases
+  every held subject (the email hash still holds).
 
 What stays, and why: audit rows are hash-chained, so erasure does not touch
-them. They keep the person's opaque user id, and older rows can carry their
-username or email in a detail field (for example an `admin_disable_user` or
-`email_change_skipped` row), until `AUDIT_RETENTION_DAYS` prunes their
-partition; the legal basis is security logging. Columns that only record
+them. They keep the person's opaque user id, and some rows keep their
+username or email in a detail field (`admin_disable_user`, `email_change`,
+`site_transfer`, `member_add` and others), until `AUDIT_RETENTION_DAYS`
+prunes their partition; the legal basis is security logging. The access
+log keeps their address label on visits to their sites until retention. Columns that only record
 who did something elsewhere (who uploaded a version to a team site, who added
 a viewer) are cleared. The address label is held in `erased_owner_labels` so
 a later account cannot take the name and inherit old links; the same person

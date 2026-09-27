@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -315,5 +316,113 @@ func TestEraseAndConcurrentHandOverSerialize(t *testing.T) {
 	}
 	if n := w.liveSitesQueuedForRetirement(); n != 0 {
 		t.Errorf("%d live sites queued for retirement", n)
+	}
+}
+
+// An erased person still in the identity provider cannot sign straight
+// back in to a fresh account, by subject or by their verified email, until
+// an admin allows it.
+func TestErasedPersonCannotSignBackIn(t *testing.T) {
+	w := newAccessWorld(t)
+	w.disable("alice")
+	if rec := w.adminPost("/api/admin/users/alice/erase", "confirm=alice"); rec.Code != http.StatusOK {
+		t.Fatalf("erase = %d %s", rec.Code, rec.Body)
+	}
+	if n := w.count(`SELECT count(*) FROM erased_identities WHERE subject_hash = $1 AND email_hash = $2 AND erased_by = $3`,
+		db.ErasedSubjectHash(accessIssuer, "sub-alice"), db.ErasedEmailHash("alice@example.com"), w.users["root"]); n != 1 {
+		t.Fatalf("held identities = %d, want 1", n)
+	}
+	h := &AuthHandler{database: w.database, audit: audit.NewDBRecorder(w.database), claims: OIDCClaimConfig{Issuer: accessIssuer}}
+	ctx := context.Background()
+	if _, _, err := h.resolveUser(ctx, "sub-alice", "alice.new@example.com", "", false); !errors.Is(err, db.ErrIdentityErased) {
+		t.Errorf("sign-in by the erased subject = %v, want refused", err)
+	}
+	if _, _, err := h.resolveUser(ctx, "sub-other", "Alice@Example.com", "", false); !errors.Is(err, db.ErrIdentityErased) {
+		t.Errorf("sign-in by the erased email = %v, want refused", err)
+	}
+	if _, _, err := h.resolveUser(ctx, "sub-alice", "alice@example.com", "", false); !errors.Is(err, db.ErrIdentityErased) {
+		t.Errorf("sign-in = %v", err)
+	}
+	// Somebody else signs in as before.
+	if _, _, err := h.resolveUser(ctx, "sub-vera", "vera@example.com", "", false); err != nil {
+		t.Errorf("unrelated sign-in: %v", err)
+	}
+
+	// The admin page lists it, by fingerprint only.
+	page := w.admin(http.MethodGet, "/admin").Body.String()
+	if !strings.Contains(page, "Erased people") || strings.Contains(page, "alice@example.com") {
+		t.Errorf("admin page erased card missing or naming her")
+	}
+	rec := w.admin(http.MethodGet, "/api/admin/erased-identities")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"erased_by":"root"`) {
+		t.Fatalf("list = %d %s", rec.Code, rec.Body)
+	}
+	var id string
+	_ = w.database.QueryRow(`SELECT id::text FROM erased_identities`).Scan(&id)
+	if rec := w.adminPost("/api/admin/erased-identities/"+id+"/allow", ""); rec.Code != http.StatusOK {
+		t.Fatalf("allow = %d %s", rec.Code, rec.Body)
+	}
+	if rec := w.adminPost("/api/admin/erased-identities/"+id+"/allow", ""); rec.Code != http.StatusNotFound {
+		t.Errorf("allow twice = %d, want 404", rec.Code)
+	}
+	if n := w.count(`SELECT count(*) FROM audit_events WHERE action = 'erased_identity_allowed'`); n != 1 {
+		t.Errorf("erased_identity_allowed rows = %d, want 1", n)
+	}
+	user, notice, err := h.resolveUser(ctx, "sub-alice", "alice@example.com", "", false)
+	if err != nil || user.ID == w.users["alice"] || user.Username == "alice" || notice != "username_suffixed" {
+		t.Errorf("sign-in after allow = %+v %q %v, want a new, suffixed account", user, notice, err)
+	}
+}
+
+// The export covers what an erasure deletes: their visits and the grants
+// waiting for their email.
+func TestExportIncludesVisitsAndPendingGrants(t *testing.T) {
+	w := newAccessWorld(t)
+	w.deploy("vera", "/api/sites/notes")
+	w.newTeam("crew", "vera")
+	w.disable("alice")
+	for _, stmt := range []string{
+		`INSERT INTO pending_site_viewers (site_id, email) VALUES ('` + w.siteID("vera", "notes") + `', 'alice@example.com')`,
+		`INSERT INTO pending_team_members (team_id, email) VALUES ((SELECT id FROM users WHERE username = 'team-crew'), 'alice@example.com')`,
+		`INSERT INTO access_log (user_id, owner_label, site_name, path, method, status) VALUES ('` + w.users["alice"] + `', 'vera', 'notes', '/p', 'GET', 200)`,
+		`INSERT INTO access_log (user_id, owner_label, site_name, path, method, status) VALUES ('` + w.users["mo"] + `', 'vera', 'notes', '/other', 'GET', 200)`,
+	} {
+		if _, err := w.database.Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	rec := w.admin(http.MethodGet, "/api/admin/users/alice/export")
+	archive, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
+	if err != nil {
+		t.Fatalf("export = %d: %v", rec.Code, err)
+	}
+	files := map[string]string{}
+	for _, f := range archive.File {
+		r, _ := f.Open()
+		body, _ := io.ReadAll(r)
+		r.Close()
+		files[f.Name] = string(body)
+	}
+	if v := files["visits.jsonl"]; strings.Count(v, "\n") != 1 || !strings.Contains(v, `"path":"/p"`) || strings.Contains(v, "/other") {
+		t.Errorf("visits.jsonl = %q", v)
+	}
+	if p := files["pending-grants.json"]; !strings.Contains(p, `"site":"notes"`) || !strings.Contains(p, `"team":"team-crew"`) {
+		t.Errorf("pending-grants.json = %q", p)
+	}
+}
+
+// An erased person's old label does not pass to a same-named pre-v1.3 team.
+func TestErasedLabelDoesNotResolveToALegacyTeam(t *testing.T) {
+	w := newAccessWorld(t)
+	w.newTeam("alice", "mo")
+	w.disable("alice")
+	if rec := w.adminPost("/api/admin/users/alice/erase", "confirm=alice"); rec.Code != http.StatusOK {
+		t.Fatalf("erase = %d %s", rec.Code, rec.Body)
+	}
+	if name, ok, err := db.LegacyTeamName(context.Background(), w.database, "alice"); err != nil || ok {
+		t.Errorf("legacy team for the erased label = %q %v %v, want none", name, ok, err)
+	}
+	if name, ok, _ := db.LegacyTeamName(context.Background(), w.database, "nobody"); ok {
+		t.Errorf("legacy team for an unheld label = %q", name)
 	}
 }

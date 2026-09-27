@@ -2,11 +2,15 @@ package db
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
+	"time"
 )
 
 // A person's data, for an admin's "Export this person's data" and "Delete
@@ -22,7 +26,10 @@ type ErasablePerson struct {
 	// EmailSource is how Email was learned ('claimed' when the identity
 	// provider vouched for it at a sign-in).
 	EmailSource string
-	Disabled    bool
+	// Subject is the identity provider's subject the account signed in
+	// with ('' when it never did).
+	Subject  string
+	Disabled bool
 }
 
 // ErrNotAPerson is returned for a team name: a team is deleted, not erased.
@@ -32,13 +39,13 @@ var ErrNotAPerson = errors.New("not a person")
 // the row is held for the rest of the transaction, so a concurrent enable
 // cannot slip in between the disabled check and the erasure.
 func GetErasablePerson(ctx context.Context, q Querier, username string, lock bool) (ErasablePerson, error) {
-	query := `SELECT id::text, username, COALESCE(email, ''), COALESCE(email_source, ''), disabled_at IS NOT NULL, kind FROM users WHERE username = $1`
+	query := `SELECT id::text, username, COALESCE(email, ''), COALESCE(email_source, ''), COALESCE(oidc_sub, ''), disabled_at IS NOT NULL, kind FROM users WHERE username = $1`
 	if lock {
 		query += ` FOR UPDATE`
 	}
 	var p ErasablePerson
 	var kind string
-	if err := q.QueryRowContext(ctx, query, username).Scan(&p.ID, &p.Username, &p.Email, &p.EmailSource, &p.Disabled, &kind); err != nil {
+	if err := q.QueryRowContext(ctx, query, username).Scan(&p.ID, &p.Username, &p.Email, &p.EmailSource, &p.Subject, &p.Disabled, &kind); err != nil {
 		return p, err
 	}
 	if kind == "team" {
@@ -83,7 +90,25 @@ var PersonExportQueries = []struct{ File, Query string }{
 	{"sessions.json", `SELECT COALESCE(json_agg(t ORDER BY t.created_at), '[]') FROM (
 		SELECT created_at, last_seen_at, expires_at, revoked_at, host(ip) AS ip, user_agent
 		FROM sessions WHERE user_id = $1::uuid) t`},
+	// Grants waiting for their provider-vouched email: the same ones an
+	// erasure deletes.
+	{"pending-grants.json", `WITH me AS (SELECT lower(email) AS email FROM users WHERE id = $1::uuid AND email_source = 'claimed')
+		SELECT COALESCE(json_agg(t ORDER BY t.granted_at), '[]') FROM (
+		SELECT 'viewer' AS kind, owner.username AS owner, s.name AS site, NULL AS team, p.created_at AS granted_at
+		FROM pending_site_viewers p JOIN me ON p.email = me.email
+		JOIN sites s ON s.id = p.site_id JOIN users owner ON owner.id = s.user_id
+		UNION ALL
+		SELECT 'team_member', NULL, NULL, team.username, p.created_at
+		FROM pending_team_members p JOIN me ON p.email = me.email
+		JOIN users team ON team.id = p.team_id) t`},
 }
+
+// PersonVisitsQuery is visits.jsonl: one JSON object per access-log row
+// where they were the visitor (the rows an erasure deletes), newest first,
+// streamed rather than aggregated.
+const PersonVisitsQuery = `SELECT row_to_json(t)::text FROM (
+	SELECT at, owner_label, site_name, path, method, status, host(ip) AS ip, user_agent
+	FROM access_log WHERE user_id = $1::uuid ORDER BY at DESC) t`
 
 // SiteExportQueries are the per-site parts, each taking the site id as $1.
 var SiteExportQueries = []struct{ File, Query string }{
@@ -206,8 +231,10 @@ type ErasureCounts struct {
 // subject) are set to NULL by their foreign keys. sites.deleted_by has no
 // foreign key and is cleared here. Access-log rows where they were the
 // visitor are deleted; audit_events rows are left alone (hash-chained).
-// Their address label is held in erased_owner_labels so nobody inherits it.
-func ErasePerson(ctx context.Context, tx *sql.Tx, p ErasablePerson, label string) (ErasureCounts, error) {
+// Their address label is held in erased_owner_labels so nobody inherits it,
+// and their sign-in identity in erased_identities (hashed; issuer is
+// OIDC_ISSUER) so they cannot sign straight back in. erasedBy is the admin.
+func ErasePerson(ctx context.Context, tx *sql.Tx, p ErasablePerson, label, issuer, erasedBy string) (ErasureCounts, error) {
 	var c ErasureCounts
 	count := func(dst *int64, query string, args ...any) error {
 		return tx.QueryRowContext(ctx, query, args...).Scan(dst)
@@ -222,7 +249,6 @@ func ErasePerson(ctx context.Context, tx *sql.Tx, p ErasablePerson, label string
 		{&c.Sessions, `SELECT count(*) FROM sessions WHERE user_id = $1::uuid`, []any{p.ID}},
 		{&c.ViewerGrants, `SELECT count(*) FROM site_viewers WHERE principal_id = $1::uuid`, []any{p.ID}},
 		{&c.TeamMembership, `SELECT count(*) FROM team_members WHERE user_id = $1::uuid`, []any{p.ID}},
-		{&c.AccessLogRows, `SELECT access_log_erase_visitor($1::uuid)`, []any{p.ID}},
 		// Only an address the identity provider vouched for is theirs: a
 		// pending grant naming an inferred address may be meant for
 		// whoever really holds it.
@@ -264,5 +290,86 @@ func ErasePerson(ctx context.Context, tx *sql.Tx, p ErasablePerson, label string
 	} else if n != 1 {
 		return c, sql.ErrNoRows
 	}
+	// After the account is gone: the function refuses a live account's id.
+	if err := count(&c.AccessLogRows, `SELECT access_log_erase_visitor($1::uuid)`, p.ID); err != nil {
+		return c, fmt.Errorf("erase person: %w", err)
+	}
+	subjectHash, emailHash := sql.NullString{}, sql.NullString{}
+	if p.Subject != "" {
+		subjectHash = sql.NullString{String: ErasedSubjectHash(issuer, p.Subject), Valid: true}
+	}
+	if p.EmailSource == "claimed" && p.Email != "" {
+		emailHash = sql.NullString{String: ErasedEmailHash(p.Email), Valid: true}
+	}
+	if subjectHash.Valid || emailHash.Valid {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO erased_identities (subject_hash, email_hash, erased_by) VALUES ($1, $2, $3::uuid)`,
+			subjectHash, emailHash, sql.NullString{String: erasedBy, Valid: erasedBy != ""}); err != nil {
+			return c, fmt.Errorf("erase person: %w", err)
+		}
+	}
 	return c, nil
+}
+
+// ErrIdentityErased refuses a sign-in whose identity an admin erased.
+var ErrIdentityErased = errors.New("this identity was erased")
+
+// ErasedSubjectHash is the hex SHA-256 of an issuer and a subject, the
+// form erased_identities keeps a sign-in identity in.
+func ErasedSubjectHash(issuer, subject string) string {
+	sum := sha256.Sum256([]byte(strings.TrimRight(issuer, "/") + "\n" + subject))
+	return hex.EncodeToString(sum[:])
+}
+
+// ErasedEmailHash is the hex SHA-256 of a lower-cased email.
+func ErasedEmailHash(email string) string {
+	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(email))))
+	return hex.EncodeToString(sum[:])
+}
+
+// IsIdentityErased reports whether either hash names an erased person.
+func IsIdentityErased(ctx context.Context, q Querier, subjectHash, emailHash string) (bool, error) {
+	var erased bool
+	err := q.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM erased_identities WHERE subject_hash = $1 OR email_hash = $2)`,
+		subjectHash, emailHash).Scan(&erased)
+	return erased, err
+}
+
+// ErasedIdentity is one row of the admin's "Erased people" list. Nothing in
+// it names the person: the hashes cannot be reversed.
+type ErasedIdentity struct {
+	ID         string    `json:"id"`
+	HashPrefix string    `json:"hash_prefix"`
+	ErasedAt   time.Time `json:"erased_at"`
+	ErasedBy   string    `json:"erased_by,omitempty"`
+}
+
+// ListErasedIdentities returns every held identity, newest first.
+func ListErasedIdentities(ctx context.Context, q Querier) ([]ErasedIdentity, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT e.id::text, left(COALESCE(e.subject_hash, e.email_hash), 12), e.erased_at, COALESCE(u.username, '')
+		FROM erased_identities e LEFT JOIN users u ON u.id = e.erased_by
+		ORDER BY e.erased_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("list erased identities: %w", err)
+	}
+	defer rows.Close()
+	out := []ErasedIdentity{}
+	for rows.Next() {
+		var e ErasedIdentity
+		if err := rows.Scan(&e.ID, &e.HashPrefix, &e.ErasedAt, &e.ErasedBy); err != nil {
+			return nil, fmt.Errorf("list erased identities: %w", err)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// AllowErasedIdentity deletes one held identity, so that person can sign in
+// again (to a new account). sql.ErrNoRows when id holds nothing.
+func AllowErasedIdentity(ctx context.Context, q Querier, id string) (ErasedIdentity, error) {
+	var e ErasedIdentity
+	err := q.QueryRowContext(ctx, `
+		DELETE FROM erased_identities WHERE id::text = $1
+		RETURNING id::text, left(COALESCE(subject_hash, email_hash), 12), erased_at`, id).Scan(&e.ID, &e.HashPrefix, &e.ErasedAt)
+	return e, err
 }

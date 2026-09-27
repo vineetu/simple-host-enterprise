@@ -6,12 +6,13 @@ release, commit and schema.
 
 ## Unreleased
 
-Schema 0048 (from 0042). Run `simple-host migrate` before the new image.
+Schema 0049 (from 0042). Run `simple-host migrate` before the new image.
 0043 (`site_redirects`), 0045 (`pending_site_viewers`,
 `pending_team_members`), 0046 (rewrites `audit_ensure_partitions`, creates
 audit and access-log partitions twelve months ahead), 0047 (nullable
-`sites.access_decision*` columns) and 0048 (`erased_owner_labels`, a
-trigger on `users`, `access_log_erase_visitor()`) are backward-compatible. 0044
+`sites.access_decision*` columns), 0048 (`erased_owner_labels`,
+`erased_identities`, a trigger on `users`, `access_log_erase_visitor()`)
+and 0049 (the definer-function security fix below) are backward-compatible. 0044
 (`sites.deleted_at`, `sites.deleted_by`) is not: an older binary would serve
 sites in their recovery window again, so it refuses to start on this
 schema, and rolling back to v1.3.1 needs the database restored from before
@@ -114,20 +115,36 @@ the migration. Skills are at 0.14.1 (0.11.0 still works).
 - Data subject requests: a disabled person's row on `/admin` offers
   "Export data" (`GET /api/admin/users/{username}/export`, one zip of their
   account, teams, viewer grants, key/connected-app/session metadata, every
-  site with its live files, saved data and history, versions and assets, and
-  their audit events) and "Delete person and all data"
+  site with its live files, saved data and history, versions and assets,
+  grants waiting for their email, their own visits and their audit events)
+  and "Delete person and all data"
   (`POST /api/admin/users/{username}/erase`, username typed to confirm):
   sites skip Recently deleted and their objects are queued for the sweep;
   keys, connected apps, sessions, memberships, viewer grants, pending grants
   for their provider-vouched email and the access-log rows of their visits
   go too, and old addresses of sites they handed on stop redirecting (not
   found). A hand-over or team change touching them waits for it. Refused
-  while they are a team's last member. Audit rows stay (hash chain), keep
-  the opaque id, and the new `user_erased` row names nobody. The name stays
-  held so nobody inherits old links. Audited as `admin_user_export` and
-  `user_erased`.
+  while they are a team's last member. Audit rows stay (hash chain) and
+  keep the opaque id, and some their name or email in the detail, until
+  retention prunes them; the new `user_erased` row names nobody. The name
+  stays held so nobody inherits old links, and they cannot sign back in
+  while the identity provider still admits them: sign-in says the account
+  was erased by an administrator. `/admin`'s "Erased people" card allows
+  sign-in again (`GET /api/admin/erased-identities`,
+  `POST /api/admin/erased-identities/{id}/allow`). Audited as
+  `admin_user_export`, `user_erased` and `erased_identity_allowed`.
 
 ### Security
+- **Fix for every earlier release (upgrade and run `simple-host migrate`).**
+  The database functions that run with the owning role's rights
+  (`audit_bump_state_write` since 0027, `audit_chain_append` since 0036,
+  `audit_chain_entry` since 0040) searched the session's temporary schema
+  first. Whoever could run SQL as the application role (through SQL
+  injection or a leaked `DB_APP_PASSWORD`) could use that to run SQL as the
+  migration owner and rewrite the audit trail. Migration 0049 pins their
+  search path and schema-qualifies what they name, and takes `TEMPORARY` on
+  the database and `CREATE` on the `public` schema away from `PUBLIC`.
+  Nothing else changes; no configuration is needed.
 - A viewer or team member named by email must be a plain ASCII address
   (letters, digits and `._%+-` before the `@`, a dotted domain); quotes,
   brackets and non-ASCII look-alikes are refused. Every dashboard and

@@ -695,12 +695,14 @@ const legacyTeamLabelQuery = `
 	FROM users t
 	WHERE t.kind = 'team' AND t.username = 'team-' || $1
 	  AND NOT EXISTS (SELECT 1 FROM users u WHERE lower(replace(u.username, '.', '-')) = $1)
+	  AND NOT EXISTS (SELECT 1 FROM erased_owner_labels e WHERE e.owner_label = $1)
 `
 
 // LegacyTeamName reports the team a pre-v1.3 team address now belongs to:
 // label names no account, and a team called "team-<label>" exists. Once a
 // person takes the old name, the old address is theirs and this reports
-// nothing.
+// nothing; so too once an erased person held it (their old links answer not
+// found rather than landing on a same-named team).
 func LegacyTeamName(ctx context.Context, q Querier, label string) (string, bool, error) {
 	if strings.HasPrefix(label, TeamPrefix) {
 		return "", false, nil

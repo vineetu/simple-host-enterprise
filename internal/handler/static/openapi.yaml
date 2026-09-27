@@ -2253,7 +2253,7 @@ paths:
   /api/admin/users/{username}/export:
     get:
       summary: Export everything held about a disabled person
-      description: Admin only, browser session only. Streams one zip - `account.json`, `teams.json`, `viewer-grants.json`, `api-keys.json`, `connected-apps.json`, `sessions.json` (metadata only, never a key, token or secret), `sites/<name>/` for every site they own including recently deleted ones (live files under `files/`, `site.json`, `saved-data.json`, `saved-data-history.json`, `versions.json`, `assets.json`, asset bytes under `assets/<id>`), and `audit-events.jsonl` (every audited action they took). Audited as `admin_user_export`.
+      description: Admin only, browser session only. Streams one zip - `account.json`, `teams.json`, `viewer-grants.json`, `api-keys.json`, `connected-apps.json`, `sessions.json` (metadata only, never a key, token or secret), `pending-grants.json` (viewer and team grants waiting for their provider-vouched email), `visits.jsonl` (the access-log rows of their own visits), `sites/<name>/` for every site they own including recently deleted ones (live files under `files/`, `site.json`, `saved-data.json`, `saved-data-history.json`, `versions.json`, `assets.json`, asset bytes under `assets/<id>`), and `audit-events.jsonl` (every audited action they took). Audited as `admin_user_export`.
       tags: [Admin]
       parameters:
         - name: username
@@ -2281,7 +2281,7 @@ paths:
   /api/admin/users/{username}/erase:
     post:
       summary: Delete a disabled person and all their data
-      description: Admin only, browser session only. Permanent, with no recovery window - their sites (live and recently deleted) with files, saved data and its history, versions and assets (bucket objects queued for the retire sweep), API keys, connected apps, sessions, team memberships, viewer grants they hold, pending grants for their email (when the identity provider vouched for it), the access-log rows of their own visits, redirects from their old addresses to sites they handed on (those addresses answer not found), and the account. Audit rows stay and keep the opaque user id; the `user_erased` row names them by id only. The address label stays held. Send `confirm` (form or JSON) equal to the username.
+      description: Admin only, browser session only. Permanent, with no recovery window - their sites (live and recently deleted) with files, saved data and its history, versions and assets (bucket objects queued for the retire sweep), API keys, connected apps, sessions, team memberships, viewer grants they hold, pending grants for their email (when the identity provider vouched for it), the access-log rows of their own visits, redirects from their old addresses to sites they handed on (those addresses answer not found), and the account. Audit rows stay and keep the opaque user id, and some keep their username or email in the detail, until retention prunes them; the `user_erased` row names them by id only. The address label stays held, and their sign-in identity is held as a SHA-256 of issuer and subject and of their verified email, so they cannot sign in again until an admin allows it (`/api/admin/erased-identities`). Send `confirm` (form or JSON) equal to the username.
       tags: [Admin]
       parameters:
         - name: username
@@ -2317,6 +2317,55 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: The person can still sign in, or is the last member of a team
+
+  /api/admin/erased-identities:
+    get:
+      summary: List erased people still refused at sign-in
+      description: Admin only, browser session only. One entry per erased person, by the first 12 hex characters of the held hash, with when and by which admin; never a name or address.
+      tags: [Admin]
+      responses:
+        '200':
+          description: Held identities, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  erased_identities:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        hash_prefix:
+                          type: string
+                        erased_at:
+                          type: string
+                          format: date-time
+                        erased_by:
+                          type: string
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/admin/erased-identities/{id}/allow:
+    post:
+      summary: Let an erased person sign in again
+      description: Admin only, browser session only. Deletes the held identity; the person's next sign-in makes a new, empty account. Audited as `erased_identity_allowed`.
+      tags: [Admin]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Allowed
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No held identity has that id
 
 components:
   headers:
