@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"io"
 	"log"
 	"net/http"
@@ -22,7 +23,6 @@ import (
 	"github.com/vsriram/simple-host/internal/tarball"
 )
 
-const maxSiteArchiveSize = 100 << 20
 const maxSiteStateSize = 1 << 20
 
 type SiteHandler struct {
@@ -926,7 +926,7 @@ func (h *SiteHandler) deleteSiteForTarget(w http.ResponseWriter, r *http.Request
 		RequestID: auditRequestID(r.Context()),
 		Extra: map[string]any{
 			"active_version":   site.ActiveVersion,
-			"restorable_until": time.Now().Add(db.DeletedSiteRetention).UTC().Format(time.RFC3339),
+			"restorable_until": time.Now().Add(db.DeletedSiteRetention()).UTC().Format(time.RFC3339),
 		},
 	}); err != nil {
 		log.Printf("record audit for site_delete %s/%s: %v", target.OwnerUsername, siteName, err)
@@ -1128,13 +1128,14 @@ func (h *SiteHandler) readAndValidateFiles(w http.ResponseWriter, r *http.Reques
 }
 
 func readLimitedBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxSiteArchiveSize)
+	maxArchive := oplimits.Get().MaxArchiveBytes
+	r.Body = http.MaxBytesReader(w, r.Body, maxArchive)
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
-			writeJSON(w, http.StatusRequestEntityTooLarge, errorResponse{Error: "request body too large"})
+			writeJSON(w, http.StatusRequestEntityTooLarge, errorResponse{Error: "request body too large: an archive may be at most " + oplimits.Bytes(maxArchive)})
 			return nil, err
 		}
 

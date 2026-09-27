@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"io"
 	"log"
 	"log/slog"
@@ -74,7 +75,7 @@ func main() {
 
 func run() (runErr error) {
 	log.Print(versionString())
-	cfg, err := config.Load()
+	cfg, err := loadConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
@@ -358,7 +359,7 @@ func run() (runErr error) {
 		if mailer != nil {
 			notice = "dashboard and email"
 		}
-		log.Printf("idle cleanup: sites unused for %d days are marked, and move to Recently deleted 30 days later (notice: %s)", days, notice)
+		log.Printf("idle cleanup: sites unused for %d days are marked, and move to Recently deleted %s later (notice: %s)", days, oplimits.Days(cfg.Limits.IdleGraceDays), notice)
 		cleanup := handler.NewIdleCleanup(database, auditRecorder, days, mailer, cfg.PublicBaseURL)
 		resources.workers = append(resources.workers, startLoop(ctx, cleanup.Run))
 	}

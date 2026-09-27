@@ -120,7 +120,7 @@ func (s *Store) purgeBatch(ctx context.Context, database *sql.DB) (int, error) {
 		return 0, err
 	}
 	defer tx.Rollback()
-	due, err := db.ClaimExpiredDeletedSites(ctx, tx, db.DeletedSiteRetention, sweepBatch)
+	due, err := db.ClaimExpiredDeletedSites(ctx, tx, db.DeletedSiteRetention(), sweepBatch)
 	if err != nil {
 		return 0, err
 	}

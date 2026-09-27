@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"context"
 	"database/sql"
 	"errors"
@@ -19,9 +20,9 @@ import (
 // (IDLE_CLEANUP_DAYS): a site nobody has opened (owner and team included),
 // deployed to, or read or written saved data on for that many days
 // (db.siteLastUsed) is marked; the dashboard tells its owner (or team)
-// and, with SMTP set, so does an email; 30 days later (db.IdleGrace), still
-// unused and not kept, it moves to Recently deleted, where it can be
-// restored for another 30 days. Any use or Keep unmarks it. Every step is
+// and, with SMTP set, so does an email; IDLE_CLEANUP_GRACE_DAYS later
+// (db.IdleGrace), still unused and not kept, it moves to Recently deleted,
+// where it can be restored for DELETED_RETENTION_DAYS. Any use or Keep unmarks it. Every step is
 // audited. It runs on every replica; each step is atomic per site, so two
 // replicas never mark, notify or delete the same site twice.
 type IdleCleanup struct {
@@ -76,7 +77,13 @@ func (c *IdleCleanup) RunOnce(ctx context.Context) error {
 	}
 	marked := []db.IdleSite{}
 	if err := c.step(ctx, "site_idle_marked", func(tx *sql.Tx) ([]db.IdleSite, error) {
-		sites, err := db.MarkIdleSites(ctx, tx, c.idleFor)
+		// With email on, IDLE_CLEANUP_MAX_EMAILS bounds how many sites are
+		// marked (so emailed) per run; the rest wait for the next run.
+		limit := 0
+		if c.mailer != nil {
+			limit = oplimits.Get().IdleMaxEmails
+		}
+		sites, err := db.MarkIdleSites(ctx, tx, c.idleFor, limit)
 		marked = sites
 		return sites, err
 	}, map[string]any{"notified": notified}); err != nil {
@@ -164,7 +171,7 @@ func (c *IdleCleanup) moveToRecentlyDeleted(ctx context.Context, s db.IdleSite) 
 		ActorKind: "system", Action: "site_delete", OwnerID: s.OwnerID, SiteID: s.ID,
 		Extra: map[string]any{
 			"reason": "idle", "active_version": s.ActiveVersion, "last_used": s.LastUsed.UTC().Format(time.RFC3339),
-			"restorable_until": time.Now().Add(db.DeletedSiteRetention).UTC().Format(time.RFC3339),
+			"restorable_until": time.Now().Add(db.DeletedSiteRetention()).UTC().Format(time.RFC3339),
 		},
 	}); err != nil {
 		return err
@@ -187,9 +194,9 @@ func (c *IdleCleanup) notify(ctx context.Context, s db.IdleSite) {
 	}
 	subject := fmt.Sprintf("%s/%s moves to Recently deleted on %s", s.Owner, s.Name, s.DeleteOn().UTC().Format("2 January 2006"))
 	body := fmt.Sprintf("The site %s/%s has not been opened or changed in %d days (last used %s).\r\n\r\n"+
-		"On %s it will move to Recently deleted, where it can still be restored for 30 days.\r\n\r\n"+
+		"On %s it will move to Recently deleted, where it can still be restored for %s.\r\n\r\n"+
 		"To keep it, open %s/dashboard and choose Keep, or download a copy there. Opening or updating the site also keeps it.\r\n",
-		s.Owner, s.Name, idleDays(s.LastUsed, time.Now()), s.LastUsed.UTC().Format("2 January 2006"), s.DeleteOn().UTC().Format("2 January 2006"), c.base)
+		s.Owner, s.Name, idleDays(s.LastUsed, time.Now()), s.LastUsed.UTC().Format("2 January 2006"), s.DeleteOn().UTC().Format("2 January 2006"), oplimits.Days(oplimits.Get().DeletedRetentionDays), c.base)
 	if err := c.mailer.Send(ctx, to, subject, body); err != nil {
 		log.Printf("idle cleanup: email about %s/%s: %v", s.Owner, s.Name, err)
 	}
@@ -280,7 +287,7 @@ func idleNoticeHTML(ctx context.Context, database *sql.DB, user *db.User) string
 	var b strings.Builder
 	b.WriteString(`<section id="idle-section">
   <h2 class="section-title">Not used lately</h2>
-  <p class="login-copy">These sites have not been opened or changed in a long while. Each moves to Recently deleted on the date shown (and can be restored for 30 days after that). Keep it, download a copy, or just open it.</p>
+  <p class="login-copy">These sites have not been opened or changed in a long while. Each moves to Recently deleted on the date shown (and can be restored for ` + oplimits.Days(oplimits.Get().DeletedRetentionDays) + ` after that). Keep it, download a copy, or just open it.</p>
   <div class="rank-list" role="region" aria-label="Sites not used lately">`)
 	for _, s := range sites {
 		fmt.Fprintf(&b, `<div class="rank-row idle-row"><span class="rank-name">%s/%s <span class="rank-sub">Not opened or changed in %d days · moves to Recently deleted on %s</span></span>
@@ -293,7 +300,7 @@ func idleNoticeHTML(ctx context.Context, database *sql.DB, user *db.User) string
 </section>
 <script>
 // Download is the whole-site zip (files, saved data and its history,
-// versions, uploaded files) through a single-use 10-minute link
+// versions, uploaded files) through a single-use EXPORT_LINK_TTL link
 // (site_export.go).
 document.querySelectorAll('.idle-download').forEach(function(button){
   button.addEventListener('click', function(){

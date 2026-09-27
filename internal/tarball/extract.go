@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"io"
 	"path"
 	"strings"
@@ -49,17 +50,30 @@ var defaultExtractLimits = extractLimits{
 	entries:      maxArchiveEntries,
 }
 
+// configuredExtractLimits is defaultExtractLimits with the archive size and
+// entry count this installation set (MAX_ARCHIVE_BYTES, MAX_FILES_PER_SITE).
+// The uncompressed and stream caps stay fixed: they are the bomb guard, and
+// MAX_ARCHIVE_BYTES is bounded below them.
+func configuredExtractLimits() extractLimits {
+	l := defaultExtractLimits
+	v := oplimits.Get()
+	l.compressed = v.MaxArchiveBytes
+	l.entries = v.MaxFilesPerSite
+	return l
+}
+
 func Extract(r io.Reader, filename string) (map[string][]byte, error) {
-	return extractWithLimits(r, filename, defaultExtractLimits)
+	return extractWithLimits(r, filename, configuredExtractLimits())
 }
 
 // ExtractBytes avoids copying a request body that the caller has already
 // bounded and buffered.
 func ExtractBytes(archiveBytes []byte, filename string) (map[string][]byte, error) {
-	if int64(len(archiveBytes)) > defaultExtractLimits.compressed {
-		return nil, fmt.Errorf("read archive: content exceeds %d byte limit", defaultExtractLimits.compressed)
+	extract := configuredExtractLimits()
+	if int64(len(archiveBytes)) > extract.compressed {
+		return nil, fmt.Errorf("read archive: content exceeds %d byte limit", extract.compressed)
 	}
-	return extractArchiveBytes(archiveBytes, filename, defaultExtractLimits)
+	return extractArchiveBytes(archiveBytes, filename, extract)
 }
 
 func extractWithLimits(r io.Reader, filename string, limits extractLimits) (map[string][]byte, error) {

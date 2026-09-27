@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"net/netip"
 	"net/url"
 	"os"
@@ -166,6 +167,12 @@ type Config struct {
 	// IdleCleanup is IDLE_CLEANUP_DAYS and the optional SMTP_URL/SMTP_FROM
 	// (idle.go). Off by default.
 	IdleCleanup IdleCleanupConfig
+
+	// Limits is the operational times and limits (oplimits.go), which
+	// cmd/server hands to oplimits.Set, and RateLimits the RATE_LIMIT_*
+	// overrides, which it hands to handler.ConfigureRateLimits.
+	Limits     oplimits.Values
+	RateLimits map[string]RateLimit
 }
 
 // defaultOAuthRedirectHosts covers the AI apps a company is most likely to
@@ -494,6 +501,13 @@ func Load() (Config, error) {
 	}
 	if cfg.APIKeyMaxDays < 1 || cfg.APIKeyMaxDays > maxAPIKeyDays {
 		return Config{}, fmt.Errorf("API_KEY_MAX_DAYS must be between 1 and %d, got %d", maxAPIKeyDays, cfg.APIKeyMaxDays)
+	}
+
+	if cfg.Limits, err = loadOpLimits(cfg.APIKeyMaxDays); err != nil {
+		return Config{}, err
+	}
+	if cfg.RateLimits, err = loadRateLimits(); err != nil {
+		return Config{}, err
 	}
 
 	// NETWORK_ACCESS_APPROVALS: one admin (the default) or two different

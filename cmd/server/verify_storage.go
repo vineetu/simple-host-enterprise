@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 
-	"github.com/vsriram/simple-host/internal/config"
 	db "github.com/vsriram/simple-host/internal/db"
 	"github.com/vsriram/simple-host/internal/storage"
 )
@@ -26,7 +25,7 @@ func runVerifyStorage(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	cfg, err := config.Load()
+	cfg, err := loadConfig()
 	if err != nil {
 		return err
 	}

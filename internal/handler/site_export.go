@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"log"
 	"mime"
 	"net/http"
@@ -29,10 +30,10 @@ import (
 // the caller's key or cookie. The zip is written by writeSiteExport, the
 // code the admin's person export uses.
 
-// siteExportLinkTTL is how long a download address works. It works once:
-// the first download to start uses it up (site_export_links_used), and the
-// request log never records it (reqlog.RedactPath).
-const siteExportLinkTTL = 10 * time.Minute
+// A download address works for EXPORT_LINK_TTL (10 minutes by default) and
+// only once: the first download to start uses it up
+// (site_export_links_used), and the request log never records it
+// (reqlog.RedactPath).
 
 // siteExportTimeout bounds one download stream.
 const siteExportTimeout = 10 * time.Minute
@@ -137,7 +138,7 @@ func (h *SiteHandler) siteExportLink(w http.ResponseWriter, r *http.Request) {
 	if !ok || !requireOwnerRole(w, access) {
 		return
 	}
-	expires := time.Now().Add(siteExportLinkTTL).UTC().Truncate(time.Second)
+	expires := time.Now().Add(oplimits.Get().ExportLinkTTL).UTC().Truncate(time.Second)
 	token, err := signSiteExport(h.signingKeys, siteExportClaims{
 		SiteID: access.Site.ID, ActorID: access.ActorID, Owner: access.OwnerUsername, Site: access.Site.Name, Exp: expires.Unix(),
 	})

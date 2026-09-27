@@ -1,18 +1,25 @@
 package handler
 
 import (
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"net/http"
+	"time"
 
 	"github.com/vsriram/simple-host/internal/auth"
 )
 
 const (
-	hstsPolicy                = "max-age=31536000"
-	hstsPolicyBase            = hstsPolicy + "; includeSubDomains"
-	contentSecurityPolicy     = "frame-ancestors 'none'"
-	searchSessionCookieName   = "__Host-simple_host_search_session"
-	searchSessionCookieMaxAge = 180 * 24 * 60 * 60
+	hstsPolicy              = "max-age=31536000"
+	hstsPolicyBase          = hstsPolicy + "; includeSubDomains"
+	contentSecurityPolicy   = "frame-ancestors 'none'"
+	searchSessionCookieName = "__Host-simple_host_search_session"
 )
+
+// searchSessionCookieMaxAge is SEARCH_SESSION_MAX_AGE (180 days by
+// default), in the seconds a cookie's Max-Age takes.
+func searchSessionCookieMaxAge() int {
+	return int(oplimits.Get().SearchSessionMaxAge / time.Second)
+}
 
 // CookiePolicy is trusted deployment configuration. It must not be inferred
 // from request headers such as X-Forwarded-Proto: the client can set them.
@@ -103,6 +110,6 @@ func (p CookiePolicy) searchSession(value string) *http.Cookie {
 		HttpOnly: true,
 		Secure:   true, // required by the __Host- prefix
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   searchSessionCookieMaxAge,
+		MaxAge:   searchSessionCookieMaxAge(),
 	}
 }

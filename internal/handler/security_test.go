@@ -168,7 +168,7 @@ func TestSearchSessionCookieIsHostPrefixed(t *testing.T) {
 		c := policy.searchSession("anonymous-token")
 		if c.Name != searchSessionCookieName || !strings.HasPrefix(c.Name, "__Host-") || c.Value != "anonymous-token" ||
 			c.Path != "/" || !c.HttpOnly || !c.Secure || c.Domain != "" ||
-			c.SameSite != http.SameSiteLaxMode || c.MaxAge != searchSessionCookieMaxAge {
+			c.SameSite != http.SameSiteLaxMode || c.MaxAge != searchSessionCookieMaxAge() {
 			t.Fatalf("search session cookie = %+v", c)
 		}
 	}

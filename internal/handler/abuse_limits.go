@@ -6,10 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"io"
 	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/vsriram/simple-host/internal/auth"
@@ -18,14 +21,12 @@ import (
 )
 
 const (
-	abuseLimitMaxKeys          = 10_000
-	searchAbuseLimitMaxKeys    = 4_096
-	abuseLimitIdleAfter        = time.Hour
-	searchQueryConcurrency     = 8
-	searchClickConcurrency     = 16
-	uploadConcurrency          = 2
-	archiveDownloadConcurrency = 2
-	concurrencyRetryAfter      = time.Second
+	abuseLimitMaxKeys       = 10_000
+	searchAbuseLimitMaxKeys = 4_096
+	abuseLimitIdleAfter     = time.Hour
+	searchQueryConcurrency  = 8
+	searchClickConcurrency  = 16
+	concurrencyRetryAfter   = time.Second
 
 	smallJSONBodyBytes = 16 << 10
 	smallFormBodyBytes = 8 << 10
@@ -108,6 +109,66 @@ var sharedPolicies = map[string]bool{
 	oauthTokenPolicy.Name:    true,
 }
 
+// configurablePolicies are the limits an installation may change with
+// RATE_LIMIT_<NAME> (the policy name upper-cased, "-" as "_"). The search
+// click buckets stay fixed: they only shed load behind the query ones.
+var configurablePolicies = []*ratelimit.Policy{
+	&authClientPolicy, &authEmailPolicy,
+	&managementClientPolicy, &managementUserPolicy, &apiKeyMintPolicy,
+	&stateClientPolicy, &stateSitePolicy, &stateReadClientPolicy, &stateReadSitePolicy,
+	&adminClientPolicy, &adminIdentityPolicy,
+	&searchQueryPeerPolicy, &searchQuerySessionPolicy,
+	&oauthRegisterPolicy, &oauthTokenPolicy,
+}
+
+// RateLimit is one limit override: Burst requests at once, then one more
+// every Every.
+type RateLimit struct {
+	Burst int
+	Every time.Duration
+}
+
+// RateLimitDefaults returns every configurable limit as it stands, by name.
+func RateLimitDefaults() map[string]RateLimit {
+	out := make(map[string]RateLimit, len(configurablePolicies))
+	for _, p := range configurablePolicies {
+		out[p.Name] = RateLimit{Burst: p.Burst, Every: time.Duration(float64(time.Second) / p.RefillPerSecond)}
+	}
+	return out
+}
+
+// ConfigureRateLimits applies RATE_LIMIT_* overrides. It is called once at
+// startup, before any handler serves, and refuses an unknown name or a
+// limit counted across replicas (sharedPolicies) whose window, burst times
+// interval, is longer than the shared counter keeps (ratelimit.MaxSharedWindow).
+func ConfigureRateLimits(overrides map[string]RateLimit) error {
+	byName := make(map[string]*ratelimit.Policy, len(configurablePolicies))
+	for _, p := range configurablePolicies {
+		byName[p.Name] = p
+	}
+	for name, limit := range overrides {
+		p, ok := byName[name]
+		if !ok {
+			return fmt.Errorf("RATE_LIMIT_%s: no such limit", strings.ToUpper(strings.ReplaceAll(name, "-", "_")))
+		}
+		if limit.Burst < 1 || limit.Every <= 0 {
+			return fmt.Errorf("RATE_LIMIT_%s: burst and interval must be positive", strings.ToUpper(strings.ReplaceAll(name, "-", "_")))
+		}
+		next := ratelimit.Policy{Name: p.Name, Burst: limit.Burst, RefillPerSecond: float64(time.Second) / float64(limit.Every)}
+		if sharedPolicies[p.Name] {
+			if _, window := ratelimit.FixedWindow(next); window <= 0 || window > ratelimit.MaxSharedWindow {
+				return fmt.Errorf("RATE_LIMIT_%s: burst times interval must be at most %s for this limit, which is counted across replicas", strings.ToUpper(strings.ReplaceAll(name, "-", "_")), ratelimit.MaxSharedWindow)
+			}
+		}
+	}
+	for name, limit := range overrides {
+		p := byName[name]
+		p.Burst = limit.Burst
+		p.RefillPerSecond = float64(time.Second) / float64(limit.Every)
+	}
+	return nil
+}
+
 // AbuseLimits owns the process-wide limiter state and the memory-sensitive
 // concurrency slots. Handler constructors accept a shared instance so every
 // route observes one set of process-wide gates. Anonymous search traffic has a
@@ -150,8 +211,8 @@ func newAbuseLimits(
 		// extracted-file data plus the packed archive being uploaded,
 		// leaving headroom in the Pod for Go allocation overhead and the
 		// service.
-		uploadSlots:          make(chan struct{}, uploadConcurrency),
-		archiveDownloadSlots: make(chan struct{}, archiveDownloadConcurrency),
+		uploadSlots:          make(chan struct{}, oplimits.Get().UploadConcurrency),
+		archiveDownloadSlots: make(chan struct{}, oplimits.Get().UploadConcurrency),
 	}
 }
 

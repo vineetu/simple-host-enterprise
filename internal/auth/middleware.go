@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"log"
 	"net/http"
 	"strings"
@@ -152,16 +153,12 @@ func Middleware(database *sql.DB, signingKeys []SigningKey, sessionIdle time.Dur
 	}
 }
 
-// KeyExpiryWarning is how long before its expiry a key's successful
-// requests start carrying X-Key-Expires and the notice header.
-const KeyExpiryWarning = 14 * 24 * time.Hour
-
 // warnKeyExpiry tells the holder of a key that expires within
-// KeyExpiryWarning, on every request it still makes: X-Key-Expires carries
+// API_KEY_EXPIRY_WARNING_DAYS (14 by default), on every request it still makes: X-Key-Expires carries
 // the time, X-Simple-Host-Notice says what to do. Headers rather than a body
 // field, because no management response body is rewritten.
 func warnKeyExpiry(h http.Header, expiresAt, now time.Time) {
-	if expiresAt.Sub(now) > KeyExpiryWarning {
+	if expiresAt.Sub(now) > oplimits.Get().APIKeyExpiryWarning() {
 		return
 	}
 	h.Set("X-Key-Expires", expiresAt.UTC().Format(time.RFC3339))

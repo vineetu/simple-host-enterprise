@@ -117,7 +117,7 @@ func TestPendingSiteViewersCapAndCascade(t *testing.T) {
 	ctx := context.Background()
 	ownerID, siteID := mustCreateUserAndSite(t, database, "alice", "demo")
 
-	emails := make([]string, MaxSiteViewers)
+	emails := make([]string, MaxSiteViewers())
 	for i := range emails {
 		emails[i] = fmt.Sprintf("p%02d@example.com", i)
 	}
@@ -184,7 +184,7 @@ func TestPendingTeamMembers(t *testing.T) {
 	}
 
 	// Pending counts toward the cap: 3 so far, 47 more pending fill it.
-	fill := make([]string, MaxTeamMembers-3)
+	fill := make([]string, MaxTeamMembers()-3)
 	for i := range fill {
 		fill[i] = fmt.Sprintf("f%02d@example.com", i)
 	}

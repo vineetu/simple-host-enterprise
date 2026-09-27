@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"time"
 )
 
@@ -11,8 +12,9 @@ import (
 // objects are kept untouched for this long; then the sweeper purges the row
 // and queues the objects for the usual retire sweep, after which only the
 // bucket's own versioning keeps them. Thirty days matches the noncurrent-
-// version retention docs/storage.md recommends.
-const DeletedSiteRetention = 30 * 24 * time.Hour
+// version retention docs/storage.md recommends (DELETED_RETENTION_DAYS, 30
+// by default; the bucket's noncurrent-version retention should not be shorter).
+func DeletedSiteRetention() time.Duration { return oplimits.Get().DeletedRetention() }
 
 // DeletedSite is a site in its recovery window.
 type DeletedSite struct {
@@ -28,7 +30,7 @@ type DeletedSite struct {
 }
 
 // PurgeAt is when the site stops being recoverable.
-func (d DeletedSite) PurgeAt() time.Time { return d.DeletedAt.Add(DeletedSiteRetention) }
+func (d DeletedSite) PurgeAt() time.Time { return d.DeletedAt.Add(DeletedSiteRetention()) }
 
 const deletedSiteColumns = `
 	s.id::text, s.user_id::text, owner.username, s.name, s.active_version, s.access,
@@ -79,7 +81,7 @@ func GetDeletedSite(ctx context.Context, tx *sql.Tx, ownerID, name string) (Dele
 	rows, err := tx.QueryContext(ctx, `SELECT `+deletedSiteColumns+`
 		WHERE s.user_id = $1::uuid AND s.name = $2 AND s.deleted_at IS NOT NULL
 		  AND s.deleted_at > now() - $3 * interval '1 second'
-		FOR UPDATE OF s`, ownerID, name, int64(DeletedSiteRetention/time.Second))
+		FOR UPDATE OF s`, ownerID, name, int64(DeletedSiteRetention()/time.Second))
 	if err != nil {
 		return DeletedSite{}, err
 	}

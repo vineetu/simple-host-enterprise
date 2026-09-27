@@ -1152,7 +1152,7 @@ func assertSearchCookiePolicy(t *testing.T, cookie *http.Cookie, secure bool) {
 	t.Helper()
 	if cookie.Name != searchSessionCookieName || cookie.Path != "/" || !cookie.HttpOnly ||
 		cookie.Secure != secure || cookie.SameSite != http.SameSiteLaxMode ||
-		cookie.MaxAge != searchSessionCookieMaxAge {
+		cookie.MaxAge != searchSessionCookieMaxAge() {
 		t.Fatalf("search cookie = %+v", cookie)
 	}
 }

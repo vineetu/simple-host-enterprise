@@ -211,7 +211,7 @@ func softDeleteSites(ctx context.Context, tx *sql.Tx, actorID, ownerID string, s
 			return nil, err
 		}
 	}
-	restorableUntil := time.Now().Add(db.DeletedSiteRetention).UTC().Format(time.RFC3339)
+	restorableUntil := time.Now().Add(db.DeletedSiteRetention()).UTC().Format(time.RFC3339)
 	var events []audit.Event
 	for _, site := range sites {
 		// Constrained to this owner and name: a site handed to someone else

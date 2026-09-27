@@ -3,12 +3,14 @@ package db
 import (
 	"context"
 	"database/sql"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"time"
 )
 
 // IdleGrace is how long a site stays marked idle before it moves to
-// Recently deleted, unless it is kept or used again first.
-const IdleGrace = 30 * 24 * time.Hour
+// Recently deleted, unless it is kept or used again first
+// (IDLE_CLEANUP_GRACE_DAYS, 30 by default).
+func IdleGrace() time.Duration { return oplimits.Get().IdleGrace() }
 
 // siteLastUsed is when a site (alias s) was last used: created, deployed,
 // its saved data read or written, or opened by anyone but a bot or a
@@ -63,7 +65,7 @@ type IdleSite struct {
 }
 
 // DeleteOn is when the site moves to Recently deleted if nothing changes.
-func (s IdleSite) DeleteOn() time.Time { return s.IdleSince.Add(IdleGrace) }
+func (s IdleSite) DeleteOn() time.Time { return s.IdleSince.Add(IdleGrace()) }
 
 func scanIdleSites(rows *sql.Rows) ([]IdleSite, error) {
 	defer rows.Close()
@@ -81,14 +83,27 @@ func scanIdleSites(rows *sql.Rows) ([]IdleSite, error) {
 // MarkIdleSites marks every live site not kept and not used for idleFor,
 // and returns them. Atomic per row, so replicas running it at once never
 // mark (or report) a site twice.
-func MarkIdleSites(ctx context.Context, q Querier, idleFor time.Duration) ([]IdleSite, error) {
+//
+// limit, when above 0, marks at most that many (the longest unused first);
+// the rest are marked on a later run.
+func MarkIdleSites(ctx context.Context, q Querier, idleFor time.Duration, limit int) ([]IdleSite, error) {
+	var maxSites any // NULL: LIMIT NULL marks every idle site
+	if limit > 0 {
+		maxSites = limit
+	}
 	rows, err := q.QueryContext(ctx, `
 		UPDATE sites s SET idle_since = now()
 		FROM users u
 		WHERE u.id = s.user_id AND s.deleted_at IS NULL AND NOT s.idle_keep AND s.idle_since IS NULL
 		  AND `+siteLastUsed+` < now() - $1 * interval '1 second'
+		  AND s.id IN (
+			SELECT s.id FROM sites s
+			WHERE s.deleted_at IS NULL AND NOT s.idle_keep AND s.idle_since IS NULL
+			  AND `+siteLastUsed+` < now() - $1 * interval '1 second'
+			ORDER BY `+siteLastUsed+`, s.id
+			LIMIT $2)
 		RETURNING s.id::text, s.user_id::text, u.username, s.name, s.active_version, s.idle_since, `+siteLastUsed,
-		int64(idleFor/time.Second))
+		int64(idleFor/time.Second), maxSites)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +135,7 @@ func DueIdleSites(ctx context.Context, q Querier) ([]IdleSite, error) {
 		WHERE s.deleted_at IS NULL AND NOT s.idle_keep AND s.idle_since IS NOT NULL
 		  AND s.idle_since < now() - $1 * interval '1 second'
 		  AND `+siteLastUsed+` <= s.idle_since
-		ORDER BY s.idle_since`, int64(IdleGrace/time.Second))
+		ORDER BY s.idle_since`, int64(IdleGrace()/time.Second))
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +152,7 @@ func StillDueIdle(ctx context.Context, q Querier, s IdleSite) (bool, error) {
 		  AND s.deleted_at IS NULL AND NOT s.idle_keep AND s.idle_since IS NOT NULL
 		  AND s.idle_since < now() - $4 * interval '1 second'
 		  AND `+siteLastUsed+` <= s.idle_since)`,
-		s.ID, s.OwnerID, s.Name, int64(IdleGrace/time.Second)).Scan(&due)
+		s.ID, s.OwnerID, s.Name, int64(IdleGrace()/time.Second)).Scan(&due)
 	return due, err
 }
 

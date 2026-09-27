@@ -201,15 +201,15 @@ func TestTeamMemberBatchIsDeterministicAndStrict(t *testing.T) {
 	if _, err := normalizeTeamUsernames([]string{"alice", " "}); !errors.Is(err, ErrTeamMemberNotFound) {
 		t.Fatalf("blank username error = %v, want ErrTeamMemberNotFound", err)
 	}
-	if MaxTeamMembers != 50 {
-		t.Fatalf("MaxTeamMembers = %d, want 50", MaxTeamMembers)
+	if MaxTeamMembers() != 50 {
+		t.Fatalf("MaxTeamMembers() = %d, want 50", MaxTeamMembers())
 	}
 	if _, err := AddTeamMembers(context.Background(), &teamExecQuerier{}, "team", nil, "actor"); err != nil {
 		t.Fatalf("empty batch returned %v", err)
 	}
 
-	oversized := make([]string, 0, MaxTeamMembers+1)
-	for i := 0; i <= MaxTeamMembers; i++ {
+	oversized := make([]string, 0, MaxTeamMembers()+1)
+	for i := 0; i <= MaxTeamMembers(); i++ {
 		oversized = append(oversized, string(rune('a'+i%26))+string(rune('a'+i/26))+"user")
 	}
 	if _, err := AddTeamMembers(context.Background(), &teamExecQuerier{}, "team", oversized, "actor"); !errors.Is(err, ErrTeamMemberLimit) {

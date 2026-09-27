@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"io/fs"
 	"log"
 	"net/http"
@@ -27,7 +28,7 @@ import (
 // token is "<version>-<expiry>-<signature>": an HMAC, under the session
 // signing key, of the site id, the version and the expiry. It is minted by
 // GET .../versions/{version}/preview for the owner or a team member and lasts
-// previewTTL. The link alone opens nothing: the host gate still requires a
+// PREVIEW_LINK_TTL (an hour by default). The link alone opens nothing: the host gate still requires a
 // host session, and that person must be the site's owner or in its team
 // (previewAllowed), whatever the site's access level. A preview is never
 // indexed or cached, and the site API refuses a save from a preview page
@@ -35,8 +36,6 @@ import (
 // suppresses its Referer is not recognised and saves to the live data: a
 // documented limitation, since only the owner and team open previews.
 // Making the version live is the ordinary rollback to it.
-
-const previewTTL = time.Hour
 
 // previewSegment is the path segment a preview lives under. A signature that
 // does not verify is not a preview, so a site's own "_preview" folder is
@@ -129,7 +128,7 @@ func (h *SiteHandler) previewVersion(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, errorResponse{Error: "site has no address"})
 		return
 	}
-	expires := time.Now().Add(previewTTL).Truncate(time.Second).UTC()
+	expires := time.Now().Add(oplimits.Get().PreviewLinkTTL).Truncate(time.Second).UTC()
 	writeJSON(w, http.StatusOK, previewResponse{
 		URL:       base + previewSegment + "/" + previewToken(h.signingKeys, access.Site.ID, number, expires) + "/",
 		ExpiresAt: expires,

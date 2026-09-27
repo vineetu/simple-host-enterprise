@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"sort"
 	"strings"
 	"time"
@@ -14,8 +15,9 @@ import (
 
 // MaxTeamMembers bounds one team: a
 // membership list is read on every authenticated request against the team's
-// namespace, and an unbounded one is an unbounded join.
-const MaxTeamMembers = 50
+// namespace, and an unbounded one is an unbounded join (MAX_TEAM_MEMBERS,
+// 50 by default).
+func MaxTeamMembers() int { return oplimits.Get().MaxTeamMembers }
 
 var (
 	ErrTeamMemberLimit    = errors.New("team member limit reached")
@@ -261,7 +263,7 @@ func AddTeamMembers(ctx context.Context, q Querier, teamID string, usernames []s
 	if len(requested) == 0 {
 		return nil, nil
 	}
-	if len(requested) > MaxTeamMembers {
+	if len(requested) > MaxTeamMembers() {
 		return nil, ErrTeamMemberLimit
 	}
 	normalized, pending, err := resolveEmailNames(ctx, q, requested)
@@ -284,7 +286,7 @@ func AddTeamMembers(ctx context.Context, q Querier, teamID string, usernames []s
 			return nil, fmt.Errorf("count pending team members: %w", err)
 		}
 	}
-	if current+(resolved-alreadyMembers)+(len(pending)-alreadyPending) > MaxTeamMembers {
+	if current+(resolved-alreadyMembers)+(len(pending)-alreadyPending) > MaxTeamMembers() {
 		return nil, ErrTeamMemberLimit
 	}
 

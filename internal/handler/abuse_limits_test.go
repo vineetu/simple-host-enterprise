@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -225,7 +226,7 @@ func TestDecodeSmallJSONRejectsTrailingAndOversizedBodies(t *testing.T) {
 func TestUploadConcurrencyRejectsWhileFullAndReleasesAfterHandlersReturn(t *testing.T) {
 	limits := testAbuseLimits(time.Now)
 	handler := NewSiteHandler(nil, nil, "", HostModel{}, limits)
-	started := make(chan struct{}, uploadConcurrency)
+	started := make(chan struct{}, oplimits.Get().UploadConcurrency)
 	finish := make(chan struct{})
 	wrapped := handler.limitUploadConcurrency(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		started <- struct{}{}
@@ -234,14 +235,14 @@ func TestUploadConcurrencyRejectsWhileFullAndReleasesAfterHandlersReturn(t *test
 	}))
 
 	var wait sync.WaitGroup
-	wait.Add(uploadConcurrency)
-	for i := 0; i < uploadConcurrency; i++ {
+	wait.Add(oplimits.Get().UploadConcurrency)
+	for i := 0; i < oplimits.Get().UploadConcurrency; i++ {
 		go func() {
 			defer wait.Done()
 			wrapped.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/sites/demo", nil))
 		}()
 	}
-	for i := 0; i < uploadConcurrency; i++ {
+	for i := 0; i < oplimits.Get().UploadConcurrency; i++ {
 		<-started
 	}
 
@@ -266,8 +267,8 @@ func TestUploadConcurrencyRejectsWhileFullAndReleasesAfterHandlersReturn(t *test
 
 func TestArchiveDownloadSemaphoreIsBoundedAndReusable(t *testing.T) {
 	limits := testAbuseLimits(time.Now)
-	releases := make([]func(), 0, archiveDownloadConcurrency)
-	for i := 0; i < archiveDownloadConcurrency; i++ {
+	releases := make([]func(), 0, oplimits.Get().UploadConcurrency)
+	for i := 0; i < oplimits.Get().UploadConcurrency; i++ {
 		release, acquired := limits.acquireArchiveDownload()
 		if !acquired {
 			t.Fatalf("archive slot %d was unavailable", i)

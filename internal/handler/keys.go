@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"log"
 	"net/http"
 	"strings"
@@ -27,9 +28,6 @@ type KeysHandler struct {
 	limits     *AbuseLimits
 	maxDays    int
 }
-
-// defaultAPIKeyDays is a new key's lifetime when the request names none.
-const defaultAPIKeyDays = 90
 
 // WithMaxKeyDays sets the longest lifetime a key may be minted with
 // (API_KEY_MAX_DAYS); 365 when never called.
@@ -179,7 +177,7 @@ func (h *KeysHandler) mint(w http.ResponseWriter, r *http.Request) {
 	}
 	days := req.ExpiresInDays
 	if days == 0 {
-		days = min(defaultAPIKeyDays, h.maxDays)
+		days = min(oplimits.Get().APIKeyDefaultDays, h.maxDays)
 	}
 	if days < 1 || days > h.maxDays {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: fmt.Sprintf("expires_in_days must be between 1 and %d", h.maxDays)})
@@ -323,14 +321,14 @@ func keyLabel(last4 string) string {
 }
 
 // keyStatus is a key row's state: revoked, expired, "expires soon" inside
-// auth.KeyExpiryWarning, or active.
+// API_KEY_EXPIRY_WARNING_DAYS, or active.
 func keyStatus(k db.APIKey, now time.Time) string {
 	switch {
 	case k.RevokedAt != nil:
 		return "revoked"
 	case !k.ExpiresAt.After(now):
 		return "expired"
-	case k.ExpiresAt.Sub(now) <= auth.KeyExpiryWarning:
+	case k.ExpiresAt.Sub(now) <= oplimits.Get().APIKeyExpiryWarning():
 		return "expires soon"
 	default:
 		return "active"

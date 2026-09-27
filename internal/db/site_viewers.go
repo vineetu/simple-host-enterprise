@@ -5,13 +5,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"time"
 
 	"github.com/lib/pq"
 )
 
-// MaxSiteViewers bounds a site's viewer list.
-const MaxSiteViewers = 50
+// MaxSiteViewers bounds a site's viewer list (MAX_SITE_VIEWERS, 50 by default).
+func MaxSiteViewers() int { return oplimits.Get().MaxSiteViewers }
 
 // SiteViewer describes one entry on a site's viewer list, person or team.
 type SiteViewer struct {
@@ -345,7 +346,7 @@ func GrantSiteViewers(ctx context.Context, tx *sql.Tx, ownerID, siteName, siteID
 			newViewers++
 		}
 	}
-	if len(current)+newViewers > MaxSiteViewers {
+	if len(current)+newViewers > MaxSiteViewers() {
 		return nil, ErrViewerLimit
 	}
 

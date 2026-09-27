@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"strings"
 	"unicode/utf8"
 )
@@ -444,7 +445,7 @@ const deleteExpiredSiteSearchTelemetryQuery = `
 	WITH expired_queries AS MATERIALIZED (
 		SELECT id
 		FROM site_search_queries
-		WHERE created_at < now() - interval '180 days'
+		WHERE created_at < now() - make_interval(days => $2)
 		ORDER BY created_at, id
 		FOR UPDATE SKIP LOCKED
 		LIMIT $1
@@ -455,7 +456,7 @@ const deleteExpiredSiteSearchTelemetryQuery = `
 `
 
 // DeleteExpiredSiteSearchTelemetry deletes a bounded batch of query rows older
-// than 180 days. Foreign-key cascades remove their impressions and clicks in the
+// than SEARCH_TELEMETRY_RETENTION_DAYS (180 by default). Foreign-key cascades remove their impressions and clicks in the
 // same statement.
 func DeleteExpiredSiteSearchTelemetry(ctx context.Context, q Querier, batchSize int) (int64, error) {
 	if q == nil {
@@ -469,7 +470,7 @@ func DeleteExpiredSiteSearchTelemetry(ctx context.Context, q Querier, batchSize 
 		)
 	}
 
-	result, err := q.ExecContext(ctx, deleteExpiredSiteSearchTelemetryQuery, batchSize)
+	result, err := q.ExecContext(ctx, deleteExpiredSiteSearchTelemetryQuery, batchSize, oplimits.Get().SearchTelemetryRetentionDays)
 	if err != nil {
 		return 0, fmt.Errorf("delete expired site search telemetry: %w", err)
 	}

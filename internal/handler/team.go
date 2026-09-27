@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"log"
 	"net/http"
 	"strconv"
@@ -62,10 +63,10 @@ func (h *TeamHandler) WithAudit(recorder audit.Recorder) *TeamHandler {
 	return h
 }
 
-// maxTeamsPerPerson caps how many teams one person may create. It bounds name
-// squatting without needing moderation: the platform-admin route can still add
-// somebody to a team that has run out of reachable members.
-const maxTeamsPerPerson = 10
+// MAX_TEAMS_PER_PERSON (10 by default) caps how many teams one person may
+// belong to and still create another. It bounds name squatting without needing
+// moderation: the platform-admin route can still add somebody to a team that
+// has run out of reachable members.
 
 func (h *TeamHandler) Register(mux *http.ServeMux, authMiddleware, skillVersionMiddleware func(http.Handler) http.Handler, hosts HostModel, publicBaseURL string) {
 	member := func(next http.Handler) http.Handler {
@@ -183,7 +184,7 @@ func (h *TeamHandler) createTeam(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	if len(teams) >= maxTeamsPerPerson {
+	if len(teams) >= oplimits.Get().MaxTeamsPerPerson {
 		writeJSON(w, http.StatusConflict, errorResponse{
 			Error: "you already belong to the maximum number of teams",
 			Code:  "team_limit",
@@ -367,7 +368,7 @@ func (h *TeamHandler) addMembers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "no usernames given"})
 		return
 	}
-	if len(request.Usernames) > db.MaxTeamMembers {
+	if len(request.Usernames) > db.MaxTeamMembers() {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "too many usernames"})
 		return
 	}

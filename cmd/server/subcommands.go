@@ -182,7 +182,7 @@ func runRestore(args []string) error {
 		return fmt.Errorf("-site: %w", err)
 	}
 
-	cfg, err := config.Load()
+	cfg, err := loadConfig()
 	if err != nil {
 		return err
 	}
@@ -355,7 +355,7 @@ func runMigrateStorage(args []string) error {
 	}
 	defer tree.Close()
 
-	cfg, err := config.Load()
+	cfg, err := loadConfig()
 	if err != nil {
 		return err
 	}
@@ -491,7 +491,7 @@ func runReencrypt(args []string) error {
 	if *concurrency < 1 || *concurrency > 64 {
 		return errors.New("-concurrency must be between 1 and 64")
 	}
-	cfg, err := config.Load()
+	cfg, err := loadConfig()
 	if err != nil {
 		return err
 	}

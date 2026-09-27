@@ -144,7 +144,7 @@ func (h *SiteHandler) mutateSiteViewers(w http.ResponseWriter, r *http.Request, 
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "at least one username is required"})
 			return
 		}
-		if len(request.Usernames) > db.MaxSiteViewers {
+		if len(request.Usernames) > db.MaxSiteViewers() {
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "too many usernames"})
 			return
 		}

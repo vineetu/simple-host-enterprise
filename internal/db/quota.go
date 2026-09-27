@@ -44,7 +44,7 @@ func OwnerUsageOf(ctx context.Context, q Querier, ownerID string) (OwnerUsage, e
 			   WHERE s.user_id = $1 AND (s.deleted_at IS NULL OR s.deleted_at > now() - $2 * interval '1 second') AND a.deleted_at IS NULL)
 	`
 	var usage OwnerUsage
-	err := q.QueryRowContext(ctx, query, ownerID, int64(DeletedSiteRetention/time.Second)).Scan(&usage.Sites, &usage.Bytes)
+	err := q.QueryRowContext(ctx, query, ownerID, int64(DeletedSiteRetention()/time.Second)).Scan(&usage.Sites, &usage.Bytes)
 	return usage, err
 }
 

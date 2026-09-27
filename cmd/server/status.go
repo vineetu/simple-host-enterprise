@@ -4,10 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"time"
 
 	"github.com/vsriram/simple-host/internal/config"
-	dbstore "github.com/vsriram/simple-host/internal/db"
 	"github.com/vsriram/simple-host/internal/handler"
 	"github.com/vsriram/simple-host/internal/metrics"
 	"github.com/vsriram/simple-host/internal/migrate"
@@ -49,14 +49,19 @@ func instanceLimits(cfg config.Config) []handler.InstanceLimit {
 		{Name: "Uploaded files", Value: fmt.Sprintf("%s each, %s and %d files per site", bytesText(cfg.Assets.MaxFileBytes), bytesText(cfg.Assets.MaxSiteBytes), cfg.Assets.MaxSiteCount)},
 		{Name: "Sessions", Value: fmt.Sprintf("end after %s, or %s idle", durationText(cfg.Session.TTL), durationText(cfg.Session.Idle))},
 		{Name: "Connected apps", Value: fmt.Sprintf("access token %s, sign in again after %s", durationText(cfg.OAuthAccessTTL), durationText(cfg.OAuthRefreshTTL))},
-		{Name: "API keys", Value: fmt.Sprintf("at most %d days", cfg.APIKeyMaxDays)},
+		{Name: "API keys", Value: fmt.Sprintf("%s by default, at most %d days; expiry warned %s ahead", oplimits.Days(cfg.Limits.APIKeyDefaultDays), cfg.APIKeyMaxDays, oplimits.Days(cfg.Limits.APIKeyExpiryWarningDays))},
+		{Name: "Uploads", Value: fmt.Sprintf("archives up to %s and %s files; %d at once per replica", oplimits.Bytes(cfg.Limits.MaxArchiveBytes), oplimits.Count(cfg.Limits.MaxFilesPerSite), cfg.Limits.UploadConcurrency)},
+		{Name: "Teams", Value: fmt.Sprintf("%s per person, %s members each", oplimits.Count(cfg.Limits.MaxTeamsPerPerson), oplimits.Count(cfg.Limits.MaxTeamMembers))},
+		{Name: "Viewers per site", Value: oplimits.Count(cfg.Limits.MaxSiteViewers)},
+		{Name: "Links", Value: fmt.Sprintf("previews work for %s, downloads for %s", oplimits.Duration(cfg.Limits.PreviewLinkTTL), oplimits.Duration(cfg.Limits.ExportLinkTTL))},
 		{Name: "Upload scanning", Value: scanner},
 		{Name: "Envelope encryption", Value: envelope},
 		{Name: "Network access approvals", Value: fmt.Sprint(cfg.NetworkAccessApprovals)},
 		{Name: "Audit log kept", Value: fmt.Sprintf("%d days", cfg.Audit.RetentionDays)},
 		{Name: "Access log kept", Value: fmt.Sprintf("%d days", cfg.Audit.AccessLogRetentionDays)},
-		{Name: "Recently deleted kept", Value: durationText(dbstore.DeletedSiteRetention)},
-		{Name: "Idle-site cleanup", Value: idleText(cfg.IdleCleanup)},
+		{Name: "Recently deleted kept", Value: oplimits.Days(cfg.Limits.DeletedRetentionDays)},
+		{Name: "Search history kept", Value: oplimits.Days(cfg.Limits.SearchTelemetryRetentionDays)},
+		{Name: "Idle-site cleanup", Value: idleText(cfg.IdleCleanup, cfg.Limits.IdleGraceDays)},
 	}
 }
 
@@ -100,7 +105,7 @@ func durationText(d time.Duration) string {
 	}
 }
 
-func idleText(c config.IdleCleanupConfig) string {
+func idleText(c config.IdleCleanupConfig, grace int) string {
 	if c.Days == 0 {
 		return "off"
 	}
@@ -108,5 +113,24 @@ func idleText(c config.IdleCleanupConfig) string {
 	if c.SMTPURL != "" {
 		notice = "dashboard notice and email"
 	}
-	return fmt.Sprintf("sites unused for %d days are marked and move to Recently deleted 30 days later (%s)", c.Days, notice)
+	return fmt.Sprintf("sites unused for %d days are marked and move to Recently deleted %s later (%s)", c.Days, oplimits.Days(grace), notice)
+}
+
+// loadConfig is config.Load plus putting its operational limits in force
+// (oplimits, and the handler's rate limits), which every command that loads
+// the full configuration does before it builds anything that reads them.
+func loadConfig() (config.Config, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return config.Config{}, err
+	}
+	rates := make(map[string]handler.RateLimit, len(cfg.RateLimits))
+	for name, r := range cfg.RateLimits {
+		rates[name] = handler.RateLimit{Burst: r.Burst, Every: r.Every}
+	}
+	if err := handler.ConfigureRateLimits(rates); err != nil {
+		return config.Config{}, err
+	}
+	oplimits.Set(cfg.Limits)
+	return cfg, nil
 }
