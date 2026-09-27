@@ -145,3 +145,23 @@ func TestLegacyTeamAddressesRedirect(t *testing.T) {
 	}
 	wantRedirect(t, w.get("", "https://crew."+accessBase+"/board/"), http.StatusMovedPermanently, "https://board.crew."+accessBase+"/")
 }
+
+// A team's members see every team site on the team's index page, as an
+// owner does; anyone else sees only its listed ones.
+func TestTeamIndexShowsMembersEverySite(t *testing.T) {
+	w := newAccessWorld(t)
+	w.newTeam("crew", "mo", "olly")
+	w.deploy("mo", "/api/collaboration/sites/team-crew/board")
+	w.deploy("mo", "/api/collaboration/sites/team-crew/notes")
+	w.setAccess("mo", "/api/collaboration/sites/team-crew/notes/access", map[string]any{"level": "listed"}, http.StatusOK)
+	index := "https://team-crew." + accessBase + "/"
+
+	member := w.get("olly", index)
+	if member.Code != http.StatusOK || !strings.Contains(member.Body.String(), "board") || !strings.Contains(member.Body.String(), "Everything your team has published") {
+		t.Fatalf("member's team index = %d %s", member.Code, member.Body)
+	}
+	stranger := w.get("vera", index)
+	if stranger.Code != http.StatusOK || strings.Contains(stranger.Body.String(), "board") || !strings.Contains(stranger.Body.String(), "notes") {
+		t.Fatalf("stranger's team index = %d %s", stranger.Code, stranger.Body)
+	}
+}

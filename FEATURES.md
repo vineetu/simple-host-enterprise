@@ -682,7 +682,8 @@ Config names are documented in `docs/configuration.md`; schema in
   pseudonymously and pruned by a background loop. `/showcase` is the gallery
   of listed sites. The root of an owner host (`GET /` on `<owner>.<base>`,
   sign-in required) is the owner's index page, linking to each site's
-  current address: everything to the owner, only listed sites to others, never a
+  current address: everything to the owner (for a team, to each of its
+  members), only listed sites to others, never a
   `specific` one. A pre-v1.3 team address redirects to `team-<name>`.
 - **Status.** Built.
 - **Routes.** `GET /api/search`, `POST /api/search/click`, `GET /showcase`.

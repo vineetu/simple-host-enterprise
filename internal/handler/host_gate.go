@@ -105,6 +105,10 @@ type hostGate struct {
 	// NewHostGate from the database and factored into a field for the same
 	// reason as siteForServing above.
 	ownerIndex ownerIndexData
+	// teamMember reports whether userID belongs to the team ownerID (false
+	// for a person): a member sees a team's index page as its owner does.
+	// Nil counts nobody as a member.
+	teamMember func(ctx context.Context, ownerID, userID string) (bool, error)
 	// recordAccess writes one access_log row, reading SiteFiles' writer at
 	// call time because it is attached after NewHostGate runs. A field for
 	// the same reason as the funcs above: a test asserts what was logged
@@ -154,6 +158,9 @@ func NewHostGate(hosts HostModel, files *SiteFiles, database *sql.DB, signingKey
 			}
 		},
 		ownerIndex: newOwnerIndexData(database),
+		teamMember: func(ctx context.Context, ownerID, userID string) (bool, error) {
+			return db.IsTeamMember(ctx, database, ownerID, userID)
+		},
 		legacyTeam: func(r *http.Request, label string) (string, bool, error) {
 			return db.LegacyTeamName(r.Context(), database, label)
 		},

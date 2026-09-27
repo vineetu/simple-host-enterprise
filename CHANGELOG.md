@@ -20,6 +20,11 @@ backward-compatible. Skills are at 0.14.2 (0.11.0 still works).
   `list_sites` add the sites shared with the caller by name or through a
   team, as `access_role: "viewer"` entries with `shared_via`.
 
+### Owner index
+- A team's index page (`team-<name>.<base>/`) shows its members every team
+  site, as the owner's page does for the owner; others still see only the
+  listed ones.
+
 ### Dashboard
 - Each site links to its address and shows its live version and last update.
 - The Manage panel adds Versions (Make live), Saved data (history with
