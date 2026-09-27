@@ -51,8 +51,9 @@ type SiteHandler struct {
 	// allowedEmailDomains is ALLOWED_EMAIL_DOMAINS, for viewers named by
 	// email (viewers.go).
 	allowedEmailDomains []string
-	// previewKeys sign preview links (preview.go); the session signing keys.
-	previewKeys []auth.SigningKey
+	// signingKeys sign preview links (preview.go) and download links
+	// (site_export.go), each under its own domain string; the session keys.
+	signingKeys []auth.SigningKey
 }
 
 // WithUploadLimits sets the per-owner quota and the malware scanner (nil for
@@ -238,6 +239,7 @@ func (h *SiteHandler) Register(mux *http.ServeMux, authMiddleware, skillVersionM
 	h.registerStateHistoryRoutes(mux, ownerMutation, browserWrite)
 	h.registerMoveRoutes(mux, ownerMutation, browserWrite)
 	h.registerPreviewRoutes(mux, ownerMutation)
+	h.registerExportRoutes(mux, ownerMutation, browserWrite)
 	// Namespace-scoped writes: create, delete and access level in a namespace
 	// the caller owns or belongs to — see requireOwnerOrMember.
 	mux.Handle("POST /api/collaboration/sites/{owner}/{sitename}", browserWrite(ownerUpload(http.HandlerFunc(h.createCollaborationSite))))

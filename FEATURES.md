@@ -49,19 +49,33 @@ Config names are documented in `docs/configuration.md`; schema in
   page lists sessions with Revoke, the person's connected apps with
   Disconnect (section 3), and "Sign out everywhere": every session, and by
   default every API key and connected app, revoked in one transaction
-  (`sign_out_everywhere`), leaving the browser signed out.
+  (`sign_out_everywhere`), leaving the browser signed out. **No access and
+  switch account.** A browser opening a site host whose site does not exist,
+  or that the signed-in person may not open, gets the same 404 page: "This
+  site doesn't exist or isn't shared with you", who they are signed in as
+  (username and email), "Ask the person who sent you the link to share it
+  with you", and Switch account. A signed-out browser is sent to sign in
+  first in both cases, so the page confirms nothing; scripts and agents get
+  the plain 404 (only a refused existing site is audited `access_denied`).
+  Switch account (`GET /auth/switch` on the site or owner host, reserved
+  like `/auth/session`) clears that host's cookie and goes to
+  `/dashboard?switch=<site address>`, which offers "Sign out and switch";
+  `POST /auth/logout` with form field `to` (an https address on this
+  server's owner or site hosts, anything else ignored) signs out and returns
+  there, which asks for sign-in again.
 - **Status.** Built.
 - **Routes.** `GET /auth/login`, `GET /auth/callback`, `POST /auth/logout`,
   `GET /auth/sessions` (sessions page), `POST /auth/sessions/{id}/revoke`,
   `POST /auth/sessions/revoke-all` (sign out everywhere; form field
   `credentials` set = keys and apps too), `GET /auth/handoff`, `GET /api/me`.
-  Host-gate: `GET /auth/session` (redeem, owner and site hosts).
+  Host-gate: `GET /auth/session` (redeem, owner and site hosts),
+  `GET /auth/switch` (switch account, owner and site hosts).
 - **MCP.** `get_account` (→ `GET /api/me`).
 - **Skill.** `references/account-recovery.md` (Sign-in and API keys);
   `SKILL.md` §1–2.
 - **Pages.** `/auth/sessions` (sessions, connected apps, sign out
   everywhere); sign-in prompt on `/dashboard`.
-- **Go.** `internal/handler/auth.go`, `handoff.go`, `user.go`, `origin.go`;
+- **Go.** `internal/handler/auth.go`, `handoff.go`, `user.go`, `origin.go`, `no_access.go`;
   `internal/auth/` (`middleware.go`, `session_cookie.go`, `hostsession.go`);
   `internal/oidc/`; `internal/db/identity.go`, `sessions.go`, `handoff.go`.
 - **DB.** `users` (0001, 0017 email, 0023 OIDC identity), `sessions` (0021),
@@ -199,7 +213,8 @@ Config names are documented in `docs/configuration.md`; schema in
   deploys or saved-data writes for that many days is marked
   (`sites.idle_since`; audited `site_idle_marked` as `system`), its owner or
   every team member sees "Not used lately" on the dashboard (the date it
-  moves, Keep, Download of the live version) and, with `SMTP_URL`, gets an
+  moves, Keep, and Download: the whole-site zip of section 5's download
+  link) and, with `SMTP_URL`, gets an
   email; admins see the list on /admin. A visit, deploy, write or restore
   unmarks it (`site_idle_cleared`); Keep (`POST .../keep`, `{"keep": false}`
   undoes it; `sites.idle_keep`; `site_idle_keep`) takes it out for good.
@@ -287,6 +302,27 @@ Config names are documented in `docs/configuration.md`; schema in
   page (Referer under a verifying preview path) is 403
   `preview_read_only`. Make live is the rollback to that version ("Make
   live" in Versions).
+
+  **Download a site.** The owner or a team member gets a download address
+  (`POST .../export-link`, full-scope key or session; `{url, expires_at}`)
+  that works for 10 minutes with no key or cookie (`GET
+  /api/site-export/{token}`): one zip of `site.json`, `saved-data.json`,
+  `saved-data-history.json`, `versions.json`, `assets.json`, the live
+  version's files under `files/` and each uploaded file under
+  `assets/<id>`, written by the same code as the admin's person export
+  (`writeSiteExport`). The token is HMAC-signed with the session signing
+  keys under its own domain string (a session cookie never verifies as one)
+  and names the site id and the caller; at download the caller must still
+  be active and still own the site or belong to its team, and the site must
+  be the same one (not deleted, not re-created under the name), else 404.
+  Audited `site_export` when downloaded. **Shared with me.** `GET
+  /api/collaboration/sites?include=shared` appends the sites the caller, or
+  a team they are in, is a named viewer of (not their own or their teams',
+  not while the site is `only_me`) as entries with `access_role: "viewer"`
+  and `shared_via` (the team's name, or empty for a grant naming the caller),
+  without analytics, network request or admin decision. It is a listing
+  only: no management route resolves a viewer. MCP `list_sites` always asks
+  for them.
 - **Status.** Built.
 - **Routes.** `POST /api/sites/{sitename}`, `PUT /api/sites/{sitename}`,
   `DELETE /api/sites/{sitename}`, `POST /api/sites/{sitename}/rollback`,
@@ -309,7 +345,9 @@ Config names are documented in `docs/configuration.md`; schema in
   `POST /api/sites/{sitename}/rename`,
   `POST /api/collaboration/sites/{owner}/{sitename}/rename`,
   `POST /api/sites/{sitename}/keep`,
-  `POST /api/collaboration/sites/{owner}/{sitename}/keep`.
+  `POST /api/collaboration/sites/{owner}/{sitename}/keep`,
+  `POST /api/collaboration/sites/{owner}/{sitename}/export-link`,
+  `GET /api/site-export/{token}`.
   Host-gate: every path on the site host `<site>.<owner>.<base>` (hosted
   content, root-served); `/{site}/...` on the owner host (served before the
   owner is ready, redirected after); every path on a v1.2
@@ -319,24 +357,27 @@ Config names are documented in `docs/configuration.md`; schema in
   `preview_version`,
   `rollback_site`, `delete_site`, `list_deleted_sites`, `restore_site`,
   `list_site_files`, `read_site_file` (the last
-  two read a version archive), `transfer_site`, `rename_site`, `keep_site`.
+  two read a version archive), `transfer_site`, `rename_site`, `keep_site`,
+  `export_site` (returns the download address).
 - **Skill.** `SKILL.md` §3, Canonical deployment workflow, Core collaboration
   and conflict rules; `references/packaging-and-validation.md`,
   `references/collaboration.md` §1–5 and §8, `references/frameworks.md`;
   `skills/fix-paths-for-subpath-hosting/`, `skills/simple-host-builder/`.
-- **Pages.** `/dashboard` "Your sites" (Manage: Versions with Preview and Make live; Rename, Move to a team, both off while an admin's restriction stands) and
-  "Recently deleted", "Not used lately" (idle cleanup); `/admin` "Recently
+- **Pages.** `/dashboard` "Your sites" (each links to its address with its live version and last update; Manage: Versions with
+  Preview and Make live, Download site, Rename, Move to a team, Delete with the site name typed back; Rename and Move are off while an admin's
+  restriction stands), "Shared with me", "Recently deleted" and "Not used lately" (idle cleanup); `/admin` "Recently
   deleted", "Not used lately".
-- **Go.** `internal/handler/site.go`, `site_restore.go`, `collaboration.go`, `site_mutation.go`, `preview.go`, `dashboard_versions.go`,
-  `site_move.go`, `admin_move.go`, `idle_cleanup.go`, `smtp_mailer.go`,
+- **Go.** `internal/handler/site.go`, `site_restore.go`, `collaboration.go`, `site_mutation.go`, `preview.go`, `dashboard.go`,
+  `site_move.go`, `admin_move.go`, `site_export.go`, `admin_erase.go` (`writeSiteExport`), `idle_cleanup.go`, `smtp_mailer.go`,
   `upload_limits.go`, `serve.go`, `serve_self_traffic.go`, `host_gate.go`, `host.go`, `names.go`,
   `security.go`; `internal/tarball/`; `internal/scan/clamd.go`;
-  `internal/db/queries.go`, `collaboration.go`, `quota.go`, `site_move.go`, `deleted_sites.go`,
-  `idle.go`; `internal/config/idle.go`.
+  `internal/db/queries.go`, `collaboration.go` (`ListSharedSites`), `quota.go`, `site_move.go`, `deleted_sites.go`,
+  `erase.go` (`SiteExportQueries`), `idle.go`; `internal/config/idle.go`.
 - **DB.** `sites`, `versions` (0001; 0012 `versions.uploaded_by`; 0037
   `versions.size_bytes`), 0018 owner label uniqueness, `site_redirects`
   (0043, backward-compatible), 0044 `sites.deleted_at`/`deleted_by`,
-  0051 `sites.idle_since`/`idle_keep` (backward-compatible).
+  0051 `sites.idle_since`/`idle_keep`, 0052 `site_viewers_principal_idx`
+  (Shared with me) (both backward-compatible).
 - **Config.** `PUBLIC_BASE_URL`, `RESERVED_LABELS`, `QUOTA_MAX_SITES`,
   `QUOTA_MAX_BYTES`, `QUOTA_MAX_VERSIONS`, `CLAMD_ADDR`, `CLAMD_TIMEOUT`,
   `IDLE_CLEANUP_DAYS`, `SMTP_URL`, `SMTP_FROM`.
@@ -465,7 +506,7 @@ Config names are documented in `docs/configuration.md`; schema in
 - **MCP.** `find_users`, `list_site_viewers`, `grant_site_viewer`,
   `revoke_site_viewer`.
 - **Skill.** `references/collaboration.md` §7 (Named viewers).
-- **Pages.** `/dashboard` viewers panel.
+- **Pages.** `/dashboard` viewers panel; "Shared with me" (section 5).
 - **Go.** `internal/handler/viewers.go`, `host_gate.go`
   (`serveSiteHost`, `serveOwnerPath`, `serveLegacySiteHost`), `host.go`
   (`SplitSiteLabel`);
@@ -511,7 +552,11 @@ Config names are documented in `docs/configuration.md`; schema in
   `leave_team`.
 - **Skill.** `references/teams.md`; `references/account-recovery.md` (A team
   is not an account).
-- **Pages.** `/admin` orphan-team delete.
+- **Pages.** `/dashboard` "Teams": create a team, and per team its members
+  (pending ones marked), add by username or email, remove, Leave (as the
+  last active member, the server's `confirm_team_delete` is put to the person
+  and the team name typed back), Delete (team name typed back); `/admin`
+  orphan-team delete.
 - **Go.** `internal/handler/team.go` (`teamName`), `admin.go`
   (`deleteOrphanTeam`), `auth.go` (handle prefix), `owner_index.go`,
   `host_gate.go` (`currentOwnerLabel`), `grant_emails.go`;
@@ -703,17 +748,25 @@ Config names are documented in `docs/configuration.md`; schema in
 - **What.** `/dashboard` on the base host: sign-in prompt when signed out;
   when signed in, API keys (mint/list/revoke; a new key stays on screen
   until dismissed), "Your sites" across the
-  person's and their teams' namespaces with access level (and the last
+  person's and their teams' namespaces, each name linking to the site's
+  address with its live version and last update, with access level (and the last
   admin decision: declined, revoked or restricted, with the note), viewers, assets,
-  rename and hand over (section 5), visitor counts, each namespace's usage against its quota (sites, stored
-  bytes; the same numbers `GET /api/me` returns as `usage`), "Recently
+  versions with Make live (rollback with the listed ETag; a 412 says to
+  reload), saved-data history with Restore (the newest is marked current),
+  Download site (section 5), rename and hand over (section 5), Delete (the
+  site name typed back; it goes to Recently deleted), visitor counts, each namespace's usage against its quota (sites, stored
+  bytes; the same numbers `GET /api/me` returns as `usage`), "Teams"
+  (section 9), "Shared with
+  me" (section 5; hidden when empty), "Recently
   deleted" (the person's and their teams' sites deleted in the last 30 days,
   each with Restore; hidden when empty), "Not used lately" (sites the idle
   cleanup marked, with the date each moves, Keep and Download; section 5;
   hidden when none), and a link to sessions. Key rows show the key's last
   four ("earlier key" before 0050), last used, and "expires soon"; a
-  site's Activity names who made each change (section 12). Calls the JSON routes of sections
-  2, 5, 7, 8, 11 and 12 with the session cookie.
+  site's Activity names who made each change (section 12). With no
+  sites, the list shows the connect step instead: the `/mcp` address,
+  `plugin.zip` and the install page. Calls the JSON routes of sections
+  2, 5, 7, 8, 9, 10, 11 and 12 with the session cookie.
 - **Status.** Built.
 - **Routes.** `GET /dashboard`.
 - **MCP.** None.
@@ -731,14 +784,18 @@ Config names are documented in `docs/configuration.md`; schema in
   was ready, carry owner-host URLs, which redirect; each site's next deploy
   reindexes it); clicks and impressions are recorded
   pseudonymously and pruned by a background loop. `/showcase` is the gallery
-  of listed sites. The root of an owner host (`GET /` on `<owner>.<base>`,
+  of listed sites; its search box filters by owner and site name as you type
+  and adds the sites `GET /api/search` finds by the words on their pages
+  (after a pause in typing, or on submit; the name filter alone when search
+  fails). MCP `search_sites` is the same search for agents. The root of an owner host (`GET /` on `<owner>.<base>`,
   sign-in required) is the owner's index page, linking to each site's
-  current address: everything to the owner, only listed sites to others, never a
+  current address: everything to the owner (for a team, to each of its
+  members), only listed sites to others, never a
   `specific` one. A pre-v1.3 team address redirects to `team-<name>`.
 - **Status.** Built.
 - **Routes.** `GET /api/search`, `POST /api/search/click`, `GET /showcase`.
   Host-gate: `GET /` on an owner host.
-- **MCP.** None.
+- **MCP.** `search_sites`.
 - **Skill.** `references/state-and-ai.md` (Public search).
 - **Pages.** `/showcase`; owner-host index.
 - **Go.** `internal/handler/search.go`, `showcase.go`, `owner_index.go`;

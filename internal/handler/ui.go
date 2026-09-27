@@ -28,7 +28,11 @@ const (
 	skillBundleName      = "simple-host-skills"
 	skillBundleURL       = "/skills.zip"
 	// skillReleaseType is hand-set, so it has to move with the version above
-	// it. 0.14.2 documents why a key was refused (the 401 code), the
+	// it. 0.15.0 documents holding a version back to preview it
+	// (publish=false, preview_version), site_activity, managing uploaded files
+	// (list_site_assets, delete_site_asset), downloading a whole site
+	// (export_site, export-link), sites shared with the caller (list_sites
+	// viewer entries), search_sites, why a key was refused (the 401 code), the
 	// X-Key-Expires warning, and keep_site for the idle cleanup; 0.14.1 corrects the hand-over text (only into a team the caller
 	// is in; a restricted site cannot be renamed or moved); 0.14.0 documents handing a site over and renaming it
 	// (transfer_site, rename_site), restoring a deleted site (list_deleted_sites,
@@ -43,7 +47,7 @@ const (
 	// approval; 0.11.0 stays the minimum
 	// (notice_middleware.go), since no route an 0.11.0 skill calls went
 	// away. An agent reads this to decide how loudly to mention the update.
-	skillReleaseType     = "patch"
+	skillReleaseType     = "minor"
 	skillReleaseNotesURL = "/changelog.html"
 
 	agentSkillsDiscoverySchema = "https://schemas.agentskills.io/discovery/0.2.0/schema.json"

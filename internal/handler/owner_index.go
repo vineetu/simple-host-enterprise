@@ -140,11 +140,24 @@ func (g *hostGate) serveOwnerIndex(w http.ResponseWriter, r *http.Request, label
 		http.Error(w, "failed to load sites", http.StatusInternalServerError)
 		return
 	}
-	entries := ownerIndexVisible(owner, sites, restricted, ownerUserID == userID, g.hosts)
+	// A team's members see its index as an owner does: they can manage
+	// every one of its sites on the dashboard already.
+	isOwner := ownerUserID == userID
+	if !isOwner && g.teamMember != nil {
+		member, err := g.teamMember(r.Context(), ownerUserID, userID)
+		if err != nil {
+			log.Printf("host gate: owner index %q membership: %v", owner, err)
+			status = http.StatusInternalServerError
+			http.Error(w, "failed to load sites", http.StatusInternalServerError)
+			return
+		}
+		isOwner = member
+	}
+	entries := ownerIndexVisible(owner, sites, restricted, isOwner, g.hosts)
 
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	body := renderOwnerIndex(owner, entries, ownerUserID == userID)
+	body := renderOwnerIndex(owner, entries, isOwner)
 	w.Header().Set("Content-Length", fmt.Sprint(len(body)))
 	w.WriteHeader(http.StatusOK)
 	written = int64(len(body))
@@ -220,7 +233,9 @@ func renderOwnerIndex(owner string, entries []ownerIndexEntry, isOwner bool) str
 <h1>`)
 	b.WriteString(html.EscapeString(owner))
 	b.WriteString("</h1>\n<p class=\"sub\">")
-	if isOwner {
+	if isOwner && strings.HasPrefix(owner, db.TeamPrefix) {
+		b.WriteString("Everything your team has published.")
+	} else if isOwner {
 		b.WriteString("Everything you have published.")
 	} else {
 		b.WriteString("Shared work by ")

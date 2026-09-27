@@ -6,7 +6,10 @@ release, commit and schema.
 
 ## Unreleased
 
-No schema change. Skills are at 0.14.2 (0.11.0 still works).
+Schema 0052 (from 0049), all three backward-compatible: nullable
+`api_keys.last4` (0050), `sites.idle_since` and `sites.idle_keep` (0051), an
+index on `site_viewers (principal_id)` (0052). Run `simple-host migrate`
+before the new image. Skills are at 0.15.0 (0.11.0 still works).
 
 ### Sites
 - Preview before live. An update sent with `?publish=false` (MCP
@@ -15,27 +18,31 @@ No schema change. Skills are at 0.14.2 (0.11.0 still works).
   it is audited as `site_update` with `published: false`. A create refuses
   it (`publish_required`). The owner or a team member opens any kept version
   through a private link that lasts an hour (`GET .../versions/{version}/preview`,
-  MCP `preview_version`, "Preview" in the Manage panel's new Versions list):
+  MCP `preview_version`, "Preview" in the Manage panel's Versions list):
   it still needs their own sign-in, nobody else can open it whatever the
   site's access level, it is never indexed or cached, and saves from it are
   refused (`preview_read_only`). "Make live" (and `rollback_site`) publishes
   it. Version lists now say which version is `live`.
+- Download a whole site: the owner or a team member gets a 10-minute
+  download address (`POST .../export-link`, MCP `export_site`, "Download
+  site" in the dashboard's Manage panel) for one zip of the live files, the
+  saved data and its history, the version list and the uploaded files. The
+  address needs no sign-in; the person who asked must still own the site or
+  be in its team when it is opened. Audited as `site_export`.
+- Shared with me: `GET /api/collaboration/sites?include=shared` and MCP
+  `list_sites` add the sites shared with the caller by name or through a
+  team, as `access_role: "viewer"` entries with `shared_via`.
 
 ### Agents
 - `list_site_assets` and `delete_site_asset`: list and delete a site's
   uploaded files from a chat app (delete asks first). The storage-quota hint
   now points at them.
 - `site_activity`: one site's versions (who published each, and which is
-  live), its recent recorded changes with who made them, and its visit
-  counts, in one read. A part the credential cannot read becomes a sentence.
-
-### Audit
-- `GET /api/audit` events carry `actor`, the actor's username.
+  live), its recent recorded changes with who made them (`actor_name`, the
+  same rule as the dashboard's Activity), and its visit counts, in one read.
+  A part the credential cannot read becomes a sentence.
   `GET /api/access?summary=counts` returns the counts shape under
   `ACCESS_LOG_VISIBILITY=owner` too.
-Schema 0051 (from 0049; both backward-compatible: nullable `api_keys.last4`
-in 0050; `sites.idle_since` and `sites.idle_keep` in 0051). Skills are at
-0.14.2 (0.11.0 still works).
 
 ### API keys
 - A new key keeps its own last four characters; the dashboard shows
@@ -80,6 +87,38 @@ in 0050; `sites.idle_since` and `sites.idle_keep` in 0051). Skills are at
   and `from`/`to` also take a `YYYY-MM-DD` date. A site's Activity on the
   dashboard shows who made each change: owners and team members see the
   names of themselves and fellow members, never a visitor's.
+
+### Access
+- Opening a site you can't see now shows a page instead of a bare 404: "This
+  site doesn't exist or isn't shared with you", who you are signed in as,
+  and Switch account (sign out and back in as someone else, then return to
+  the site). A missing site and one not shared with you look the same, and a
+  signed-out browser is asked to sign in first for both; scripts and agents
+  still get a plain 404.
+
+### Search
+- The `/showcase` search box also finds sites by the words on their pages
+  (full-text search), not only by owner and site name; the name match still
+  answers as you type and on its own if search is unavailable.
+- MCP `search_sites`: the same full-text search for agents.
+
+### Owner index
+- A team's index page (`team-<name>.<base>/`) shows its members every team
+  site, as the owner's page does for the owner; others still see only the
+  listed ones.
+
+### Dashboard
+- Each site links to its address and shows its live version and last update.
+- The Manage panel adds Versions (Preview and Make live), Saved data (history with
+  Restore), Download site, and Delete (type the site name; it goes to
+  Recently deleted).
+- A "Shared with me" section lists the sites shared with you.
+- A "Teams" section: create a team, see its members (people not signed in
+  yet included), add and remove them, leave, and delete a team (type its
+  name). Leaving as the last active member says how many sites go with the
+  team and asks for the name first.
+- With no sites yet, the list shows how to connect an AI app: the `/mcp`
+  address, `plugin.zip` and the install page.
 
 ## v1.4.0 — 2026-09-27
 

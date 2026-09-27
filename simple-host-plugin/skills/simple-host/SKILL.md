@@ -1,6 +1,6 @@
 ---
 name: simple-host
-description: Deploy and collaborate on static websites in Simple Host. Use when an agent needs to get the user signed in and holding an API key, validate and package a local site, choose the namespace a site is published under, create or update a site, choose who can open it, resolve owned/team sites, download an exact retained artifact, deploy with ETag conflict protection, create a team or manage its members, restore saved data, list versions, roll back, delete, or restore a recently deleted site.
+description: Deploy and collaborate on static websites in Simple Host. Use when an agent needs to get the user signed in and holding an API key, validate and package a local site, choose the namespace a site is published under, create or update a site, choose who can open it, resolve owned/team sites, download an exact retained artifact or a whole site with its saved data, deploy with ETag conflict protection, create a team or manage its members, restore saved data, list versions, roll back, delete, or restore a recently deleted site.
 ---
 
 # Simple Host
@@ -84,6 +84,9 @@ separately when relevant:
   open it, restore its saved data, and delete it.
 - **Who can open it:** `access` is `only_me`, `specific`, `company`, `listed`,
   or `network`; `network_request` shows a request waiting for an admin.
+- **Shared with the user:** add `?include=shared` to also list the sites
+  other people shared with them (`access_role` `viewer`, `shared_via`). A
+  viewer entry can be opened, never changed: `list_sites` includes them.
 
 `member` means the owner is a team and you are in it. Team names begin with
 `team-` (`team-sales`). A team is a namespace that owns sites exactly as a

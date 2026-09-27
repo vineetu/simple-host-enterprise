@@ -826,13 +826,23 @@ paths:
       description: |
         Returns canonical sites the authenticated user owns or that belong to
         a team the user is in. Legacy `GET /api/sites` remains owned-only for
-        normal users.
+        normal users. With `include=shared`, the sites the user, or a team
+        they are in, is a named viewer of follow, as entries with
+        `access_role: viewer` and `shared_via`; a viewer entry is a listing
+        only, and no management route acts on it.
       tags: [Collaboration]
       security:
         - apiKey: []
       parameters:
         - $ref: '#/components/parameters/SkillVersion'
         - $ref: '#/components/parameters/SimpleHostClient'
+        - name: include
+          in: query
+          required: false
+          description: '`shared` adds the sites shared with the caller (Shared with me).'
+          schema:
+            type: string
+            enum: [shared]
       responses:
         '200':
           description: Owned and team sites
@@ -1657,6 +1667,69 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /api/collaboration/sites/{owner}/{sitename}/export-link:
+    post:
+      summary: Get a download address for a whole site
+      description: For the site's owner or a member of the owning team. Returns an address that works for 10 minutes with no key or cookie and downloads one zip of the site. Full-scope key or session.
+      tags: [Sites]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+      responses:
+        '200':
+          description: The download address
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url, expires_at]
+                properties:
+                  url:
+                    type: string
+                    description: GET it to download the zip; it carries its own credential, so share it with nobody.
+                  expires_at:
+                    type: string
+                    format: date-time
+        '400':
+          $ref: '#/components/responses/ManagementBadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/site-export/{token}:
+    get:
+      summary: Download a whole site
+      description: The address `export-link` returns. One zip of `site.json`, `saved-data.json`, `saved-data-history.json`, `versions.json`, `assets.json`, the live version's files under `files/` and each uploaded file under `assets/<id>`. No key or cookie; the person who asked for the link must still own the site or be in its team, and the site must be the same one. Audited as `site_export`.
+      tags: [Sites]
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The zip
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: The link is invalid or expired, or its site is gone or no longer the caller's.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
 
   /api/access:
     get:
@@ -2899,7 +2972,11 @@ components:
           type: string
         access_role:
           type: string
-          enum: [owner, member]
+          enum: [owner, member, viewer]
+          description: '`viewer` appears only with `include=shared`: the site is shared with the caller, who can open it and nothing more.'
+        shared_via:
+          type: string
+          description: On a viewer entry only, the team whose viewer grant lets the caller open the site; empty when the grant names the caller.
         active_version:
           type: integer
           minimum: 1

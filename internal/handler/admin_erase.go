@@ -18,6 +18,7 @@ import (
 
 	"github.com/vsriram/simple-host/internal/audit"
 	db "github.com/vsriram/simple-host/internal/db"
+	"github.com/vsriram/simple-host/internal/storage"
 )
 
 // Data subject requests, run by an admin for a disabled person: export
@@ -137,27 +138,42 @@ func (h *AdminHandler) writePersonExport(ctx context.Context, zw *zip.Writer, pe
 		return err
 	}
 	for _, site := range sites {
-		dir := "sites/" + site.Name + "/"
-		for _, part := range db.SiteExportQueries {
-			if err := writeJSONEntry(dir+part.File, part.Query, site.ID); err != nil {
-				return err
-			}
-		}
-		if err := h.exportSiteFiles(ctx, zw, site, dir); err != nil {
+		if err := writeSiteExport(ctx, zw, h.database, h.store, site.ID, site.ActiveVersion, "sites/"+site.Name+"/"); err != nil {
 			return fmt.Errorf("site %s: %w", site.Name, err)
 		}
 	}
 	return h.exportActorAudit(ctx, zw, person.ID)
 }
 
+// writeSiteExport adds one site under dir: its record, current saved data
+// and saved-data history, version list and asset list (db.SiteExportQueries),
+// then its files. The admin's person export and an owner's own site download
+// (site_export.go) both write a site this way.
+func writeSiteExport(ctx context.Context, zw *zip.Writer, database *sql.DB, store *storage.Store, siteID string, activeVersion int, dir string) error {
+	for _, part := range db.SiteExportQueries {
+		body, err := db.QueryJSON(ctx, database, part.Query, siteID)
+		if err != nil {
+			return fmt.Errorf("%s: %w", part.File, err)
+		}
+		f, err := zw.Create(dir + part.File)
+		if err != nil {
+			return err
+		}
+		if _, err := f.Write(body); err != nil {
+			return err
+		}
+	}
+	return exportSiteFiles(ctx, zw, database, store, siteID, activeVersion, dir)
+}
+
 // exportSiteFiles adds the live version's files under dir/files/ and each
 // live asset under dir/assets/<id> (assets.json names them).
-func (h *AdminHandler) exportSiteFiles(ctx context.Context, zw *zip.Writer, site db.OwnedSite, dir string) error {
-	if h.store == nil {
+func exportSiteFiles(ctx context.Context, zw *zip.Writer, database *sql.DB, store *storage.Store, siteID string, activeVersion int, dir string) error {
+	if store == nil {
 		return nil
 	}
-	if site.ActiveVersion > 0 {
-		lease, err := h.store.OpenVersion(ctx, site.ID, site.ActiveVersion)
+	if activeVersion > 0 {
+		lease, err := store.OpenVersion(ctx, siteID, activeVersion)
 		if err != nil {
 			return err
 		}
@@ -170,12 +186,12 @@ func (h *AdminHandler) exportSiteFiles(ctx context.Context, zw *zip.Writer, site
 			return err
 		}
 	}
-	assets, err := db.ListAssets(ctx, h.database, site.ID)
+	assets, err := db.ListAssets(ctx, database, siteID)
 	if err != nil {
 		return err
 	}
 	for _, asset := range assets {
-		lease, err := h.store.OpenAsset(ctx, site.ID, asset.ID, asset.Size, asset.SHA256)
+		lease, err := store.OpenAsset(ctx, siteID, asset.ID, asset.Size, asset.SHA256)
 		if err != nil {
 			return fmt.Errorf("asset %s: %w", asset.ID, err)
 		}

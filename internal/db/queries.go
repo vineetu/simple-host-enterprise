@@ -964,3 +964,10 @@ func GetActiveSiteVersion(ctx context.Context, db *sql.DB, siteID string) (Versi
 	)
 	return version, err
 }
+
+// UserLabel returns the username and email (empty when unknown) of userID,
+// for telling a signed-in person which account they are using.
+func UserLabel(ctx context.Context, q Querier, userID string) (username, email string, err error) {
+	err = q.QueryRowContext(ctx, `SELECT username, COALESCE(email, '') FROM users WHERE id = $1::uuid`, userID).Scan(&username, &email)
+	return username, email, err
+}

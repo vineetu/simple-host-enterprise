@@ -29,7 +29,7 @@
 set -u
 
 BASE="${BASE:-}"
-SKILL_VERSION="${SKILL_VERSION:-0.14.2}"
+SKILL_VERSION="${SKILL_VERSION:-0.15.0}"
 CERT_WAIT="${CERT_WAIT:-300}"
 
 die() { echo "smoke-remote: $*" >&2; exit 2; }

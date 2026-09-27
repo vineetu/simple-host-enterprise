@@ -81,14 +81,6 @@ func parsePreviewToken(keys []auth.SigningKey, siteID, token string) (version in
 	return 0, time.Time{}, false
 }
 
-// WithPreviewKeys sets the keys preview links are signed with (the session
-// signing keys) and returns h for chaining. Without them the preview route
-// answers 503.
-func (h *SiteHandler) WithPreviewKeys(keys []auth.SigningKey) *SiteHandler {
-	h.previewKeys = keys
-	return h
-}
-
 func (h *SiteHandler) registerPreviewRoutes(mux *http.ServeMux, ownerMutation func(http.Handler) http.Handler) {
 	mux.Handle("GET /api/collaboration/sites/{owner}/{sitename}/versions/{version}/preview", ownerMutation(http.HandlerFunc(h.previewVersion)))
 }
@@ -115,7 +107,7 @@ func (h *SiteHandler) previewVersion(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid version"})
 		return
 	}
-	if len(h.previewKeys) == 0 {
+	if len(h.signingKeys) == 0 {
 		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "previews are not available on this server"})
 		return
 	}
@@ -136,7 +128,7 @@ func (h *SiteHandler) previewVersion(w http.ResponseWriter, r *http.Request) {
 	}
 	expires := time.Now().Add(previewTTL).Truncate(time.Second).UTC()
 	writeJSON(w, http.StatusOK, previewResponse{
-		URL:       base + previewSegment + "/" + previewToken(h.previewKeys, access.Site.ID, number, expires) + "/",
+		URL:       base + previewSegment + "/" + previewToken(h.signingKeys, access.Site.ID, number, expires) + "/",
 		ExpiresAt: expires,
 		Version:   number,
 		Live:      number == access.Site.ActiveVersion,

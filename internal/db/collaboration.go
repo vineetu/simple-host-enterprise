@@ -261,3 +261,60 @@ func LockSiteCollaboration(ctx context.Context, tx *sql.Tx, ownerID, siteName st
 	_, err := tx.ExecContext(ctx, lockSiteCollaborationQuery, ownerID, siteName)
 	return err
 }
+
+// SharedSite is a site the actor is a named viewer of, directly or through a
+// team they are in, without owning it or belonging to its team.
+type SharedSite struct {
+	Site          Site
+	OwnerUsername string
+	// SharedVia is the team the viewer grant names, or "" when it names the
+	// actor directly (a direct grant wins when both exist).
+	SharedVia string
+}
+
+const listSharedSitesQuery = `
+	WITH principals AS (
+		SELECT $1::uuid AS id
+		UNION
+		SELECT team_id FROM team_members WHERE user_id = $1::uuid
+	), grants AS (
+		SELECT DISTINCT ON (sv.site_id)
+			sv.site_id,
+			CASE WHEN sv.principal_id = $1::uuid THEN '' ELSE via.username END AS via
+		FROM site_viewers sv
+		JOIN principals p ON p.id = sv.principal_id
+		JOIN users via ON via.id = sv.principal_id
+		ORDER BY sv.site_id, (sv.principal_id = $1::uuid) DESC, via.username
+	)
+	SELECT s.id::text, s.user_id::text, s.name, s.active_version, s.public,
+		s.created_at, s.updated_at, owner.username, s.access, g.via
+	FROM grants g
+	JOIN sites s ON s.id = g.site_id
+	JOIN users owner ON owner.id = s.user_id
+	WHERE s.deleted_at IS NULL
+	  AND s.access <> 'only_me'
+	  AND s.user_id <> $1::uuid
+	  AND NOT EXISTS (SELECT 1 FROM team_members tm WHERE tm.team_id = s.user_id AND tm.user_id = $1::uuid)
+	ORDER BY owner.username, s.name, s.id
+`
+
+// ListSharedSites returns the sites actorID can open because they, or a team
+// they are in, are named as a viewer. A site set back to only_me is left
+// out: the grant is kept but opens nothing until the level changes.
+func ListSharedSites(ctx context.Context, q Querier, actorID string) ([]SharedSite, error) {
+	rows, err := q.QueryContext(ctx, listSharedSitesQuery, actorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var sites []SharedSite
+	for rows.Next() {
+		var s SharedSite
+		if err := rows.Scan(&s.Site.ID, &s.Site.UserID, &s.Site.Name, &s.Site.ActiveVersion, &s.Site.Public,
+			&s.Site.CreatedAt, &s.Site.UpdatedAt, &s.OwnerUsername, &s.Site.Access, &s.SharedVia); err != nil {
+			return nil, err
+		}
+		sites = append(sites, s)
+	}
+	return sites, rows.Err()
+}

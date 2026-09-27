@@ -52,6 +52,7 @@ function site(name, filterText, ranks) {
       'data-rank-newest': String(ranks.newest),
       'data-rank-owner': String(ranks.owner),
       'data-rank-name': String(ranks.name),
+      'data-site-key': filterText.replace(' ', '/'),
     },
     getAttribute(key) { return this.attrs[key]; },
   };
@@ -93,6 +94,16 @@ global.document = {
   },
 };
 
+// The company search: "pricing" is on bob's roadmap page; anything else
+// matches nothing by content. Calls are recorded.
+const searches = [];
+global.fetch = function (url) {
+  searches.push(url);
+  const q = new URL(url, 'https://x.test').searchParams.get('q');
+  const results = q === 'pricing' ? [{ owner: 'bob', site: 'roadmap' }] : [];
+  return Promise.resolve({ ok: true, json() { return Promise.resolve({ results }); } });
+};
+
 new Function(process.env.SHOWCASE_FILTER_SCRIPT)();
 
 const names = () => list.order.map((s) => s.name);
@@ -116,7 +127,7 @@ input.value = 'missing';
 let prevented = false;
 form.listeners.submit({ preventDefault() { prevented = true; } });
 assert.equal(prevented, true);
-assert.equal(count.textContent, 'No sites match this filter.');
+assert.equal(count.textContent, 'No sites match this search.');
 
 clear.listeners.click();
 assert.equal(input.value, '');
@@ -166,3 +177,33 @@ input.value = 'atlas';
 input.listeners.input();
 assert.match(count.textContent, /^1 of 3 sites/, 'visible count updates synchronously');
 assert.notEqual(announcer.textContent, count.textContent, 'announcement is deferred, not immediate');
+
+// --- full-text search ---
+(async () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  // Submitting asks the search index at once; a site found only by the words
+  // on its pages shows beside the name matches.
+  input.value = 'pricing';
+  form.listeners.submit({ preventDefault() {} });
+  assert.match(searches[searches.length - 1], /^\/api\/search\?q=pricing&group=site&limit=50$/);
+  assert.equal(bob.hidden, true, 'no name matches pricing before the search answers');
+  await settle();
+  await settle();
+  assert.equal(bob.hidden, false, 'the full-text match is shown');
+  assert.equal(alice.hidden, true);
+  assert.equal(carol.hidden, true);
+
+  // Search failing leaves the name filter working on its own.
+  global.fetch = () => Promise.reject(new Error('down'));
+  input.value = 'carol';
+  form.listeners.submit({ preventDefault() {} });
+  await settle();
+  await settle();
+  assert.equal(carol.hidden, false);
+  assert.equal(bob.hidden, true);
+
+  // Clearing drops the search results with the text.
+  clear.listeners.click();
+  assert.deepEqual(allSites.map((s) => s.hidden), [false, false, false]);
+  process.exit(0);
+})().catch((err) => { console.error(err); process.exit(1); });

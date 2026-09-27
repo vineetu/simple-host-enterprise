@@ -8,7 +8,6 @@ import (
 	"html"
 	"log"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -248,16 +247,30 @@ func idleNoticeHTML(ctx context.Context, database *sql.DB, user *db.User) string
   <p class="login-copy">Nobody has visited or updated these sites for a while. Each moves to Recently deleted on the date shown (and can be restored for 30 days after that). Keep it, download a copy, or just use it.</p>
   <div class="rank-list" role="region" aria-label="Sites not used lately">`)
 	for _, s := range sites {
-		archive := fmt.Sprintf("/api/collaboration/sites/%s/%s/versions/%d/archive", url.PathEscape(s.Owner), url.PathEscape(s.Name), s.ActiveVersion)
 		fmt.Fprintf(&b, `<div class="rank-row idle-row"><span class="rank-name">%s/%s <span class="rank-sub">Will move to Recently deleted on %s · last used %s</span></span>
-  <button type="button" class="btn-login idle-keep" data-owner="%s" data-site="%s">Keep</button> <a class="btn-reject" href="%s" download>Download</a></div>`,
+  <button type="button" class="btn-login idle-keep" data-owner="%s" data-site="%s">Keep</button> <button type="button" class="btn-reject idle-download" data-owner="%s" data-site="%s">Download</button></div>`,
 			html.EscapeString(s.Owner), html.EscapeString(s.Name),
 			localTimeHTML(s.DeleteOn(), "date"), localTimeHTML(s.LastUsed, "date"),
-			html.EscapeString(s.Owner), html.EscapeString(s.Name), html.EscapeString(archive))
+			html.EscapeString(s.Owner), html.EscapeString(s.Name), html.EscapeString(s.Owner), html.EscapeString(s.Name))
 	}
 	b.WriteString(`</div>
 </section>
 <script>
+// Download is the whole-site zip (files, saved data and its history,
+// versions, uploaded files) through a 10-minute link (site_export.go).
+document.querySelectorAll('.idle-download').forEach(function(button){
+  button.addEventListener('click', function(){
+    button.disabled = true;
+    var path = '/api/collaboration/sites/' + encodeURIComponent(button.getAttribute('data-owner')) + '/' + encodeURIComponent(button.getAttribute('data-site')) + '/export-link';
+    fetch(path, {method: 'POST', credentials: 'same-origin', headers: {'X-Simple-Host-Client': 'control-ui'}})
+      .then(function(r){ return r.json().then(function(b){
+        button.disabled = false;
+        if (!r.ok || !b.url) throw new Error();
+        location.href = b.url;
+      }); })
+      .catch(function(){ button.disabled = false; button.textContent = 'Try again'; });
+  });
+});
 document.querySelectorAll('.idle-keep').forEach(function(button){
   button.addEventListener('click', function(){
     button.disabled = true;

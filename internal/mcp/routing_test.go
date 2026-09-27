@@ -22,6 +22,7 @@ func appRoutes(t *testing.T) *http.ServeMux {
 	handler.NewSiteHandler(nil, nil, "", handler.HostModel{}, nil).Register(mux, passthrough, passthrough)
 	handler.NewTeamHandler(nil, nil).Register(mux, passthrough, passthrough, handler.HostModel{}, "")
 	handler.NewAuditHandler(nil, nil, "").Register(mux, passthrough, passthrough)
+	handler.NewSearchHandler(nil, nil, handler.CookiePolicy{}).Register(mux, passthrough, passthrough)
 	return mux
 }
 
@@ -83,6 +84,8 @@ var fixtures = []fixture{
 	{"list_site_assets", []map[string]any{{"owner": "alice", "site": "demo"}}},
 	{"delete_site_asset", []map[string]any{{"owner": "alice", "site": "demo", "id": "0f8c"}}},
 	{"list_deleted_sites", []map[string]any{{}}},
+	{"export_site", []map[string]any{{"owner": "alice", "site": "demo"}}},
+	{"search_sites", []map[string]any{{"query": "pricing"}, {"query": "pricing model", "limit": float64(5)}}},
 	{"restore_site", []map[string]any{
 		{"site": "demo"},
 		{"site": "demo", "owner": "alice"},
