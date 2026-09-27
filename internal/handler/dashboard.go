@@ -233,7 +233,8 @@ func (h *DashboardHandler) optionalUser(r *http.Request) *db.User {
 // browser sends the session cookie and the same Origin header
 // originCheckMiddleware requires. The plaintext key is shown exactly once,
 // in a block shaped for the account-recovery skill's "paste this back to
-// your agent" step.
+// your agent" step, and stays on screen until dismissed: minting never
+// reloads the page (the new row is added in place).
 const dashboardScript = `<script>
 (function(){
   var mintButton = document.getElementById('mint-button');
@@ -241,6 +242,65 @@ const dashboardScript = `<script>
   var resultBox = document.getElementById('mint-result');
   var list = document.getElementById('key-list');
   if (!mintButton) return;
+
+  function block(text) {
+    var pre = document.createElement('pre');
+    pre.style.cssText = 'white-space:pre-wrap;word-break:break-all;background:var(--ps-blue-50);padding:12px;border-radius:4px';
+    pre.textContent = text;
+    return pre;
+  }
+  function para(text, strong) {
+    var p = document.createElement('p');
+    if (strong) { var s = document.createElement('strong'); s.textContent = text; p.appendChild(s); } else { p.textContent = text; }
+    return p;
+  }
+
+  // showMinted puts the new key and the paste-back block in the result box
+  // until "Done" is pressed.
+  function showMinted(key, payload) {
+    resultBox.innerHTML = '';
+    resultBox.appendChild(para('Copy this now. It will not be shown again:', true));
+    resultBox.appendChild(block(key));
+    resultBox.appendChild(para('Paste this block back to your agent:'));
+    resultBox.appendChild(block(payload));
+    var done = document.createElement('button');
+    done.type = 'button';
+    done.className = 'btn-reject';
+    done.id = 'mint-done';
+    done.textContent = 'Done, I have copied it';
+    done.addEventListener('click', function(){ resultBox.hidden = true; resultBox.innerHTML = ''; });
+    resultBox.appendChild(done);
+    resultBox.hidden = false;
+  }
+
+  // addKeyRow adds the minted key to the top of the list, shaped like the
+  // rows the server renders.
+  function addKeyRow(k) {
+    var empty = list.querySelector('.rank-empty');
+    if (empty) empty.remove();
+    var row = document.createElement('div');
+    row.className = 'rank-row';
+    row.setAttribute('data-key-id', k.id);
+    var name = document.createElement('span');
+    name.className = 'rank-name';
+    name.textContent = k.name + ' ';
+    var sub = document.createElement('span');
+    sub.className = 'rank-sub';
+    sub.textContent = k.prefix + ' · ' + k.scope + ' · created ' + new Date(k.created_at).toLocaleString() + ' · expires ' + new Date(k.expires_at).toLocaleString();
+    name.appendChild(sub);
+    var status = document.createElement('span');
+    status.className = 'rank-metric';
+    status.textContent = 'active';
+    var revoke = document.createElement('button');
+    revoke.type = 'button';
+    revoke.className = 'btn-reject revoke-key';
+    revoke.setAttribute('data-key-id', k.id);
+    revoke.textContent = 'Revoke';
+    row.appendChild(name);
+    row.appendChild(status);
+    row.appendChild(revoke);
+    list.insertBefore(row, list.firstChild);
+  }
 
   mintButton.addEventListener('click', function(){
     mintButton.disabled = true;
@@ -258,14 +318,12 @@ const dashboardScript = `<script>
           return;
         }
         var payload = JSON.stringify({api_key: res.body.api_key, username: document.querySelector('.mast').getAttribute('data-username') || ''});
-        resultBox.hidden = false;
-        resultBox.innerHTML = '<p><strong>Copy this now — it will not be shown again:</strong></p>' +
-          '<pre style="white-space:pre-wrap;word-break:break-all;background:var(--ps-blue-50);padding:12px;border-radius:4px">' +
-          res.body.api_key + '</pre>' +
-          '<p>Paste this block back to your agent:</p>' +
-          '<pre style="white-space:pre-wrap;word-break:break-all;background:var(--ps-blue-50);padding:12px;border-radius:4px">' +
-          payload + '</pre>';
-        location.reload();
+        // The key is shown once and never again, so the page does not
+        // reload here: it stays until the person dismisses it, and the new
+        // key joins the list in place.
+        showMinted(res.body.api_key, payload);
+        addKeyRow(res.body);
+        nameInput.value = '';
       }).catch(function(){
         mintButton.disabled = false;
         resultBox.hidden = false;
@@ -341,6 +399,24 @@ const dashboardSitesScript = `<script>
     return ' (' + (req.approvals || 0) + ' of ' + req.approvals_required + ' approvals)';
   }
 
+  // decisionNote is the last admin decision about who can open the site,
+  // shown until the owner acts on it (see access_decision in the API).
+  function decisionNote(site) {
+    var d = site.access_decision;
+    if (!d) return '';
+    var when = new Date(d.at).toLocaleString();
+    var why = d.reason ? ': "' + d.reason + '"' : '.';
+    if (d.decision === 'restricted') return 'An admin restricted this site to only you (or your team) on ' + when + why + ' Choosing a level again lifts it.';
+    if (d.decision === 'declined') return 'An admin declined network access on ' + when + why + ' You can ask again with a new reason.';
+    if (d.decision === 'revoked') return 'An admin took this site off the network on ' + when + why + ' You can ask again with a new reason.';
+    return '';
+  }
+  function decisionShort(site) {
+    var d = site.access_decision;
+    if (!d) return '';
+    return {restricted: ' · restricted by an admin', declined: ' · network access declined', revoked: ' · network access revoked'}[d.decision] || '';
+  }
+
   function renderSites(sites) {
     if (!sites || !sites.length) { container.innerHTML = '<div class="rank-empty">No sites yet.</div>'; return; }
     container.innerHTML = '';
@@ -350,7 +426,7 @@ const dashboardSitesScript = `<script>
       row.className = 'rank-row site-row';
       row.innerHTML = '<span class="rank-name">' + esc(site.owner_username) + '/' + esc(site.name) +
         ' <span class="rank-sub">' + esc(site.access_role) + ' · ' + esc(levelLabel(site.access)) +
-        (site.network_request ? ' · network access requested' + approvalProgress(site.network_request) : '') + '</span></span>' +
+        (site.network_request ? ' · network access requested' + approvalProgress(site.network_request) : esc(decisionShort(site))) + '</span></span>' +
         (canManage ? '<button type="button" class="btn-reject manage-toggle">Manage</button>' : '');
       var panel = document.createElement('div');
       panel.className = 'site-panel';
@@ -377,7 +453,7 @@ const dashboardSitesScript = `<script>
       '<div class="site-subsection"><h4>Who can open it</h4>' +
       '<div class="add-row"><select class="access-select">' + options + '</select>' +
       '<button type="button" class="btn-login access-button">Save</button></div>' +
-      '<p class="share-help access-status">' + (site.network_request ? 'Network access requested; waiting for ' + (site.network_request.approvals_required > 1 ? 'two admins' + approvalProgress(site.network_request) : 'an admin') + '. The site keeps its current level until then.' : '') + '</p></div>' +
+      '<p class="share-help access-status">' + (site.network_request ? 'Network access requested; waiting for ' + (site.network_request.approvals_required > 1 ? 'two admins' + approvalProgress(site.network_request) : 'an admin') + '. The site keeps its current level until then.' : esc(decisionNote(site))) + '</p></div>' +
       '<div class="site-subsection"><h4>Viewers</h4>' +
       '<p class="share-help">Named viewers can open the site while it is set to specific people or teams. Adding one sets that level.</p>' +
       '<div class="viewer-list" aria-live="polite"></div>' +

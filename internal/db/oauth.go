@@ -141,8 +141,56 @@ func DeleteOAuthGrant(ctx context.Context, q Querier, grantID string) error {
 	return err
 }
 
+// OAuthConnection is one connected app as its person sees it: the grant,
+// the app's registered name, when it was allowed and last used.
+type OAuthConnection struct {
+	ID         string
+	ClientName string
+	CreatedAt  time.Time
+	LastUsedAt time.Time
+}
+
+// ListOAuthConnectionsForUser returns a person's connected apps that can
+// still act (an unexpired token remains), newest first. A grant whose
+// tokens have all expired is left for SweepOAuth.
+func ListOAuthConnectionsForUser(ctx context.Context, q Querier, userID string) ([]OAuthConnection, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT g.id::text, c.client_name, g.created_at, g.last_used_at
+		FROM oauth_grants g
+		JOIN oauth_clients c ON c.client_id = g.client_id
+		WHERE g.user_id = $1
+		  AND EXISTS (SELECT 1 FROM oauth_tokens t WHERE t.grant_id = g.id AND t.expires_at > now())
+		ORDER BY g.created_at DESC, g.id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []OAuthConnection
+	for rows.Next() {
+		var c OAuthConnection
+		if err := rows.Scan(&c.ID, &c.ClientName, &c.CreatedAt, &c.LastUsedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// DeleteOAuthGrantForUser disconnects one of a person's apps (DeleteOAuthGrant
+// scoped to its owner) and returns the app's name. sql.ErrNoRows covers an
+// id that is not theirs, not a grant id, or already gone.
+func DeleteOAuthGrantForUser(ctx context.Context, q Querier, userID, grantID string) (string, error) {
+	var name string
+	err := q.QueryRowContext(ctx, `
+		DELETE FROM oauth_grants g
+		USING oauth_clients c
+		WHERE g.id::text = $2 AND g.user_id = $1 AND c.client_id = g.client_id
+		RETURNING c.client_name`, userID, grantID).Scan(&name)
+	return name, err
+}
+
 // DeleteOAuthGrantsForUser revokes every connected app a person has; called
-// when the person is disabled.
+// when the person is disabled or signs out everywhere.
 func DeleteOAuthGrantsForUser(ctx context.Context, q Querier, userID string) error {
 	_, err := q.ExecContext(ctx, `DELETE FROM oauth_grants WHERE user_id = $1`, userID)
 	return err

@@ -334,7 +334,7 @@ func toolList() []Tool {
 			Name:  "list_sites",
 			Title: "List sites I can act on",
 			Description: "List every site the account can act on: sites it owns and sites owned by a team it belongs to. " +
-				"Each entry gives the site name, its owner, its `access_role` — owner, or member (the site belongs to a team you are in) — its `access` level, any pending `network_request`, and its address: " +
+				"Each entry gives the site name, its owner, its `access_role` — owner, or member (the site belongs to a team you are in) — its `access` level, any pending `network_request`, the last admin `access_decision` if any, and its address: " +
 				"`url` is absolute, and `public_path` is the address to hand out, " +
 				"which may be absolute rather than a path, so use it exactly as returned and never prefix it with the server origin. " +
 				"Call this first when acting on a site that already exists — " +
@@ -349,7 +349,7 @@ func toolList() []Tool {
 		{
 			Name:  "get_site",
 			Title: "Get one site",
-			Description: "Fetch one site's current state: its live version number, its `access` level (who can open it), any pending `network_request` awaiting an admin (with `approvals` so far of `approvals_required`), its address, and the ETag needed to change it safely. " +
+			Description: "Fetch one site's current state: its live version number, its `access` level (who can open it), any pending `network_request` awaiting an admin (with `approvals` so far of `approvals_required`), the last admin `access_decision` (a network request `declined`, network access `revoked`, or the site `restricted` to only_me by an admin, with when and the admin's `reason`; tell the user about it), its address, and the ETag needed to change it safely. " +
 				"`url` is absolute and `public_path` is the address to hand out; it may be absolute rather than a path, so use it exactly as returned. " +
 				"Call this before deploy_site or rollback_site on an existing site, and pass the returned etag to that call. " +
 				"To see the live files before changing them, pass `active_version` to list_site_files and read_site_file.",
@@ -508,6 +508,7 @@ func toolList() []Tool {
 				"Anonymous visitors to a network site can read its pages and saved data but cannot change anything. " +
 				"Never request `network` unless the user explicitly asked for anyone without a company sign-in to open the site. " +
 				"Moving to any other level takes effect at once, withdraws a pending network request, and takes a network site off the network. " +
+				"If an admin restricted the site (get_site shows `access_decision` `restricted` with their reason), choosing a level lifts the restriction and the admin's action and yours are both on record: only do it when the user, told the reason, asks for it. A new network request clears a declined or revoked decision. " +
 				"Works on a site you own and on a site owned by a team you are in.",
 			InputSchema: object(map[string]any{
 				"site":  str(siteArgDesc),

@@ -159,6 +159,16 @@ func (c *emailLookupConn) QueryContext(_ context.Context, query string, args []d
 		return rows, nil
 	case strings.Contains(query, "disabled_at IS NOT NULL"):
 		return &boolRow{value: false}, nil
+	case strings.Contains(query, "SELECT COALESCE(email, '') FROM users WHERE id = $1"):
+		// RefreshUserEmail reading the stored address: the one the account
+		// was found by, so the refresh has nothing to change.
+		id, _ := args[0].Value.(string)
+		for email, user := range c.byEmail {
+			if user.id == id {
+				return &stringRow{value: email}, nil
+			}
+		}
+		return &stringRow{}, nil
 	case strings.Contains(query, "INSERT INTO users"):
 		c.insertCalled = true
 		if len(args) > 0 {
@@ -184,6 +194,23 @@ type boolRow struct {
 func (r *boolRow) Columns() []string { return []string{"disabled"} }
 func (r *boolRow) Close() error      { return nil }
 func (r *boolRow) Next(dest []driver.Value) error {
+	if r.done {
+		return io.EOF
+	}
+	r.done = true
+	dest[0] = r.value
+	return nil
+}
+
+// stringRow answers a single-column, single-row text query.
+type stringRow struct {
+	value string
+	done  bool
+}
+
+func (r *stringRow) Columns() []string { return []string{"email"} }
+func (r *stringRow) Close() error      { return nil }
+func (r *stringRow) Next(dest []driver.Value) error {
 	if r.done {
 		return io.EOF
 	}

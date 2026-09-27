@@ -2,11 +2,13 @@ package handler
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
 	"log"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -575,6 +577,7 @@ func writeSiteRow(b *strings.Builder, hosts HostModel, site db.Site, owner strin
 	if site.Access == db.AccessListed || site.Access == db.AccessNetwork {
 		visibility = fmt.Sprintf(`<span class="chip">%s</span>`, html.EscapeString(accessLevelLabel(site.Access)))
 	}
+	visibility += siteRestrictionControl(owner, site)
 	attrs := ""
 	ownerLine := ""
 	timeCell := localTimeHTML(site.UpdatedAt, "date")
@@ -610,6 +613,21 @@ func writeSiteRow(b *strings.Builder, hosts HostModel, site db.Site, owner strin
 		analyticsRangeCompact(analyticsDays),
 		timeCell,
 	)
+}
+
+// siteRestrictionControl is the admin's take-down control on a site row:
+// Restrict (to only the owner or team, with a required reason) or, on a
+// site an admin restricted, the reason and Lift.
+func siteRestrictionControl(owner string, site db.Site) string {
+	base := "/api/admin/sites/" + url.PathEscape(owner) + "/" + url.PathEscape(site.Name)
+	if site.AccessDecision == db.AccessDecisionRestricted {
+		return fmt.Sprintf(` <span class="chip chip-warn" title="%s">restricted</span><form method="POST" action="%s/unrestrict" onsubmit="return confirm('Lift the restriction on %s/%s? It goes back to the access level it had.');"><button type="submit" class="btn-reset">Lift</button></form>`,
+			html.EscapeString(site.AccessDecisionReason), html.EscapeString(base), html.EscapeString(owner), html.EscapeString(site.Name))
+	}
+	question, _ := json.Marshal("Restrict " + owner + "/" + site.Name + " to only its owner (or team)? Anyone else loses access at once. The owner sees your reason. Reason:")
+	onsubmit := "var n = prompt(" + string(question) + ", ''); if (n === null || !n.trim()) return false; this.reason.value = n; return true;"
+	return fmt.Sprintf(`<form method="POST" action="%s/restrict" onsubmit="%s"><input type="hidden" name="reason"><button type="submit" class="btn-reject">Restrict</button></form>`,
+		html.EscapeString(base), html.EscapeString(onsubmit))
 }
 
 // disableUser is the offboarding action: sessions and keys
@@ -1200,6 +1218,8 @@ const adminHeadHTML = `<!doctype html>
   .site-name a:hover{color:var(--ps-blue-800);text-decoration:none}
   .site-version,.site-visibility,.site-backend{font-variant-numeric:tabular-nums}
   .site-version .chip,.site-visibility .chip,.site-backend .chip{font-size:11px;letter-spacing:0.12em;padding:3px 8px}
+  .site-visibility form{display:inline-block;margin-left:6px}
+  .site-visibility button{padding:2px 8px;font-size:11px}
   .site-backend .chip+.chip{margin-left:4px}
   .site-traffic{
     font-family:var(--font-mono);font-weight:500;font-size:12px;

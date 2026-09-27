@@ -6,9 +6,39 @@ release, commit and schema.
 
 ## Unreleased
 
-Schema 0043 (from 0042): 0043 rewrites `audit_ensure_partitions` and
-creates audit and access-log partitions twelve months ahead. It is marked
-backward-compatible, so rolling back to v1.3.1 is safe.
+Schema 0044 (from 0042): 0043 rewrites `audit_ensure_partitions` and
+creates audit and access-log partitions twelve months ahead; 0044 adds
+nullable `sites.access_decision*` columns. Both are marked
+backward-compatible, so rolling back to v1.3.1 is safe. Skills are at
+0.13.2 (0.11.0 still works).
+
+### People
+- A newly created API key stays on the dashboard, with its paste-back
+  block, until you press Done; the page no longer reloads and hides it
+  before it can be copied. The new key joins the list in place.
+- `/auth/sessions` lists your connected chat apps (name, connected, last
+  used) with Disconnect, which ends that app's access at once
+  (`GET /api/me/connections`, `DELETE /api/me/connections/{id}`, browser
+  session only; audited as `connector_revoke`).
+- "Sign out everywhere" on `/auth/sessions` ends every session of yours
+  and, unless you clear the box, revokes your API keys and connected apps,
+  in one audited transaction (`sign_out_everywhere`).
+- Your dashboard (and `get_site`/`list_sites` as `access_decision`) shows
+  the last admin decision about who can open a site: a network request
+  declined or network access revoked, with the admin's note, until your
+  next request; or a restriction, with its reason.
+
+### Admins
+- Restrict any site to only its owner (or team) from `/admin` with a
+  one-line reason: a reversible take-down, audited as `site_restricted`.
+  The owner sees the reason and lifts it by choosing a level again; Lift on
+  `/admin` restores the earlier level (`company` for a site that was on the
+  network).
+- Declining a network request or taking a site off the network asks for
+  an optional note for the owner, recorded in the audit event.
+- Each sign-in refreshes a person's stored email from the address the IdP
+  verified, so offboarding by email follows directory changes. An address
+  another person already holds is not taken over (`email_change_skipped`).
 
 ### Operations
 - `simple-host migrate-storage` and `simple-host reencrypt` record one

@@ -143,7 +143,7 @@ func TestNetworkAccessRequestFlow(t *testing.T) {
 	}
 	tx.Rollback()
 
-	if err := inTx(t, database, func(tx *sql.Tx) error { return DeclineNetworkAccess(ctx, tx, siteID) }); !errors.Is(err, ErrNoPendingRequest) {
+	if err := inTx(t, database, func(tx *sql.Tx) error { return DeclineNetworkAccess(ctx, tx, siteID, "") }); !errors.Is(err, ErrNoPendingRequest) {
 		t.Fatalf("decline with nothing pending = %v", err)
 	}
 	if err := inTx(t, database, func(tx *sql.Tx) error { return RequestNetworkAccess(ctx, tx, siteID, ownerID, "event page") }); err != nil {
@@ -156,7 +156,7 @@ func TestNetworkAccessRequestFlow(t *testing.T) {
 	if err != nil || len(entries) != 1 || entries[0].Reason != "event page" || entries[0].RequestedBy != "alice" || entries[0].Access != AccessCompany {
 		t.Fatalf("pending list = %+v (%v)", entries, err)
 	}
-	if err := inTx(t, database, func(tx *sql.Tx) error { return DeclineNetworkAccess(ctx, tx, siteID) }); err != nil {
+	if err := inTx(t, database, func(tx *sql.Tx) error { return DeclineNetworkAccess(ctx, tx, siteID, "") }); err != nil {
 		t.Fatal(err)
 	}
 	if entries, _ := ListNetworkAccess(ctx, database); len(entries) != 0 {

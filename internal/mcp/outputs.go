@@ -123,6 +123,11 @@ func collaborationSiteSchema() map[string]any {
 		"approvals":          outInteger("How many admins have approved it so far."),
 		"approvals_required": outInteger("How many different admins must approve it (1 or 2) before the site opens to the network."),
 	}, "status", "reason", "requested_at", "approvals", "approvals_required")
+	props["access_decision"] = outObject(map[string]any{
+		"decision": outEnum("declined: an admin declined the network request; revoked: an admin took the site off the network; restricted: an admin set the site to only_me.", "declined", "revoked", "restricted"),
+		"at":       outString("When the admin decided."),
+		"reason":   outString("The admin's note, when they gave one (always given for restricted)."),
+	}, "decision", "at")
 	return outObject(props, "id", "name", "owner_username", "owner_id", "access_role", "access", "active_version",
 		"public", "public_path", "url", "etag", "created_at", "updated_at", "analytics")
 }

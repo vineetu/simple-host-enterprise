@@ -36,6 +36,11 @@ type collaborationSiteResponse struct {
 	// while a request to open it to the network waits for an admin.
 	Access         string                  `json:"access"`
 	NetworkRequest *networkRequestResponse `json:"network_request,omitempty"`
+	// AccessDecision is the last admin decision about who can open the
+	// site: a network request declined, network access revoked, or the site
+	// restricted to only_me. A declined or revoked one stays until the next
+	// network request; a restriction until the owner chooses a level again.
+	AccessDecision *accessDecisionResponse `json:"access_decision,omitempty"`
 	// PublicPath is the address the site should be handed out under. It was
 	// the relative long path on the base host; after the subdomain cutover
 	// it is the absolute short address on the owner's host. Clients use it
@@ -46,6 +51,20 @@ type collaborationSiteResponse struct {
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 	Analytics  analytics `json:"analytics"`
+}
+
+type accessDecisionResponse struct {
+	Decision string    `json:"decision"`
+	At       time.Time `json:"at"`
+	Reason   string    `json:"reason,omitempty"`
+}
+
+// siteAccessDecision is the site's last admin decision, or nil.
+func siteAccessDecision(site db.Site) *accessDecisionResponse {
+	if site.AccessDecision == "" || site.AccessDecisionAt == nil {
+		return nil
+	}
+	return &accessDecisionResponse{Decision: site.AccessDecision, At: *site.AccessDecisionAt, Reason: site.AccessDecisionReason}
 }
 
 type networkRequestResponse struct {
@@ -177,6 +196,7 @@ func (h *SiteHandler) collaborationSiteResponse(r *http.Request, site db.Site, o
 		Public:         site.Public,
 		Access:         site.Access,
 		NetworkRequest: pending,
+		AccessDecision: siteAccessDecision(site),
 		PublicPath:     base.URL,
 		URL:            base.URL,
 		ETag:           formatSiteETag(site.ID, site.ActiveVersion),

@@ -334,7 +334,8 @@ func ListAllUsers(ctx context.Context, db *sql.DB) ([]User, error) {
 
 func ListAllSites(ctx context.Context, db *sql.DB) ([]Site, error) {
 	const query = `
-		SELECT id, user_id, name, active_version, public, uses_state, uses_versioned_state, created_at, updated_at, access
+		SELECT id, user_id, name, active_version, public, uses_state, uses_versioned_state, created_at, updated_at, access,
+		       COALESCE(access_decision, ''), access_decision_at, COALESCE(access_decision_reason, '')
 		FROM sites
 		ORDER BY created_at ASC, name ASC
 	`
@@ -348,7 +349,8 @@ func ListAllSites(ctx context.Context, db *sql.DB) ([]Site, error) {
 
 func ListSitesByUser(ctx context.Context, db *sql.DB, userID string) ([]Site, error) {
 	const query = `
-		SELECT id, user_id, name, active_version, public, uses_state, uses_versioned_state, created_at, updated_at, access
+		SELECT id, user_id, name, active_version, public, uses_state, uses_versioned_state, created_at, updated_at, access,
+		       COALESCE(access_decision, ''), access_decision_at, COALESCE(access_decision_reason, '')
 		FROM sites
 		WHERE user_id = $1
 		ORDER BY created_at ASC, name ASC
@@ -363,7 +365,8 @@ func ListSitesByUser(ctx context.Context, db *sql.DB, userID string) ([]Site, er
 
 func ListSitesByUsername(ctx context.Context, db *sql.DB, username string) ([]Site, error) {
 	const query = `
-		SELECT s.id, s.user_id, s.name, s.active_version, s.public, s.uses_state, s.uses_versioned_state, s.created_at, s.updated_at, s.access
+		SELECT s.id, s.user_id, s.name, s.active_version, s.public, s.uses_state, s.uses_versioned_state, s.created_at, s.updated_at, s.access,
+		       COALESCE(s.access_decision, ''), s.access_decision_at, COALESCE(s.access_decision_reason, '')
 		FROM sites s
 		INNER JOIN users u ON u.id = s.user_id
 		WHERE u.username = $1
@@ -395,6 +398,9 @@ func scanSiteRows(rows *sql.Rows) ([]Site, error) {
 			&site.CreatedAt,
 			&site.UpdatedAt,
 			&site.Access,
+			&site.AccessDecision,
+			&site.AccessDecisionAt,
+			&site.AccessDecisionReason,
 		); err != nil {
 			return nil, err
 		}

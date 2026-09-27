@@ -209,7 +209,18 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 		t.Errorf("get_site does not show the pending request: %v", got)
 	}
 	call("list_sites", map[string]any{})
-	call("set_site_access", map[string]any{"site": "demo", "owner": "alice", "level": "company"})
+	// An admin declines it with a note: the owner sees the decision until
+	// the next request, through a level change.
+	if _, err := database.Exec(`UPDATE sites SET network_requested_at = NULL, access_decision = 'declined', access_decision_at = now(), access_decision_reason = 'not for partners' WHERE name = 'demo'`); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := call("get_site", map[string]any{"site": "demo", "owner": "alice"})["access_decision"].(map[string]any); got["decision"] != "declined" || got["reason"] != "not for partners" {
+		t.Errorf("get_site access_decision = %v", got)
+	}
+	call("list_sites", map[string]any{})
+	if got := call("set_site_access", map[string]any{"site": "demo", "owner": "alice", "level": "company"}); got["access_decision"] == nil {
+		t.Errorf("a level change dropped the declined decision: %v", got)
+	}
 
 	call("find_users", map[string]any{"site": "demo", "owner": "alice", "query": "a"})
 	call("grant_site_viewer", map[string]any{"site": "demo", "owner": "alice", "usernames": []any{"team-acme-team"}})

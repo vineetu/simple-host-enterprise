@@ -1183,11 +1183,20 @@ paths:
   /api/admin/access-requests/{owner}/{sitename}/decline:
     post:
       summary: Decline a network access request
-      description: Admin only, browser session only (never an API key). The site keeps its current level. Audited as `network_access_declined`. `409` when nothing is pending.
+      description: Admin only, browser session only (never an API key). The site keeps its current level. The optional `reason` is shown to the owner as the site's `access_decision` (`declined`) until their next request. Audited as `network_access_declined`. `409` when nothing is pending.
       tags: [Admin]
       parameters:
         - $ref: '#/components/parameters/owner'
         - $ref: '#/components/parameters/sitename'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminNote'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminNote'
       responses:
         '200':
           description: Done
@@ -1207,7 +1216,73 @@ paths:
   /api/admin/access-requests/{owner}/{sitename}/revoke:
     post:
       summary: Take a site off the network
-      description: Admin only, browser session only (never an API key). Sets the site to `company`, so signed-in people keep the link. Audited as `network_access_reverted`. `409` when the site is not open to the network.
+      description: Admin only, browser session only (never an API key). Sets the site to `company`, so signed-in people keep the link. The optional `reason` is shown to the owner as the site's `access_decision` (`revoked`) until their next request. Audited as `network_access_reverted`. `409` when the site is not open to the network.
+      tags: [Admin]
+      parameters:
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminNote'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminNote'
+      responses:
+        '200':
+          description: Done
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Nothing to approve, decline or revoke
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/admin/sites/{owner}/{sitename}/restrict:
+    post:
+      summary: Restrict a site to its owner
+      description: Admin only, browser session only (never an API key). Takes any site down to `only_me` (its owner, or the owning team's members) at once, withdrawing any network request or approval. `reason` is required and shown to the owner as the site's `access_decision` (`restricted`). The owner lifts it by choosing a level again or requesting network access; an admin by `unrestrict`. Audited as `site_restricted`.
+      tags: [Admin]
+      parameters:
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminNote'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AdminNote'
+      responses:
+        '200':
+          description: Done
+        '400':
+          description: No reason, or a reason over 500 characters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/admin/sites/{owner}/{sitename}/unrestrict:
+    post:
+      summary: Lift an admin's restriction
+      description: Admin only, browser session only (never an API key). Puts the site back to the level it had before it was restricted (`company` if it was open to the network, which needs a new request) and clears the owner's `access_decision`. Audited as `site_restriction_lifted`. `409` when the site is not restricted.
       tags: [Admin]
       parameters:
         - $ref: '#/components/parameters/owner'
@@ -1222,7 +1297,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Nothing to approve, decline or revoke
+          description: The site is not restricted by an admin
           content:
             application/json:
               schema:
@@ -2000,6 +2075,20 @@ components:
             approvals_required:
               type: integer
               description: Approvals needed (`NETWORK_ACCESS_APPROVALS`, 1 or 2).
+        access_decision:
+          type: object
+          description: The last admin decision about who can open the site. `declined` and `revoked` stay until the next network request; `restricted` until the owner chooses a level again or an admin lifts it.
+          required: [decision, at]
+          properties:
+            decision:
+              type: string
+              enum: [declined, revoked, restricted]
+            at:
+              type: string
+              format: date-time
+            reason:
+              type: string
+              description: The admin's note; always present for `restricted`.
         public_path:
           type: string
           example: https://my-cool-site.alice-smith.simple-host.example.com/
@@ -2382,6 +2471,14 @@ components:
       properties:
         error:
           type: string
+
+    AdminNote:
+      type: object
+      properties:
+        reason:
+          type: string
+          maxLength: 500
+          description: One line for the site's owner; line breaks are folded to spaces.
 
   responses:
     AgentSkillsDiscoveryIndexGET:
