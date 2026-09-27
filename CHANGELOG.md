@@ -31,6 +31,18 @@ release, commit and schema.
   marker under a prefix on any S3-compatible store (the secret read from a
   0600 curl config file). Every `kubectl` line names its context, and the
   DNS check allows for a parent zone's own wildcard.
+- `docs/cloud/upcloud.md`: use the database's `public-` hostname (the
+  plain one resolves to a private address from outside UpCloud); API
+  examples to create the database and read its host and admin password into
+  variables, with a warning that `upctl database show` prints that password;
+  reading the project CA from the server's TLS chain with a fingerprint
+  check; setting the owning role's password with no terminal through a new
+  `scripts/db-role-password.py` (sends only a SCRAM verifier); a
+  bucket-only IAM policy through the API instead of `ECSS3FullAccess`; the
+  bucket's region; annotating the load balancer straight after
+  `make prereqs`; and why a node-IP database filter breaks when nodes
+  change. `docs/storage.md`'s bucket `curl` commands read the key pair from
+  a 0600 file (`-K`), not the command line.
 - `make smoke` against a real install checks the key's scope first and
   stops before publishing when it is not Full, instead of failing four
   checks and leaving its throwaway site behind; if the site cannot be

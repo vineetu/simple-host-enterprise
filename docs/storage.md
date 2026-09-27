@@ -87,19 +87,22 @@ aws s3api put-bucket-lifecycle-configuration --bucket simple-host-backups --life
 
 Without the AWS CLI, any S3 client that can sign a request sends the same
 configuration as XML. With curl 7.75 or later, set the rule, then send
-versioning and the rule (`<endpoint>`, `<bucket>`, `<region>` and the key
-pair are the bucket's; the lifecycle call needs the `Content-MD5` header):
+versioning and the rule (`<endpoint>`, `<bucket>` and `<region>` are the
+bucket's; the lifecycle call needs the `Content-MD5` header). The key pair
+goes in a 0600 curl config file (`<cred-file>`) holding one line,
+`user = "<key-id>:<secret>"`, so the secret is never on a command line where
+`ps` shows it:
 
 ```sh
 RULE='<LifecycleConfiguration><Rule><ID>simple-host</ID><Status>Enabled</Status><Filter/><NoncurrentVersionExpiration><NoncurrentDays>30</NoncurrentDays></NoncurrentVersionExpiration><AbortIncompleteMultipartUpload><DaysAfterInitiation>7</DaysAfterInitiation></AbortIncompleteMultipartUpload><Expiration><ExpiredObjectDeleteMarker>true</ExpiredObjectDeleteMarker></Expiration></Rule></LifecycleConfiguration>'
 ```
 
 ```sh
-curl -fsS -X PUT --aws-sigv4 "aws:amz:<region>:s3" --user "<key-id>:<secret>" --data-binary '<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>' "https://<endpoint>/<bucket>?versioning"
+curl -fsS -X PUT --aws-sigv4 "aws:amz:<region>:s3" -K <cred-file> --data-binary '<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>' "https://<endpoint>/<bucket>?versioning"
 ```
 
 ```sh
-curl -fsS -X PUT --aws-sigv4 "aws:amz:<region>:s3" --user "<key-id>:<secret>" -H "Content-MD5: $(printf %s "$RULE" | openssl dgst -md5 -binary | base64)" --data-binary "$RULE" "https://<endpoint>/<bucket>?lifecycle"
+curl -fsS -X PUT --aws-sigv4 "aws:amz:<region>:s3" -K <cred-file> -H "Content-MD5: $(printf %s "$RULE" | openssl dgst -md5 -binary | base64)" --data-binary "$RULE" "https://<endpoint>/<bucket>?lifecycle"
 ```
 
 Read both back (the same commands without `-X PUT`, the header and the
