@@ -414,6 +414,13 @@ extra redirect hop on first visit to each host) and is exactly what
 `scripts/smoke.sh`'s `hand_off_session` helper drives end to end with curl
 and a cookie jar, if you want to see the wire protocol.
 
+A colleague who is not signed in and opens a shared link is sent to your
+identity provider's sign-in page and, once signed in, back to the page they
+opened (the nonce cookie lasts 10 minutes, long enough for a sign-in with a
+second factor). Only a browser navigation is redirected: a page's own
+`fetch`, a script, or an agent gets `401 {"error":"unauthorized"}` instead of
+a sign-in page it cannot use.
+
 Every site has an access level, set from `/dashboard`'s "Your sites" panel
 ("Who can open it") or with `POST /api/sites/{site}/access`
 (`POST /api/collaboration/sites/{owner}/{sitename}/access` for a team's

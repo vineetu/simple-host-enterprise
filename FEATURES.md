@@ -37,7 +37,10 @@ Config names are documented in `docs/configuration.md`; schema in
   the base host is handed to an owner host or a site host by a one-time
   code (`/auth/handoff` on the base host mints; `/auth/session` on the target
   host redeems, nonce-bound against login CSRF); the first visit to each site
-  host hands off transparently, one redirect round trip, no prompt. Every session cookie is bound
+  host hands off transparently, one redirect round trip, no prompt. A
+  signed-out browser opening a link is sent to company sign-in and back to
+  the link (`/auth/handoff` redirects a navigation to `/auth/login`; scripts,
+  agents and keyed requests still get 401 JSON). Every session cookie is bound
   to the host it was minted for; a hand-off cookie shares the sign-in's
   session row and expiry, so it never outlives it. Every sign-in (verified
   email, allowed domain) turns any pending viewer or team grants for that

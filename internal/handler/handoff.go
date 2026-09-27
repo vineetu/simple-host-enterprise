@@ -24,7 +24,10 @@ import (
 // colleague's browser redeem the resulting code, because the colleague's
 // browser never held the matching nonce.
 const handoffNonceCookie = "__Host-sh_handoff"
-const handoffNonceMaxAge = 120 // seconds
+// Long enough for a signed-out colleague to sign in at the company's
+// identity provider between the two legs (the OAuth state cookie's 10
+// minutes); the code itself still lives only briefly.
+const handoffNonceMaxAge = 10 * 60 // seconds
 
 // HandoffHandler serves the base-host leg of the session hand-off:
 // GET /auth/handoff mints a one-time code for a validated
@@ -48,7 +51,48 @@ func NewHandoffHandler(database *sql.DB, signingKeys []auth.SigningKey, hosts Ho
 }
 
 func (h *HandoffHandler) Register(mux *http.ServeMux, authMiddleware func(http.Handler) http.Handler) {
-	mux.Handle("GET /auth/handoff", authMiddleware(requireSessionAuth(http.HandlerFunc(h.handoff))))
+	mux.Handle("GET /auth/handoff", signInNavigation(authMiddleware(requireSessionAuth(http.HandlerFunc(h.handoff)))))
+}
+
+// signInNavigation sends a signed-out browser navigation to /auth/login,
+// returning to this same URL afterwards, instead of the 401 JSON the auth
+// middleware answers. A colleague who opens a shared link to a site that
+// needs sign-in then signs in and lands on the site. Scripts, agents and
+// any request carrying an API key or bearer token still get the 401.
+func signInNavigation(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !wantsNavigation(r) || r.Header.Get("X-API-Key") != "" || r.Header.Get("Authorization") != "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		next.ServeHTTP(&signInRedirectWriter{ResponseWriter: w, r: r}, r)
+	})
+}
+
+// signInRedirectWriter turns a 401 into the redirect to /auth/login and
+// drops the JSON body that followed it; every other status passes through.
+type signInRedirectWriter struct {
+	http.ResponseWriter
+	r          *http.Request
+	redirected bool
+}
+
+func (s *signInRedirectWriter) WriteHeader(code int) {
+	if code != http.StatusUnauthorized {
+		s.ResponseWriter.WriteHeader(code)
+		return
+	}
+	s.redirected = true
+	s.Header().Del("Content-Type")
+	s.Header().Set("Cache-Control", "no-store")
+	http.Redirect(s.ResponseWriter, s.r, "/auth/login?to="+url.QueryEscape(s.r.URL.RequestURI()), http.StatusFound)
+}
+
+func (s *signInRedirectWriter) Write(b []byte) (int, error) {
+	if s.redirected {
+		return len(b), nil
+	}
+	return s.ResponseWriter.Write(b)
 }
 
 // handoff validates `to`, mints a one-time code, and redirects the browser

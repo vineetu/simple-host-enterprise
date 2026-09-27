@@ -4,6 +4,15 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## Unreleased
+
+### Fixed
+- A signed-out colleague who opens a shared link to a site that needs
+  sign-in is sent to company sign-in and back to the site, instead of a raw
+  `{"error":"unauthorized"}` page. Scripts, agents and API-key calls still
+  get the 401 JSON. The hand-off's nonce cookie now lasts 10 minutes, long
+  enough for a sign-in with a second factor.
+
 ## v1.8.0 — 2026-09-27
 
 Schema 0058 (backward-compatible); run `simple-host migrate` before
