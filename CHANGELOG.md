@@ -16,7 +16,8 @@ before deploying. Skills are at 0.15.3.
   site address and its older forms redirect to the new one only for people
   who may open the site; the old owner page answers as a missing one and
   never names the new name (a name change is often sensitive); and the owner-hosts reconciler requests the new name's certificate
-  (until it is ready the sites answer at `<new>.<base>/<site>/`). The old
+  (until it is ready the sites answer at `<new>.<base>/<site>/`). Their
+  Visitors history carries over. The old
   name is held so no sign-in or rename takes it; erasing the person keeps
   every name they had held. Collisions (another person or team, a held
   name, a team's old address) are refused. Audited as `admin_rename_user`.

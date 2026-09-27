@@ -760,7 +760,8 @@ Config names are documented in `docs/configuration.md`; schema in
   page answers as a missing one (it never names the new name), the owner-hosts reconciler requests the
   new label's certificate (sites answer at `<new>.<base>/<site>/` until it
   is ready) and keeps the old one's for the redirects, search reindexes
-  their sites, and the old label is held in `renamed_owner_labels` so no
+  their sites, their Visitors history carries over (`/api/access` for the
+  new name also counts what was recorded under the names they had), and the old label is held in `renamed_owner_labels` so no
   sign-in or rename takes it (the person may take it back); refused for a
   team, a name another person or team has, one held after a rename or an
   erasure, a team's pre-v1.3 address, `team-` names, dots, and anything

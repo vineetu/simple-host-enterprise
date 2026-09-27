@@ -77,12 +77,14 @@ func (r *Reader) ListAuditEvents(ctx context.Context, q AuditQuery) (AuditPage, 
 // same division of responsibility as AuditQuery.OwnerScope above. Admin
 // scope may leave Owner and Site empty to see every site.
 type AccessQuery struct {
-	Admin  bool
-	Owner  string
-	Site   string
-	From   time.Time
-	To     time.Time
-	Cursor string
+	Admin bool
+	Owner string
+	// Aliases are Owner's labels before a rename (db.OwnerLabelHistory).
+	Aliases []string
+	Site    string
+	From    time.Time
+	To      time.Time
+	Cursor  string
 }
 
 // AccessPage is one page of access log entries, newest first. Every entry's
@@ -100,11 +102,12 @@ type AccessPage struct {
 // that mode, not something this package reads from the environment itself.
 func (r *Reader) ListAccess(ctx context.Context, q AccessQuery) (AccessPage, error) {
 	page, err := dbstore.ListAccessLog(ctx, r.db, dbstore.AccessLogFilter{
-		Admin: q.Admin,
-		Owner: q.Owner,
-		Site:  q.Site,
-		From:  q.From,
-		To:    q.To,
+		Admin:   q.Admin,
+		Owner:   q.Owner,
+		Aliases: q.Aliases,
+		Site:    q.Site,
+		From:    q.From,
+		To:      q.To,
 	}, q.Cursor)
 	if err != nil {
 		return AccessPage{}, err

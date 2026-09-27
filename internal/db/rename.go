@@ -165,3 +165,28 @@ func LockOwnerLabels(ctx context.Context, tx *sql.Tx, labels ...string) error {
 	}
 	return nil
 }
+
+// OwnerLabelHistory is label followed by every label the namespace that
+// has it now held before an admin renamed it, so a person's Visitors
+// history (access_log is keyed by label) carries across a rename. Just
+// label when nobody has it or it was never renamed.
+func OwnerLabelHistory(ctx context.Context, q Querier, label string) ([]string, error) {
+	out := []string{label}
+	rows, err := q.QueryContext(ctx, `
+		SELECT h.owner_label FROM renamed_owner_labels h
+		JOIN users u ON u.id = h.user_id
+		WHERE lower(replace(u.username, '.', '-')) = $1
+		ORDER BY h.renamed_at DESC, h.owner_label`, label)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var held string
+		if err := rows.Scan(&held); err != nil {
+			return nil, err
+		}
+		out = append(out, held)
+	}
+	return out, rows.Err()
+}

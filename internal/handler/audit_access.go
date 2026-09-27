@@ -448,6 +448,15 @@ func (h *AuditHandler) listAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query.From, query.To = from, to
+	if owner != "" {
+		labels, err := db.OwnerLabelHistory(r.Context(), h.database, owner)
+		if err != nil {
+			log.Printf("audit: label history for %s: %v", owner, err)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+			return
+		}
+		query.Aliases = labels[1:]
+	}
 
 	page, err := h.reader.ListAccess(r.Context(), query)
 	if err != nil {
@@ -508,7 +517,15 @@ func (h *AuditHandler) listAccessCounts(w http.ResponseWriter, r *http.Request, 
 	if from.IsZero() {
 		from = to.AddDate(0, 0, -30)
 	}
-	counts, err := db.ListAccessCounts(r.Context(), h.database, owner, site, from, to)
+	// A person an admin renamed keeps their history: it is recorded under
+	// the labels they had then.
+	labels, err := db.OwnerLabelHistory(r.Context(), h.database, owner)
+	if err != nil {
+		log.Printf("audit: label history for %s: %v", owner, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	counts, err := db.ListAccessCounts(r.Context(), h.database, labels, site, from, to)
 	if err != nil {
 		log.Printf("audit: access counts for %s/%s: %v", owner, site, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})

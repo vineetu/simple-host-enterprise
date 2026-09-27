@@ -25,7 +25,7 @@ func TestListAuditEventsQueryShape(t *testing.T) {
 
 func TestListAccessLogQueryShape(t *testing.T) {
 	for _, required := range []string{
-		"($1 = '' OR owner_label = $1)",
+		"($1 = '' OR owner_label = ANY(array_prepend($1::text, $8::text[])))",
 		"($2 = '' OR site_name = $2)",
 		"(at, id) < ($5, $6)",
 		"ORDER BY at DESC, id DESC",

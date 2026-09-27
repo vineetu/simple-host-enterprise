@@ -392,6 +392,9 @@ type AccessLogEntry struct {
 type AccessLogFilter struct {
 	Admin bool
 	Owner string
+	// Aliases are labels the same namespace had before an admin renamed it
+	// (OwnerLabelHistory), matched as well as Owner.
+	Aliases []string
 	Site  string
 	From  time.Time
 	To    time.Time
@@ -407,7 +410,7 @@ const listAccessLogQuery = `
 	SELECT id, at, COALESCE(user_id::text, ''), COALESCE(session_id::text, ''), owner_label, site_name,
 	       path, method, status, bytes, COALESCE(host(ip), ''), COALESCE(user_agent, ''), client_kind, referrer_domain
 	FROM access_log
-	WHERE ($1 = '' OR owner_label = $1)
+	WHERE ($1 = '' OR owner_label = ANY(array_prepend($1::text, $8::text[])))
 	  AND ($2 = '' OR site_name = $2)
 	  AND ($3::timestamptz IS NULL OR at >= $3)
 	  AND ($4::timestamptz IS NULL OR at <= $4)
@@ -439,7 +442,7 @@ func ListAccessLog(ctx context.Context, database *sql.DB, filter AccessLogFilter
 		curAt = cur.At
 	}
 	rows, err := database.QueryContext(ctx, listAccessLogQuery,
-		filter.Owner, filter.Site, from, to, curAt, cur.ID, auditPageSize+1,
+		filter.Owner, filter.Site, from, to, curAt, cur.ID, auditPageSize+1, pq.Array(filter.Aliases),
 	)
 	if err != nil {
 		return AccessLogPage{}, err
@@ -510,13 +513,13 @@ const accessPageFilter = `method = 'GET' AND status BETWEEN 200 AND 399 AND clie
 	AND (path LIKE '%/' OR lower(path) LIKE '%.html' OR lower(path) LIKE '%.htm' OR path !~ '\.[A-Za-z0-9]+$')`
 
 // listAccessTop runs one top-list query (col is a trusted column name).
-func listAccessTop(ctx context.Context, q Querier, col, extra, owner, site string, from, to time.Time) ([]AccessTopCount, error) {
+func listAccessTop(ctx context.Context, q Querier, col, extra string, labels []string, site string, from, to time.Time) ([]AccessTopCount, error) {
 	rows, err := q.QueryContext(ctx, `
 		SELECT `+col+`, count(*)
 		FROM access_log
-		WHERE owner_label = $1 AND ($2 = '' OR site_name = $2) AND at >= $3 AND at <= $4
+		WHERE owner_label = ANY($1) AND ($2 = '' OR site_name = $2) AND at >= $3 AND at <= $4
 		  AND `+accessPageFilter+extra+`
-		GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT $5`, owner, site, from, to, AccessTopN)
+		GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT $5`, pq.Array(labels), site, from, to, AccessTopN)
 	if err != nil {
 		return nil, err
 	}
@@ -532,15 +535,16 @@ func listAccessTop(ctx context.Context, q Querier, col, extra, owner, site strin
 	return out, rows.Err()
 }
 
-// ListAccessCounts aggregates access_log for one owner label (and
-// optionally one site) between from and to (UTC days).
-func ListAccessCounts(ctx context.Context, q Querier, owner, site string, from, to time.Time) (AccessCounts, error) {
+// ListAccessCounts aggregates access_log for one namespace's labels (its
+// current one and any it had before a rename: OwnerLabelHistory), and
+// optionally one site, between from and to (UTC days).
+func ListAccessCounts(ctx context.Context, q Querier, labels []string, site string, from, to time.Time) (AccessCounts, error) {
 	var out AccessCounts
 	rows, err := q.QueryContext(ctx, `
 		SELECT date_trunc('day', at AT TIME ZONE 'UTC'), count(*), count(DISTINCT user_id)
 		FROM access_log
-		WHERE owner_label = $1 AND ($2 = '' OR site_name = $2) AND at >= $3 AND at <= $4
-		GROUP BY 1 ORDER BY 1 DESC`, owner, site, from, to)
+		WHERE owner_label = ANY($1) AND ($2 = '' OR site_name = $2) AND at >= $3 AND at <= $4
+		GROUP BY 1 ORDER BY 1 DESC`, pq.Array(labels), site, from, to)
 	if err != nil {
 		return out, err
 	}
@@ -557,14 +561,14 @@ func ListAccessCounts(ctx context.Context, q Querier, owner, site string, from, 
 	}
 	err = q.QueryRowContext(ctx, `
 		SELECT count(DISTINCT user_id) FROM access_log
-		WHERE owner_label = $1 AND ($2 = '' OR site_name = $2) AND at >= $3 AND at <= $4`,
-		owner, site, from, to).Scan(&out.UniqueViewers)
+		WHERE owner_label = ANY($1) AND ($2 = '' OR site_name = $2) AND at >= $3 AND at <= $4`,
+		pq.Array(labels), site, from, to).Scan(&out.UniqueViewers)
 	if err != nil {
 		return out, err
 	}
-	if out.TopPages, err = listAccessTop(ctx, q, "path", "", owner, site, from, to); err != nil {
+	if out.TopPages, err = listAccessTop(ctx, q, "path", "", labels, site, from, to); err != nil {
 		return out, err
 	}
-	out.TopReferrers, err = listAccessTop(ctx, q, "referrer_domain", " AND referrer_domain <> ''", owner, site, from, to)
+	out.TopReferrers, err = listAccessTop(ctx, q, "referrer_domain", " AND referrer_domain <> ''", labels, site, from, to)
 	return out, err
 }

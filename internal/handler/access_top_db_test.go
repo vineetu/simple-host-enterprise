@@ -98,3 +98,41 @@ func TestSiteVisitRecordsReferrerDomainOnly(t *testing.T) {
 		t.Fatalf("referrer_domain = %q (%v), want news.example.com", ref, err)
 	}
 }
+
+// A person an admin renamed keeps their Visitors history: visits recorded
+// under the old label count under the new one, for the person themselves.
+func TestAccessCountsCarryAcrossRename(t *testing.T) {
+	w := newAccessWorld(t)
+	w.deploy("alice", "/api/sites/demo")
+	now := time.Now().UTC()
+	if err := db.InsertAccessLogBatch(context.Background(), w.database, []db.AccessLogEvent{
+		{At: now, UserID: w.users["vera"], OwnerLabel: "alice", SiteName: "demo", Path: "/", Method: "GET", Status: 200, ClientKind: "human", ReferrerDomain: "news.example.com"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if rec := w.adminForm("/api/admin/users/alice/rename", map[string][]string{"name": {"alicia"}}); rec.Code != http.StatusOK {
+		t.Fatalf("rename = %d %s", rec.Code, rec.Body)
+	}
+	if err := db.InsertAccessLogBatch(context.Background(), w.database, []db.AccessLogEvent{
+		{At: now, UserID: w.users["olly"], OwnerLabel: "alicia", SiteName: "demo", Path: "/", Method: "GET", Status: 200, ClientKind: "human"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec := w.api("alice", http.MethodGet, "/api/access?owner=alicia&site=demo&summary=counts", nil)
+	var counts struct {
+		UniqueViewers int64 `json:"unique_viewers"`
+		TopReferrers  []struct {
+			Domain string `json:"domain"`
+		} `json:"top_referrers"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &counts); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("counts after rename = %d %s", rec.Code, rec.Body)
+	}
+	if counts.UniqueViewers != 2 || len(counts.TopReferrers) != 1 || counts.TopReferrers[0].Domain != "news.example.com" {
+		t.Fatalf("counts after rename = %s, want both visits (one before the rename)", rec.Body)
+	}
+	// Somebody else cannot ask for the old label: it is not theirs.
+	if rec := w.api("vera", http.MethodGet, "/api/access?owner=alice&site=demo&summary=counts", nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("vera reading the old label = %d", rec.Code)
+	}
+}
