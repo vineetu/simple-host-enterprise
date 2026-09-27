@@ -33,17 +33,19 @@ pilot what must outlive it, then:
   key: keep the key with the copy, or do not bother keeping the copy.
 
 Then stop changes: scale the server to zero so nothing is written while
-you remove it.
+you remove it. Every `kubectl` line on this page names the cluster's context
+(`CTX`), as `INSTALL.md` does, so none can fall through to another cluster.
 
 ```sh
-kubectl -n simple-host scale deploy/simple-host --replicas=0
+kubectl --context "$CTX" -n simple-host scale deploy/simple-host --replicas=0
 ```
 
 ## 2. Remove the DNS records first
 
 **Remove `<base>` and `*.<base>` before you delete anything in the
-cluster.** Deleting the namespace releases the load balancer, and a cloud
-hands a released address or hostname to the next customer who asks. A
+cluster.** Removing the ingress controller (step 3) releases the load
+balancer, and a cloud hands a released address or hostname to the next
+customer who asks. A
 wildcard record left pointing at it lets a stranger serve any page they
 like under every name on your domain, with a certificate they can get for
 it, in front of colleagues who were told those addresses are the company's.
@@ -59,8 +61,8 @@ it, in front of colleagues who were told those addresses are the company's.
 ## 3. Delete what the install created in the cluster
 
 ```sh
-kustomize build deploy/overlays/byo | kubectl delete --ignore-not-found -f -
-kubectl delete namespace simple-host --ignore-not-found
+kustomize build deploy/overlays/byo | kubectl --context "$CTX" delete --ignore-not-found -f -
+kubectl --context "$CTX" delete namespace simple-host --ignore-not-found
 ```
 
 (Use your own overlay's path.) This removes the server, its Service and
@@ -78,16 +80,37 @@ Then check what was installed alongside it:
   else uses it:
 
   ```sh
-  kubectl get certificates -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,ISSUER:.spec.issuerRef.name
+  kubectl --context "$CTX" get certificates -A -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,ISSUER:.spec.issuerRef.name
   ```
 
-  then `kubectl delete clusterissuer <name>`, and delete the Secret it
+  then `kubectl --context "$CTX" delete clusterissuer <name>`, and delete the Secret it
   names in the `cert-manager` namespace (a CA issuer's CA key, an ACME
   account key, a DNS provider credential). A CA created for this install
   should be removed from company devices' trust stores too.
+- **The load balancer belongs to the ingress controller, not to Simple
+  Host.** Deleting the `simple-host` namespace does not release it: it is
+  the `LoadBalancer` Service of the ingress controller (for the one
+  `make install` adds, `ingress-nginx-controller` in the `ingress-nginx`
+  namespace), and it keeps its address and keeps billing until that
+  Service is gone. Check with
+  `kubectl --context "$CTX" get svc -A --field-selector spec.type=LoadBalancer`.
 - **cert-manager and ingress-nginx.** `make install` adds them only when
   the cluster had none. Remove them only if nothing else on the cluster
-  uses them.
+  uses them, with the same pinned manifests the Makefile installed
+  (`INGRESS_NGINX_URL` and `CERT_MANAGER_URL` at the top of the Makefile):
+
+  ```sh
+  kubectl --context "$CTX" delete --ignore-not-found -f "$(sed -n 's/^INGRESS_NGINX_URL := //p' Makefile)"
+  ```
+
+  ```sh
+  kubectl --context "$CTX" delete --ignore-not-found -f "$(sed -n 's/^CERT_MANAGER_URL  := //p' Makefile)"
+  ```
+
+  Removing ingress-nginx deletes its Service, which releases the load
+  balancer. To keep the controller but stop the load balancer, delete only
+  that Service
+  (`kubectl --context "$CTX" -n ingress-nginx delete svc ingress-nginx-controller`).
 - **Image pull secrets and mirrored images**, if you used a private
   registry (`INSTALL.md`, "If you use a private registry").
 
@@ -103,10 +126,24 @@ account in the identity provider needs to change.
 Only after the export decision in step 1:
 
 - Delete every object under `BACKUP_STORAGE_PREFIX`, **including
-  noncurrent versions**: versioning is on (it has to be), so a plain delete
-  leaves every version recoverable and billed. Most providers do this with
-  a lifecycle rule that expires current and noncurrent versions, or a
-  "delete bucket and all versions" action in the console.
+  noncurrent versions and delete markers**: versioning is on (it has to
+  be), so a plain delete leaves every version recoverable and billed, and a
+  provider refuses to delete a bucket that still holds any. Some consoles
+  have a "delete bucket and all versions" action, and a lifecycle rule that
+  expires current and noncurrent versions does it within a day or two. On
+  any S3-compatible store, this does it now (it lists `?versions` and
+  deletes each version; `DRY_RUN=1` lists the first page without deleting;
+  `CRED_FILE` is a 0600 curl config file holding
+  `user = "<key-id>:<secret>"`, so the secret is never on a command line;
+  leave `PREFIX` empty for the whole bucket):
+
+  ```sh
+  BUCKET_URL=https://<endpoint>/<bucket> REGION=<region> CRED_FILE=<file> PREFIX=<BACKUP_STORAGE_PREFIX> ./scripts/bucket-delete-versions.sh
+  ```
+
+  Some providers delete a bucket asynchronously (UpCloud lists it as
+  deleted for about a minute) and refuse to delete the storage service
+  until its buckets, users and policies are gone: retry after a minute.
 - Delete the bucket if it was created for this install.
 - Remove the credential the server used: the access key pair (and the user
   or service account it belongs to), or the workload identity binding and
@@ -137,9 +174,16 @@ needs them:
 
 ## 8. Check
 
-- `dig <base>` and `dig anything.<base>` return nothing.
-- `kubectl get ns simple-host` is gone, and
-  `kubectl get clusterissuer,ingressclass` lists only what other workloads
-  use.
+- Your DNS provider's record list has no `<base>` or `*.<base>` record,
+  and `dig <base>` and `dig anything.<base>` no longer answer with the load
+  balancer (no CNAME or address of it). If the parent zone has a wildcard
+  of its own (`*.example.com`), the names still resolve, to that wildcard:
+  that is expected.
+- `kubectl --context "$CTX" get svc -A --field-selector spec.type=LoadBalancer`
+  lists no Service left over from the install, and your cloud's console
+  shows no load balancer for it.
+- `kubectl --context "$CTX" get ns simple-host` is gone, and
+  `kubectl --context "$CTX" get clusterissuer,ingressclass` lists only what
+  other workloads use.
 - The bucket and the database (with its backups) are gone or deliberately
   kept, and the OIDC client no longer exists.

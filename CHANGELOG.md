@@ -23,6 +23,14 @@ release, commit and schema.
   (`scripts/run-job.sh`) that runs any subcommand as a one-off Job cloned
   from the prune CronJob, follows its output and deletes it. The restore
   drill, INSTALL.md and `docs/security-review.md` use it.
+- `docs/uninstall.md`: the load balancer belongs to the ingress
+  controller's Service and keeps billing after the `simple-host` namespace
+  is gone; the page now says so and gives the commands to remove
+  ingress-nginx and cert-manager (or just the Service). A new
+  `scripts/bucket-delete-versions.sh` deletes every version and delete
+  marker under a prefix on any S3-compatible store (the secret read from a
+  0600 curl config file). Every `kubectl` line names its context, and the
+  DNS check allows for a parent zone's own wildcard.
 - `make smoke` against a real install checks the key's scope first and
   stops before publishing when it is not Full, instead of failing four
   checks and leaving its throwaway site behind; if the site cannot be
