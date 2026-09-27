@@ -109,3 +109,18 @@ func TestClientIP(t *testing.T) {
 		}
 	}
 }
+
+func TestRedactPathHidesLinkTokens(t *testing.T) {
+	for in, want := range map[string]string{
+		"/api/site-export/k1.eyJ.c2ln":        "/api/site-export/[redacted]",
+		"/_preview/2-1790000000-c2ln/":        "/_preview/[redacted]/",
+		"/_preview/2-1790000000-c2ln/a/b.css": "/_preview/[redacted]/a/b.css",
+		"/demo/_preview/2-1790000000-c2ln/x":  "/demo/_preview/[redacted]/x",
+		"/demo/page.html":                     "/demo/page.html",
+		"/a/b/_preview/deep":                  "/a/b/_preview/deep",
+	} {
+		if got := RedactPath(in); got != want {
+			t.Errorf("RedactPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

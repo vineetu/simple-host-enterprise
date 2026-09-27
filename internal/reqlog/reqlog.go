@@ -92,7 +92,7 @@ func Middleware(logger *slog.Logger, skip func(*http.Request) bool) func(http.Ha
 					slog.String("request_id", record.ID),
 					slog.String("method", r.Method),
 					slog.String("host", r.Host),
-					slog.String("path", r.URL.Path),
+					slog.String("path", RedactPath(r.URL.Path)),
 					slog.Int("status", status),
 					slog.Int64("bytes", recorder.bytes),
 					slog.Int64("duration_ms", time.Since(started).Milliseconds()),
@@ -108,6 +108,25 @@ func Middleware(logger *slog.Logger, skip func(*http.Request) bool) func(http.Ha
 			next.ServeHTTP(recorder, r.WithContext(ctx))
 		})
 	}
+}
+
+// RedactPath is path as the request log records it: without the credential
+// a whole-site download link (/api/site-export/<token>) or a preview link
+// (<site>/_preview/<token>/...) carries in its path. Anyone who reads the
+// logs could otherwise use one before it expires.
+func RedactPath(path string) string {
+	const export = "/api/site-export/"
+	if strings.HasPrefix(path, export) {
+		return export + "[redacted]"
+	}
+	segments := strings.SplitN(path, "/", 5)
+	for i := 1; i <= 2 && i+1 < len(segments); i++ {
+		if segments[i] == "_preview" {
+			segments[i+1] = "[redacted]"
+			return strings.Join(segments, "/")
+		}
+	}
+	return path
 }
 
 // ProbePaths reports whether the request is a Kubernetes probe.

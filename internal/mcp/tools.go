@@ -611,7 +611,7 @@ func toolList() []Tool {
 			Name:  "export_site",
 			Title: "Download a copy of a site",
 			Description: "Get a download address for one zip of a site: its live files, its current saved data and the saved-data history, its version list, and its uploaded files with a list naming them. " +
-				"The address works for 10 minutes without signing in, so hand it to the user to open in their browser rather than fetching it yourself, and do not post it anywhere others can see it. " +
+				"The address works once, within 10 minutes, without signing in, so hand it to the user to open in their browser rather than fetching it yourself (that would use it up), and do not post it anywhere others can see it. A used address answers 410; call this again for a new one. " +
 				"Works for your own sites and for sites of a team you are in.",
 			InputSchema: object(map[string]any{
 				"site":  str(siteArgDesc),

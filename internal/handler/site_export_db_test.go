@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -65,6 +66,14 @@ func TestSiteExportDownload(t *testing.T) {
 	if code != http.StatusOK || !strings.HasPrefix(link, "https://"+accessBase+"/api/site-export/") {
 		t.Fatalf("export link = %d %q", code, link)
 	}
+	// HEAD: the headers, no zip, no audit row, and the link still works.
+	head := w.do(httptest.NewRequest(http.MethodHead, link, nil))
+	if head.Code != http.StatusOK || head.Header().Get("Content-Type") != "application/zip" || head.Body.Len() != 0 {
+		t.Fatalf("HEAD = %d %q %d bytes", head.Code, head.Header().Get("Content-Type"), head.Body.Len())
+	}
+	if n := w.count(`SELECT count(*) FROM audit_events WHERE action = 'site_export'`); n != 0 {
+		t.Fatalf("HEAD audited %d exports", n)
+	}
 	rec := w.fetchAnonymous(link)
 	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/zip" {
 		t.Fatalf("download = %d %s", rec.Code, rec.Body)
@@ -91,6 +100,26 @@ func TestSiteExportDownload(t *testing.T) {
 		t.Errorf("site_export audit rows = %d, want 1", n)
 	}
 
+	// A link works once.
+	if again := w.fetchAnonymous(link); again.Code != http.StatusGone {
+		t.Errorf("second download = %d %s, want 410", again.Code, again.Body)
+	}
+	// Another spelling of the same signature is the same, used, link.
+	if i := strings.LastIndex(link, "."); i > 0 {
+		sig, _ := base64.RawURLEncoding.DecodeString(link[i+1:])
+		last := link[len(link)-1]
+		for _, c := range "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_" {
+			if byte(c) == last {
+				continue
+			}
+			other := link[:len(link)-1] + string(c)
+			if got, err := base64.RawURLEncoding.DecodeString(other[i+1:]); err == nil && bytes.Equal(got, sig) {
+				if rec := w.fetchAnonymous(other); rec.Code == http.StatusOK {
+					t.Errorf("respelled link downloaded again")
+				}
+			}
+		}
+	}
 	if code, _ := w.exportLink("vera", "alice", "demo"); code != http.StatusNotFound {
 		t.Errorf("stranger export link = %d, want 404", code)
 	}
@@ -108,6 +137,7 @@ func TestSiteExportDownload(t *testing.T) {
 	if rec := w.fetchAnonymous("https://" + accessBase + "/api/site-export/" + w.cookie("alice", "").Value); rec.Code != http.StatusNotFound {
 		t.Errorf("session cookie as a link = %d, want 404", rec.Code)
 	}
+	_, link = w.exportLink("alice", "alice", "demo")
 	if rec := w.api("alice", http.MethodDelete, "/api/sites/demo", nil); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete = %d", rec.Code)
 	}

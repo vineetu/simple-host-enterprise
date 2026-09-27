@@ -24,8 +24,9 @@ before the new image. Skills are at 0.15.0 (0.11.0 still works).
   site's access level, it is never indexed or cached, and saves from it are
   refused (`preview_read_only`). "Make live" (and `rollback_site`) publishes
   it. Version lists now say which version is `live`.
-- Download a whole site: the owner or a team member gets a 10-minute
-  download address (`POST .../export-link`, MCP `export_site`, "Download
+- Download a whole site: the owner or a team member gets a single-use,
+  10-minute download address (a second use answers 410; the request log
+  never records it) (`POST .../export-link`, MCP `export_site`, "Download
   site" in the dashboard's Manage panel) for one zip of the live files, the
   saved data and its history, the version list and the uploaded files. The
   address needs no sign-in; the person who asked must still own the site or

@@ -29,7 +29,9 @@ import (
 // the caller's key or cookie. The zip is written by writeSiteExport, the
 // code the admin's person export uses.
 
-// siteExportLinkTTL is how long a download address works.
+// siteExportLinkTTL is how long a download address works. It works once:
+// the first download to start uses it up (site_export_links_used), and the
+// request log never records it (reqlog.RedactPath).
 const siteExportLinkTTL = 10 * time.Minute
 
 // siteExportTimeout bounds one download stream.
@@ -46,6 +48,9 @@ type siteExportClaims struct {
 	Owner   string `json:"own"`
 	Site    string `json:"site"`
 	Exp     int64  `json:"exp"`
+	// signature is the verified MAC, re-encoded canonically (so another
+	// spelling of the same bytes is the same link): what marks it used.
+	signature string
 }
 
 type siteExportLinkResponse struct {
@@ -117,6 +122,7 @@ func verifySiteExport(keys []auth.SigningKey, token string, now time.Time) (site
 	if !now.Before(time.Unix(claims.Exp, 0)) {
 		return siteExportClaims{}, errSiteExportToken
 	}
+	claims.signature = base64.RawURLEncoding.EncodeToString(signature)
 	return claims, nil
 }
 
@@ -146,9 +152,10 @@ func (h *SiteHandler) siteExportLink(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// downloadSiteExport streams the zip. The caller named in the link must
-// still be able to manage the same site (same id, so a site deleted and
-// re-created under the name is refused) and still be allowed to sign in.
+// downloadSiteExport streams the zip, once per link. The caller named in the
+// link must still be able to manage the same site (same id, so a site
+// deleted and re-created under the name is refused) and still be allowed to
+// sign in. HEAD answers the headers only.
 func (h *SiteHandler) downloadSiteExport(w http.ResponseWriter, r *http.Request) {
 	claims, err := verifySiteExport(h.signingKeys, r.PathValue("token"), time.Now())
 	if err != nil {
@@ -173,12 +180,31 @@ func (h *SiteHandler) downloadSiteExport(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusNotFound, errorResponse{Error: errSiteExportToken.Error()})
 		return
 	}
+	filename := access.OwnerUsername + "-" + access.Site.Name + ".zip"
+	if r.Method == http.MethodHead {
+		// Headers only: no zip is built, nothing is audited, and the link
+		// is not used up.
+		setSiteExportHeaders(w, filename)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	release, acquired := h.limits.acquireArchiveDownload()
 	if !acquired {
 		writeConcurrencyRateLimit(w)
 		return
 	}
 	defer release()
+	// A link works once: the first download to start uses it up.
+	first, err := db.UseSiteExportLink(r.Context(), h.database, claims.signature, time.Unix(claims.Exp, 0))
+	if err != nil {
+		log.Printf("export: use link for %s/%s: %v", claims.Owner, claims.Site, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	if !first {
+		writeJSON(w, http.StatusGone, errorResponse{Error: "this download link has already been used; get a new one"})
+		return
+	}
 	h.audit.Record(r.Context(), audit.Event{
 		ActorID: claims.ActorID, ActorKind: "person",
 		Action: "site_export", OwnerID: access.OwnerID, SiteID: access.Site.ID,
@@ -193,13 +219,7 @@ func (h *SiteHandler) downloadSiteExport(w http.ResponseWriter, r *http.Request)
 	ctx, cancel := context.WithDeadline(r.Context(), deadline)
 	defer cancel()
 
-	w.Header().Set("Cache-Control", "private, no-store")
-	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Referrer-Policy", "no-referrer")
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{
-		"filename": access.OwnerUsername + "-" + access.Site.Name + ".zip",
-	}))
+	setSiteExportHeaders(w, filename)
 	w.WriteHeader(http.StatusOK)
 	zw := zip.NewWriter(w)
 	if err := writeSiteExport(ctx, zw, h.database, h.store, access.Site.ID, access.Site.ActiveVersion, ""); err != nil {
@@ -210,6 +230,14 @@ func (h *SiteHandler) downloadSiteExport(w http.ResponseWriter, r *http.Request)
 	if err := zw.Close(); err != nil {
 		log.Printf("finish export %s/%s: %v", claims.Owner, claims.Site, err)
 	}
+}
+
+func setSiteExportHeaders(w http.ResponseWriter, filename string) {
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
 }
 
 func grantsOwnerRole(role db.CollaborationRole) bool {

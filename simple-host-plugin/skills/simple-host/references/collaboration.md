@@ -264,9 +264,10 @@ X-Skill-Version: <installed skill version>
 
 The answer is `{"url", "expires_at"}`. The `url` downloads one zip of the
 live files (`files/`), the current saved data and its history, the version
-list, and the uploaded files with a list naming them. It works for 10
-minutes without signing in: give it to the user to open, and never post it
-where others can see it. Connector tool: `export_site`. The user can also use
+list, and the uploaded files with a list naming them. It works once, within
+10 minutes, without signing in: give it to the user to open (do not fetch it
+yourself, or it is used up), and never post it where others can see it. A
+used link answers 410; ask for a new one. Connector tool: `export_site`. The user can also use
 "Download site" in the site's Manage panel on `/dashboard`.
 
 ## 6. Who can open the site

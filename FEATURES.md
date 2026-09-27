@@ -316,8 +316,12 @@ Config names are documented in `docs/configuration.md`; schema in
 
   **Download a site.** The owner or a team member gets a download address
   (`POST .../export-link`, full-scope key or session; `{url, expires_at}`)
-  that works for 10 minutes with no key or cookie (`GET
-  /api/site-export/{token}`): one zip of `site.json`, `saved-data.json`,
+  that works once, within 10 minutes, with no key or cookie (`GET
+  /api/site-export/{token}`; the first download to start uses it up,
+  `site_export_links_used`, and a second answers 410; HEAD answers headers
+  only, without building the zip, auditing or using the link; the request
+  log records the path as `/api/site-export/[redacted]`, and a preview
+  link's token is redacted the same way in the request and access logs): one zip of `site.json`, `saved-data.json`,
   `saved-data-history.json`, `versions.json`, `assets.json`, the live
   version's files under `files/` and each uploaded file under
   `assets/<id>`, written by the same code as the admin's person export

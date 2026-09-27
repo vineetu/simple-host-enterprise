@@ -1675,7 +1675,7 @@ paths:
   /api/collaboration/sites/{owner}/{sitename}/export-link:
     post:
       summary: Get a download address for a whole site
-      description: For the site's owner or a member of the owning team. Returns an address that works for 10 minutes with no key or cookie and downloads one zip of the site. Full-scope key or session.
+      description: For the site's owner or a member of the owning team. Returns an address that works once, within 10 minutes, with no key or cookie and downloads one zip of the site. Full-scope key or session.
       tags: [Sites]
       security:
         - apiKey: []
@@ -1709,7 +1709,7 @@ paths:
   /api/site-export/{token}:
     get:
       summary: Download a whole site
-      description: The address `export-link` returns. One zip of `site.json`, `saved-data.json`, `saved-data-history.json`, `versions.json`, `assets.json`, the live version's files under `files/` and each uploaded file under `assets/<id>`. No key or cookie; the person who asked for the link must still own the site or be in its team, and the site must be the same one. Audited as `site_export`.
+      description: The address `export-link` returns. One zip of `site.json`, `saved-data.json`, `saved-data-history.json`, `versions.json`, `assets.json`, the live version's files under `files/` and each uploaded file under `assets/<id>`. No key or cookie; the person who asked for the link must still own the site or be in its team, and the site must be the same one. The link works once: the first download to start uses it up. HEAD answers the headers only (no zip, no audit, the link stays unused). Audited as `site_export`.
       tags: [Sites]
       security: []
       parameters:
@@ -1728,6 +1728,12 @@ paths:
                 format: binary
         '404':
           description: The link is invalid or expired, or its site is gone or no longer the caller's.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '410':
+          description: The link was already used; ask for a new one.
           content:
             application/json:
               schema:

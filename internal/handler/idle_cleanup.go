@@ -293,7 +293,8 @@ func idleNoticeHTML(ctx context.Context, database *sql.DB, user *db.User) string
 </section>
 <script>
 // Download is the whole-site zip (files, saved data and its history,
-// versions, uploaded files) through a 10-minute link (site_export.go).
+// versions, uploaded files) through a single-use 10-minute link
+// (site_export.go).
 document.querySelectorAll('.idle-download').forEach(function(button){
   button.addEventListener('click', function(){
     button.disabled = true;
