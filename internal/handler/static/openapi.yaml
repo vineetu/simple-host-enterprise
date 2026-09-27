@@ -3211,7 +3211,7 @@ components:
 
     AccessCounts:
       type: object
-      description: Counts only, never who. `top_pages` and `top_referrers` count people's page views (GET, answered 2xx/3xx, not bots, not stylesheets, scripts or images), at most 10 each, most first; a referrer is the linking page's domain only, never its path or query, and another page on this install shows as `<base>` or `*.<base>`.
+      description: Counts only, never who. `top_pages` and `top_referrers` count people's page views (GET, answered 2xx/3xx, not bots, not stylesheets, scripts or images), at most 10 each, most first; a referrer is the linking page's domain only, never its path or query, in hostname characters (punycode for an international name), `(other)` for an IP address or anything else, and another page on this install shows as `<base>` or `*.<base>`. For a person an admin renamed, the counts include what was recorded under their earlier names.
       required: [from, to, unique_viewers, days, top_pages, top_referrers]
       properties:
         from:
