@@ -53,6 +53,14 @@ deploying.
   when it is used.
 - Idle cleanup marks and unmarks one site at a time under the site's lock,
   so it no longer deadlocks with a bulk move or delete.
+- A sign-in converting grants made to its email could deadlock with an
+  erasure or offboarding of the same person, or with the purge of a
+  deleted site holding such a grant. Conversion now locks the person (and
+  whoever made the grants) before it takes any grant, and leaves grants on
+  a site in Recently deleted pending.
+- An erasure that found a team membership added a moment earlier could
+  lock rows out of order and deadlock with a site move; it now starts its
+  locks over in order.
 - Migrations 0047 (admin restriction) and 0048 (erasure) are now recorded
   as not backward-compatible (0058 corrects databases already migrated), so
   an image built before them is refused at startup instead of letting an

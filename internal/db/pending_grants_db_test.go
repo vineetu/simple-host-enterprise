@@ -445,3 +445,130 @@ func TestPendingSiteConversionWaitsForViewerChange(t *testing.T) {
 		t.Fatalf("ViewerAllowed = %v (%v), want false", ok, err)
 	}
 }
+
+// Conversion locks the recipient's row before it takes any pending row, so
+// an erasure holding that row and deleting the person's pending grants
+// never waits on a conversion that waits on it (it used to deadlock), and
+// the conversion, once the erasure is done, converts nothing.
+func TestPendingConversionWaitsForErasure(t *testing.T) {
+	database := assetsTestDB(t)
+	ctx := context.Background()
+	ownerID, siteID := mustCreateUserAndSite(t, database, "alice", "demo")
+	if err := inTx(t, database, func(tx *sql.Tx) error {
+		_, err := GrantSiteViewers(ctx, tx, ownerID, "demo", siteID, &ownerID, []string{"later@example.com"})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	user, err := CreateOIDCUser(ctx, database, "later", "sub-later", "later@example.com", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	erasure, err := database.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer erasure.Rollback()
+	if _, err := erasure.Exec(`SELECT 1 FROM users WHERE id = $1::uuid FOR UPDATE`, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	done := convertAsync(database, user.ID, "later@example.com")
+	waitForLockWaiter(t, database)
+	deleteCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := erasure.ExecContext(deleteCtx, `DELETE FROM pending_site_viewers WHERE email = 'later@example.com'`); err != nil {
+		t.Fatalf("erasure's pending-grant delete while a conversion runs: %v", err)
+	}
+	if _, err := erasure.Exec(`DELETE FROM users WHERE id = $1::uuid`, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := erasure.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if converted := <-done; len(converted) != 0 {
+		t.Fatalf("converted = %+v, want nothing for an erased person", converted)
+	}
+}
+
+// A grant on a site in Recently deleted stays pending: the site cannot be
+// opened, and taking it would race the site's purge.
+func TestPendingConversionSkipsDeletedSites(t *testing.T) {
+	database := assetsTestDB(t)
+	ctx := context.Background()
+	ownerID, siteID := mustCreateUserAndSite(t, database, "alice", "demo")
+	if err := inTx(t, database, func(tx *sql.Tx) error {
+		_, err := GrantSiteViewers(ctx, tx, ownerID, "demo", siteID, &ownerID, []string{"later@example.com"})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`UPDATE sites SET deleted_at = now() WHERE id = $1::uuid`, siteID); err != nil {
+		t.Fatal(err)
+	}
+	user, err := CreateOIDCUser(ctx, database, "later", "sub-later", "later@example.com", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if converted := <-convertAsync(database, user.ID, "later@example.com"); len(converted) != 0 {
+		t.Fatalf("converted = %+v, want nothing for a deleted site", converted)
+	}
+	if left := pendingEmails(t, database, "pending_site_viewers", "site_id", siteID); len(left) != 1 {
+		t.Fatalf("pending grants left = %v, want the one kept", left)
+	}
+}
+
+// An erasure that finds a team, added between its listing and its locks,
+// whose id sorts before the person's gives its locks back and takes them
+// again in order, so a move holding that team and waiting for the person
+// finishes instead of deadlocking with it.
+func TestLockPersonAndTeamsKeepsOrder(t *testing.T) {
+	database := assetsTestDB(t)
+	ctx := context.Background()
+	person, _ := mustCreateUserAndSite(t, database, "zed", "z")
+	var teamID string
+	if err := database.QueryRow(`INSERT INTO users (id, username, kind) VALUES ('00000000-0000-4000-8000-000000000001', 'team-aa', 'team') RETURNING id::text`).Scan(&teamID); err != nil {
+		t.Fatal(err)
+	}
+	if teamID >= person {
+		t.Skip("the team id does not sort first")
+	}
+	move, err := database.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer move.Rollback()
+	moveDone := make(chan error, 1)
+	afterTeamsListed = func(round int) {
+		if round != 0 {
+			return
+		}
+		// Joins the team, then a move takes the team and, a moment later,
+		// the person, as LockNamespacesShared would.
+		if _, err := database.Exec(`INSERT INTO team_members (team_id, user_id) VALUES ($1::uuid, $2::uuid)`, teamID, person); err != nil {
+			t.Error(err)
+		}
+		if _, err := move.Exec(`SELECT 1 FROM users WHERE id = $1::uuid FOR KEY SHARE`, teamID); err != nil {
+			t.Error(err)
+		}
+		go func() {
+			time.Sleep(300 * time.Millisecond)
+			_, err := move.Exec(`SELECT 1 FROM users WHERE id = $1::uuid FOR KEY SHARE`, person)
+			if err == nil {
+				err = move.Commit()
+			}
+			moveDone <- err
+		}()
+	}
+	t.Cleanup(func() { afterTeamsListed = nil })
+	erasure, err := database.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer erasure.Rollback()
+	if _, err := LockPersonAndTeams(ctx, erasure, person); err != nil {
+		t.Fatalf("LockPersonAndTeams: %v", err)
+	}
+	if err := <-moveDone; err != nil {
+		t.Fatalf("the move: %v", err)
+	}
+}

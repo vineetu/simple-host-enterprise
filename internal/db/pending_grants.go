@@ -166,7 +166,15 @@ const pendingSitesForEmailQuery = `
 	SELECT DISTINCT s.user_id::text, s.name
 	FROM pending_site_viewers p
 	JOIN sites s ON s.id = p.site_id
-	WHERE p.email = $1
+	WHERE p.email = $1 AND s.deleted_at IS NULL
+`
+
+// pendingGrantorsForEmailQuery lists who added the pending grants, whose
+// rows the converted grants' added_by references.
+const pendingGrantorsForEmailQuery = `
+	SELECT added_by::text FROM pending_site_viewers WHERE email = $1 AND added_by IS NOT NULL
+	UNION
+	SELECT added_by::text FROM pending_team_members WHERE email = $1 AND added_by IS NOT NULL
 `
 
 const pendingTeamsForEmailQuery = `
@@ -176,7 +184,7 @@ const pendingTeamsForEmailQuery = `
 const takePendingSiteViewersQuery = `
 	DELETE FROM pending_site_viewers p
 	USING sites s
-	WHERE p.email = $1 AND s.id = p.site_id
+	WHERE p.email = $1 AND s.id = p.site_id AND s.deleted_at IS NULL
 	  AND (s.user_id::text || chr(31) || s.name) = ANY($2::text[])
 	RETURNING p.site_id::text, s.user_id::text, p.added_by::text
 `
@@ -207,32 +215,57 @@ const convertTeamMemberQuery = `
 // meet) and is the address userID's account now holds from a claim (not one
 // the sign-in's refresh refused because another account holds it). Matching
 // is exact on the lower-cased address. Each pending grant was counted against its site's or team's cap
-// when it was added, so converting one never exceeds it. Locks: every team
-// row first, then every site name, each set in sorted order, before any
-// pending row is taken (see pendingSitesForEmailQuery).
+// when it was added, so converting one never exceeds it. Locks: every
+// namespace row the grants touch first, in one sorted pass (each team FOR
+// UPDATE as membership changes take it; the recipient and every grantor
+// FOR KEY SHARE, which the grant rows' foreign keys would otherwise take
+// later, behind an erasure holding them), then every site name in sorted
+// order, and only then the pending rows (see pendingSitesForEmailQuery).
+// Grants on a site in Recently deleted stay pending: it cannot be opened,
+// and its purge takes the site row before its pending rows.
 func ConvertPendingGrants(ctx context.Context, tx *sql.Tx, userID, email string) ([]ConvertedGrant, error) {
 	email = strings.TrimSpace(email)
 	if email == "" || strings.IndexFunc(email, func(r rune) bool { return r > unicode.MaxASCII }) >= 0 {
 		return nil, nil
 	}
 	email = strings.ToLower(email)
-	var holds bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE id = $1::uuid AND email = $2 AND email_source = 'claimed')`, userID, email).Scan(&holds); err != nil {
-		return nil, fmt.Errorf("check account email: %w", err)
-	}
-	if !holds {
-		return nil, nil
-	}
 	lockedTeams, err := queryStrings(ctx, tx, pendingTeamsForEmailQuery, email)
 	if err != nil {
 		return nil, fmt.Errorf("list pending team members: %w", err)
 	}
-	sort.Strings(lockedTeams)
-	for _, teamID := range lockedTeams {
-		// A team deleted since the read has taken its pending rows with it.
-		if err := LockTeam(ctx, tx, teamID); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return nil, err
+	grantors, err := queryStrings(ctx, tx, pendingGrantorsForEmailQuery, email)
+	if err != nil {
+		return nil, fmt.Errorf("list pending grantors: %w", err)
+	}
+	isTeam := map[string]bool{}
+	for _, id := range lockedTeams {
+		isTeam[id] = true
+	}
+	namespaces := append(append([]string{userID}, lockedTeams...), grantors...)
+	sort.Strings(namespaces)
+	for i, id := range namespaces {
+		if i > 0 && id == namespaces[i-1] {
+			continue
 		}
+		if isTeam[id] {
+			// A team deleted since the read has taken its pending rows with it.
+			if err := LockTeam(ctx, tx, id); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return nil, err
+			}
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `SELECT 1 FROM users WHERE id = $1::uuid FOR KEY SHARE`, id); err != nil {
+			return nil, fmt.Errorf("lock grant namespaces: %w", err)
+		}
+	}
+	// Checked under the recipient's lock: an erasure or offboarding that
+	// won the race has removed or disabled them, and nothing converts.
+	var holds bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE id = $1::uuid AND email = $2 AND email_source = 'claimed' AND disabled_at IS NULL)`, userID, email).Scan(&holds); err != nil {
+		return nil, fmt.Errorf("check account email: %w", err)
+	}
+	if !holds {
+		return nil, nil
 	}
 	var lockedSites []string
 	rows, err := tx.QueryContext(ctx, pendingSitesForEmailQuery, email)

@@ -165,13 +165,30 @@ func ListAllOwnerSites(ctx context.Context, q Querier, ownerID string) ([]OwnedS
 // waits for the erasure rather than deadlocking with it. With the person's
 // row held nobody can add them to another team (the membership insert
 // waits on it), so a membership added between the list and the locks is
-// caught by listing again.
+// caught by listing again. A team found that way whose id sorts before a
+// row already held would break the order, so the locks are given back (a
+// savepoint releases row locks taken after it) and taken again, the whole
+// set in order.
+// afterTeamsListed, when set by a test, runs after each listing of the
+// person's teams, where a concurrent membership change can land.
+var afterTeamsListed func(round int)
+
 func LockPersonAndTeams(ctx context.Context, tx *sql.Tx, userID string) (lastMemberOf []string, err error) {
-	locked := map[string]bool{}
+	if _, err := tx.ExecContext(ctx, `SAVEPOINT lock_person_and_teams`); err != nil {
+		return nil, fmt.Errorf("lock person and teams: %w", err)
+	}
 	var teams []Team
-	for round := 0; round < 3; round++ {
+	locked := map[string]bool{}
+	highest := ""
+	for round := 0; ; round++ {
+		if round >= 10 {
+			return nil, errors.New("lock person and teams: memberships kept changing")
+		}
 		if teams, err = ListTeamsForUser(ctx, tx, userID); err != nil {
 			return nil, err
+		}
+		if afterTeamsListed != nil {
+			afterTeamsListed(round)
 		}
 		ids := []string{}
 		if !locked[userID] {
@@ -186,12 +203,23 @@ func LockPersonAndTeams(ctx context.Context, tx *sql.Tx, userID string) (lastMem
 			break
 		}
 		sort.Strings(ids)
+		if len(locked) > 0 && ids[0] < highest {
+			if _, err := tx.ExecContext(ctx, `ROLLBACK TO SAVEPOINT lock_person_and_teams`); err != nil {
+				return nil, fmt.Errorf("lock person and teams: %w", err)
+			}
+			locked, highest = map[string]bool{}, ""
+			continue
+		}
 		for _, id := range ids {
 			if _, err := tx.ExecContext(ctx, `SELECT 1 FROM users WHERE id = $1::uuid FOR UPDATE`, id); err != nil {
 				return nil, fmt.Errorf("lock person and teams: %w", err)
 			}
 			locked[id] = true
+			highest = id
 		}
+	}
+	if _, err := tx.ExecContext(ctx, `RELEASE SAVEPOINT lock_person_and_teams`); err != nil {
+		return nil, fmt.Errorf("lock person and teams: %w", err)
 	}
 	for _, team := range teams {
 		var others int
