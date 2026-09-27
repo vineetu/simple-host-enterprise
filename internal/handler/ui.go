@@ -28,7 +28,8 @@ const (
 	skillBundleName      = "simple-host-skills"
 	skillBundleURL       = "/skills.zip"
 	// skillReleaseType is hand-set, so it has to move with the version above
-	// it. 0.14.0 documents handing a site over and renaming it
+	// it. 0.14.1 corrects the hand-over text (only into a team the caller
+	// is in; a restricted site cannot be renamed or moved); 0.14.0 documents handing a site over and renaming it
 	// (transfer_site, rename_site), restoring a deleted site (list_deleted_sites,
 	// restore_site), and viewers and team members named by email before they
 	// sign in (pending), access_decision (declined, revoked, restricted; a
@@ -41,7 +42,7 @@ const (
 	// approval; 0.11.0 stays the minimum
 	// (notice_middleware.go), since no route an 0.11.0 skill calls went
 	// away. An agent reads this to decide how loudly to mention the update.
-	skillReleaseType     = "minor"
+	skillReleaseType     = "patch"
 	skillReleaseNotesURL = "/changelog.html"
 
 	agentSkillsDiscoverySchema = "https://schemas.agentskills.io/discovery/0.2.0/schema.json"
