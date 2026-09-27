@@ -69,7 +69,7 @@ func TestAdminRevokesLeakedKey(t *testing.T) {
 	if got := w.withKey(other); got.Code != http.StatusOK {
 		t.Fatalf("owner's other key = %d %s, want 200", got.Code, got.Body)
 	}
-	if n := w.count(`SELECT count(*) FROM audit_events WHERE action = 'admin_key_revoke' AND detail->>'owner' = 'alice' AND detail->>'key_name' = 'gist'`); n != 1 {
+	if n := w.count(`SELECT count(*) FROM audit_events WHERE action = 'admin_key_revoke' AND detail->>'owner' = 'alice' AND detail->>'key_name' = 'gist' AND owner_id = $1`, w.users["alice"]); n != 1 {
 		var raw string
 		_ = w.database.QueryRow(`SELECT detail::text FROM audit_events WHERE action = 'admin_key_revoke'`).Scan(&raw)
 		t.Fatalf("admin_key_revoke rows naming alice = %d (detail %s)", n, raw)

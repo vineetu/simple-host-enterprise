@@ -102,6 +102,9 @@ func TestAuditSearchAndNames(t *testing.T) {
 		switch e.Action {
 		case "state_write":
 			sawWriter = sawWriter || e.ActorName == "vera"
+			if e.ActorName == "vera" && (e.IP != "" || e.UserAgent != "") {
+				t.Fatalf("owner sees a saved-data author's address or browser: %+v", e)
+			}
 		case "access_denied":
 			sawDenied = true
 			if e.ActorName != "" || e.ActorID != "" || e.KeyID != "" || e.IP != "" || e.UserAgent != "" {

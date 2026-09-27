@@ -11,6 +11,7 @@ import (
 	"github.com/vsriram/simple-host/internal/audit"
 	"github.com/vsriram/simple-host/internal/auth"
 	db "github.com/vsriram/simple-host/internal/db"
+	"github.com/vsriram/simple-host/internal/reqlog"
 	"github.com/vsriram/simple-host/internal/safepath"
 )
 
@@ -133,7 +134,7 @@ func (g *hostGate) recordDenied(r *http.Request, siteID, userID, reason string) 
 	}
 	g.audit.Record(r.Context(), audit.Event{
 		ActorID: userID, Action: "access_denied", SiteID: siteID,
-		Detail: r.Method + " " + r.Host + r.URL.Path, Extra: map[string]any{"reason": reason},
+		Detail: r.Method + " " + r.Host + reqlog.RedactPath(r.URL.Path), Extra: map[string]any{"reason": reason},
 	})
 }
 

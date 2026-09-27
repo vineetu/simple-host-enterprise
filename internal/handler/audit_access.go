@@ -331,6 +331,11 @@ func namedAuditEvents(r *http.Request, database *sql.DB, events []db.AuditEvent,
 		}
 		if admin || actorNamedToOwner(e, caller.ID, members) {
 			row.ActorName = users[e.ActorID]
+			if !admin && e.ActorID != caller.ID && !members[e.OwnerID][e.ActorID] {
+				// Named as the author of a saved-data change, like "written
+				// by", but where they were and on what device is theirs.
+				row.IP, row.UserAgent = "", ""
+			}
 		} else {
 			// Nor anything that would tell the same visitor apart across
 			// rows.

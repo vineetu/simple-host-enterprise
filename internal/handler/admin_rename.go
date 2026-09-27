@@ -86,8 +86,10 @@ func (h *AdminHandler) renameUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := h.audit.RecordTx(r.Context(), tx, h.userAuditEvent(r, "admin_rename_user", target.ID, newName,
-		map[string]any{"from": oldName, "to": newName, "sites": len(sites)})); err != nil {
+	event := h.userAuditEvent(r, "admin_rename_user", target.ID, newName,
+		map[string]any{"from": oldName, "to": newName, "sites": len(sites)})
+	event.OwnerID = target.ID // the person sees it in their own activity
+	if err := h.audit.RecordTx(r.Context(), tx, event); err != nil {
 		log.Printf("admin: rename %q: audit: %v", username, err)
 		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
 		return

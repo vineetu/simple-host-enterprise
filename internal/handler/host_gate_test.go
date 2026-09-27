@@ -1433,3 +1433,13 @@ func TestHostGateRecordsAccessDenied(t *testing.T) {
 		t.Fatalf("events = %+v, want one not_a_writer", recorder.events)
 	}
 }
+
+// A refused preview does not write its link's token into the audit log.
+func TestRecordDeniedRedactsPreviewTokens(t *testing.T) {
+	rec := &siteAPITestRecorder{}
+	g := &hostGate{audit: rec}
+	g.recordDenied(httptest.NewRequest(http.MethodGet, "https://demo.alice.example/_preview/secret-token/index.html", nil), "site-1", "user-1", "not_a_viewer")
+	if detail := rec.last().Detail; strings.Contains(detail, "secret-token") || !strings.Contains(detail, "[redacted]") {
+		t.Fatalf("detail = %q, want the token redacted", detail)
+	}
+}

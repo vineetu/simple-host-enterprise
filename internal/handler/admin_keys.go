@@ -70,9 +70,11 @@ func (h *AdminHandler) revokeLeakedKey(w http.ResponseWriter, r *http.Request) {
 	}
 	err = db.RevokeAPIKeyByID(r.Context(), tx, rec.ID)
 	if err == nil {
-		err = h.audit.RecordTx(r.Context(), tx, h.userAuditEvent(r, "admin_key_revoke", rec.UserID, rec.Owner, map[string]any{
+		event := h.userAuditEvent(r, "admin_key_revoke", rec.UserID, rec.Owner, map[string]any{
 			"owner": rec.Owner, "key_id": rec.ID, "key_name": rec.Name, "key_label": keyLabel(rec.Last4), "scope": rec.Scope,
-		}))
+		})
+		event.OwnerID = rec.UserID // the key's owner sees it in their own activity
+		err = h.audit.RecordTx(r.Context(), tx, event)
 	}
 	if err == nil {
 		err = audit.Commit(tx)

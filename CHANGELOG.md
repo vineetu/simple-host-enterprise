@@ -38,6 +38,12 @@ deploying.
   after reading the list. A manifest now records when a deleted site is
   purged, and a rebuild keeps that date instead of recomputing it from
   today's retention.
+- An owner's activity names whoever saved their site's data, but no longer
+  shows that person's IP address or browser unless they are the owner or a
+  teammate.
+- A refused preview no longer writes its link's token into the audit log.
+- An admin's rename of a person and an admin's revoke of a leaked key now
+  appear in that person's own activity (`/api/audit`).
 
 ### Configuration
 - Safer lower bounds, refused at startup with a message naming the range:

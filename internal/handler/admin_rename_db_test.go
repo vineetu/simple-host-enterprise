@@ -94,7 +94,7 @@ func TestAdminRenamePerson(t *testing.T) {
 	}
 
 	// Audited.
-	if n := w.count(`SELECT count(*) FROM audit_events WHERE action = 'admin_rename_user' AND detail::text LIKE '%alicia%'`); n != 1 {
+	if n := w.count(`SELECT count(*) FROM audit_events WHERE action = 'admin_rename_user' AND detail::text LIKE '%alicia%' AND owner_id = $1`, w.users["alice"]); n != 1 {
 		t.Fatalf("admin_rename_user rows = %d, want 1", n)
 	}
 
