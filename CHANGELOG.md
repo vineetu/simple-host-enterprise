@@ -4,7 +4,7 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
-## Unreleased
+## v1.5.0 — 2026-09-27
 
 Schema 0053 (from 0049), all four backward-compatible: nullable
 `api_keys.last4` (0050), `sites.idle_since` and `sites.idle_keep` (0051), an
