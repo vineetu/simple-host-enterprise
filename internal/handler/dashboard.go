@@ -136,6 +136,7 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 	b.WriteString(`</div>
 </section>
 
+` + idleNoticeHTML(r.Context(), h.database, user) + `
 <section>
   <h2 class="section-title">Your sites</h2>
   <p class="login-copy">Choose who can open each site, name its viewers, manage the files it has uploaded, rename it, or hand it to a team or another person. A new site opens only for you (or your team). Deploying and rolling back are done with the skill or MCP.</p>

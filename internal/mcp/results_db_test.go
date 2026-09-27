@@ -269,6 +269,9 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	call("revoke_site_viewer", map[string]any{"site": "demo", "owner": "alice", "username": "guest@example.com"})
 
 	call("list_sites", map[string]any{})
+	if got := call("keep_site", map[string]any{"site": "other"}); got["keep"] != true || got["site"] != "other" {
+		t.Errorf("keep_site = %v", got)
+	}
 	if got := call("rename_site", map[string]any{"site": "other", "name": "other-two"}); got["name"] != "other-two" || got["previous_url_status"] != "redirects" {
 		t.Errorf("rename_site = %v", got)
 	}

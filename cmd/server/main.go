@@ -345,6 +345,23 @@ func run() (runErr error) {
 	resources.workers = append(resources.workers, startLoop(ctx, func(ctx context.Context) {
 		siteStore.RunSweeper(ctx, database)
 	}))
+	if days := cfg.IdleCleanup.Days; days > 0 {
+		var mailer handler.Mailer
+		if cfg.IdleCleanup.SMTPURL != "" {
+			smtpMailer, err := handler.NewSMTPMailer(cfg.IdleCleanup.SMTPURL, cfg.IdleCleanup.SMTPFrom)
+			if err != nil {
+				return fmt.Errorf("SMTP_URL: %w", err)
+			}
+			mailer = smtpMailer
+		}
+		notice := "dashboard"
+		if mailer != nil {
+			notice = "dashboard and email"
+		}
+		log.Printf("idle cleanup: sites unused for %d days are marked, and move to Recently deleted 30 days later (notice: %s)", days, notice)
+		cleanup := handler.NewIdleCleanup(database, auditRecorder, days, mailer, cfg.PublicBaseURL)
+		resources.workers = append(resources.workers, startLoop(ctx, cleanup.Run))
+	}
 
 	for _, server := range servers {
 		log.Printf("%s listening on %s", server.name, server.server.Addr)

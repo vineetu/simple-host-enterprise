@@ -271,6 +271,11 @@ func outputSchemas() map[string]map[string]any {
 		"delete_site":   doneSchema(),
 		"transfer_site": moveSchema(),
 		"rename_site":   moveSchema(),
+		"keep_site": outObject(map[string]any{
+			"owner": outString("The namespace the site is in."),
+			"site":  outString("The site's name."),
+			"keep":  outBool("true: the idle cleanup never marks this site; false: it may again."),
+		}, "owner", "site", "keep"),
 		"list_deleted_sites": listOf("Every site deleted in the last 30 days from this account or its teams, newest first.", outObject(map[string]any{
 			"owner":            outString("The namespace it was in: a username or a team name."),
 			"site":             outString("The site's name, which it keeps until it is restored or gone for good."),

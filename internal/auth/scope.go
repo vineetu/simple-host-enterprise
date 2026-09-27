@@ -71,6 +71,8 @@ var routeKeyAccess = map[string]keyAccess{
 	"POST /api/collaboration/sites/{owner}/{sitename}/transfer":             keyFull,
 	"POST /api/sites/{sitename}/rename":                                     keyFull,
 	"POST /api/collaboration/sites/{owner}/{sitename}/rename":               keyFull,
+	"POST /api/sites/{sitename}/keep":                                       keyFull,
+	"POST /api/collaboration/sites/{owner}/{sitename}/keep":                 keyFull,
 	"GET /api/deleted-sites":                                                keyFull,
 	"POST /api/sites/{sitename}/restore":                                    keyFull,
 	"POST /api/collaboration/sites/{owner}/{sitename}/restore":              keyFull,

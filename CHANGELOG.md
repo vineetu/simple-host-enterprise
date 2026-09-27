@@ -6,7 +6,9 @@ release, commit and schema.
 
 ## Unreleased
 
-Schema 0050 (backward-compatible: nullable `api_keys.last4`).
+Schema 0051 (from 0049; both backward-compatible: nullable `api_keys.last4`
+in 0050; `sites.idle_since` and `sites.idle_keep` in 0051). Skills are at
+0.14.2 (0.11.0 still works).
 
 ### API keys
 - A new key keeps its own last four characters; the dashboard shows
@@ -32,6 +34,15 @@ Schema 0050 (backward-compatible: nullable `api_keys.last4`).
 - The restore drill is documented (`docs/install.md`, "Restore drill": a
   site with `restore`, and the database by PITR to a new instance), tested
   end to end against a real database, and run by `make smoke`.
+
+### Idle sites (opt-in)
+- `IDLE_CLEANUP_DAYS` (off by default): a site nobody has visited, deployed
+  or written for that many days is marked; its owner or team sees "Not used
+  lately" on the dashboard with the date, Keep and Download, admins see the
+  list on /admin, and with `SMTP_URL`/`SMTP_FROM` the owner (or each team
+  member) is emailed. 30 days later, still unused and not kept, it moves to
+  Recently deleted. Any use unmarks it; Keep (`POST .../keep`, MCP
+  `keep_site`) takes it out for good. Every step is audited.
 
 ### Audit log
 - /admin's Activity card searches by owner, site, person, action and date,

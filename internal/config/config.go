@@ -162,6 +162,10 @@ type Config struct {
 	// scan of uploads (uploads.go).
 	Quota QuotaConfig
 	Clamd ClamdConfig
+
+	// IdleCleanup is IDLE_CLEANUP_DAYS and the optional SMTP_URL/SMTP_FROM
+	// (idle.go). Off by default.
+	IdleCleanup IdleCleanupConfig
 }
 
 // defaultOAuthRedirectHosts covers the AI apps a company is most likely to
@@ -502,6 +506,10 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("NETWORK_ACCESS_APPROVALS must be 1 or 2, got %d", approvals)
 	}
 	cfg.NetworkAccessApprovals = int(approvals)
+
+	if cfg.IdleCleanup, err = loadIdleCleanup(); err != nil {
+		return Config{}, err
+	}
 
 	auditCfg, err := LoadAuditRetention()
 	if err != nil {

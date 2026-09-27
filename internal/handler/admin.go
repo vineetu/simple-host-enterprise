@@ -400,6 +400,7 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 	h.renderInstanceStatus(r, &b)
 	h.renderAccessRequests(r, &b, user)
 	h.renderDeletedSites(r, &b)
+	h.renderIdleSites(r, &b)
 	h.renderErasedIdentities(r, &b)
 	b.WriteString(leakedKeyCardHTML)
 

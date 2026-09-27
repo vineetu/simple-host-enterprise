@@ -912,6 +912,38 @@ func toolList() []Tool {
 			},
 		},
 		{
+			Name:  "keep_site",
+			Title: "Keep a site from the idle cleanup",
+			Description: "When an admin has turned on the idle cleanup, a site nobody has visited, deployed or written for a set number of days is marked on its owner's dashboard (\"Not used lately\") and moves to Recently deleted 30 days later. " +
+				"This keeps it: the site is unmarked and never marked again. Pass `keep: false` to let the cleanup consider it again. Using the site (a visit or a deploy) also unmarks it, for that round only. " +
+				"Works on a site you own and on a site owned by a team you are in. Call it only when the user asks to keep a site.",
+			InputSchema: object(map[string]any{
+				"site":  str(siteArgDesc),
+				"owner": str(ownerArgDesc + " Omit only for a site in your own account."),
+				"keep":  map[string]any{"type": "boolean", "description": "true (the default) keeps the site; false lets the idle cleanup consider it again."},
+			}, "site"),
+			Annotations: writes(false, true),
+			family:      familySite,
+			call: func(args map[string]any) (upstream, error) {
+				ownerScoped, collaboration, err := siteRoute(args, "keep")
+				if err != nil {
+					return upstream{}, err
+				}
+				keep := true
+				if _, ok := args["keep"]; ok {
+					if keep, err = boolArg(args, "keep"); err != nil {
+						return upstream{}, err
+					}
+				}
+				body, _ := json.Marshal(map[string]any{"keep": keep})
+				path := ownerScoped
+				if collaboration != "" {
+					path = collaboration
+				}
+				return upstream{Method: "POST", Path: path, Body: body, ContentType: "application/json"}, nil
+			},
+		},
+		{
 			Name:  "create_team",
 			Title: "Create a team",
 			Description: "Create a team. A team is a namespace that owns sites exactly as a person does, but it is not a person: it has no API key, and its members act with their own. " +

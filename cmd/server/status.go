@@ -56,6 +56,7 @@ func instanceLimits(cfg config.Config) []handler.InstanceLimit {
 		{Name: "Audit log kept", Value: fmt.Sprintf("%d days", cfg.Audit.RetentionDays)},
 		{Name: "Access log kept", Value: fmt.Sprintf("%d days", cfg.Audit.AccessLogRetentionDays)},
 		{Name: "Recently deleted kept", Value: durationText(dbstore.DeletedSiteRetention)},
+		{Name: "Idle-site cleanup", Value: idleText(cfg.IdleCleanup)},
 	}
 }
 
@@ -97,4 +98,15 @@ func durationText(d time.Duration) string {
 	default:
 		return d.String()
 	}
+}
+
+func idleText(c config.IdleCleanupConfig) string {
+	if c.Days == 0 {
+		return "off"
+	}
+	notice := "dashboard notice"
+	if c.SMTPURL != "" {
+		notice = "dashboard notice and email"
+	}
+	return fmt.Sprintf("sites unused for %d days are marked and move to Recently deleted 30 days later (%s)", c.Days, notice)
 }

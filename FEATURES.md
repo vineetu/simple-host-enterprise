@@ -193,7 +193,19 @@ Config names are documented in `docs/configuration.md`; schema in
   holds its name or address). A recently deleted site keeps counting toward
   its owner's site and storage quota until its window ends, so the
   restore's quota re-check only refuses an owner already over; past the
-  window a restore is 404 even before the sweeper runs; an admin restores any from `/admin`, and an
+  window a restore is 404 even before the sweeper runs. Idle-site cleanup
+  (opt-in, `IDLE_CLEANUP_DAYS`, off by default; `internal/handler/idle_cleanup.go`,
+  hourly on every replica, atomic per site): a site with no human visits,
+  deploys or saved-data writes for that many days is marked
+  (`sites.idle_since`; audited `site_idle_marked` as `system`), its owner or
+  every team member sees "Not used lately" on the dashboard (the date it
+  moves, Keep, Download of the live version) and, with `SMTP_URL`, gets an
+  email; admins see the list on /admin. A visit, deploy, write or restore
+  unmarks it (`site_idle_cleared`); Keep (`POST .../keep`, `{"keep": false}`
+  undoes it; `sites.idle_keep`; `site_idle_keep`) takes it out for good.
+  30 days after marking (`db.IdleGrace`), still unused and not kept, it
+  moves to Recently deleted like an owner's delete (`site_delete`, `system`,
+  `reason` `idle`). An admin restores any from `/admin`, and an
   admin's "Delete sites" for a leaver lands there too. After the window the
   sweeper purges the row and retires the objects (section 6). A team's
   deletion still removes its sites for good. Every site, at
@@ -274,7 +286,9 @@ Config names are documented in `docs/configuration.md`; schema in
   `POST /api/sites/{sitename}/transfer`,
   `POST /api/collaboration/sites/{owner}/{sitename}/transfer`,
   `POST /api/sites/{sitename}/rename`,
-  `POST /api/collaboration/sites/{owner}/{sitename}/rename`.
+  `POST /api/collaboration/sites/{owner}/{sitename}/rename`,
+  `POST /api/sites/{sitename}/keep`,
+  `POST /api/collaboration/sites/{owner}/{sitename}/keep`.
   Host-gate: every path on the site host `<site>.<owner>.<base>` (hosted
   content, root-served); `/{site}/...` on the owner host (served before the
   owner is ready, redirected after); every path on a v1.2
@@ -282,23 +296,27 @@ Config names are documented in `docs/configuration.md`; schema in
 - **MCP.** `list_sites`, `get_site`, `deploy_site`, `list_site_versions`,
   `rollback_site`, `delete_site`, `list_deleted_sites`, `restore_site`,
   `list_site_files`, `read_site_file` (the last
-  two read a version archive), `transfer_site`, `rename_site`.
+  two read a version archive), `transfer_site`, `rename_site`, `keep_site`.
 - **Skill.** `SKILL.md` §3, Canonical deployment workflow, Core collaboration
   and conflict rules; `references/packaging-and-validation.md`,
   `references/collaboration.md` §1–5 and §8, `references/frameworks.md`;
   `skills/fix-paths-for-subpath-hosting/`, `skills/simple-host-builder/`.
 - **Pages.** `/dashboard` "Your sites" (Manage: Rename, Move to a team; both off while an admin's restriction stands) and
-  "Recently deleted"; `/admin` "Recently deleted".
+  "Recently deleted", "Not used lately" (idle cleanup); `/admin` "Recently
+  deleted", "Not used lately".
 - **Go.** `internal/handler/site.go`, `site_restore.go`, `collaboration.go`, `site_mutation.go`,
-  `site_move.go`, `admin_move.go`,
+  `site_move.go`, `admin_move.go`, `idle_cleanup.go`, `smtp_mailer.go`,
   `upload_limits.go`, `serve.go`, `serve_self_traffic.go`, `host_gate.go`, `host.go`, `names.go`,
   `security.go`; `internal/tarball/`; `internal/scan/clamd.go`;
-  `internal/db/queries.go`, `collaboration.go`, `quota.go`, `site_move.go`, `deleted_sites.go`.
+  `internal/db/queries.go`, `collaboration.go`, `quota.go`, `site_move.go`, `deleted_sites.go`,
+  `idle.go`; `internal/config/idle.go`.
 - **DB.** `sites`, `versions` (0001; 0012 `versions.uploaded_by`; 0037
   `versions.size_bytes`), 0018 owner label uniqueness, `site_redirects`
-  (0043, backward-compatible), 0044 `sites.deleted_at`/`deleted_by`.
+  (0043, backward-compatible), 0044 `sites.deleted_at`/`deleted_by`,
+  0051 `sites.idle_since`/`idle_keep` (backward-compatible).
 - **Config.** `PUBLIC_BASE_URL`, `RESERVED_LABELS`, `QUOTA_MAX_SITES`,
-  `QUOTA_MAX_BYTES`, `QUOTA_MAX_VERSIONS`, `CLAMD_ADDR`, `CLAMD_TIMEOUT`.
+  `QUOTA_MAX_BYTES`, `QUOTA_MAX_VERSIONS`, `CLAMD_ADDR`, `CLAMD_TIMEOUT`,
+  `IDLE_CLEANUP_DAYS`, `SMTP_URL`, `SMTP_FROM`.
 
 ## 6. Bucket storage, cache, retire sweep, migrate-storage, restore and reencrypt
 
@@ -662,7 +680,11 @@ Config names are documented in `docs/configuration.md`; schema in
   rename and hand over (section 5), visitor counts, each namespace's usage against its quota (sites, stored
   bytes; the same numbers `GET /api/me` returns as `usage`), "Recently
   deleted" (the person's and their teams' sites deleted in the last 30 days,
-  each with Restore; hidden when empty), and a link to sessions. Calls the JSON routes of sections
+  each with Restore; hidden when empty), "Not used lately" (sites the idle
+  cleanup marked, with the date each moves, Keep and Download; section 5;
+  hidden when none), and a link to sessions. Key rows show the key's last
+  four ("earlier key" before 0050), last used, and "expires soon"; a
+  site's Activity names who made each change (section 12). Calls the JSON routes of sections
   2, 5, 7, 8, 11 and 12 with the session cookie.
 - **Status.** Built.
 - **Routes.** `GET /dashboard`.

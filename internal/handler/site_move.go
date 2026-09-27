@@ -416,6 +416,9 @@ func (h *SiteHandler) registerMoveRoutes(mux *http.ServeMux, ownerMutation, brow
 	mux.Handle("POST /api/collaboration/sites/{owner}/{sitename}/transfer", browserWrite(ownerMutation(http.HandlerFunc(h.transferSite))))
 	mux.Handle("POST /api/sites/{sitename}/rename", browserWrite(ownerMutation(http.HandlerFunc(h.renameSite))))
 	mux.Handle("POST /api/collaboration/sites/{owner}/{sitename}/rename", browserWrite(ownerMutation(http.HandlerFunc(h.renameSite))))
+	// Keep a site out of the idle cleanup (idle_cleanup.go).
+	mux.Handle("POST /api/sites/{sitename}/keep", browserWrite(ownerMutation(http.HandlerFunc(h.keepSite))))
+	mux.Handle("POST /api/collaboration/sites/{owner}/{sitename}/keep", browserWrite(ownerMutation(http.HandlerFunc(h.keepSite))))
 }
 
 // movableSite resolves the site a transfer or rename names and checks the
