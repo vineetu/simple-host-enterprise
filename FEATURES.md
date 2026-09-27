@@ -731,7 +731,10 @@ Config names are documented in `docs/configuration.md`; schema in
   `site_name` and `actor_name`. An owner or team member is given
   `actor_name` for changes to the site: by themselves, a member of the
   owning team, or anyone who saved its data (`state_write`; the same person
-  the dashboard shows as "written by" on each saved-data version). Someone
+  the dashboard shows as "written by" on each saved-data version; their
+  `ip` and `user_agent` are left out unless they are the caller or a
+  teammate). An admin's rename of a person and revoke of their key carry
+  that person as `owner`, so they see it in their own activity. Someone
   who only opened the site, or was refused (`access_denied`), is never
   named, and for those rows `actor_id`, `key_id`, `ip` and `user_agent` are
   left out too; an admin always sees all of it. A non-admin's `actor` filter
