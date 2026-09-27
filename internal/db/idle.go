@@ -11,10 +11,45 @@ import (
 const IdleGrace = 30 * 24 * time.Hour
 
 // siteLastUsed is when a site (alias s) was last used: created, deployed,
-// its saved data written (both bump updated_at), or visited by a person.
-const siteLastUsed = `GREATEST(s.created_at, s.updated_at, COALESCE(
-	(SELECT max(a.last_seen_at) FROM site_daily_analytics a WHERE a.site_id = s.id AND a.pageviews > 0),
-	s.created_at))`
+// its saved data read or written, or opened by anyone but a bot or a
+// preview (sites.last_used_at, bumped at most hourly: TouchSiteUsed,
+// MarkSiteUsed). A site that existed before last_used_at did starts at the
+// time the column was added, so it is never judged idle on missing data.
+const siteLastUsed = `GREATEST(s.created_at, s.updated_at, s.last_used_at)`
+
+// SiteUseThrottle is how often a site's use is written: at most once per
+// site in this long, however many visits and saved-data reads it gets.
+const SiteUseThrottle = time.Hour
+
+// MarkSiteUsed records that owner's site was just opened or its saved data
+// read, unless that was already recorded within SiteUseThrottle. It updates
+// the site row, so it waits for (and is seen by) the idle cleanup's check
+// under LockSiteRow.
+func MarkSiteUsed(ctx context.Context, q Querier, owner, site string) error {
+	_, err := q.ExecContext(ctx, `
+		UPDATE sites s SET last_used_at = now()
+		FROM users u
+		WHERE u.id = s.user_id AND u.username = $1 AND s.name = $2 AND s.deleted_at IS NULL
+		  AND s.last_used_at < now() - $3 * interval '1 second'`,
+		owner, site, int64(SiteUseThrottle/time.Second))
+	return err
+}
+
+// TouchSiteUsed records, in the caller's transaction, that a site was just
+// used (a version deployed, live or held).
+func TouchSiteUsed(ctx context.Context, q Querier, siteID string) error {
+	_, err := q.ExecContext(ctx, `UPDATE sites SET last_used_at = now() WHERE id = $1::uuid`, siteID)
+	return err
+}
+
+// LockSiteRow takes the site row's lock for the rest of the transaction, so
+// a concurrent use (MarkSiteUsed, a saved-data write, Keep) either lands
+// before the caller's next read or waits until it commits.
+func LockSiteRow(ctx context.Context, q Querier, siteID string) error {
+	var id string
+	err := q.QueryRowContext(ctx, `SELECT id::text FROM sites WHERE id = $1::uuid FOR UPDATE`, siteID).Scan(&id)
+	return err
+}
 
 // IdleSite is a site the idle cleanup has marked (or is acting on).
 type IdleSite struct {
@@ -131,12 +166,13 @@ func ListIdleSites(ctx context.Context, q Querier, actorID string) ([]IdleSite, 
 
 // SetSiteIdleKeep records Keep (or takes it back) for one site; keeping also
 // unmarks it. It returns when the site had been marked (zero when it was
-// not). It never touches updated_at: keeping is not using.
+// not). It never touches updated_at: keeping is not using. sql.ErrNoRows
+// when the site has been deleted.
 func SetSiteIdleKeep(ctx context.Context, q Querier, siteID string, keep bool) (wasIdleSince *time.Time, err error) {
 	err = q.QueryRowContext(ctx, `
 		UPDATE sites s SET idle_keep = $2, idle_since = CASE WHEN $2 THEN NULL ELSE s.idle_since END
 		FROM (SELECT idle_since FROM sites WHERE id = $1::uuid) prev
-		WHERE s.id = $1::uuid
+		WHERE s.id = $1::uuid AND s.deleted_at IS NULL
 		RETURNING prev.idle_since`, siteID, keep).Scan(&wasIdleSince)
 	return wasIdleSince, err
 }

@@ -665,6 +665,11 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
+	// A deploy is use, live or held (the idle cleanup, db.siteLastUsed).
+	if err := db.TouchSiteUsed(r.Context(), tx, site.ID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
 
 	liveVersion := previousVersion
 	if publish {

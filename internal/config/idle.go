@@ -14,8 +14,8 @@ const maxIdleCleanupDays = 3650
 // IdleCleanupConfig is the opt-in cleanup of sites nobody visits or
 // updates. Days 0 (the default) turns it off.
 type IdleCleanupConfig struct {
-	// Days is IDLE_CLEANUP_DAYS: a site with no visits and no deploys for
-	// this many days is marked, and moves to Recently deleted 30 days later
+	// Days is IDLE_CLEANUP_DAYS: a site nobody opened, deployed to, or read
+	// or wrote saved data on for this many days is marked, and moves to Recently deleted 30 days later
 	// unless someone keeps it or it is used again.
 	Days int
 	// SMTPURL is SMTP_URL (smtp://user:pass@host:587, STARTTLS when the

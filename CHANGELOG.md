@@ -6,9 +6,10 @@ release, commit and schema.
 
 ## Unreleased
 
-Schema 0052 (from 0049), all three backward-compatible: nullable
+Schema 0053 (from 0049), all four backward-compatible: nullable
 `api_keys.last4` (0050), `sites.idle_since` and `sites.idle_keep` (0051), an
-index on `site_viewers (principal_id)` (0052). Run `simple-host migrate`
+index on `site_viewers (principal_id)` (0052), `sites.last_used_at` and the
+`site_export_links_used` table (0053). Run `simple-host migrate`
 before the new image. Skills are at 0.15.0 (0.11.0 still works).
 
 ### Sites
@@ -70,8 +71,12 @@ before the new image. Skills are at 0.15.0 (0.11.0 still works).
   end to end against a real database, and run by `make smoke`.
 
 ### Idle sites (opt-in)
-- `IDLE_CLEANUP_DAYS` (off by default): a site nobody has visited, deployed
-  or written for that many days is marked; its owner or team sees "Not used
+- `IDLE_CLEANUP_DAYS` (off by default): a site nobody has opened (its owner
+  and team count; bots and previews do not), deployed to, or read or written
+  saved data on for that many days (`sites.last_used_at`, written at most
+  hourly per site) is marked. Sites that existed before 0053 count as used
+  when it ran, so none is marked until `IDLE_CLEANUP_DAYS` after the
+  upgrade; its owner or team sees "Not used
   lately" on the dashboard with the date, Keep and Download, admins see the
   list on /admin, and with `SMTP_URL`/`SMTP_FROM` the owner (or each team
   member) is emailed. 30 days later, still unused and not kept, it moves to

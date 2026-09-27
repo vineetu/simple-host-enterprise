@@ -41,6 +41,9 @@ type SiteAPIHandler struct {
 	// process-local, best-effort, and keyed by site id, so two independent
 	// instances double-write at most once per site rather than disagreeing.
 	stateUsage *stateUsageMarker
+	// use records saved-data reads and writes and file opens as use of the
+	// site, for the idle cleanup (site_use.go).
+	use *stateUsageMarker
 	// quota and scanner are the per-owner upload limits and the optional
 	// malware scan (upload_limits.go).
 	quota   UploadQuota
@@ -71,6 +74,7 @@ func NewSiteAPIHandler(database *sql.DB, store *storage.Store, assetLimits stora
 		hosts:       hosts,
 		limits:      chooseAbuseLimits(limits),
 		stateUsage:  newStateUsageMarker(4),
+		use:         newSiteUseMarker(),
 	}
 }
 
@@ -184,6 +188,7 @@ func (h *SiteAPIHandler) GetState(w http.ResponseWriter, r *http.Request, call s
 		return
 	}
 	h.markStateUsage(siteID, call.Owner, call.SiteName, false)
+	markSiteUsed(h.use, h.database, call.Owner, call.SiteName)
 	writeRawJSON(w, http.StatusOK, state)
 }
 
@@ -247,6 +252,7 @@ func (h *SiteAPIHandler) PutState(w http.ResponseWriter, r *http.Request, call s
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
+	markSiteUsed(h.use, h.database, call.Owner, call.SiteName)
 	writeRawJSON(w, http.StatusOK, state)
 }
 
@@ -270,6 +276,7 @@ func (h *SiteAPIHandler) GetStateVersioned(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	h.markStateUsage(siteID, call.Owner, call.SiteName, true)
+	markSiteUsed(h.use, h.database, call.Owner, call.SiteName)
 	writeJSON(w, http.StatusOK, versionedStateResponse{Version: version, State: state})
 }
 
@@ -351,6 +358,7 @@ func (h *SiteAPIHandler) PutStateVersioned(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
+	markSiteUsed(h.use, h.database, call.Owner, call.SiteName)
 	writeJSON(w, http.StatusOK, versionedStateSavedResponse{Version: newVersion})
 }
 
@@ -563,6 +571,7 @@ func (h *SiteAPIHandler) CreateAsset(w http.ResponseWriter, r *http.Request, cal
 		return
 	}
 	keepObject = true
+	markSiteUsed(h.use, h.database, call.Owner, call.SiteName)
 	writeJSON(w, http.StatusCreated, createAssetResponse{
 		ID:  stored.ID,
 		URL: h.siteURL(call) + "_assets/" + url.PathEscape(stored.ID) + "/" + url.PathEscape(name),
@@ -692,6 +701,7 @@ func (h *SiteAPIHandler) ServeAsset(w http.ResponseWriter, r *http.Request, call
 		w.Header().Set("Content-Disposition", `attachment; filename="`+sanitizeAssetFilename(row.Name)+`"`)
 	}
 	http.ServeContent(w, r, row.Name, row.CreatedAt, asset.File)
+	markSiteOpened(h.use, h.database, r, http.StatusOK, call.Owner, call.SiteName)
 }
 
 func isInlineAssetType(contentType string) bool {

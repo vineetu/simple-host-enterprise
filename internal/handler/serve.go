@@ -95,6 +95,9 @@ type SiteFiles struct {
 	// nil-safe, but skipping avoids building an AccessEvent nobody reads
 	// when no real writer has been wired in yet).
 	access *audit.AccessWriter
+	// use records that a site was opened, for the idle cleanup
+	// (site_use.go).
+	use *stateUsageMarker
 }
 
 // NewSiteFiles builds the shared site file server.
@@ -106,6 +109,7 @@ func NewSiteFiles(store *storage.Store, database *sql.DB, cookies CookiePolicy, 
 		downloads:   newFileDownloadRecorder(database),
 		signingKeys: signingKeys,
 		sessionIdle: sessionIdle,
+		use:         newSiteUseMarker(),
 	}
 }
 
@@ -198,6 +202,7 @@ func (s *SiteFiles) serveSite(w http.ResponseWriter, r *http.Request, user, site
 		},
 	}
 	fileServer.ServeHTTP(recorder, r)
+	markSiteOpened(s.use, database, r, recorder.status, user, siteName)
 
 	// Every hosted-content response is logged here, including the owner's
 	// and team members' own: the isSelfTraffic exclusion above

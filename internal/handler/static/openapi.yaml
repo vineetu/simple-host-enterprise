@@ -1460,7 +1460,7 @@ paths:
   /api/collaboration/sites/{owner}/{sitename}/keep:
     post:
       summary: Keep a site from the idle cleanup
-      description: 'With `IDLE_CLEANUP_DAYS` set, a site nobody has visited, deployed or written for that many days is marked ("Not used lately" on the dashboard) and moves to Recently deleted 30 days later. `{"keep": true}` (the default, also with no body) unmarks the site and keeps the cleanup away from it for good; `{"keep": false}` lets the cleanup consider it again. `POST /api/sites/{sitename}/keep` does the same for the caller''s own site. Owner or team member; full-scope key or session. Audited as `site_idle_keep`.'
+      description: 'With `IDLE_CLEANUP_DAYS` set, a site nobody has opened (its owner and team count; bots and previews do not), deployed to, or read or written saved data on for that many days is marked ("Not used lately" on the dashboard) and moves to Recently deleted 30 days later. `{"keep": true}` (the default, also with no body) unmarks the site and keeps the cleanup away from it for good; `{"keep": false}` lets the cleanup consider it again. `POST /api/sites/{sitename}/keep` does the same for the caller''s own site. Owner or team member; full-scope key or session. 404 when the site was deleted or moved meanwhile. Audited as `site_idle_keep`.'
       tags: [Sites]
       security:
         - apiKey: []

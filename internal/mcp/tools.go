@@ -1082,8 +1082,8 @@ func toolList() []Tool {
 		{
 			Name:  "keep_site",
 			Title: "Keep a site from the idle cleanup",
-			Description: "When an admin has turned on the idle cleanup, a site nobody has visited, deployed or written for a set number of days is marked on its owner's dashboard (\"Not used lately\") and moves to Recently deleted 30 days later. " +
-				"This keeps it: the site is unmarked and never marked again. Pass `keep: false` to let the cleanup consider it again. Using the site (a visit or a deploy) also unmarks it, for that round only. " +
+			Description: "When an admin has turned on the idle cleanup, a site nobody has opened (its owner and team count), deployed to, or read or written saved data on for a set number of days is marked on its owner's dashboard (\"Not used lately\") and moves to Recently deleted 30 days later. " +
+				"This keeps it: the site is unmarked and never marked again. Pass `keep: false` to let the cleanup consider it again. Using the site (opening it, a deploy, or reading or writing its saved data) also unmarks it, for that round only. " +
 				"Works on a site you own and on a site owned by a team you are in. Call it only when the user asks to keep a site.",
 			InputSchema: object(map[string]any{
 				"site":  str(siteArgDesc),

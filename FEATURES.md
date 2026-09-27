@@ -209,13 +209,21 @@ Config names are documented in `docs/configuration.md`; schema in
   restore's quota re-check only refuses an owner already over; past the
   window a restore is 404 even before the sweeper runs. Idle-site cleanup
   (opt-in, `IDLE_CLEANUP_DAYS`, off by default; `internal/handler/idle_cleanup.go`,
-  hourly on every replica, atomic per site): a site with no human visits,
-  deploys or saved-data writes for that many days is marked
+  hourly on every replica, atomic per site): a site nobody has opened
+  (owner and team included; bots and previews not), deployed to (held
+  deploys too), or read or written saved data on for that many days
+  (`sites.last_used_at`, 0053: bumped at most hourly per site by `serve.go`,
+  the site API and deploys, `site_use.go`; sites older than 0053 start at
+  the migration time, so the cleanup waits a full period rather than
+  judging on missing data) is marked
   (`sites.idle_since`; audited `site_idle_marked` as `system`), its owner or
   every team member sees "Not used lately" on the dashboard (the date it
   moves, Keep, and Download: the whole-site zip of section 5's download
   link) and, with `SMTP_URL`, gets an
-  email; admins see the list on /admin. A visit, deploy, write or restore
+  email ("not opened or changed in N days"); admins see the list on /admin.
+  The final check and the delete run under the site's lock and row lock, so
+  a use or Keep in flight either lands first (and saves the site) or finds
+  it gone. A visit, deploy, saved-data read or write, or restore
   unmarks it (`site_idle_cleared`); Keep (`POST .../keep`, `{"keep": false}`
   undoes it; `sites.idle_keep`; `site_idle_keep`) takes it out for good.
   30 days after marking (`db.IdleGrace`), still unused and not kept, it
@@ -368,7 +376,7 @@ Config names are documented in `docs/configuration.md`; schema in
   restriction stands), "Shared with me", "Recently deleted" and "Not used lately" (idle cleanup); `/admin` "Recently
   deleted", "Not used lately".
 - **Go.** `internal/handler/site.go`, `site_restore.go`, `collaboration.go`, `site_mutation.go`, `preview.go`, `dashboard.go`,
-  `site_move.go`, `admin_move.go`, `site_export.go`, `admin_erase.go` (`writeSiteExport`), `idle_cleanup.go`, `smtp_mailer.go`,
+  `site_move.go`, `admin_move.go`, `site_export.go`, `admin_erase.go` (`writeSiteExport`), `idle_cleanup.go`, `site_use.go`, `smtp_mailer.go`,
   `upload_limits.go`, `serve.go`, `serve_self_traffic.go`, `host_gate.go`, `host.go`, `names.go`,
   `security.go`; `internal/tarball/`; `internal/scan/clamd.go`;
   `internal/db/queries.go`, `collaboration.go` (`ListSharedSites`), `quota.go`, `site_move.go`, `deleted_sites.go`,
@@ -377,7 +385,8 @@ Config names are documented in `docs/configuration.md`; schema in
   `versions.size_bytes`), 0018 owner label uniqueness, `site_redirects`
   (0043, backward-compatible), 0044 `sites.deleted_at`/`deleted_by`,
   0051 `sites.idle_since`/`idle_keep`, 0052 `site_viewers_principal_idx`
-  (Shared with me) (both backward-compatible).
+  (Shared with me), 0053 `sites.last_used_at` and `site_export_links_used`
+  (all backward-compatible).
 - **Config.** `PUBLIC_BASE_URL`, `RESERVED_LABELS`, `QUOTA_MAX_SITES`,
   `QUOTA_MAX_BYTES`, `QUOTA_MAX_VERSIONS`, `CLAMD_ADDR`, `CLAMD_TIMEOUT`,
   `IDLE_CLEANUP_DAYS`, `SMTP_URL`, `SMTP_FROM`.

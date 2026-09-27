@@ -29,6 +29,39 @@ func (m *fakeMailer) Send(_ context.Context, to []string, subject, _ string) err
 	return nil
 }
 
+// browse opens path on host as user from a browser (a bot is not use).
+func (w *accessWorld) browse(user, host, path string) int {
+	r := httptest.NewRequest(http.MethodGet, "https://"+host+path, nil)
+	r.Header.Set("Accept", "text/html")
+	r.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh) Safari/605")
+	r.AddCookie(w.cookie(user, host))
+	return w.do(r).Code
+}
+
+// usedRecently reports whether a site's last use was in the last minute.
+func (w *accessWorld) usedRecently(name string) bool {
+	return w.count(`SELECT count(*) FROM sites WHERE name = $1 AND last_used_at > now() - interval '1 minute'`, name) == 1
+}
+
+// waitUsed waits for a site's use to be written (it is written off the
+// request path).
+func (w *accessWorld) waitUsed(name string) {
+	w.t.Helper()
+	if !waitFor(func() bool { return w.usedRecently(name) }) {
+		w.t.Fatalf("%s: use never recorded", name)
+	}
+}
+
+// makeUnused puts a site's every sign of use 100 days back.
+func (w *accessWorld) makeUnused(names ...string) {
+	w.t.Helper()
+	for _, name := range names {
+		if _, err := w.database.Exec(`UPDATE sites SET created_at = now() - interval '100 days', updated_at = now() - interval '100 days', last_used_at = now() - interval '100 days' WHERE name = $1`, name); err != nil {
+			w.t.Fatal(err)
+		}
+	}
+}
+
 func (w *accessWorld) idleSince(name string) (marked, kept, deleted bool) {
 	w.t.Helper()
 	if err := w.database.QueryRow(`SELECT idle_since IS NOT NULL, idle_keep, deleted_at IS NOT NULL FROM sites WHERE name = $1`, name).Scan(&marked, &kept, &deleted); err != nil {
@@ -48,7 +81,7 @@ func TestIdleCleanup(t *testing.T) {
 	w.deploy("alice", "/api/sites/fresh")
 	w.newTeam("crew", "mo", "olly")
 	w.deploy("mo", "/api/collaboration/sites/team-crew/board")
-	if _, err := w.database.Exec(`UPDATE sites SET created_at = now() - interval '100 days', updated_at = now() - interval '100 days' WHERE name IN ('old', 'board')`); err != nil {
+	if _, err := w.database.Exec(`UPDATE sites SET created_at = now() - interval '100 days', updated_at = now() - interval '100 days', last_used_at = now() - interval '100 days' WHERE name IN ('old', 'board')`); err != nil {
 		t.Fatal(err)
 	}
 	mailer := &fakeMailer{}
@@ -87,7 +120,7 @@ func TestIdleCleanup(t *testing.T) {
 
 	// The dashboard tells the owner and each team member; /admin lists both.
 	olly, _ := db.GetUserByUsername(ctx, w.database, "olly")
-	if notice := idleNoticeHTML(ctx, w.database, &olly); !strings.Contains(notice, "team-crew/board") || !strings.Contains(notice, "Will move to Recently deleted on") || strings.Contains(notice, "alice/old") {
+	if notice := idleNoticeHTML(ctx, w.database, &olly); !strings.Contains(notice, "team-crew/board") || !strings.Contains(notice, "Not opened or changed in 100 days") || strings.Contains(notice, "alice/old") {
 		t.Fatalf("olly's notice = %q", notice)
 	}
 	vera, _ := db.GetUserByUsername(ctx, w.database, "vera")
@@ -114,23 +147,23 @@ func TestIdleCleanup(t *testing.T) {
 		t.Fatalf("site_idle_keep events = %d", n)
 	}
 
-	// A visit unmarks; unused again, it is marked again.
+	// The owner opening it unmarks it (owners are not counted as visitors,
+	// but they are use); unused again, it is marked again.
 	id := w.siteID("alice", "old")
-	if _, err := w.database.Exec(`INSERT INTO site_daily_analytics (site_id, day, pageviews, visits, last_seen_at) VALUES ($1, current_date, 1, 1, now())`, id); err != nil {
-		t.Fatal(err)
+	if code := w.browse("alice", "old.alice."+accessBase, "/"); code != http.StatusOK {
+		t.Fatalf("owner visit = %d", code)
 	}
+	w.waitUsed("old")
 	if err := cleanup.RunOnce(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if marked, _, _ := w.idleSince("old"); marked {
-		t.Fatal("a visited site is still marked")
+		t.Fatal("a site its owner opened is still marked")
 	}
 	if n := w.count(`SELECT count(*) FROM audit_events WHERE action = 'site_idle_cleared' AND site_id = $1`, id); n != 1 {
 		t.Fatalf("site_idle_cleared events = %d", n)
 	}
-	if _, err := w.database.Exec(`DELETE FROM site_daily_analytics WHERE site_id = $1`, id); err != nil {
-		t.Fatal(err)
-	}
+	w.makeUnused("old")
 	if err := cleanup.RunOnce(ctx); err != nil {
 		t.Fatal(err)
 	}

@@ -16,8 +16,9 @@ import (
 )
 
 // IdleCleanup is the opt-in cleanup of sites nobody uses
-// (IDLE_CLEANUP_DAYS): a site with no visits, deploys or saved-data writes
-// for that many days is marked; the dashboard tells its owner (or team)
+// (IDLE_CLEANUP_DAYS): a site nobody has opened (owner and team included),
+// deployed to, or read or written saved data on for that many days
+// (db.siteLastUsed) is marked; the dashboard tells its owner (or team)
 // and, with SMTP set, so does an email; 30 days later (db.IdleGrace), still
 // unused and not kept, it moves to Recently deleted, where it can be
 // restored for another 30 days. Any use or Keep unmarks it. Every step is
@@ -135,6 +136,15 @@ func (c *IdleCleanup) moveToRecentlyDeleted(ctx context.Context, s db.IdleSite) 
 	if err := db.LockSiteCollaboration(ctx, tx, s.OwnerID, s.Name); err != nil {
 		return err
 	}
+	// The row lock orders this check against a visit, a saved-data write or
+	// a Keep (each updates the row): one that committed first is seen here,
+	// one that comes later waits and then finds the site gone.
+	if err := db.LockSiteRow(ctx, tx, s.ID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
 	if due, err := db.StillDueIdle(ctx, tx, s); err != nil || !due {
 		return err
 	}
@@ -176,10 +186,10 @@ func (c *IdleCleanup) notify(ctx context.Context, s db.IdleSite) {
 		return
 	}
 	subject := fmt.Sprintf("%s/%s moves to Recently deleted on %s", s.Owner, s.Name, s.DeleteOn().UTC().Format("2 January 2006"))
-	body := fmt.Sprintf("Nobody has visited or updated the site %s/%s since %s.\r\n\r\n"+
+	body := fmt.Sprintf("The site %s/%s has not been opened or changed in %d days (last used %s).\r\n\r\n"+
 		"On %s it will move to Recently deleted, where it can still be restored for 30 days.\r\n\r\n"+
-		"To keep it, open %s/dashboard and choose Keep, or download a copy there. Visiting or updating the site also keeps it.\r\n",
-		s.Owner, s.Name, s.LastUsed.UTC().Format("2 January 2006"), s.DeleteOn().UTC().Format("2 January 2006"), c.base)
+		"To keep it, open %s/dashboard and choose Keep, or download a copy there. Opening or updating the site also keeps it.\r\n",
+		s.Owner, s.Name, idleDays(s.LastUsed, time.Now()), s.LastUsed.UTC().Format("2 January 2006"), s.DeleteOn().UTC().Format("2 January 2006"), c.base)
 	if err := c.mailer.Send(ctx, to, subject, body); err != nil {
 		log.Printf("idle cleanup: email about %s/%s: %v", s.Owner, s.Name, err)
 	}
@@ -207,6 +217,23 @@ func (h *SiteHandler) keepSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer audit.Rollback(tx)
+	// Under the site's lock, and only if the caller still manages the same
+	// site: a Keep never lands on a site the cleanup (or its owner) deleted,
+	// or one moved somewhere the caller cannot manage, in the meantime.
+	if err := db.LockSiteCollaboration(r.Context(), tx, access.OwnerID, access.Site.Name); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	locked, err := db.ResolveSiteAccess(r.Context(), tx, access.ActorID, access.OwnerUsername, access.Site.Name)
+	if err != nil || locked.Site.ID != access.Site.ID || !grantsOwnerRole(locked.Role) {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			log.Printf("keep %s/%s: recheck access: %v", access.OwnerUsername, access.Site.Name, err)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+			return
+		}
+		writeJSON(w, http.StatusNotFound, errorResponse{Error: "site not found"})
+		return
+	}
 	was, err := db.SetSiteIdleKeep(r.Context(), tx, access.Site.ID, keep)
 	if err == nil {
 		actorKind, keyID := auditActorKind(r.Context())
@@ -222,12 +249,21 @@ func (h *SiteHandler) keepSite(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		err = audit.Commit(tx)
 	}
+	if errors.Is(err, sql.ErrNoRows) {
+		writeJSON(w, http.StatusNotFound, errorResponse{Error: "site not found"})
+		return
+	}
 	if err != nil {
 		log.Printf("keep %s/%s: %v", access.OwnerUsername, access.Site.Name, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"owner": access.OwnerUsername, "site": access.Site.Name, "keep": keep})
+}
+
+// idleDays is how many whole days a site has gone unused.
+func idleDays(lastUsed, now time.Time) int {
+	return int(now.Sub(lastUsed) / (24 * time.Hour))
 }
 
 // idleNoticeHTML is the dashboard notice for the person's marked sites, one
@@ -244,13 +280,13 @@ func idleNoticeHTML(ctx context.Context, database *sql.DB, user *db.User) string
 	var b strings.Builder
 	b.WriteString(`<section id="idle-section">
   <h2 class="section-title">Not used lately</h2>
-  <p class="login-copy">Nobody has visited or updated these sites for a while. Each moves to Recently deleted on the date shown (and can be restored for 30 days after that). Keep it, download a copy, or just use it.</p>
+  <p class="login-copy">These sites have not been opened or changed in a long while. Each moves to Recently deleted on the date shown (and can be restored for 30 days after that). Keep it, download a copy, or just open it.</p>
   <div class="rank-list" role="region" aria-label="Sites not used lately">`)
 	for _, s := range sites {
-		fmt.Fprintf(&b, `<div class="rank-row idle-row"><span class="rank-name">%s/%s <span class="rank-sub">Will move to Recently deleted on %s · last used %s</span></span>
+		fmt.Fprintf(&b, `<div class="rank-row idle-row"><span class="rank-name">%s/%s <span class="rank-sub">Not opened or changed in %d days · moves to Recently deleted on %s</span></span>
   <button type="button" class="btn-login idle-keep" data-owner="%s" data-site="%s">Keep</button> <button type="button" class="btn-reject idle-download" data-owner="%s" data-site="%s">Download</button></div>`,
 			html.EscapeString(s.Owner), html.EscapeString(s.Name),
-			localTimeHTML(s.DeleteOn(), "date"), localTimeHTML(s.LastUsed, "date"),
+			idleDays(s.LastUsed, time.Now()), localTimeHTML(s.DeleteOn(), "date"),
 			html.EscapeString(s.Owner), html.EscapeString(s.Name), html.EscapeString(s.Owner), html.EscapeString(s.Name))
 	}
 	b.WriteString(`</div>

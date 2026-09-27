@@ -380,8 +380,9 @@ or `list_deleted_sites` then `restore_site`. A restore counts toward the
 namespace's limits again (`site_limit`, `storage_quota`). After 30 days the
 site is gone for good.
 
-If the admins have turned on the idle cleanup, a site nobody has visited,
-deployed or written for a long time shows under "Not used lately" on its
+If the admins have turned on the idle cleanup, a site nobody has opened
+(its owner and team count), deployed to, or read or written saved data on for
+a long time shows under "Not used lately" on its
 owner's dashboard and moves to Recently deleted 30 days later. When the user
 wants such a site kept, call `POST .../keep` (or `keep_site`); using the site
 also unmarks it. Only do this when the user asks.
