@@ -91,6 +91,14 @@ BEGIN
 END;
 $$;
 
+-- Owner-role only (migrate and prune connect as the owning role, which
+-- always holds EXECUTE on its own functions): nothing for PUBLIC, and so
+-- nothing for simplehost_app, as 0036 and 0040 do for theirs. SECURITY
+-- INVOKER means a caller without table privileges could do nothing anyway;
+-- this keeps the grants saying so.
+REVOKE ALL ON FUNCTION audit_ensure_month_partition(text, date) FROM PUBLIC;
+REVOKE ALL ON FUNCTION audit_ensure_partitions(int) FROM PUBLIC;
+
 SELECT audit_ensure_partitions(12);
 
 COMMIT;
