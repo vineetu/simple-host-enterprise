@@ -8,6 +8,9 @@ bucket's old-version retention at least as long.
 to, or read or written saved data on for that long is marked: its owner sees "Not used lately"
 with Keep and Download, admins see a list, and with [email](email.md) set the owner is emailed.
 After `IDLE_CLEANUP_GRACE_DAYS` more, still unused and not kept, it moves to Recently deleted.
+A site an admin has restricted is never marked or deleted for disuse. `IDLE_CLEANUP_DAYS` is 0
+(off) or at least 30, and the grace and `DELETED_RETENTION_DAYS` at least 7, so a site unused
+over a holiday is never removed.
 
 **Logs.** The audit log, the access log and search counts are pruned by the `prune` CronJob.
 
