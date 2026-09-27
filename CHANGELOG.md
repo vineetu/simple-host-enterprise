@@ -6,6 +6,25 @@ release, commit and schema.
 
 ## Unreleased
 
+Schema 0043 (`sites.deleted_at`, `sites.deleted_by`) is not marked
+backward-compatible: an older binary would serve sites in their recovery
+window again, so it refuses to start on this schema.
+
+### Sites
+- Deleting a site can be undone for 30 days. It stops serving and leaves
+  every list at once, but keeps its versions, saved data and history, access
+  level, viewers and uploaded files, and its name (a new site of that name
+  is refused with `409 name_held`). The owner or a team member restores it
+  from "Recently deleted" on the dashboard, `GET /api/deleted-sites` and
+  `POST /api/sites/{site}/restore` (or the owner-qualified
+  `/api/collaboration/sites/{owner}/{site}/restore`), or the new MCP tools
+  `list_deleted_sites` and `restore_site`; an admin restores any from the
+  "Recently deleted" card on `/admin`. A restore counts toward the quota
+  again and is audited as `site_restore`. After 30 days the sweeper removes
+  the site for good. Deleting a team still removes its sites at once.
+- `simple-host restore` into a name a recently deleted site holds undeletes
+  that site rather than creating an empty one.
+
 ### Operations
 - Startup warns when no admin is configured (neither `ADMIN_EMAILS` nor
   `OIDC_ADMIN_CLAIM`) and when the bucket's versioning is not enabled (a

@@ -516,6 +516,8 @@ func codeHint(code string, tool Tool) string {
 		return "The team is at its member limit. Somebody has to be removed with remove_team_member before another person can be added; ask the user, do not choose."
 	case "name_taken":
 		return "That team name is already registered. Ask the user for a different one rather than composing a variation of it."
+	case "name_held":
+		return "A site deleted in the last 30 days still holds that name. Ask the user whether to bring it back with restore_site (list_deleted_sites shows it) or to use a different name; do not choose for them."
 	case "name_conflict":
 		return "That name would share one web address with an existing account or site. Ask the user for a clearly different name."
 	case "team_limit":

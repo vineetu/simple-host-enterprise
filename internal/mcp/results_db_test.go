@@ -259,6 +259,13 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	call("list_sites", map[string]any{})
 	call("delete_site", map[string]any{"site": "other", "owner": "alice", "confirm_name": "other"})
 	call("delete_site", map[string]any{"site": "demo", "confirm_name": "demo"})
+	if deleted := call("list_deleted_sites", map[string]any{}); deleted["count"] != float64(2) {
+		t.Errorf("list_deleted_sites = %v, want both deleted sites", deleted)
+	}
+	if restored := call("restore_site", map[string]any{"site": "other", "owner": "alice"}); restored["site"] != "other" {
+		t.Errorf("restore_site = %v", restored)
+	}
+	call("delete_site", map[string]any{"site": "other", "owner": "alice", "confirm_name": "other"})
 	call("remove_team_member", map[string]any{"team": "acme-team", "username": "bob"})
 	call("delete_team", map[string]any{"team": "acme-team"})
 

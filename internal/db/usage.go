@@ -12,7 +12,7 @@ func SiteOwner(ctx context.Context, db *sql.DB, username, siteName string) (stri
 		SELECT u.id
 		FROM users u
 		JOIN sites s ON s.user_id = u.id
-		WHERE u.username = $1 AND s.name = $2
+		WHERE u.username = $1 AND s.name = $2 AND s.deleted_at IS NULL
 	`
 
 	var userID string

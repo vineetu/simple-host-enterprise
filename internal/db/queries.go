@@ -113,7 +113,7 @@ func GetSite(ctx context.Context, q Querier, userID, name string) (Site, error) 
 	const query = `
 		SELECT id, user_id, name, active_version, public, created_at, updated_at
 		FROM sites
-		WHERE user_id = $1 AND name = $2
+		WHERE user_id = $1 AND name = $2 AND deleted_at IS NULL
 	`
 
 	var site Site
@@ -139,7 +139,7 @@ func GetSiteState(ctx context.Context, db *sql.DB, username, sitename string) (j
 		SELECT s.id::text, s.state
 		FROM sites s
 		INNER JOIN users u ON u.id = s.user_id
-		WHERE u.username = $1 AND s.name = $2
+		WHERE u.username = $1 AND s.name = $2 AND s.deleted_at IS NULL
 	`
 
 	var siteID string
@@ -163,6 +163,7 @@ func UpdateSiteState(ctx context.Context, db Querier, username, sitename string,
 		WHERE s.user_id = u.id
 		  AND u.username = $1
 		  AND s.name = $2
+		  AND s.deleted_at IS NULL
 	`
 
 	result, err := db.ExecContext(ctx, query, username, sitename, string(state))
@@ -230,7 +231,7 @@ func GetSiteStateVersioned(ctx context.Context, db *sql.DB, username, sitename s
 		SELECT s.id::text, s.state, s.state_version
 		FROM sites s
 		INNER JOIN users u ON u.id = s.user_id
-		WHERE u.username = $1 AND s.name = $2
+		WHERE u.username = $1 AND s.name = $2 AND s.deleted_at IS NULL
 	`
 
 	var siteID string
@@ -259,6 +260,7 @@ func UpdateSiteStateCAS(ctx context.Context, db Querier, username, sitename stri
 		WHERE s.user_id = u.id
 		  AND u.username = $1
 		  AND s.name = $2
+		  AND s.deleted_at IS NULL
 		  AND s.state_version = $4
 		RETURNING s.state_version
 	`
@@ -277,7 +279,7 @@ func UpdateSiteStateCAS(ctx context.Context, db Querier, username, sitename stri
 		SELECT 1
 		FROM sites s
 		INNER JOIN users u ON u.id = s.user_id
-		WHERE u.username = $1 AND s.name = $2
+		WHERE u.username = $1 AND s.name = $2 AND s.deleted_at IS NULL
 	`
 	var one int
 	if err := db.QueryRowContext(ctx, exists, username, sitename).Scan(&one); err != nil {
@@ -336,6 +338,7 @@ func ListAllSites(ctx context.Context, db *sql.DB) ([]Site, error) {
 	const query = `
 		SELECT id, user_id, name, active_version, public, uses_state, uses_versioned_state, created_at, updated_at, access
 		FROM sites
+		WHERE deleted_at IS NULL
 		ORDER BY created_at ASC, name ASC
 	`
 
@@ -350,7 +353,7 @@ func ListSitesByUser(ctx context.Context, db *sql.DB, userID string) ([]Site, er
 	const query = `
 		SELECT id, user_id, name, active_version, public, uses_state, uses_versioned_state, created_at, updated_at, access
 		FROM sites
-		WHERE user_id = $1
+		WHERE user_id = $1 AND deleted_at IS NULL
 		ORDER BY created_at ASC, name ASC
 	`
 
@@ -366,7 +369,7 @@ func ListSitesByUsername(ctx context.Context, db *sql.DB, username string) ([]Si
 		SELECT s.id, s.user_id, s.name, s.active_version, s.public, s.uses_state, s.uses_versioned_state, s.created_at, s.updated_at, s.access
 		FROM sites s
 		INNER JOIN users u ON u.id = s.user_id
-		WHERE u.username = $1
+		WHERE u.username = $1 AND s.deleted_at IS NULL
 		ORDER BY s.created_at ASC, s.name ASC
 	`
 
@@ -420,7 +423,7 @@ func RecordSiteDailyAnalytics(ctx context.Context, q Querier, username, siteName
 			SELECT s.id
 			FROM sites s
 			INNER JOIN users u ON u.id = s.user_id
-			WHERE u.username = $1 AND s.name = $2
+			WHERE u.username = $1 AND s.name = $2 AND s.deleted_at IS NULL
 		)
 		INSERT INTO site_daily_analytics (
 			site_id, day, pageviews, visits, bot_pageviews, bot_visits, first_seen_at, last_seen_at
@@ -551,7 +554,7 @@ func RecordSiteFileDownload(ctx context.Context, q Querier, username, siteName, 
 			SELECT s.id
 			FROM sites s
 			INNER JOIN users u ON u.id = s.user_id
-			WHERE u.username = $1 AND s.name = $2
+			WHERE u.username = $1 AND s.name = $2 AND s.deleted_at IS NULL
 		)
 		INSERT INTO site_file_downloads (site_id, path, day, downloads, first_seen_at, last_seen_at)
 		SELECT

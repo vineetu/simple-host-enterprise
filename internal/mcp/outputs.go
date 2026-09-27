@@ -247,6 +247,22 @@ func outputSchemas() map[string]map[string]any {
 		}, "version"),
 
 		"delete_site": doneSchema(),
+		"list_deleted_sites": listOf("Every site deleted in the last 30 days from this account or its teams, newest first.", outObject(map[string]any{
+			"owner":            outString("The namespace it was in: a username or a team name."),
+			"site":             outString("The site's name, which it keeps until it is restored or gone for good."),
+			"active_version":   outInteger("The version that was live when it was deleted."),
+			"access":           outString("Who could open it; restored as it was."),
+			"deleted_at":       outString("When it was deleted (RFC 3339)."),
+			"deleted_by":       outString("Username of whoever deleted it."),
+			"restorable_until": outString("When it is removed for good (RFC 3339)."),
+		}, "owner", "site", "active_version", "access", "deleted_at", "restorable_until")),
+		"restore_site": outObject(map[string]any{
+			"owner":          outString("The namespace it is in."),
+			"site":           outString("The site's name."),
+			"active_version": outInteger("The live version, as before it was deleted."),
+			"access":         outString("Who can open it, as before it was deleted."),
+			"url":            outString("The site's address; hand this to the user."),
+		}, "owner", "site", "active_version", "access", "url"),
 
 		"create_team":       teamSchema(),
 		"list_teams":        outObject(map[string]any{"teams": outArray("The teams this account is in.", teamSchema())}, "teams"),

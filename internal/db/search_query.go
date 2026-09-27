@@ -78,6 +78,7 @@ const publicSiteSearchQuery = `
 		JOIN sites AS live_site
 			ON live_site.id = document.site_id
 			AND live_site.public = true
+			AND live_site.deleted_at IS NULL
 			AND live_site.active_version = document.version_number
 			-- A restricted site is not public, whatever its own public flag
 			-- says: search must not surface it to anyone who is not

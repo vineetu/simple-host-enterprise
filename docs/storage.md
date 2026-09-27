@@ -110,10 +110,16 @@ truth for what is live, the state documents, and the users.
 
 ## Retention
 
-When a version is retired or a site is deleted, its objects are queued in
-the database and deleted from the bucket by the server one hour after they
-stop being referenced. After that only bucket versioning keeps them, until
-the lifecycle rule expires them.
+When a version is retired, its object is queued in the database and deleted
+from the bucket by the server one hour after it stops being referenced.
+
+A deleted site is different: for 30 days it stays whole (its database row
+and every object under `sites/<id>/`), so its owner, a member of its team or
+an admin can restore it exactly as it was ("Recently deleted" on the
+dashboard and on `/admin`, or the `restore_site` tool). After 30 days the
+server's sweeper purges the row and queues the objects, which go an hour
+later. After that only bucket versioning keeps them, until the lifecycle
+rule expires them. A team's deletion removes its sites at once.
 
 ## Encryption
 
@@ -408,11 +414,14 @@ kubectl -n simple-host exec deploy/simple-host -- /simple-host restore -from-sit
 ```
 
 `-owner` is the account's username; for a team, its full `team-<name>`.
-`-set-current=false` adds the version without making it live. A deleted
-site's id is in the audit log (its `site_delete` event). If the object has
+`-set-current=false` adds the version without making it live. A site
+deleted in the last 30 days is best restored from "Recently deleted"; if
+`restore` is pointed at its name it undeletes that row (saved data, viewers
+and assets included), and with its own id and live version it does only
+that. A deleted site's id is in the audit log (its `site_delete` event). If the object has
 already been swept, first bring back its noncurrent version with the
 bucket's own tools, for example on AWS: find it with
 `aws s3api list-object-versions --bucket <bucket> --prefix <prefix>sites/<uuid>/`,
 copy it back with
 `aws s3api copy-object --bucket <bucket> --key <key> --copy-source "<bucket>/<key>?versionId=<id>" --server-side-encryption AES256`,
-then run `restore`. Assets are not restored.
+then run `restore`. Assets are not restored once the site has been purged.

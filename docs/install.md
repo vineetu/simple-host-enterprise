@@ -521,7 +521,7 @@ Every mutation writes an `audit_events` row.
 These actions write it inside the same database transaction as the
 change it records (`internal/audit`'s `RecordTx`), so a mutation in this
 group without its audit row cannot commit: `site_create`, `site_update`,
-`site_delete`, `site_rollback`, `site_access`, `network_access_requested`,
+`site_delete`, `site_restore`, `site_rollback`, `site_access`, `network_access_requested`,
 `network_access_approval_added`, `network_access_approved`,
 `network_access_declined`,
 `network_access_reverted`, `state_restore`, `viewer_grant`,

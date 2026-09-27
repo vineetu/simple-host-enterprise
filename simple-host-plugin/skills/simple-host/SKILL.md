@@ -1,6 +1,6 @@
 ---
 name: simple-host
-description: Deploy and collaborate on static websites in Simple Host. Use when an agent needs to get the user signed in and holding an API key, validate and package a local site, choose the namespace a site is published under, create or update a site, choose who can open it, resolve owned/team sites, download an exact retained artifact, deploy with ETag conflict protection, create a team or manage its members, restore saved data, list versions, roll back, or delete.
+description: Deploy and collaborate on static websites in Simple Host. Use when an agent needs to get the user signed in and holding an API key, validate and package a local site, choose the namespace a site is published under, create or update a site, choose who can open it, resolve owned/team sites, download an exact retained artifact, deploy with ETag conflict protection, create a team or manage its members, restore saved data, list versions, roll back, delete, or restore a recently deleted site.
 ---
 
 # Simple Host
@@ -190,7 +190,7 @@ References are one level deep. Read each selected file completely before acting.
 |---|---|
 | Install or update skills | [`references/updating.md`](references/updating.md) |
 | Sign in and get a key | [`references/account-recovery.md`](references/account-recovery.md) |
-| Edit, download, roll back, delete, share, or restore saved data of an existing site | [`references/collaboration.md`](references/collaboration.md) |
+| Edit, download, roll back, delete, restore a deleted site, share, or restore saved data of an existing site | [`references/collaboration.md`](references/collaboration.md) |
 | Create, list, join, leave, or delete a team | [`references/teams.md`](references/teams.md) |
 | Detect and build a framework with relative paths | [`references/frameworks.md`](references/frameworks.md) |
 | Validate, package, upload, and verify a site | [`references/packaging-and-validation.md`](references/packaging-and-validation.md) |

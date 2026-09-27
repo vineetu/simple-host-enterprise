@@ -88,6 +88,7 @@ const resolveSiteAccessQuery = `
 		AND tm.user_id = $1::uuid
 	WHERE owner.username = $2
 	  AND s.name = $3
+	  AND s.deleted_at IS NULL
 	  AND (s.user_id = $1::uuid OR tm.user_id IS NOT NULL)
 `
 
@@ -153,7 +154,7 @@ const listAccessibleSitesQuery = `
 	LEFT JOIN team_members tm
 		ON tm.team_id = s.user_id
 		AND tm.user_id = $1::uuid
-	WHERE s.user_id = $1::uuid OR tm.user_id IS NOT NULL
+	WHERE (s.user_id = $1::uuid OR tm.user_id IS NOT NULL) AND s.deleted_at IS NULL
 	ORDER BY
 		CASE WHEN s.user_id = $1::uuid THEN 0 ELSE 1 END,
 		owner.username,
@@ -226,7 +227,7 @@ func requireSiteIncarnation(ctx context.Context, tx *sql.Tx, ownerID, siteName, 
 	const query = `
 		SELECT 1
 		FROM sites
-		WHERE id = $1::uuid AND user_id = $2::uuid AND name = $3
+		WHERE id = $1::uuid AND user_id = $2::uuid AND name = $3 AND deleted_at IS NULL
 	`
 	var one int
 	return tx.QueryRowContext(ctx, query, siteID, ownerID, siteName).Scan(&one)

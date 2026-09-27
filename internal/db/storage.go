@@ -14,7 +14,7 @@ func ServingSite(ctx context.Context, q Querier, ownerUsername, siteName string)
 		SELECT s.id, s.active_version
 		FROM sites s
 		JOIN users u ON u.id = s.user_id
-		WHERE u.username = $1 AND s.name = $2
+		WHERE u.username = $1 AND s.name = $2 AND s.deleted_at IS NULL
 	`
 	var siteID string
 	var version int
@@ -27,7 +27,7 @@ func ListSiteOwnerUsernames(ctx context.Context, q Querier) ([]string, error) {
 	const query = `
 		SELECT DISTINCT u.username
 		FROM users u
-		JOIN sites s ON s.user_id = u.id
+		JOIN sites s ON s.user_id = u.id AND s.deleted_at IS NULL
 		ORDER BY u.username
 	`
 	return queryStrings(ctx, q, query)
@@ -35,6 +35,21 @@ func ListSiteOwnerUsernames(ctx context.Context, q Querier) ([]string, error) {
 
 // ListSiteNamesByOwnerUsername returns the names of every site ownerUsername owns.
 func ListSiteNamesByOwnerUsername(ctx context.Context, q Querier, ownerUsername string) ([]string, error) {
+	const query = `
+		SELECT s.name
+		FROM sites s
+		JOIN users u ON u.id = s.user_id
+		WHERE u.username = $1 AND s.deleted_at IS NULL
+		ORDER BY s.name
+	`
+	return queryStrings(ctx, q, query, ownerUsername)
+}
+
+// ListHeldSiteNamesByOwnerUsername is ListSiteNamesByOwnerUsername plus the
+// names of the owner's deleted sites still in their recovery window: the
+// names a new site's address must not collide with, since a restore brings
+// them back.
+func ListHeldSiteNamesByOwnerUsername(ctx context.Context, q Querier, ownerUsername string) ([]string, error) {
 	const query = `
 		SELECT s.name
 		FROM sites s

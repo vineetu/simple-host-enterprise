@@ -461,6 +461,42 @@ func toolList() []Tool {
 			},
 		},
 		{
+			Name:  "list_deleted_sites",
+			Title: "List recently deleted sites",
+			Description: "List the sites deleted in the last 30 days from your account and from every team you are in. " +
+				"Each entry gives `owner`, `site`, who deleted it (`deleted_by`), `deleted_at`, and `restorable_until`, after which it is gone for good. " +
+				"Call this when the user wants a deleted site back, then restore_site with the exact owner and site.",
+			InputSchema: noArgs(),
+			Annotations: readOnly(),
+			family:      familySite,
+			call: func(map[string]any) (upstream, error) {
+				return upstream{Method: "GET", Path: "/api/deleted-sites"}, nil
+			},
+		},
+		{
+			Name:  "restore_site",
+			Title: "Restore a deleted site",
+			Description: "Bring back a site deleted in the last 30 days, exactly as it was: its live version and older versions, saved data and its history, who can open it, its viewers and its uploaded files. " +
+				"It is served again at once at the returned `url`. Get the exact owner and site from list_deleted_sites. " +
+				"Works for your own sites and for sites of a team you are in. It counts toward the namespace's site and storage limits again, so it can be refused with `site_limit` or `storage_quota`.",
+			InputSchema: object(map[string]any{
+				"site":  str("The deleted site's name, exactly as list_deleted_sites shows it."),
+				"owner": str(ownerArgDesc + " Omit only for a site that was in your own account."),
+			}, "site"),
+			Annotations: writes(false, false),
+			family:      familySite,
+			call: func(args map[string]any) (upstream, error) {
+				ownerScoped, collaboration, err := siteRoute(args, "restore")
+				if err != nil {
+					return upstream{}, err
+				}
+				if collaboration != "" {
+					return upstream{Method: "POST", Path: collaboration}, nil
+				}
+				return upstream{Method: "POST", Path: ownerScoped}, nil
+			},
+		},
+		{
 			Name:  "rollback_site",
 			Title: "Roll back to an earlier version",
 			Description: "Make one of a site's earlier versions live again. This changes what visitors see immediately. " +
@@ -776,8 +812,10 @@ func toolList() []Tool {
 		},
 		{
 			Name:  "delete_site",
-			Title: "Delete a site permanently",
-			Description: "Permanently delete a site and every version of it. This cannot be undone and the URL stops working immediately. " +
+			Title: "Delete a site",
+			Description: "Delete a site and every version of it. The URL stops working immediately and the site leaves every list. " +
+				"For 30 days it stays in Recently deleted and restore_site brings it back whole (files, saved data and its history, who can open it, viewers, uploaded files); " +
+				"its name stays taken until then. After 30 days it is gone for good. " +
 				"Works on a site you own and on a site owned by a team you are in. " +
 				"Always confirm with the user before calling this. " +
 				"There is no way to delete a single version — use rollback_site to stop serving an unwanted one.",

@@ -141,7 +141,11 @@ func runMigrate(args []string) error {
 // default makes it live. The copy is server side, and it and the database
 // rows land under the target site's advisory lock, so a restore serializes
 // with deploys exactly as another deploy would. A deleted site's id is in
-// its site_delete audit event. An object already swept from the bucket has
+// its site_delete audit event. When the target names a site still in its
+// recovery window (db.DeletedSiteRetention), that row is undeleted and used,
+// so its saved data, history, access level, viewers and assets come back;
+// restoring its own live version (-from-site-id its id, -version its live
+// version) is then just the undelete. An object already swept from the bucket has
 // to be brought back from the bucket's own versioning first
 // (docs/storage.md).
 func checkRestoreSiteName(ctx context.Context, q db.Querier, baseURL, owner, site string) error {
@@ -149,7 +153,7 @@ func checkRestoreSiteName(ctx context.Context, q db.Querier, baseURL, owner, sit
 	if err != nil {
 		return err
 	}
-	existing, err := db.ListSiteNamesByOwnerUsername(ctx, q, owner)
+	existing, err := db.ListHeldSiteNamesByOwnerUsername(ctx, q, owner)
 	if err != nil {
 		return err
 	}
@@ -200,7 +204,23 @@ func runRestore(args []string) error {
 		return err
 	}
 	target, err := db.GetSite(ctx, tx, user.ID, *site)
-	created := false
+	created, revived := false, false
+	if errors.Is(err, sql.ErrNoRows) {
+		// A recently deleted site of that name is brought back whole (saved
+		// data, history, access level, viewers, assets) rather than
+		// replaced by a new, empty site.
+		deleted, derr := db.GetDeletedSite(ctx, tx, user.ID, *site)
+		switch {
+		case derr == nil:
+			if err := db.UndeleteSite(ctx, tx, deleted.ID); err != nil {
+				return fmt.Errorf("undelete %s/%s: %w", *owner, *site, err)
+			}
+			target, err = db.GetSite(ctx, tx, user.ID, *site)
+			revived = true
+		case !errors.Is(derr, sql.ErrNoRows):
+			return fmt.Errorf("target site: %w", derr)
+		}
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		// A new site gets the same name rules as a create through the API,
 		// so a restore never makes a site that has no address.
@@ -212,6 +232,11 @@ func runRestore(args []string) error {
 	}
 	if err != nil {
 		return fmt.Errorf("target site: %w", err)
+	}
+	if revived && target.ID == *fromSiteID && target.ActiveVersion == *version {
+		// The deleted site's own live version: undeleting it is the whole
+		// restore, no copy needed.
+		return commitRevivedSite(ctx, tx, database, user.ID, target, *owner, *site)
 	}
 	maxVersion, err := db.GetMaxVersionNumber(ctx, tx, target.ID)
 	if err != nil {
@@ -236,6 +261,8 @@ func runRestore(args []string) error {
 		if err := db.UpdateSiteActiveVersion(ctx, tx, target.ID, newVersion); err != nil {
 			return err
 		}
+	}
+	if *setCurrent || created || revived {
 		if err := db.EnqueueSiteSearch(ctx, tx, target.ID, db.SiteSearchReconcile); err != nil {
 			return err
 		}
@@ -251,6 +278,7 @@ func runRestore(args []string) error {
 		Extra: map[string]any{
 			"from_site_id": *fromSiteID, "from_version": *version,
 			"version": newVersion, "live": *setCurrent || created, "created_site": created,
+			"undeleted_site": revived,
 		},
 	}); err != nil {
 		return fmt.Errorf("record audit: %w", err)
@@ -259,6 +287,30 @@ func runRestore(args []string) error {
 		return fmt.Errorf("commit: %w", err)
 	}
 	log.Printf("restored %s v%d into %s/%s as v%d (site %s, live=%t)", *fromSiteID, *version, *owner, *site, newVersion, target.ID, *setCurrent || created)
+	return nil
+}
+
+// commitRevivedSite finishes a restore that only undeleted a recently deleted
+// site: search indexes it again and the site_restore event is recorded, in
+// the same transaction.
+func commitRevivedSite(ctx context.Context, tx *sql.Tx, database *sql.DB, ownerID string, target db.Site, owner, site string) error {
+	if err := db.EnqueueSiteSearch(ctx, tx, target.ID, db.SiteSearchReconcile); err != nil {
+		return err
+	}
+	recorder := audit.NewDBRecorder(database)
+	stream := audit.NewStream(slog.New(slog.NewJSONHandler(os.Stdout, nil)), 0)
+	defer stream.Close(5 * time.Second)
+	recorder.SetStream(stream)
+	if err := recorder.RecordTx(ctx, tx, audit.Event{
+		ActorKind: "system", Action: "site_restore", OwnerID: ownerID, SiteID: target.ID,
+		Extra: map[string]any{"from": "recently_deleted", "active_version": target.ActiveVersion, "undeleted_site": true},
+	}); err != nil {
+		return fmt.Errorf("record audit: %w", err)
+	}
+	if err := audit.Commit(tx); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	log.Printf("restored deleted site %s/%s (site %s) as it was, live v%d", owner, site, target.ID, target.ActiveVersion)
 	return nil
 }
 

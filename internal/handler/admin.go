@@ -34,6 +34,8 @@ type AdminHandler struct {
 	auditReader *audit.Reader
 	// networkApprovals is NETWORK_ACCESS_APPROVALS (see access.go).
 	networkApprovals int
+	// quota is what restoring a deleted site is checked against (WithQuota).
+	quota UploadQuota
 }
 
 // WithAuditReader attaches the reader GET /api/admin/export streams from.
@@ -165,6 +167,8 @@ func (h *AdminHandler) Register(mux *http.ServeMux, authMiddleware, skillVersion
 	mux.Handle("POST /api/admin/users/{username}/enable", dashboardCheck(adminAPI(http.HandlerFunc(h.enableUser))))
 	mux.Handle("POST /api/admin/teams/{team}/delete", dashboardCheck(adminAPI(http.HandlerFunc(h.deleteOrphanTeam))))
 	mux.Handle("GET /api/admin/export", adminAPI(http.HandlerFunc(h.exportAuditOrAccess)))
+	mux.Handle("GET /api/admin/deleted-sites", adminAPI(http.HandlerFunc(h.listAllDeletedSites)))
+	mux.Handle("POST /api/admin/deleted-sites/{owner}/{sitename}/restore", dashboardCheck(adminAPI(http.HandlerFunc(h.restoreDeletedSiteAsAdmin))))
 	h.registerAccessRequestRoutes(mux, adminAPI, dashboardCheck)
 }
 
@@ -384,6 +388,7 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 	})
 
 	h.renderAccessRequests(r, &b, user)
+	h.renderDeletedSites(r, &b)
 
 	if len(users) == 0 {
 		b.WriteString(`<div class="empty">No users yet.</div>`)

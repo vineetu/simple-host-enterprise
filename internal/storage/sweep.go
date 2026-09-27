@@ -97,12 +97,61 @@ func (s *Store) deleteRetired(ctx context.Context, key string) error {
 	return nil
 }
 
-// RunSweeper runs Sweep, and FillVersionSizes, every few minutes until ctx
-// ends.
+// PurgeDeletedSites ends the recovery window of every deleted site whose
+// window (db.DeletedSiteRetention) has passed: the row goes, with its saved
+// data, history, viewers and asset records, and the site's objects are
+// queued for the retire sweep. Returns how many sites it purged.
+func (s *Store) PurgeDeletedSites(ctx context.Context, database *sql.DB) (int, error) {
+	done := 0
+	for {
+		n, err := s.purgeBatch(ctx, database)
+		done += n
+		if err != nil || n < sweepBatch {
+			return done, err
+		}
+	}
+}
+
+func (s *Store) purgeBatch(ctx context.Context, database *sql.DB) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, sweepTimeout)
+	defer cancel()
+	tx, err := database.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	due, err := db.ClaimExpiredDeletedSites(ctx, tx, db.DeletedSiteRetention, sweepBatch)
+	if err != nil {
+		return 0, err
+	}
+	for _, site := range due {
+		prefix, err := SitePrefix(site.ID)
+		if err != nil {
+			return 0, err
+		}
+		if err := db.RetireObjects(ctx, tx, prefix, RetireGrace); err != nil {
+			return 0, err
+		}
+		if err := db.PurgeDeletedSite(ctx, tx, site.ID); err != nil {
+			return 0, err
+		}
+		log.Printf("storage sweep: purged deleted site %s/%s (%s), deleted %s", site.Owner, site.Name, site.ID, site.DeletedAt.UTC().Format(time.RFC3339))
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return len(due), nil
+}
+
+// RunSweeper runs PurgeDeletedSites, Sweep and FillVersionSizes every few
+// minutes until ctx ends.
 func (s *Store) RunSweeper(ctx context.Context, database *sql.DB) {
 	ticker := time.NewTicker(sweepInterval)
 	defer ticker.Stop()
 	for {
+		if _, err := s.PurgeDeletedSites(ctx, database); err != nil && ctx.Err() == nil {
+			log.Printf("storage sweep: purge deleted sites: %v", err)
+		}
 		if n, err := s.Sweep(ctx, database); err != nil && ctx.Err() == nil {
 			log.Printf("storage sweep: %v", err)
 		} else if n > 0 {

@@ -273,8 +273,24 @@ Never delete merely because the public URL loads or the actor can edit. Confirm
 destructive intent with the human immediately before sending the request. The
 `delete_site` tool also takes `confirm_name`: the site's name typed again.
 
+A deleted site stops serving at once but can be restored for 30 days, whole:
+its versions, saved data and history, who can open it, viewers and uploaded
+files. Its name stays taken until then (a create answers `409` `name_held`:
+ask the user whether to restore it or pick another name). To bring one back,
+list them and restore the one the user names:
+
+```
+GET /api/deleted-sites
+POST /api/collaboration/sites/<owner>/<site>/restore
+```
+
+or `list_deleted_sites` then `restore_site`. A restore counts toward the
+namespace's limits again (`site_limit`, `storage_quota`). After 30 days the
+site is gone for good.
+
 Deleting a site does not delete the team that owned it. Deleting a team, or its
-last active member leaving, deletes every site it owns; see [`teams.md`](teams.md).
+last active member leaving, deletes every site it owns for good (no 30-day
+restore); see [`teams.md`](teams.md).
 
 ## Trust and state boundaries
 

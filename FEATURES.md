@@ -152,7 +152,16 @@ Config names are documented in `docs/configuration.md`; schema in
   per-owner lock (409 `site_limit`, 413 `storage_quota`), and, with
   `CLAMD_ADDR` set, every file is scanned before anything is stored (422
   `malware_found`, 503 `scanner_unavailable`, fail closed). Rollback
-  makes an earlier version live. Delete retires the whole site. Every site, at
+  makes an earlier version live. Delete is recoverable for 30 days
+  (`db.DeletedSiteRetention`): the row is marked `deleted_at` and stops
+  serving and listing at once, while its versions, objects, saved data and
+  history, access level, viewers and asset records stay; its name stays
+  held (409 `name_held`). The owner or a team member lists them
+  (`GET /api/deleted-sites`, dashboard "Recently deleted") and restores one
+  whole (`site_restore`, quota-checked again: 409 `site_limit`, 413
+  `storage_quota`); an admin restores any from `/admin`. After the window the
+  sweeper purges the row and retires the objects (section 6). A team's
+  deletion still removes its sites for good. Every site, at
   every access level, is served at the root of its own host
   `<site>.<owner>.<base>/` (e.g. `todo.alice.<base>/`) once the owner's
   `*.<owner>.<base>` certificate is ready (section 19); until then it is
@@ -175,6 +184,10 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Status.** Built.
 - **Routes.** `POST /api/sites/{sitename}`, `PUT /api/sites/{sitename}`,
   `DELETE /api/sites/{sitename}`, `POST /api/sites/{sitename}/rollback`,
+  `GET /api/deleted-sites`, `POST /api/sites/{sitename}/restore`,
+  `POST /api/collaboration/sites/{owner}/{sitename}/restore`,
+  `GET /api/admin/deleted-sites`,
+  `POST /api/admin/deleted-sites/{owner}/{sitename}/restore`,
   `GET /api/sites/{sitename}/versions`, `GET /api/sites`,
   `GET /api/collaboration/sites`,
   `GET /api/collaboration/sites/{owner}/{sitename}`,
@@ -189,19 +202,22 @@ Config names are documented in `docs/configuration.md`; schema in
   owner is ready, redirected after); every path on a v1.2
   `<owner>--<site>.<base>` host (redirect).
 - **MCP.** `list_sites`, `get_site`, `deploy_site`, `list_site_versions`,
-  `rollback_site`, `delete_site`, `list_site_files`, `read_site_file` (the last
+  `rollback_site`, `delete_site`, `list_deleted_sites`, `restore_site`,
+  `list_site_files`, `read_site_file` (the last
   two read a version archive).
 - **Skill.** `SKILL.md` §3, Canonical deployment workflow, Core collaboration
   and conflict rules; `references/packaging-and-validation.md`,
   `references/collaboration.md` §1–5 and §8, `references/frameworks.md`;
   `skills/fix-paths-for-subpath-hosting/`, `skills/simple-host-builder/`.
-- **Pages.** `/dashboard` "Your sites".
-- **Go.** `internal/handler/site.go`, `collaboration.go`, `site_mutation.go`,
+- **Pages.** `/dashboard` "Your sites" and "Recently deleted"; `/admin`
+  "Recently deleted".
+- **Go.** `internal/handler/site.go`, `site_restore.go`, `collaboration.go`, `site_mutation.go`,
   `upload_limits.go`, `serve.go`, `serve_self_traffic.go`, `host_gate.go`, `host.go`, `names.go`,
   `security.go`; `internal/tarball/`; `internal/scan/clamd.go`;
-  `internal/db/queries.go`, `collaboration.go`, `quota.go`.
+  `internal/db/queries.go`, `collaboration.go`, `quota.go`, `deleted_sites.go`.
 - **DB.** `sites`, `versions` (0001; 0012 `versions.uploaded_by`; 0037
-  `versions.size_bytes`), 0018 owner label uniqueness.
+  `versions.size_bytes`), 0018 owner label uniqueness, 0043
+  `sites.deleted_at`/`deleted_by`.
 - **Config.** `PUBLIC_BASE_URL`, `RESERVED_LABELS`, `QUOTA_MAX_SITES`,
   `QUOTA_MAX_BYTES`, `QUOTA_MAX_VERSIONS`, `CLAMD_ADDR`, `CLAMD_TIMEOUT`.
 
@@ -215,9 +231,12 @@ Config names are documented in `docs/configuration.md`; schema in
   transaction and deleted by a sweeper after a one-hour grace (every 5 min,
   `SKIP LOCKED`, safe on every replica). The same loop records the stored
   size of any version that has none (`versions.size_bytes`, 0037) from the
-  bucket, for the owner quota. Operator subcommands:
+  bucket, for the owner quota, and first purges every deleted site past its
+  30-day recovery window (row removed, `sites/<id>/` queued for retirement).
+  Operator subcommands:
   `simple-host migrate-storage` (one-time move off the old volume),
-  `simple-host restore`, and `simple-host reencrypt` (rewrites every stored
+  `simple-host restore` (into a name a recently deleted site holds, it
+  undeletes that row, bringing its saved data, viewers and assets back), and `simple-host reencrypt` (rewrites every stored
   object under the first `BACKUP_ENVELOPE_KEY` in the key-bound form, so old
   keys can be removed and a plaintext install can adopt the envelope;
   idempotent, verified read-back, rewrites a version only once a committed
@@ -433,7 +452,8 @@ Config names are documented in `docs/configuration.md`; schema in
 
 - **What.** Server-rendered `/admin` for admins: users (disable/enable —
   disabling revokes sessions, API keys and connected apps in the same
-  transaction as its audit row), orphan teams, access requests, rankings of users
+  transaction as its audit row), orphan teams, access requests, recently
+  deleted sites (Restore, section 5), rankings of users
   and sites (views, storage from a cached bucket measurement, updated; each
   site links to its current address), new
   users, state-backend usage, visitors and activity, all sites.
@@ -446,7 +466,8 @@ Config names are documented in `docs/configuration.md`; schema in
 - **MCP.** None.
 - **Pages.** `/admin`.
 - **Go.** `internal/handler/admin.go`, `admin_rankings.go`,
-  `admin_disk_usage.go`, `access.go` (`renderAccessRequests`).
+  `admin_disk_usage.go`, `access.go` (`renderAccessRequests`),
+  `site_restore.go` (`renderDeletedSites`).
 - **DB.** `users.disabled_at` (0023), `site_daily_analytics` (0003, 0013).
 - **Config.** `ADMIN_EMAILS`, `OIDC_ADMIN_CLAIM`, `OIDC_ADMIN_VALUE`. See
   INSTALL.md "Sessions and leavers".
@@ -457,8 +478,9 @@ Config names are documented in `docs/configuration.md`; schema in
   when signed in, API keys (mint/list/revoke), "Your sites" across the
   person's and their teams' namespaces with access level, viewers, assets,
   visitor counts, each namespace's usage against its quota (sites, stored
-  bytes; the same numbers `GET /api/me` returns as `usage`), and a link to
-  sessions. Calls the JSON routes of sections
+  bytes; the same numbers `GET /api/me` returns as `usage`), "Recently
+  deleted" (the person's and their teams' sites deleted in the last 30 days,
+  each with Restore; hidden when empty), and a link to sessions. Calls the JSON routes of sections
   2, 5, 7, 8, 11 and 12 with the session cookie.
 - **Status.** Built.
 - **Routes.** `GET /dashboard`.

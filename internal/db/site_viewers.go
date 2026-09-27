@@ -39,7 +39,7 @@ const siteForServingQuery = `
 	SELECT s.id::text, s.access = 'specific'
 	FROM sites s
 	JOIN users u ON u.id = s.user_id
-	WHERE u.username = $1 AND s.name = $2
+	WHERE u.username = $1 AND s.name = $2 AND s.deleted_at IS NULL
 `
 
 // SiteForServing resolves a site's canonical id and whether it is served on
@@ -83,7 +83,7 @@ const viewerAllowedQuery = `
 			WHERE sv.site_id = s.id
 		) AS is_viewer
 	FROM sites s
-	WHERE s.id = $1::uuid
+	WHERE s.id = $1::uuid AND s.deleted_at IS NULL
 `
 
 // ViewerAllowed decides whether a signed-in person may open a site, by its

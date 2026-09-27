@@ -67,6 +67,9 @@ var routeKeyAccess = map[string]keyAccess{
 	// company-wide view needs a browser session (handler/audit_access.go).
 	"DELETE /api/sites/{sitename}":                                          keyFull,
 	"DELETE /api/collaboration/sites/{owner}/{sitename}":                    keyFull,
+	"GET /api/deleted-sites":                                                keyFull,
+	"POST /api/sites/{sitename}/restore":                                    keyFull,
+	"POST /api/collaboration/sites/{owner}/{sitename}/restore":              keyFull,
 	"POST /api/sites/{sitename}/access":                                     keyFull,
 	"POST /api/collaboration/sites/{owner}/{sitename}/access":               keyFull,
 	"GET /api/collaboration/sites/{owner}/{sitename}/viewers":               keyFull,
@@ -106,6 +109,8 @@ var routeKeyAccess = map[string]keyAccess{
 	"POST /api/admin/users/{username}/enable":                    keyNever,
 	"POST /api/admin/teams/{team}/delete":                        keyNever,
 	"GET /api/admin/export":                                      keyNever,
+	"GET /api/admin/deleted-sites":                               keyNever,
+	"POST /api/admin/deleted-sites/{owner}/{sitename}/restore":   keyNever,
 	"POST /api/admin/access-requests/{owner}/{sitename}/approve": keyNever,
 	"POST /api/admin/access-requests/{owner}/{sitename}/decline": keyNever,
 	"POST /api/admin/access-requests/{owner}/{sitename}/revoke":  keyNever,
