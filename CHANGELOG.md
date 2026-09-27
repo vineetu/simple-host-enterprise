@@ -4,6 +4,22 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## Unreleased
+
+Schema 0043 (from 0042): 0043 rewrites `audit_ensure_partitions` and
+creates audit and access-log partitions twelve months ahead. It is marked
+backward-compatible, so rolling back to v1.3.1 is safe.
+
+### Operations
+- Retention no longer wedges after a long gap: rows that reached the
+  default partition while `prune` was not running are moved into their
+  months' partitions, unchanged and still hash-chained, instead of every
+  later run failing. The prune CronJob now runs daily (was monthly) and
+  keeps partitions twelve months ahead (was two). A row lives for its
+  retention setting plus up to one month.
+- Docs state that the stdout request log carries full client IPs and user
+  agents, so the log pipeline's retention governs those lines.
+
 ## v1.3.1 — 2026-09-26
 
 No schema change (still 0042); rolling back to v1.3.0 is safe. Skills are at

@@ -13,14 +13,17 @@
 #
 # Pruning touches only Postgres.
 #
-# The schedule (monthly, early on the 1st) is a starting point; an overlay
-# with a different retention cadence can patch it.
+# Daily: a run finds nothing to drop most days and costs a few catalog
+# reads. Daily keeps a row's life close to its retention (whole monthly
+# partitions are dropped, so rows live up to one month longer), and a
+# missed run or two never matters: partitions are kept twelve months ahead.
+# An overlay can patch the schedule.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: simple-host-prune
 spec:
-  schedule: "30 3 1 * *"
+  schedule: "30 3 * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3

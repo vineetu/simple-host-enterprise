@@ -237,7 +237,7 @@
         <span class="num">06 — Everything is logged, and you can see it</span>
         <h2>An action audit and a visitor log, both queryable and exportable</h2>
         <p>Every mutation — a publish, a rollback, a visibility change, a membership change, every admin action — writes an audit row inside the same transaction that makes the change, so there is no path to a change with no record. Separately, every visit to a site is logged with the visitor's real identity from your SSO provider, including the owner's own visits, which is what turns "who looked at this" from a guess into an answer.</p>
-        <p>Owners see the activity and visitors for their own sites in the dashboard; admins see everything and can export both as CSV or JSONL for the systems that already collect your logs. Retention is a monthly job under the database's own owning credential, never the application's own connection.</p>
+        <p>Owners see the activity and visitors for their own sites in the dashboard; admins see everything and can export both as CSV or JSONL for the systems that already collect your logs. Retention is a daily job under the database's own owning credential, never the application's own connection.</p>
       </section>
 
       <section class="numbered" id="operations">

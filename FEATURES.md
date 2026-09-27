@@ -408,9 +408,12 @@ Config names are documented in `docs/configuration.md`; schema in
   from a browser session only: an admin's API key or connected app gets the
   same own-namespace view as anyone else);
   access-log detail follows `ACCESS_LOG_VISIBILITY`. Admins export either as
-  CSV (formula-safe) or NDJSON. `simple-host prune` (a CronJob) drops
-  partitions past retention, trims the chain's rows for them, and creates
-  future ones.
+  CSV (formula-safe) or NDJSON. `simple-host prune` (a daily CronJob) drops
+  partitions past retention (so a row lives its retention plus up to one
+  month), trims the chain's rows for them, and keeps partitions twelve
+  months ahead; rows that reached a default partition while it was not
+  running are moved into their months' partitions, unchanged and still
+  chained, instead of wedging every later run (0043).
 - **Status.** Built.
 - **Routes.** `GET /api/audit`, `GET /api/access`, `GET /api/admin/export`.
 - **MCP.** None.
@@ -425,7 +428,8 @@ Config names are documented in `docs/configuration.md`; schema in
   0028, 0030); `audit_chain`, `audit_chain_head`, `audit_event_canonical()`,
   `audit_chain_append()` and trigger `audit_events_chain` (0036, owner-only);
   `audit_chain_entry()` (0040, the app role's read of one event's seq and
-  hash for its SIEM line).
+  hash for its SIEM line); `audit_ensure_partitions()` rewritten and
+  `audit_ensure_month_partition()` (0043).
 - **Config.** `AUDIT_RETENTION_DAYS`, `ACCESS_LOG_RETENTION_DAYS`,
   `ACCESS_LOG_VISIBILITY`. The stream and the chain have no settings.
 

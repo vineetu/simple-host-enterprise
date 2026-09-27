@@ -12,11 +12,12 @@ import (
 )
 
 // partitionMonthsAhead is how far ahead Prune keeps partitions created,
-// matching migration 0027's own bootstrap call
-// (SELECT audit_ensure_partitions(2)) so the rolling schedule this
-// establishes at deploy time and the one `simple-host prune` maintains
-// every month agree.
-const partitionMonthsAhead = 2
+// matching migration 0043's bootstrap call (SELECT
+// audit_ensure_partitions(12)). Empty partitions cost nothing, and with the
+// daily prune job a year ahead means rows only reach the default partition
+// if prune stops for a year; audit_ensure_partitions moves them out again
+// when it does run (0043).
+const partitionMonthsAhead = 12
 
 // monthlyPartitionPattern recognizes a partition audit_ensure_partitions
 // created (migration 0027): "<table>_p<YYYY>_<MM>". Anything else under
@@ -68,10 +69,13 @@ type PruneResult struct {
 // owning role — the application role has no DROP privilege on these tables
 // at all, so this is never called with the server's own connection pool.
 //
-// Each call also runs audit_ensure_partitions first, so a monthly prune
-// job is also what keeps the calendar ahead of the current month; a
-// deployment that only ever runs `simple-host prune` (never a second,
-// separate partition-creation job) still never runs out of partitions.
+// Each call also runs audit_ensure_partitions first, so the prune job is
+// also what keeps the calendar ahead of the current month; a deployment
+// that only ever runs `simple-host prune` (never a second, separate
+// partition-creation job) still never runs out of partitions. Rows that
+// landed in a default partition while prune was not running are moved into
+// their month's partition there (migration 0043), so a long gap never
+// stops this step.
 func Prune(ctx context.Context, db *sql.DB, opts PruneOptions) (PruneResult, error) {
 	if db == nil {
 		return PruneResult{}, fmt.Errorf("audit: Prune requires a non-nil db")

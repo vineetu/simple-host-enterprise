@@ -63,7 +63,7 @@ accounts (`admin@example.com` / `person@example.com`) to sign in with; see
   (`docs/storage.md`); `simple-host reencrypt` rewrites every stored
   object under the current envelope key, so old keys can be removed;
   `simple-host prune` drops
-  expired audit/access-log partitions on a monthly `CronJob`
+  expired audit/access-log partitions on a daily `CronJob`
   (`deploy/base/cronjob-prune.yaml`), under the database's owning
   credential rather than the application's own role;
   `simple-host audit-verify` checks the audit log's hash chain;
