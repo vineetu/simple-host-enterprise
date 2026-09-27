@@ -145,6 +145,7 @@ var routeKeyAccess = map[string]keyAccess{
 	"GET /":                                  keyNever,
 	"GET /{$}":                               keyNever,
 	"GET /openapi.yaml":                      keyNever,
+	"GET /capabilities.html":                 keyNever,
 	"GET /healthz":                           keyNever,
 	"GET /readyz":                            keyNever,
 	"GET /metrics":                           keyNever,
