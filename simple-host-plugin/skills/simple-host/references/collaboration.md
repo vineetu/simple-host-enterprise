@@ -273,6 +273,12 @@ Never delete merely because the public URL loads or the actor can edit. Confirm
 destructive intent with the human immediately before sending the request. The
 `delete_site` tool also takes `confirm_name`: the site's name typed again.
 
+To keep a site but give it a new name, or a new owner, rename or hand it over
+instead of deleting and republishing: `POST .../rename {"name": "<new>"}`
+(`rename_site`) or `POST .../transfer {"to": "<team or person>"}`
+(`transfer_site`). Saved data, history, uploads, access and viewers stay with
+the site, and the old address redirects. See [`teams.md`](teams.md).
+
 Deleting a site does not delete the team that owned it. Deleting a team, or its
 last active member leaving, deletes every site it owns; see [`teams.md`](teams.md).
 

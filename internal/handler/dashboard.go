@@ -142,7 +142,7 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 
 <section>
   <h2 class="section-title">Your sites</h2>
-  <p class="login-copy">Choose who can open each site, name its viewers, and manage the files it has uploaded. A new site opens only for you (or your team). Deploying and rolling back are done with the skill or MCP.</p>
+  <p class="login-copy">Choose who can open each site, name its viewers, manage the files it has uploaded, rename it, or hand it to a team or another person. A new site opens only for you (or your team). Deploying and rolling back are done with the skill or MCP.</p>
   ` + usageHTML + `
   <div id="site-list" class="rank-list" role="region" aria-label="Sites"></div>
 </section>
@@ -384,6 +384,14 @@ const dashboardSitesScript = `<script>
       '<div class="add-row"><input type="text" class="add-viewer-input" placeholder="username, another-username" autocomplete="off">' +
       '<button type="button" class="btn-login add-viewer-button">Add</button></div></div>' +
       '<div class="site-subsection"><h4>Assets</h4><div class="asset-list" aria-live="polite"></div></div>' +
+      '<div class="site-subsection"><h4>Rename</h4>' +
+      '<p class="share-help">The site gets a new address. The old one sends visitors on to it until another site takes the name.</p>' +
+      '<div class="add-row"><input type="text" class="rename-input" placeholder="new-name" autocomplete="off">' +
+      '<button type="button" class="btn-login rename-button">Rename</button></div></div>' +
+      '<div class="site-subsection"><h4>Hand it over</h4>' +
+      '<p class="share-help">Move the site to a team you are in, or to another person. Its files, versions, saved data, uploads, access and viewers go with it, and the old address sends visitors on to the new one.</p>' +
+      '<div class="add-row"><input type="text" class="transfer-input" placeholder="team-name or username" autocomplete="off">' +
+      '<button type="button" class="btn-login transfer-button">Move</button></div></div>' +
       '<div class="site-subsection site-tabs"><div class="site-tab-buttons">' +
       '<button type="button" class="btn-reject site-tab-button active" data-tab="activity">Activity</button>' +
       '<button type="button" class="btn-reject site-tab-button" data-tab="visitors">Visitors</button>' +
@@ -529,6 +537,33 @@ const dashboardSitesScript = `<script>
         input.value = '';
         loadViewers();
       }).catch(function(){ alert('Network error adding viewers.'); });
+    });
+
+    function moveSite(path, payload, confirmText) {
+      if (!confirm(confirmText)) return;
+      fetch(base + path, {
+        method: 'POST', credentials: 'same-origin',
+        headers: Object.assign({'Content-Type': 'application/json'}, CH),
+        body: JSON.stringify(payload),
+      }).then(function(r){
+        return r.json().then(function(b){
+          if (!r.ok) { alert('Could not move the site: ' + (b.error || 'unknown error')); return; }
+          alert(b.owner + '/' + b.name + ' is now at ' + b.url + '\nThe old address sends visitors there.');
+          loadSites();
+        });
+      }).catch(function(){ alert('Network error moving the site.'); });
+    }
+
+    panel.querySelector('.rename-button').addEventListener('click', function(){
+      var name = panel.querySelector('.rename-input').value.trim();
+      if (!name) return;
+      moveSite('/rename', {name: name}, 'Rename ' + site.name + ' to ' + name + '? Its address changes; the old one redirects.');
+    });
+
+    panel.querySelector('.transfer-button').addEventListener('click', function(){
+      var to = panel.querySelector('.transfer-input').value.trim();
+      if (!to) return;
+      moveSite('/transfer', {to: to}, 'Move ' + owner + '/' + site.name + ' to ' + to + '? They will own it and can change or delete it; you keep access only if you are in that team.');
     });
 
     viewerList.addEventListener('click', function(ev){

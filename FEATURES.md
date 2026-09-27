@@ -172,6 +172,28 @@ Config names are documented in `docs/configuration.md`; schema in
   redirect the same way to the site's current address. The owner-scoped
   routes act on the caller's own namespace; the collaboration routes name the
   owner (person or team) explicitly, by its stored name (`team-sales`).
+  **Hand over and rename.** The owner, or any member for a team site, can
+  move a site to a team they are in or to any person who can still sign in
+  (`transfer`, `{"to"}`; a bare `sales` finds `team-sales` unless a person
+  holds `sales`), or give it a new name (`rename`, `{"name"}`, the new-site
+  name rules). Only the row's owner or name changes: versions, saved data
+  and its history, assets, access level, a pending network request and named
+  viewers are keyed by the site id and stay. The old address
+  `<old part>.<old owner>.<base>` is kept in `site_redirects` and redirects
+  (301 GET/HEAD, 308 otherwise, path and query kept; a named site-API path
+  becomes the nameless `/api/site/...`) to the current address, following
+  later moves, until a live site takes that address (live always wins); the
+  fallback owner path and v1.2 hosts redirect the same way. Refused: `404
+  destination_not_found` (nobody, or a team the caller is not in), `409
+  destination_inactive` (a disabled person, a team nobody in can sign in),
+  `409 name_conflict` (the receiver has a site with that name or address),
+  `409 site_limit` / `413 storage_quota` (the receiver's quota), `400
+  same_owner` / `same_name`. Full-scope key or session. Audited as
+  `site_transfer` / `site_rename` (owner = the receiver) with `from`, `to`,
+  `from_name`, `name`; the search entry is re-indexed. An admin moves or
+  deletes the sites of a disabled person or of a team with no active member
+  (section 13); nobody else's. Visitor counts are kept per address, so a
+  moved site's Visitors tab starts again.
 - **Status.** Built.
 - **Routes.** `POST /api/sites/{sitename}`, `PUT /api/sites/{sitename}`,
   `DELETE /api/sites/{sitename}`, `POST /api/sites/{sitename}/rollback`,
@@ -183,25 +205,31 @@ Config names are documented in `docs/configuration.md`; schema in
   `DELETE /api/collaboration/sites/{owner}/{sitename}`,
   `POST /api/collaboration/sites/{owner}/{sitename}/rollback`,
   `GET /api/collaboration/sites/{owner}/{sitename}/versions`,
-  `GET /api/collaboration/sites/{owner}/{sitename}/versions/{version}/archive`.
+  `GET /api/collaboration/sites/{owner}/{sitename}/versions/{version}/archive`,
+  `POST /api/sites/{sitename}/transfer`,
+  `POST /api/collaboration/sites/{owner}/{sitename}/transfer`,
+  `POST /api/sites/{sitename}/rename`,
+  `POST /api/collaboration/sites/{owner}/{sitename}/rename`.
   Host-gate: every path on the site host `<site>.<owner>.<base>` (hosted
   content, root-served); `/{site}/...` on the owner host (served before the
   owner is ready, redirected after); every path on a v1.2
   `<owner>--<site>.<base>` host (redirect).
 - **MCP.** `list_sites`, `get_site`, `deploy_site`, `list_site_versions`,
   `rollback_site`, `delete_site`, `list_site_files`, `read_site_file` (the last
-  two read a version archive).
+  two read a version archive), `transfer_site`, `rename_site`.
 - **Skill.** `SKILL.md` §3, Canonical deployment workflow, Core collaboration
   and conflict rules; `references/packaging-and-validation.md`,
   `references/collaboration.md` §1–5 and §8, `references/frameworks.md`;
   `skills/fix-paths-for-subpath-hosting/`, `skills/simple-host-builder/`.
-- **Pages.** `/dashboard` "Your sites".
+- **Pages.** `/dashboard` "Your sites" (Manage: Rename, Hand it over).
 - **Go.** `internal/handler/site.go`, `collaboration.go`, `site_mutation.go`,
+  `site_move.go`, `admin_move.go`,
   `upload_limits.go`, `serve.go`, `serve_self_traffic.go`, `host_gate.go`, `host.go`, `names.go`,
   `security.go`; `internal/tarball/`; `internal/scan/clamd.go`;
-  `internal/db/queries.go`, `collaboration.go`, `quota.go`.
+  `internal/db/queries.go`, `collaboration.go`, `quota.go`, `site_move.go`.
 - **DB.** `sites`, `versions` (0001; 0012 `versions.uploaded_by`; 0037
-  `versions.size_bytes`), 0018 owner label uniqueness.
+  `versions.size_bytes`), 0018 owner label uniqueness, `site_redirects`
+  (0043, backward-compatible).
 - **Config.** `PUBLIC_BASE_URL`, `RESERVED_LABELS`, `QUOTA_MAX_SITES`,
   `QUOTA_MAX_BYTES`, `QUOTA_MAX_VERSIONS`, `CLAMD_ADDR`, `CLAMD_TIMEOUT`.
 
@@ -314,8 +342,11 @@ Config names are documented in `docs/configuration.md`; schema in
   Created by any person (capped per
   person). When the last active member leaves, the team and all its sites are
   deleted — refused with `409 confirm_team_delete` and `site_count` until the
-  call carries `?confirm_name=<team>`; delete works the same way. A team whose
-  members are all disabled is deleted by an admin. A team has no key and no
+  call carries `?confirm_name=<team>`; delete works the same way. That 409
+  offers the way to keep sites: move each first with `transfer_site` (to
+  another team the person is in, or to a person), then leave. A team whose
+  members are all disabled is deleted by an admin, who can first move its
+  sites to another team or a person (section 13). A team has no key and no
   sign-in.
 - **Status.** Built.
 - **Routes.** `POST /api/teams`, `GET /api/teams`,
@@ -433,7 +464,9 @@ Config names are documented in `docs/configuration.md`; schema in
 
 - **What.** Server-rendered `/admin` for admins: users (disable/enable —
   disabling revokes sessions, API keys and connected apps in the same
-  transaction as its audit row), orphan teams, access requests, rankings of users
+  transaction as its audit row), orphan teams, a disabled person's or orphan
+  team's sites ("Move to team…" moves them all to a team or person, all or
+  none; "Delete sites" for a disabled person), access requests, rankings of users
   and sites (views, storage from a cached bucket measurement, updated; each
   site links to its current address), new
   users, state-backend usage, visitors and activity, all sites.
@@ -442,11 +475,18 @@ Config names are documented in `docs/configuration.md`; schema in
   `POST /api/admin/users/{username}/enable`,
   `POST /api/admin/users/disable` (offboarding by `{"email"}`: every person
   account with that address, idempotent, 404 when none; an admin's session
-  or an admin's `offboard` key); plus the admin routes in sections 7, 9, 12.
+  or an admin's `offboard` key);
+  `POST /api/admin/sites/{owner}/{sitename}/transfer`,
+  `POST /api/admin/users/{username}/transfer-sites`,
+  `POST /api/admin/users/{username}/delete-sites` (form or JSON `to`; only
+  for a disabled person or a team with no active member, 409 otherwise;
+  audited `site_transfer` / `site_delete` with `by_admin`); plus the admin
+  routes in sections 7, 9, 12.
 - **MCP.** None.
 - **Pages.** `/admin`.
-- **Go.** `internal/handler/admin.go`, `admin_rankings.go`,
-  `admin_disk_usage.go`, `access.go` (`renderAccessRequests`).
+- **Go.** `internal/handler/admin.go` (`leaverSiteActions`), `admin_move.go`,
+  `admin_rankings.go`, `admin_disk_usage.go`, `access.go`
+  (`renderAccessRequests`).
 - **DB.** `users.disabled_at` (0023), `site_daily_analytics` (0003, 0013).
 - **Config.** `ADMIN_EMAILS`, `OIDC_ADMIN_CLAIM`, `OIDC_ADMIN_VALUE`. See
   INSTALL.md "Sessions and leavers".
@@ -456,7 +496,7 @@ Config names are documented in `docs/configuration.md`; schema in
 - **What.** `/dashboard` on the base host: sign-in prompt when signed out;
   when signed in, API keys (mint/list/revoke), "Your sites" across the
   person's and their teams' namespaces with access level, viewers, assets,
-  visitor counts, each namespace's usage against its quota (sites, stored
+  rename and hand over (section 5), visitor counts, each namespace's usage against its quota (sites, stored
   bytes; the same numbers `GET /api/me` returns as `usage`), and a link to
   sessions. Calls the JSON routes of sections
   2, 5, 7, 8, 11 and 12 with the session cookie.
@@ -563,7 +603,8 @@ Config names are documented in `docs/configuration.md`; schema in
   record already resolves every depth; no per-owner DNS). With
   `OWNER_CERTS=auto` (default) a separate Deployment runs
   `simple-host owner-hosts` every `OWNER_HOSTS_INTERVAL` (15 s): for each
-  owner with at least one site it server-side-applies one Ingress
+  owner with at least one site, and each owner label a moved or renamed site
+  still redirects from (`site_redirects`), it server-side-applies one Ingress
   `sh-owner-<owner>` (host `*.<owner>.<base>`, TLS secret
   `sh-owner-<owner>-tls`, annotation `cert-manager.io/cluster-issuer:
   <OWNER_CERT_ISSUER>`), copying ingress class, controller annotations and
@@ -592,7 +633,8 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Deploy.** `deploy/components/owner-hosts/` (`deployment.yaml`,
   `rbac.yaml`, `serviceaccount.yaml`), included by the byo, production,
   staging and local overlays.
-- **DB.** `owner_hosts` (0042, backward-compatible).
+- **DB.** `owner_hosts` (0042, backward-compatible); reads `site_redirects`
+  (0043).
 - **Config.** `OWNER_CERTS` (server), `OWNER_CERT_ISSUER` (required by the
   reconciler), `OWNER_INGRESS_TEMPLATE` (default `simple-host`),
   `OWNER_HOSTS_INTERVAL` (default 15s). See `docs/site-isolation.md`.

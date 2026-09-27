@@ -169,3 +169,39 @@ func TestOwnerHostsMigration(t *testing.T) {
 		t.Errorf("re-run: %v", err)
 	}
 }
+
+// 0043 adds site_redirects for the application role, additive only; a
+// redirect goes with its site.
+func TestSiteRedirectsMigration(t *testing.T) {
+	conn, m43 := freshThrough(t, 43)
+	ctx := context.Background()
+	if err := applyOne(ctx, conn, m43); err != nil {
+		t.Fatal(err)
+	}
+	insertUser(t, conn, "alice", "person")
+	var siteID string
+	if err := conn.QueryRowContext(ctx, `INSERT INTO sites (user_id, name) SELECT id, 'demo' FROM users WHERE username = 'alice' RETURNING id::text`).Scan(&siteID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(ctx, `INSERT INTO site_redirects (owner_label, site_part, site_id) VALUES ('bob', 'demo', $1)`, siteID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM sites WHERE id = $1`, siteID); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := conn.QueryRowContext(ctx, `SELECT count(*) FROM site_redirects`).Scan(&n); err != nil || n != 0 {
+		t.Errorf("redirects after the site's delete = %d (%v), want 0", n, err)
+	}
+	var privileges string
+	if err := conn.QueryRowContext(ctx, `SELECT string_agg(privilege_type, ',' ORDER BY privilege_type) FROM information_schema.role_table_grants
+		WHERE table_name = 'site_redirects' AND grantee = 'simplehost_app'`).Scan(&privileges); err != nil || privileges != "DELETE,INSERT,SELECT,UPDATE" {
+		t.Errorf("simplehost_app privileges = %q (%v)", privileges, err)
+	}
+	if !m43.BackwardCompatible() {
+		t.Error("0043 only adds a table; it must be marked backward-compatible")
+	}
+	if _, err := conn.ExecContext(ctx, m43.body); err != nil {
+		t.Errorf("re-run: %v", err)
+	}
+}

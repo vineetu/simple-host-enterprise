@@ -4,6 +4,35 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## Unreleased
+
+Schema 0043 (`site_redirects`, backward-compatible: an older binary ignores
+it, and a moved site's old address simply stops redirecting). Run
+`simple-host migrate` before the new image. Skills are at 0.13.2 (0.11.0
+still works).
+
+### Sites
+- Hand a site over: the owner, or any member of the owning team, moves a
+  site to a team they are in or to any person who can still sign in
+  (`POST .../transfer`, MCP `transfer_site`, "Hand it over" in the site's
+  Manage panel). Versions, saved data and its history, uploaded files, the
+  access level and viewers go with it. Refused when the receiver already has
+  a site by that name (`name_conflict`) or has no room (`site_limit`,
+  `storage_quota`). Audited as `site_transfer` with `from` and `to`.
+- Rename a site (`POST .../rename`, MCP `rename_site`, "Rename" in the
+  Manage panel), keeping everything it holds.
+- After either, the old address redirects to the new one (path and query
+  kept) until a site takes the old name again. The owner-hosts reconciler
+  keeps the old owner's certificate while any of its addresses redirects.
+- Leaving a team as its last active member, or deleting a team, now says the
+  sites can be kept by moving them first.
+
+### Admin
+- A disabled person's row on `/admin` offers "Move to team…" (all their
+  sites, to a team or a person, all or none) and "Delete sites"; a team with
+  no active member offers "Move to team…" beside "Delete team". Nobody
+  else's sites can be moved or deleted by an admin.
+
 ## v1.3.1 — 2026-09-26
 
 No schema change (still 0042); rolling back to v1.3.0 is safe. Skills are at

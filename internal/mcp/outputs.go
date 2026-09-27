@@ -51,6 +51,20 @@ func listOf(description string, item map[string]any) map[string]any {
 	}, "items", "count")
 }
 
+// moveSchema is a transfer's or rename's answer: where the site is now, and
+// where it was.
+func moveSchema() map[string]any {
+	return outObject(map[string]any{
+		"owner":               outString("The site's owner now: a username or team name."),
+		"name":                outString("The site's name now."),
+		"url":                 outString("The site's address now. Quote this one."),
+		"previous_owner":      outString("Who owned it before."),
+		"previous_name":       outString("Its name before."),
+		"previous_url":        outString("Its address before, which now redirects to url."),
+		"previous_url_status": outEnum("What the old address does now.", "redirects"),
+	}, "owner", "name", "url", "previous_owner", "previous_name", "previous_url", "previous_url_status")
+}
+
 func doneSchema() map[string]any {
 	return outObject(map[string]any{"done": outBool("Always true: the change was made.")}, "done")
 }
@@ -246,7 +260,9 @@ func outputSchemas() map[string]map[string]any {
 			"version": outInteger("The saved data's new version number."),
 		}, "version"),
 
-		"delete_site": doneSchema(),
+		"delete_site":   doneSchema(),
+		"transfer_site": moveSchema(),
+		"rename_site":   moveSchema(),
 
 		"create_team":       teamSchema(),
 		"list_teams":        outObject(map[string]any{"teams": outArray("The teams this account is in.", teamSchema())}, "teams"),

@@ -271,6 +271,13 @@ curl -fsS -X POST "$SIMPLE_HOST_URL/api/admin/users/disable" -H "X-API-Key: $SIM
 It answers 200 (`disabled`, or `already disabled` on a repeat), 404 for an
 address no account has, and is recorded in the audit log against the key.
 
+A disabled person's sites keep serving. On `/admin`, their row offers
+"Move to team…" (every site goes to a team, or to a person who can still
+sign in, with its saved data, access and viewers; the old addresses
+redirect) and "Delete sites". A team none of whose members can sign in gets
+the same "Move to team…" beside "Delete team". People who are still here hand
+their own sites over from the dashboard or their agent.
+
 Pods do not restart when `config.env` or `secrets.env` change. After any
 later edit, re-apply and run
 `kubectl --context "$CTX" -n simple-host rollout restart deploy/simple-host`.

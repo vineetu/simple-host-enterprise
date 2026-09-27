@@ -581,12 +581,22 @@ func writeTeamDeleteUnconfirmed(w http.ResponseWriter, team db.Team, sites int, 
 		SiteCount int `json:"site_count"`
 	}{
 		errorResponse: errorResponse{
-			Error: fmt.Sprintf("%s team %s and its %s permanently. Confirm with the person, then repeat with confirm_name=%s.",
-				lead, team.Username, pluralize(sites, "1 site", fmt.Sprintf("%d sites", sites)), team.Username),
+			Error: fmt.Sprintf("%s team %s and its %s permanently. Confirm with the person, then repeat with confirm_name=%s.%s",
+				lead, team.Username, pluralize(sites, "1 site", fmt.Sprintf("%d sites", sites)), team.Username, keepSitesHint(sites)),
 			Code: "confirm_team_delete",
 		},
 		SiteCount: sites,
 	})
+}
+
+// keepSitesHint offers the way to keep a closing team's sites: hand each one
+// over first (to another team the person is in, or to a person), after which
+// the team closes with nothing in it.
+func keepSitesHint(sites int) string {
+	if sites == 0 {
+		return ""
+	}
+	return " To keep the sites instead, move each one first with POST /api/collaboration/sites/{team}/{site}/transfer (MCP transfer_site) to another team the person is in or to a person; their old addresses redirect."
 }
 
 // deleteTeamAndSites deletes a team and every site it owns in tx, which must
@@ -600,40 +610,11 @@ func deleteTeamAndSites(ctx context.Context, tx *sql.Tx, recorder audit.Recorder
 	if err != nil {
 		return err
 	}
+	events, err := retireSites(ctx, tx, actorID, team.ID, sites, map[string]any{"team_delete": reason})
+	if err != nil {
+		return err
+	}
 	actorKind, keyID := auditActorKind(ctx)
-	var events []audit.Event
-	// Each site's own lock first, in name order, so a deploy or rollback in
-	// flight finishes (its new files land under the prefix retired below)
-	// or, arriving after, finds the site gone.
-	for _, site := range sites {
-		if err := db.LockSiteCollaboration(ctx, tx, team.ID, site.Name); err != nil {
-			return err
-		}
-	}
-	for _, site := range sites {
-		if err := db.EnqueueSiteSearch(ctx, tx, site.ID, db.SiteSearchDelete); err != nil {
-			return err
-		}
-		prefix, err := storage.SitePrefix(site.ID)
-		if err != nil {
-			return err
-		}
-		if err := db.RetireObjects(ctx, tx, prefix, storage.RetireGrace); err != nil {
-			return err
-		}
-		if err := db.DeleteSite(ctx, tx, team.ID, site.Name); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				continue // deleted by somebody else before our lock; its own delete queued it
-			}
-			return err
-		}
-		events = append(events, audit.Event{
-			ActorID: actorID, ActorKind: actorKind, KeyID: keyID,
-			Action: "site_delete", OwnerID: team.ID, SiteID: site.ID,
-			RequestID: auditRequestID(ctx),
-			Extra:     map[string]any{"active_version": site.ActiveVersion, "team_delete": reason},
-		})
-	}
 	if err := db.TeamAudit(ctx, tx, team.ID, actorID, "delete", "", team.Username); err != nil {
 		return err
 	}
@@ -656,6 +637,52 @@ func deleteTeamAndSites(ctx context.Context, tx *sql.Tx, recorder audit.Recorder
 		}
 	}
 	return nil
+}
+
+// retireSites deletes every one of ownerID's sites listed, in tx, the way
+// deleteSiteForTarget deletes one: search entry dropped, files queued for
+// retirement after the grace period. It returns a site_delete audit event
+// per site (extra added to each) for the caller to record last.
+func retireSites(ctx context.Context, tx *sql.Tx, actorID, ownerID string, sites []db.TeamSite, extra map[string]any) ([]audit.Event, error) {
+	actorKind, keyID := auditActorKind(ctx)
+	var events []audit.Event
+	// Each site's own lock first, in name order, so a deploy or rollback in
+	// flight finishes (its new files land under the prefix retired below)
+	// or, arriving after, finds the site gone.
+	for _, site := range sites {
+		if err := db.LockSiteCollaboration(ctx, tx, ownerID, site.Name); err != nil {
+			return nil, err
+		}
+	}
+	for _, site := range sites {
+		if err := db.EnqueueSiteSearch(ctx, tx, site.ID, db.SiteSearchDelete); err != nil {
+			return nil, err
+		}
+		prefix, err := storage.SitePrefix(site.ID)
+		if err != nil {
+			return nil, err
+		}
+		if err := db.RetireObjects(ctx, tx, prefix, storage.RetireGrace); err != nil {
+			return nil, err
+		}
+		if err := db.DeleteSite(ctx, tx, ownerID, site.Name); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue // deleted by somebody else before our lock; its own delete queued it
+			}
+			return nil, err
+		}
+		detail := map[string]any{"active_version": site.ActiveVersion}
+		for k, v := range extra {
+			detail[k] = v
+		}
+		events = append(events, audit.Event{
+			ActorID: actorID, ActorKind: actorKind, KeyID: keyID,
+			Action: "site_delete", OwnerID: ownerID, SiteID: site.ID,
+			RequestID: auditRequestID(ctx),
+			Extra:     detail,
+		})
+	}
+	return events, nil
 }
 
 // inTeamTransaction runs fn with the team's row locked for the rest of the

@@ -79,6 +79,14 @@ var fixtures = []fixture{
 		{"site": "demo", "confirm_name": "demo"},
 		{"site": "demo", "owner": "alice", "confirm_name": "demo"},
 	}},
+	{"transfer_site", []map[string]any{
+		{"site": "demo", "to": "team-acme-team"},
+		{"site": "demo", "owner": "alice", "to": "bob"},
+	}},
+	{"rename_site", []map[string]any{
+		{"site": "demo", "name": "demo-two"},
+		{"site": "demo", "owner": "alice", "name": "demo-two"},
+	}},
 	{"create_team", []map[string]any{{"name": "acme-team"}}},
 	{"list_teams", []map[string]any{{}}},
 	{"list_team_members", []map[string]any{{"team": "acme-team"}}},

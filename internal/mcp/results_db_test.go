@@ -257,7 +257,14 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	call("revoke_site_viewer", map[string]any{"site": "demo", "owner": "alice", "username": "team-acme-team"})
 
 	call("list_sites", map[string]any{})
-	call("delete_site", map[string]any{"site": "other", "owner": "alice", "confirm_name": "other"})
+	if got := call("rename_site", map[string]any{"site": "other", "name": "other-two"}); got["name"] != "other-two" || got["previous_url_status"] != "redirects" {
+		t.Errorf("rename_site = %v", got)
+	}
+	if got := call("transfer_site", map[string]any{"site": "other-two", "owner": "alice", "to": "acme-team"}); got["owner"] != "team-acme-team" {
+		t.Errorf("transfer_site = %v, want team-acme-team", got)
+	}
+	call("transfer_site", map[string]any{"site": "other-two", "owner": "team-acme-team", "to": "alice"})
+	call("delete_site", map[string]any{"site": "other-two", "owner": "alice", "confirm_name": "other-two"})
 	call("delete_site", map[string]any{"site": "demo", "confirm_name": "demo"})
 	call("remove_team_member", map[string]any{"team": "acme-team", "username": "bob"})
 	call("delete_team", map[string]any{"team": "acme-team"})

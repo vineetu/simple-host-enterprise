@@ -114,6 +114,27 @@ Removing someone ends their access to every site in the namespace. It does not
 undo content they deployed; offer rollback separately if that is what the user
 means.
 
+### Hand a site over
+
+```
+POST /api/collaboration/sites/<owner>/<site>/transfer   {"to": "team-sales"}
+```
+
+Moves a site to a team the caller is in, or to any person who can still sign
+in (`to` is their exact username). Its versions, saved data and history,
+uploads, access level and viewers all go with it; only the owner, and so the
+address, changes. The response carries the new `url` and `previous_url`; the old
+address redirects to the new one until a site takes the old name again. `404`
+`destination_not_found` means no such person or team you are in; `409`
+`name_conflict` means the receiver already has a site by that name (rename one
+with `POST .../rename {"name": "..."}` first); `409` `site_limit` or `413`
+`storage_quota` means the receiver has no room. Connector tools: `transfer_site`,
+`rename_site`. A full-scope key or a connector is needed; a publish key cannot.
+
+When leaving would delete a team, the `409 confirm_team_delete` says so and
+offers this: move the sites worth keeping first (to another team the person is
+in, or to the person), then leave. Ask which sites to keep.
+
 ### Delete
 
 ```
@@ -144,8 +165,7 @@ exactly as returned.
   owns it: add him to that team (say how many sites that covers), or, for a
   personal site, offer to publish it under a team he is in. To open it, add him
   as a viewer.
-- "Move my site to the team" is not supported. The address would change. Offer to
-  publish a new site under the team from local source, keep the old one, and
-  never delete the old site in the same turn.
+- "Move my site to the team" is a transfer (see "Hand a site over" below). Confirm
+  the team, move it, and report the new `url`; the old address redirects.
 - A name that is close but not exact — "deploy this to acme" when the team is
   `team-acme-ai` — is not a match. Show the list and ask. Never create `team-acme`.
