@@ -41,6 +41,8 @@ type AdminHandler struct {
 	quota UploadQuota
 	// oidcIssuer is OIDC_ISSUER, which erased identities are hashed with.
 	oidcIssuer string
+	// status is the "This instance" card (admin_status.go). Optional.
+	status *InstanceStatus
 }
 
 // WithAuditReader attaches the reader GET /api/admin/export streams from.
@@ -395,6 +397,7 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 		"sites": string(sitesMetric),
 	})
 
+	h.renderInstanceStatus(r, &b)
 	h.renderAccessRequests(r, &b, user)
 	h.renderDeletedSites(r, &b)
 	h.renderErasedIdentities(r, &b)
@@ -1347,6 +1350,7 @@ const adminHeadHTML = `<!doctype html>
   .login-hint{font-family:var(--font-mono);font-size:12px;letter-spacing:0.08em;text-transform:uppercase}
   .login-error{color:#a84300}
   .login-form{display:flex;gap:8px;margin-top:16px}
+  .status-bad{color:#a84300;font-weight:600}
   .activity-filter{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px;align-items:center}
   .activity-filter input{padding:6px 10px;border-radius:8px;border:1px solid var(--surface-line);background:var(--canvas);font-family:var(--font-sans);font-size:14px;color:var(--ink);min-width:0;flex:1 1 140px}
   .activity-filter label{font-family:var(--font-sans);font-size:13px;color:var(--ink-soft);display:flex;gap:6px;align-items:center}

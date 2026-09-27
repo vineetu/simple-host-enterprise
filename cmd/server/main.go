@@ -230,6 +230,17 @@ func run() (runErr error) {
 	// The route closures capture this pointer, so attaching later is enough.
 	auditReader := audit.NewReader(database)
 	adminHandler := handler.NewAdminHandler(database, cfg.PublicBaseURL, hosts, cookiePolicy, signingKeys, cfg.Session.Idle, auditRecorder, abuseLimits).WithStore(siteStore).WithAuditReader(auditReader).WithNetworkAccessApprovals(cfg.NetworkAccessApprovals).WithQuota(quota).WithOIDCIssuer(cfg.OIDC.Issuer)
+	statusSchema := "unknown"
+	if latest, err := migrate.Latest(); err == nil {
+		statusSchema = fmt.Sprintf("%04d", latest)
+	}
+	adminHandler.WithInstanceStatus(instanceStatus(cfg, database, requestMetrics, statusSchema))
+	if cfg.OwnerCerts == "auto" {
+		requestMetrics.SetOwnerHostsNotReady(func(ctx context.Context) (int, error) {
+			_, waiting, err := dbstore.OwnerHostReadiness(ctx, database)
+			return len(waiting), err
+		})
+	}
 	adminHandler.Register(mux, authMW, skillVersionMW)
 	handler.NewAuditHandler(database, auditReader, cfg.Audit.AccessLogVisibility, abuseLimits).Register(mux, authMW, skillVersionMW)
 	handler.NewShowcaseHandler(database, hosts, signingKeys, cfg.Session.Idle).Register(mux)

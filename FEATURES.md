@@ -600,6 +600,13 @@ Config names are documented in `docs/configuration.md`; schema in
   leaked key": paste any person's key (a password field; never echoed, logged
   or stored), that key alone is revoked and the answer names its owner, key
   name and last four; audited `admin_key_revoke` with the owner's name.
+  "This instance" (top of the page): release, commit and schema; migrations
+  waiting (`migrate.Pending`); this replica's latest bucket check and its
+  time; owner certificates ready and waiting, each waiting owner with how
+  long (`OWNER_CERTS=auto`; `manual` says the operator provides them); and
+  the effective limits (quotas, versions kept, uploaded files, session and
+  connected-app lifetimes, API key maximum, scanner, envelope, network
+  approvals, audit/access-log/Recently-deleted retention).
 - **Status.** Built.
 - **Routes.** `GET /admin`, `POST /api/admin/users/{username}/disable`,
   `POST /api/admin/users/{username}/enable`,
@@ -626,7 +633,8 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Pages.** `/admin`.
 - **Go.** `internal/handler/admin.go` (`leaverSiteActions`,
   `personDataActions`), `admin_move.go`, `admin_erase.go`, `internal/db/erase.go`,
-  `admin_rankings.go`, `admin_disk_usage.go`, `admin_keys.go`, `access.go`
+  `admin_rankings.go`, `admin_disk_usage.go`, `admin_keys.go`,
+  `admin_status.go` (filled by `cmd/server/status.go`), `access.go`
   (`renderAccessRequests`), `site_restore.go` (`renderDeletedSites`).
 - **DB.** `users.disabled_at` (0023), `site_daily_analytics` (0003, 0013),
   `erased_owner_labels`, `erased_identities`, the
@@ -688,7 +696,8 @@ Config names are documented in `docs/configuration.md`; schema in
 - **What.** `/healthz` (liveness) and `/readyz` (database and schema; bucket is
   reported, not gating) on every host. `/metrics` on its own port, never on
   the Service or Ingress: request counts and latency, `simplehost_bucket_ok`,
-  `simplehost_config_warning` (startup checks, section 18), DB pool, build info. Structured request log. Rate limits and concurrency
+  `simplehost_config_warning` (startup checks, section 18),
+  `simplehost_owner_hosts_not_ready` (section 19), DB pool, build info. Structured request log. Rate limits and concurrency
   slots: sign-in, session hand-off, API key mint and the connector's token
   and registration limits are counted in Postgres and shared by every
   replica; every other limit is per pod in memory (`docs/install.md`,
@@ -775,7 +784,10 @@ Config names are documented in `docs/configuration.md`; schema in
   credential; the reconciler's ServiceAccount is the one token in the
   install (namespaced Role: ingresses get/list/create/patch/delete,
   `certificates.cert-manager.io` get; no Secrets). It connects to Postgres
-  as the application role.
+  as the application role. Readiness is visible without kubectl: /admin's
+  "This instance" card counts ready and waiting owners and lists each
+  waiting one with how long (`db.OwnerHostReadiness`), and
+  `simplehost_owner_hosts_not_ready` counts them.
 - **Status.** Built.
 - **Routes.** None. **MCP.** None. **Skill.** None.
 - **Go.** `internal/ownerhosts/ownerhosts.go`; `internal/handler/owner_hosts.go`

@@ -19,6 +19,12 @@ Schema 0050 (backward-compatible: nullable `api_keys.last4`).
   key", `POST /api/admin/keys/revoke`): only that key stops working, and the
   audit row (`admin_key_revoke`) names its owner.
 
+### Admin page
+- "This instance" on /admin: release, commit and schema, migrations waiting,
+  this replica's latest bucket check, owner certificates ready and waiting
+  (each waiting owner with how long), and the limits in force.
+- New metric `simplehost_owner_hosts_not_ready`.
+
 ### Audit log
 - /admin's Activity card searches by owner, site, person, action and date,
   shows names instead of ids, loads more, and its export links carry the

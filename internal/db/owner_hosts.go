@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/lib/pq"
 )
@@ -38,4 +39,48 @@ func SetOwnerHostReady(ctx context.Context, q Querier, label string, ready bool)
 func DeleteOwnerHostsExcept(ctx context.Context, q Querier, keep []string) error {
 	_, err := q.ExecContext(ctx, `DELETE FROM owner_hosts WHERE NOT (owner_label = ANY($1))`, pq.Array(keep))
 	return err
+}
+
+// OwnerHostWait is an owner whose "*.<owner>.<base>" certificate is not
+// ready yet, and since when: when the reconciler last recorded it not
+// ready, or, when it has not seen the owner yet, their first site.
+type OwnerHostWait struct {
+	Label string
+	Since time.Time
+}
+
+// OwnerHostReadiness counts the owners that need a certificate (the same
+// set OwnerLabelsWithSites gives the reconciler) whose certificate is
+// ready, and lists the rest longest-waiting first.
+func OwnerHostReadiness(ctx context.Context, q Querier) (ready int, waiting []OwnerHostWait, err error) {
+	rows, err := q.QueryContext(ctx, `
+		WITH owners AS (
+			SELECT lower(replace(u.username, '.', '-')) AS label, min(s.created_at) AS first_site
+			FROM users u JOIN sites s ON s.user_id = u.id
+			GROUP BY 1
+			UNION ALL
+			SELECT owner_label, min(created_at) FROM site_redirects GROUP BY 1
+		), needed AS (
+			SELECT label, min(first_site) AS first_site FROM owners GROUP BY label
+		)
+		SELECT n.label, COALESCE(h.ready, false), COALESCE(h.updated_at, n.first_site)
+		FROM needed n LEFT JOIN owner_hosts h ON h.owner_label = n.label
+		ORDER BY 3, 1`)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var w OwnerHostWait
+		var ok bool
+		if err := rows.Scan(&w.Label, &ok, &w.Since); err != nil {
+			return 0, nil, err
+		}
+		if ok {
+			ready++
+		} else {
+			waiting = append(waiting, w)
+		}
+	}
+	return ready, waiting, rows.Err()
 }

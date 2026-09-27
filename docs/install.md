@@ -852,6 +852,7 @@ PodMonitor, pod annotations, or any in-cluster scraper.
 | `simplehost_build_info{version,commit,schema}` | The running release |
 | `simplehost_bucket_ok` | 1 when the last bucket check (made by `/readyz`) succeeded, 0 when it failed |
 | `simplehost_config_warning{check}` | 1 while a startup warning stands, 0 once its check passed: `no_admin` (neither `ADMIN_EMAILS` nor `OIDC_ADMIN_CLAIM` is set) and `bucket_versioning` (the bucket reports versioning is not enabled; a provider that cannot report it is logged and not flagged) |
+| `simplehost_owner_hosts_not_ready` | Owners with sites whose `*.<owner>.<base>` certificate is not ready yet (their sites are served at `<owner>.<base>/<site>/` meanwhile); `OWNER_CERTS=auto` only. /admin's "This instance" card lists them with how long each has waited |
 | `simplehost_audit_stream_dropped_total` | Audit lines not written to stdout because the writer fell behind (the database rows are intact); should stay 0 |
 
 Probes: `/healthz` is liveness and checks nothing else. `/readyz` checks
@@ -864,12 +865,23 @@ readiness would take them all out and stop even the cached pages. The
 failure is logged as `readyz: bucket: ...` and sets `simplehost_bucket_ok`
 to 0.
 
+Admins see the same things without cluster access on /admin's "This
+instance" card: release, commit and schema; migrations waiting to be
+applied; this replica's latest bucket check and when it ran; owner
+certificates ready and waiting (each waiting owner with how long); and the
+effective limits (quotas, versions kept, uploaded files, session and
+connected-app lifetimes, API key maximum, upload scanning, envelope
+encryption, network approvals, and how long the audit log, access log and
+Recently deleted keep things).
+
 No alerting stack ships with the package. What to watch:
 
 - Pods not Ready, restarts, `CrashLoopBackOff`.
 - `simplehost_bucket_ok` at 0, or `readyz: bucket:` in the logs. Pods stay
   Ready and cached pages keep serving, but uncached pages answer 503 and
   publishing fails until the bucket is fixed.
+- `simplehost_owner_hosts_not_ready` above 0 for more than a few minutes:
+  cert-manager is not issuing (see "Owner certificates").
 - `simplehost_config_warning` at 1, or `WARNING:` lines at startup: no admin
   configured, or bucket versioning off (a swept object then cannot be
   brought back).

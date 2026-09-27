@@ -6,6 +6,7 @@
 package metrics
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -26,6 +27,11 @@ type Registry struct {
 	total   uint64
 	// bucket is the last readiness bucket check: 0 not yet run, 1 ok, 2 failing.
 	bucket int
+	// bucketAt is when that check ran.
+	bucketAt time.Time
+	// ownerHostsNotReady, when set, counts the owners still waiting for
+	// their certificate; read at each scrape.
+	ownerHostsNotReady func(context.Context) (int, error)
 	// auditDropped reports SIEM stream lines dropped (audit.Stream); nil
 	// leaves the metric out.
 	auditDropped func() uint64
@@ -72,6 +78,21 @@ func (r *Registry) SetBucketOK(ok bool) {
 	} else {
 		r.bucket = 2
 	}
+	r.bucketAt = time.Now()
+}
+
+// BucketStatus is this replica's latest bucket check: known is false until
+// /readyz has run one.
+func (r *Registry) BucketStatus() (ok, known bool, at time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.bucket == 1, r.bucket != 0, r.bucketAt
+}
+
+// SetOwnerHostsNotReady registers the count exported as
+// simplehost_owner_hosts_not_ready. Call before serving.
+func (r *Registry) SetOwnerHostsNotReady(count func(context.Context) (int, error)) {
+	r.ownerHostsNotReady = count
 }
 
 // SetConfigWarning records one startup configuration check, exported as
@@ -109,7 +130,7 @@ type Build struct {
 
 // Handler writes the exposition. db may be nil.
 func (r *Registry) Handler(db *sql.DB, build Build) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 
 		fmt.Fprintln(w, "# HELP simplehost_build_info The running binary.")
@@ -169,6 +190,14 @@ func (r *Registry) Handler(db *sql.DB, build Build) http.Handler {
 					v = 1
 				}
 				fmt.Fprintf(w, "simplehost_config_warning{check=%q} %d\n", name, v)
+			}
+		}
+
+		if r.ownerHostsNotReady != nil {
+			if n, err := r.ownerHostsNotReady(req.Context()); err == nil {
+				fmt.Fprintln(w, "# HELP simplehost_owner_hosts_not_ready Owners whose sites wait for their own certificate (served at <owner>.<base>/<site>/ meanwhile).")
+				fmt.Fprintln(w, "# TYPE simplehost_owner_hosts_not_ready gauge")
+				fmt.Fprintf(w, "simplehost_owner_hosts_not_ready %d\n", n)
 			}
 		}
 
