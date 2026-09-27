@@ -12,6 +12,8 @@ release, commit and schema.
   the person who uploaded it, the site's owner or a team member (403
   otherwise). Anyone who can open the site still uploads and lists; a deleted
   file cannot be brought back, so opening the site is no longer enough.
+- `GET /auth/sessions` (your browsers and connected apps) now refuses an
+  API key like the other session-only routes.
 
 ## v1.7.0 — 2026-09-27
 

@@ -1,7 +1,12 @@
 package handler
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"github.com/vsriram/simple-host/internal/auth"
+	"github.com/vsriram/simple-host/internal/db"
 
 	"github.com/vsriram/simple-host/internal/oidc"
 )
@@ -87,5 +92,24 @@ func TestRefuseIdentity(t *testing.T) {
 				t.Fatalf("refuseIdentity = %q, %q; want reason %q", reason, message, test.wantReason)
 			}
 		})
+	}
+}
+
+// GET /auth/sessions lists a person's browsers and connected apps: a
+// session-only route, so an API key is refused like the other session
+// routes are (it used to answer a full key).
+func TestSessionsPageRefusesAPIKey(t *testing.T) {
+	mux := http.NewServeMux()
+	withKey := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := auth.ContextWithTestAuth(r.Context(), &db.User{ID: "u1", Username: "alice"}, "", "key-1")
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+	(&AuthHandler{}).Register(mux, withKey)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/auth/sessions", nil))
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("GET /auth/sessions with a key = %d, want 403", response.Code)
 	}
 }

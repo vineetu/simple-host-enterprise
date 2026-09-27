@@ -185,7 +185,7 @@ func (h *AuthHandler) Register(mux *http.ServeMux, authMiddleware func(http.Hand
 	mux.HandleFunc("GET /auth/login", h.login)
 	mux.HandleFunc("GET /auth/callback", h.callback)
 	mux.Handle("POST /auth/logout", originCheck(authMiddleware(requireSessionAuth(http.HandlerFunc(h.logout)))))
-	mux.Handle("GET /auth/sessions", authMiddleware(http.HandlerFunc(h.listSessions)))
+	mux.Handle("GET /auth/sessions", authMiddleware(requireSessionAuth(http.HandlerFunc(h.listSessions))))
 	mux.Handle("POST /auth/sessions/{id}/revoke", originCheck(authMiddleware(requireSessionAuth(http.HandlerFunc(h.revokeSession)))))
 	mux.Handle("POST /auth/sessions/revoke-all", originCheck(authMiddleware(requireSessionAuth(http.HandlerFunc(h.signOutEverywhere)))))
 }
