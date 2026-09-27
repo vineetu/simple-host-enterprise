@@ -4,7 +4,7 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
-## Unreleased
+## v1.8.0 — 2026-09-27
 
 Schema 0058 (backward-compatible); run `simple-host migrate` before
 deploying. Skills are at 0.15.5 (0.11.0 still works).
