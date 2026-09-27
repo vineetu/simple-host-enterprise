@@ -550,13 +550,18 @@ func (h *SiteHandler) finishMove(w http.ResponseWriter, r *http.Request, actorID
 // adminMoveTarget reads the destination of an admin move from the dashboard
 // form (`to`) or a JSON body.
 func adminMoveTarget(w http.ResponseWriter, r *http.Request) string {
+	return adminFormField(w, r, "to")
+}
+
+// adminFormField reads one string field of an admin action, sent either as
+// the dashboard's form or as a JSON body.
+func adminFormField(w http.ResponseWriter, r *http.Request, name string) string {
 	r.Body = http.MaxBytesReader(w, r.Body, smallFormBodyBytes)
 	if mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mediaType == "application/json" {
-		var body struct {
-			To string `json:"to"`
-		}
+		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
-		return body.To
+		value, _ := body[name].(string)
+		return value
 	}
-	return r.FormValue("to")
+	return r.FormValue(name)
 }

@@ -650,7 +650,7 @@ func (h *SiteHandler) downloadCollaborationVersion(w http.ResponseWriter, r *htt
 	w.WriteHeader(http.StatusOK)
 
 	zipWriter := zip.NewWriter(w)
-	if err := streamArchiveEntries(streamContext, zipWriter, lease.FS(), entries); err != nil {
+	if err := streamArchiveEntries(streamContext, zipWriter, lease.FS(), entries, ""); err != nil {
 		log.Printf("stream collaboration archive %s/%s v%d: %v", ownerUsername, siteName, versionNumber, err)
 		_ = zipWriter.Close()
 		return
@@ -688,7 +688,8 @@ func collectArchiveEntries(ctx context.Context, root fs.FS) ([]archiveEntry, err
 	return entries, err
 }
 
-func streamArchiveEntries(ctx context.Context, destination *zip.Writer, root fs.FS, entries []archiveEntry) error {
+// prefix is prepended to every entry name ("" for none).
+func streamArchiveEntries(ctx context.Context, destination *zip.Writer, root fs.FS, entries []archiveEntry, prefix string) error {
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -697,7 +698,7 @@ func streamArchiveEntries(ctx context.Context, destination *zip.Writer, root fs.
 		if err != nil {
 			return err
 		}
-		header.Name = entry.path
+		header.Name = prefix + entry.path
 		if entry.info.IsDir() {
 			header.Name += "/"
 		} else {

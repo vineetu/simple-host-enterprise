@@ -228,6 +228,46 @@ applies, not these settings.
 | `ACCESS_LOG_RETENTION_DAYS` | No | `90` | Must be a positive integer. Also how long `prune` keeps a session (and its IP and user agent) after it expired or was signed out. |
 | `ACCESS_LOG_VISIBILITY` | No | `counts` | Must be `counts`, `owner` or `admin`. `counts` (the default) answers a site's owner and team members on `GET /api/access` with views per day and the number of distinct viewers, never who; `owner` gives them each visit with the viewer's user id (IP and user agent stay admin-only); `admin` refuses every non-admin caller of that route outright. Admins signed in with a browser session always see full rows; an admin's API key gets the non-admin view. Read by `handler.NewAuditHandler` (`cmd/server/main.go`); does not affect `GET /api/audit`, which is always scoped by caller identity rather than gated by this switch. |
 
+## Data subject requests
+
+A person's access or erasure request goes to an admin, not to the person:
+employees do not delete their own work accounts. Disable the person first
+(`/admin` or the offboard route), then use the two actions their row offers:
+
+- **Export data** (`GET /api/admin/users/{username}/export`) streams one zip:
+  `account.json`, `teams.json`, `viewer-grants.json`, `api-keys.json`,
+  `connected-apps.json` and `sessions.json` (names, dates, IPs and user
+  agents; never a key, token or secret), then for every site they own,
+  recently deleted ones included, `sites/<name>/` with the live version's
+  files, `saved-data.json` and its history, `versions.json`, `assets.json`
+  and each asset's bytes, and `audit-events.jsonl` (every audited action
+  they took). Audited as `admin_user_export`.
+- **Delete person and all data** (`POST /api/admin/users/{username}/erase`,
+  the username typed again as `confirm`) deletes for good, skipping Recently
+  deleted: their sites with files, saved data and its history, versions and
+  assets (the bucket objects are queued for the retire sweep, which deletes
+  them an hour later; the bucket's own versioning then keeps noncurrent
+  copies for its lifecycle rule, `docs/storage.md`), API keys, connected
+  apps, sessions, team memberships, viewer access they hold, grants waiting
+  for their email (only when the identity provider vouched for that address
+  at a sign-in; a guessed address may belong to someone else), the
+  access-log rows of their own visits, and the account. Their old addresses
+  that still redirected to a site they handed on stop redirecting and answer
+  not found: the held name must not send their links to someone else's site.
+  Refused while they are the last member of a team: move or delete that
+  team's sites, or delete the team, first. Audited as one `user_erased` row
+  (plus a `site_delete` per site) that names them by id only.
+
+What stays, and why: audit rows are hash-chained, so erasure does not touch
+them. They keep the person's opaque user id, and older rows can carry their
+username or email in a detail field (for example an `admin_disable_user` or
+`email_change_skipped` row), until `AUDIT_RETENTION_DAYS` prunes their
+partition; the legal basis is security logging. Columns that only record
+who did something elsewhere (who uploaded a version to a team site, who added
+a viewer) are cleared. The address label is held in `erased_owner_labels` so
+a later account cannot take the name and inherit old links; the same person
+signing in again gets a suffixed name.
+
 ## Streaming the audit log to a SIEM
 
 Nothing to configure. After each audit row is committed, the server writes

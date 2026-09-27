@@ -174,6 +174,7 @@ func (h *AdminHandler) Register(mux *http.ServeMux, authMiddleware, skillVersion
 	mux.Handle("POST /api/admin/deleted-sites/{owner}/{sitename}/restore", dashboardCheck(adminAPI(http.HandlerFunc(h.restoreDeletedSiteAsAdmin))))
 	h.registerAccessRequestRoutes(mux, adminAPI, dashboardCheck)
 	h.registerMoveRoutes(mux, adminAPI, dashboardCheck)
+	h.registerEraseRoutes(mux, adminAPI, dashboardCheck)
 }
 
 // requireAdmin is auth.RequireAdmin plus an access_denied audit row when a
@@ -547,6 +548,7 @@ func writeUserBlockHeader(b *strings.Builder, hosts HostModel, u db.User, siteCo
 	} else if u.DisabledAt != nil {
 		nameChips = ` <span class="chip chip-warn">disabled</span>`
 		actions += leaverSiteActions(u.Username, siteCount, true)
+		actions += personDataActions(u.Username)
 		actions += confirmForm("/api/admin/users/"+url.PathEscape(u.Username)+"/enable",
 			fmt.Sprintf("Re-enable %s? They will be able to sign in again.", u.Username), "Enable")
 	} else {
@@ -592,6 +594,22 @@ func leaverSiteActions(username string, siteCount int, person bool) string {
 			fmt.Sprintf("Delete %s of %s? They stop serving at once and can be restored from Recently deleted for 30 days.", sites, username), "Delete sites")
 	}
 	return actions
+}
+
+// personDataActions are a disabled person's data-request actions: export
+// everything held about them, and delete them with all of it, confirmed by
+// typing the username.
+func personDataActions(username string) string {
+	base := "/api/admin/users/" + url.PathEscape(username)
+	question := "Delete " + username + " and all their data? This cannot be undone. " +
+		"Their sites (including recently deleted ones) with their files, saved data, history and assets, " +
+		"their API keys, connected apps, sessions, team memberships, the viewer access they hold, " +
+		"grants waiting for their email, and the record of their visits are deleted for good; " +
+		"old addresses of sites they handed on stop redirecting. " +
+		"The audit log keeps its rows under an anonymous id. Their name stays reserved so nobody inherits their links. " +
+		"Type " + username + " to confirm:"
+	return fmt.Sprintf(`<a class="btn-view" href="%s/export" download>Export data</a>`, html.EscapeString(base)) +
+		promptForm(base+"/erase", question, "confirm", "btn-reject", "Delete person and all data")
 }
 
 // writeSiteRow emits one row of a site list. The grouped list under each user

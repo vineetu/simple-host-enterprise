@@ -287,7 +287,9 @@ A disabled person's sites keep serving. On `/admin`, their row offers
 sign in, with its saved data, access and viewers; the old addresses
 redirect) and "Delete sites". A team none of whose members can sign in gets
 the same "Move to team…" beside "Delete team". People who are still here hand
-their own sites over from the dashboard or their agent.
+their own sites over from the dashboard or their agent. A disabled person's
+row also offers "Export data" and "Delete person and all data", for data
+subject requests (`docs/configuration.md`, "Data subject requests").
 
 Pods do not restart when `config.env` or `secrets.env` change. After any
 later edit, re-apply and run

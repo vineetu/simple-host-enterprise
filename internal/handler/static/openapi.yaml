@@ -2250,6 +2250,74 @@ paths:
         '409':
           description: The owner can still act on the sites
 
+  /api/admin/users/{username}/export:
+    get:
+      summary: Export everything held about a disabled person
+      description: Admin only, browser session only. Streams one zip - `account.json`, `teams.json`, `viewer-grants.json`, `api-keys.json`, `connected-apps.json`, `sessions.json` (metadata only, never a key, token or secret), `sites/<name>/` for every site they own including recently deleted ones (live files under `files/`, `site.json`, `saved-data.json`, `saved-data-history.json`, `versions.json`, `assets.json`, asset bytes under `assets/<id>`), and `audit-events.jsonl` (every audited action they took). Audited as `admin_user_export`.
+      tags: [Admin]
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The archive
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: The name is a team
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The person can still sign in; disable them first
+
+  /api/admin/users/{username}/erase:
+    post:
+      summary: Delete a disabled person and all their data
+      description: Admin only, browser session only. Permanent, with no recovery window - their sites (live and recently deleted) with files, saved data and its history, versions and assets (bucket objects queued for the retire sweep), API keys, connected apps, sessions, team memberships, viewer grants they hold, pending grants for their email (when the identity provider vouched for it), the access-log rows of their own visits, redirects from their old addresses to sites they handed on (those addresses answer not found), and the account. Audit rows stay and keep the opaque user id; the `user_erased` row names them by id only. The address label stays held. Send `confirm` (form or JSON) equal to the username.
+      tags: [Admin]
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm:
+                  type: string
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm:
+                  type: string
+      responses:
+        '200':
+          description: Erased
+        '400':
+          description: The confirmation does not match the username, or the name is a team
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The person can still sign in, or is the last member of a team
+
 components:
   headers:
     LatestSkillVersion:
