@@ -213,17 +213,58 @@ func outputSchemas() map[string]map[string]any {
 			}, "owner", "sites", "max_sites", "bytes", "max_bytes")),
 		}, "id", "username", "is_admin", "kind", "teams", "usage"),
 
-		"list_sites":  listOf("Every site this account can act on.", collaborationSiteSchema()),
-		"get_site":    collaborationSiteSchema(),
-		"deploy_site": siteSchema("url"),
+		"list_sites": listOf("Every site this account can act on.", collaborationSiteSchema()),
+		"get_site":   collaborationSiteSchema(),
+		"deploy_site": func() map[string]any {
+			schema := siteSchema("url")
+			schema["properties"].(map[string]any)["new_version"] = outInteger("Only with publish false: the version this deploy stored, which is not live. Preview it with preview_version; rollback_site to it makes it live.")
+			return schema
+		}(),
 		"list_site_versions": listOf("Retained versions, newest first.", outObject(map[string]any{
 			"id":             outString("The version's id (older routes)."),
 			"version_number": outInteger("The number to pass to rollback_site."),
 			"status":         outString("The version's status, e.g. active."),
+			"live":           outBool("Whether this is the version visitors see now."),
 			"uploaded_by":    outString("Who deployed it, when known."),
 			"created_at":     outString("When it was deployed."),
 		}, "version_number", "status", "created_at")),
 		"rollback_site": siteSchema(),
+		"preview_version": outObject(map[string]any{
+			"url":        outString("The private preview address to give the user. It works only for the site's owner or team, signed in."),
+			"expires_at": outString("When the address stops working (RFC 3339), one hour from now."),
+			"version":    outInteger("The version it shows."),
+			"live":       outBool("Whether that version is already the live one."),
+		}, "url", "expires_at", "version", "live"),
+		"site_activity": outObject(map[string]any{
+			"owner":        outString("The site's owner."),
+			"site":         outString("The site's name."),
+			"live_version": outInteger("The version visitors see now."),
+			"versions": outArray("Kept versions, newest first.", outObject(map[string]any{
+				"version_number": outInteger("The version's number."),
+				"live":           outBool("Whether visitors see this one now."),
+				"uploaded_by":    outString("Who deployed it, when known."),
+				"created_at":     outString("When it was deployed."),
+			}, "version_number", "live", "created_at")),
+			"changes": outArray("Recorded actions on the site, newest first (at most 100).", outObject(map[string]any{
+				"at":         outString("When (RFC 3339)."),
+				"action":     outString("What was done, e.g. site_update, site_rollback, site_access, viewer_grant, state_write, asset_delete."),
+				"actor":      outString("Username of who did it, when known."),
+				"actor_kind": outString("How they did it: person (signed in, including through a connected app), key (an API key) or system."),
+				"detail":     map[string]any{"type": "object", "description": "Details of the action, e.g. version and previous_version, and published false for a version stored without going live."},
+			}, "at", "action", "actor_kind")),
+			"changes_note": outString("Why changes are missing or empty, when they are."),
+			"visits": outObject(map[string]any{
+				"from":           outString("Start of the counted period (RFC 3339)."),
+				"to":             outString("End of the counted period (RFC 3339)."),
+				"unique_viewers": outInteger("Distinct signed-in people who opened the site in the period."),
+				"days": outArray("Days with visits.", outObject(map[string]any{
+					"day":            outString("The day (YYYY-MM-DD)."),
+					"views":          outInteger("Page views that day."),
+					"unique_viewers": outInteger("Distinct signed-in people that day."),
+				}, "day", "views", "unique_viewers")),
+			}, "from", "to", "unique_viewers", "days"),
+			"visits_note": outString("Why visits are missing, when they are."),
+		}, "owner", "site", "live_version", "versions"),
 		"set_site_access": func() map[string]any {
 			schema := collaborationSiteSchema()
 			schema["properties"].(map[string]any)["note"] = outString("What happened, in words.")
@@ -268,9 +309,17 @@ func outputSchemas() map[string]map[string]any {
 			"version": outInteger("The saved data's new version number."),
 		}, "version"),
 
-		"delete_site":   doneSchema(),
-		"transfer_site": moveSchema(),
-		"rename_site":   moveSchema(),
+		"list_site_assets": listOf("Files the site's pages uploaded.", outObject(map[string]any{
+			"id":           outString("The file's id, for delete_site_asset."),
+			"name":         outString("The file's name as uploaded."),
+			"content_type": outString("The file's type, e.g. image/png."),
+			"size":         outInteger("Its size in bytes."),
+			"url":          outString("Where it is served."),
+		}, "id", "name", "content_type", "size", "url")),
+		"delete_site_asset": doneSchema(),
+		"delete_site":       doneSchema(),
+		"transfer_site":     moveSchema(),
+		"rename_site":       moveSchema(),
 		"list_deleted_sites": listOf("Every site deleted in the last 30 days from this account or its teams, newest first.", outObject(map[string]any{
 			"owner":            outString("The namespace it was in: a username or a team name."),
 			"site":             outString("The site's name, which it keeps until it is restored or gone for good."),

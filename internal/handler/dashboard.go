@@ -350,7 +350,7 @@ const dashboardScript = `<script>
     });
   }
 })();
-</script>` + dashboardSitesScript + dashboardDeletedScript
+</script>` + dashboardVersionsScript + dashboardSitesScript + dashboardDeletedScript
 
 // dashboardSitesScript renders the signed-in person's accessible sites and,
 // for a site they own or belong to the owning team of (requireOwnerRole's
@@ -468,6 +468,7 @@ const dashboardSitesScript = `<script>
       '<div class="viewer-list" aria-live="polite"></div>' +
       '<div class="add-row"><input type="text" class="add-viewer-input" placeholder="username or work email, another" autocomplete="off"' + locked + '>' +
       '<button type="button" class="btn-login add-viewer-button"' + locked + '>Add</button></div></div>' +
+      '<div class="site-subsection"><h4>Versions</h4><p class="share-help">Preview opens a version in a new tab, for you and your team only, for an hour. Make live shows it to visitors.</p><div class="version-list" aria-live="polite"></div></div>' +
       '<div class="site-subsection"><h4>Assets</h4><div class="asset-list" aria-live="polite"></div></div>' +
       '<div class="site-subsection"><h4>Rename</h4>' +
       '<p class="share-help">The site gets a new address. The old one sends visitors on to it until another site takes the name.</p>' +
@@ -668,6 +669,7 @@ const dashboardSitesScript = `<script>
         .catch(function(){ alert('Network error deleting asset.'); });
     });
 
+    if (window.shSiteVersions) window.shSiteVersions(panel.querySelector('.version-list'), base);
     loadViewers();
     loadAssets();
     loadActivity();

@@ -113,6 +113,9 @@ type hostGate struct {
 	// audit records access_denied when a signed-in person is refused a
 	// site (viewerAllowed or writerAllowed). nil records nothing.
 	audit audit.Recorder
+	// previewAllowed is db.PreviewAllowed by default: whether a person may
+	// open a preview of one kept version (preview.go). nil admits nobody.
+	previewAllowed func(r *http.Request, siteID, userID string, version int) (bool, error)
 }
 
 // recordDenied writes one access_denied audit row for a signed-in caller
@@ -147,6 +150,9 @@ func NewHostGate(hosts HostModel, files *SiteFiles, database *sql.DB, signingKey
 		},
 		networkOpen: func(r *http.Request, siteID string) (bool, error) {
 			return db.NetworkOpen(r.Context(), database, siteID)
+		},
+		previewAllowed: func(r *http.Request, siteID, userID string, version int) (bool, error) {
+			return db.PreviewAllowed(r.Context(), database, siteID, userID, version)
 		},
 		touchHostSession: func(sessionID string) {
 			if err := db.TouchSession(context.Background(), database, sessionID); err != nil {
@@ -356,6 +362,9 @@ func (g *hostGate) serveOwnerPath(w http.ResponseWriter, r *http.Request, label,
 	}
 	if !hasSlash {
 		redirectWithTrailingSlash(w, r)
+		return
+	}
+	if rest, ok := strings.CutPrefix(afterSite, previewSegment+"/"); ok && g.servePreview(w, r, owner, sitename, siteID, requestHost, "/"+sitename, rest) {
 		return
 	}
 	userID, sessionID, anonymous, ok := g.requireHostSessionOrNetwork(w, r, requestHost, siteID)
@@ -658,6 +667,9 @@ func (g *hostGate) serveSiteHost(w http.ResponseWriter, r *http.Request, label s
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 		return
 	}
+	if rest, ok := strings.CutPrefix(r.URL.Path, "/"+previewSegment+"/"); ok && g.servePreview(w, r, owner, sitename, siteID, requestHost, "", rest) {
+		return
+	}
 	userID, sessionID, anonymous, ok := g.requireHostSessionOrNetwork(w, r, requestHost, siteID)
 	if !ok {
 		return
@@ -920,6 +932,12 @@ func (g *hostGate) serveSiteAPI(w http.ResponseWriter, r *http.Request, kind sit
 		return
 	}
 	if !g.checkSiteAccess(w, r, siteID, user.ID, needsWrite) {
+		return
+	}
+	// A page opened as a preview is a version that is not live: it reads
+	// the live data but must not change it.
+	if needsWrite && g.fromPreview(r, siteID) {
+		writeJSON(w, http.StatusForbidden, errorResponse{Error: "saves are turned off in a preview: this page is a version that is not live", Code: "preview_read_only"})
 		return
 	}
 

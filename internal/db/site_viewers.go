@@ -123,6 +123,27 @@ func WriterAllowed(ctx context.Context, q Querier, siteID, userID string) (bool,
 	return ViewerAllowed(ctx, q, siteID, userID)
 }
 
+const previewAllowedQuery = `
+	SELECT EXISTS (
+		SELECT 1 FROM sites s
+		JOIN versions v ON v.site_id = s.id AND v.version_number = $3 AND v.status = 'active'
+		WHERE s.id = $1::uuid AND s.deleted_at IS NULL
+		  AND (s.user_id = $2::uuid OR EXISTS (
+			SELECT 1 FROM team_members tm WHERE tm.team_id = s.user_id AND tm.user_id = $2::uuid
+		  ))
+	)
+`
+
+// PreviewAllowed decides whether a signed-in person may open a preview of
+// one kept version of a site: its owner or, for a team site, a member, and
+// only while the version is still kept. The site's access level does not
+// widen it: a preview is for the people who can publish the site.
+func PreviewAllowed(ctx context.Context, q Querier, siteID, userID string, version int) (bool, error) {
+	var allowed bool
+	err := q.QueryRowContext(ctx, previewAllowedQuery, siteID, userID, version).Scan(&allowed)
+	return allowed, err
+}
+
 const listRestrictedSiteIDsQuery = `SELECT id::text FROM sites WHERE access = 'specific'`
 
 // ListRestrictedSiteIDs returns the set of every site id at the named-viewers

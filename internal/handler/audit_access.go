@@ -116,6 +116,7 @@ type auditEventResponse struct {
 	At              time.Time      `json:"at"`
 	RequestID       string         `json:"request_id,omitempty"`
 	ActorID         string         `json:"actor_id,omitempty"`
+	Actor           string         `json:"actor,omitempty"`
 	ActorKind       string         `json:"actor_kind"`
 	KeyID           string         `json:"key_id,omitempty"`
 	Action          string         `json:"action"`
@@ -132,7 +133,7 @@ type auditEventResponse struct {
 
 func toAuditEventResponse(e db.AuditEvent) auditEventResponse {
 	return auditEventResponse{
-		ID: e.ID, At: e.At, RequestID: e.RequestID, ActorID: e.ActorID, ActorKind: e.ActorKind,
+		ID: e.ID, At: e.At, RequestID: e.RequestID, ActorID: e.ActorID, Actor: e.ActorUsername, ActorKind: e.ActorKind,
 		KeyID: e.KeyID, Action: e.Action, OwnerID: e.OwnerID, SiteID: e.SiteID, TeamID: e.TeamID,
 		ViaSiteLabel: e.ViaSiteLabel, ViaSiteName: e.ViaSiteName, ViaSiteObserved: e.ViaSiteObserved,
 		IP: e.IP, UserAgent: e.UserAgent, Detail: e.Detail,
@@ -280,7 +281,7 @@ type accessListResponse struct {
 // a non-admin must name an owner whose label is their own or one of their
 // teams'. ACCESS_LOG_VISIBILITY=admin refuses every non-admin outright,
 // before any of that; the default, counts, answers a non-admin with
-// aggregates only (listAccessCounts).
+// aggregates only (listAccessCounts), as does summary=counts under owner.
 func (h *AuditHandler) listAccess(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r.Context())
 	if user == nil {
@@ -312,7 +313,10 @@ func (h *AuditHandler) listAccess(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusForbidden, errorResponse{Error: "forbidden"})
 			return
 		}
-		if h.visibility == "counts" {
+		// summary=counts asks for the aggregate under "owner" visibility
+		// too, so a caller that wants numbers (site_activity) gets the same
+		// shape whichever visibility the server runs with.
+		if h.visibility == "counts" || r.URL.Query().Get("summary") == "counts" {
 			h.listAccessCounts(w, r, owner, site)
 			return
 		}
