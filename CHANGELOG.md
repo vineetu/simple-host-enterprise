@@ -15,6 +15,14 @@ release, commit and schema.
 - An API key calling an admin route is told that admin routes need a
   browser sign-in, instead of being told to mint a key with another scope
   (no key can call them). An offboard key is told the one route it calls.
+- `simple-host migrate -status` works through `kubectl exec` in the
+  server's container (it reads the schema as the application role).
+  `audit-verify`, `prune` and applying migrations need the owning role,
+  which that container does not hold: run through `kubectl exec` they now
+  say so and name `make job ARGS="..."`, a new target
+  (`scripts/run-job.sh`) that runs any subcommand as a one-off Job cloned
+  from the prune CronJob, follows its output and deletes it. The restore
+  drill, INSTALL.md and `docs/security-review.md` use it.
 - `make smoke` against a real install checks the key's scope first and
   stops before publishing when it is not Full, instead of failing four
   checks and leaving its throwaway site behind; if the site cannot be

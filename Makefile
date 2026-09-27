@@ -304,6 +304,15 @@ preflight:
 	[ $$fail -eq 0 ] || exit 1; \
 	echo "==> preflight ok"
 
+# job runs one subcommand (ARGS) as a one-off Job cloned from the prune
+# CronJob, which holds the database's owning credential the server's own
+# container does not: audit-verify, prune -dry-run, migrate -status.
+#   make job ARGS="audit-verify"
+.PHONY: job
+job:
+	@[ -n "$(ARGS)" ] || { echo 'set ARGS, e.g. make job ARGS="audit-verify"'; exit 2; }
+	CONTEXT="$(INSTALL_CONTEXT)" NAMESPACE="$(or $(INSTALL_NAMESPACE),$(NAMESPACE))" ./scripts/run-job.sh $(ARGS)
+
 # install is the whole thing: prerequisites, the checks, then apply and wait.
 .PHONY: install
 install: prereqs preflight

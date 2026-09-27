@@ -974,3 +974,24 @@ func TestLoadRefusesGoogleWithoutAllowedDomains(t *testing.T) {
 		t.Fatalf("non-Google issuer with empty ALLOWED_EMAIL_DOMAINS: %v", err)
 	}
 }
+
+// In the server's container (DB_APP_USER set, DB_PASSWORD blanked) a
+// read-only operator command reached through `kubectl exec` connects as the
+// application role; an owner-only one cannot load its DSN.
+func TestLoadServerDatabaseInTheServerContainer(t *testing.T) {
+	partsEnv(t)
+	t.Setenv("DB_APP_USER", "simplehost_app")
+	t.Setenv("DB_APP_PASSWORD", "app-secret")
+	t.Setenv("DB_PASSWORD", "")
+	dsn, err := LoadServerDatabase()
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse(dsn)
+	if pw, _ := u.User.Password(); u.User.Username() != "simplehost_app" || pw != "app-secret" {
+		t.Fatalf("LoadServerDatabase user = %q, want the application role", u.User.Username())
+	}
+	if _, err := LoadDatabase(); err == nil || !strings.Contains(err.Error(), "DB_PASSWORD") {
+		t.Fatalf("LoadDatabase without the owner's password = %v, want missing DB_PASSWORD", err)
+	}
+}

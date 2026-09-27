@@ -160,14 +160,17 @@ redefines that function cannot make a changed row verify), and checks the
 last row against the head. It prints the first break (seq, event id, time, and
 whether the event is missing, changed, or chain rows were deleted) and
 exits non-zero; on success it prints the rows checked and the head as
-`SEQ:HASH`. To pass `-expect`, add it to the args list below
-(`['audit-verify','-expect','SEQ:HASH']`).
+`SEQ:HASH`. To pass `-expect`, add it to the command below
+(`ARGS="audit-verify -expect SEQ:HASH"`).
 Run it from the prune CronJob's pod template, which carries those
-credentials (the command follows the job's output, prints `audit chain OK`
-or `audit chain BROKEN at ...`, and deletes the job):
+credentials; `make job` does that (`scripts/run-job.sh`: it follows the
+job's output, prints `audit chain OK` or `audit chain BROKEN at ...`,
+deletes the job and exits with its status). Through `kubectl exec` in the
+server's container it refuses and says so: that container holds only the
+application role.
 
 ```sh
-kubectl --context "$CTX" -n simple-host create job simple-host-audit-verify --from=cronjob/simple-host-prune --dry-run=client -o json | python3 -c "import json,sys; j=json.load(sys.stdin); j['spec']['template']['spec']['containers'][0]['args']=['audit-verify']; j['spec']['backoffLimit']=0; j['spec']['template']['spec']['restartPolicy']='Never'; print(json.dumps(j))" | kubectl --context "$CTX" -n simple-host create -f - && kubectl --context "$CTX" -n simple-host logs -f --pod-running-timeout=2m job/simple-host-audit-verify; kubectl --context "$CTX" -n simple-host delete job simple-host-audit-verify
+make job ARGS="audit-verify" INSTALL_CONTEXT="$CTX"
 ```
 
 **SIEM stream.** After an audit row is committed, the server also writes

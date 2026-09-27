@@ -625,19 +625,18 @@ application role has no `DROP` privilege on either table at all, so retention ca
 run would drop without dropping anything:
 
 ```sh
-kubectl --context "$CTX" -n simple-host create job simple-host-prune-preview \
-  --from=cronjob/simple-host-prune --dry-run=client -o json \
-  | python3 -c "import json,sys; j=json.load(sys.stdin); j['spec']['template']['spec']['containers'][0]['args']=['prune','-dry-run']; print(json.dumps(j))" \
-  | kubectl --context "$CTX" -n simple-host create -f -
-kubectl --context "$CTX" -n simple-host wait --for=condition=complete job/simple-host-prune-preview --timeout=60s
-kubectl --context "$CTX" -n simple-host logs job/simple-host-prune-preview
-kubectl --context "$CTX" -n simple-host delete job simple-host-prune-preview
+make job ARGS="prune -dry-run" INSTALL_CONTEXT="$CTX"
 ```
 
-`kubectl create job --from=cronjob/... | kubectl patch` does not work here:
-a Job's pod template is immutable once the object exists, so the `-dry-run`
-flag has to be patched into the rendered JSON before it is ever created.
-`scripts/smoke.sh` does exactly this.
+`make job` (`scripts/run-job.sh`) runs any subcommand that needs the owning
+credential (`prune`, `audit-verify`, `migrate`) as a one-off Job cloned from
+the prune CronJob, follows its output, deletes it, and exits with its
+status. The server's own container blanks `DB_PASSWORD` by design, so
+`kubectl exec deploy/simple-host -- /simple-host audit-verify` fails there
+with `missing: DB_PASSWORD` and says to use `make job`. (`kubectl create job
+--from=cronjob/... | kubectl patch` does not work: a Job's pod template is
+immutable once the object exists, so the script sets the args in the
+rendered JSON before creating it.)
 
 One known gap, flagged rather than silently left: `/api/audit`'s
 `actor_id`/`owner_id`/`site_id` fields are not resolved back to
@@ -706,7 +705,10 @@ is never touched):
    hostname, and scale it to one replica. It reads the same bucket; it does
    not write to it unless someone publishes, so leave it unannounced.
 3. `kubectl -n simple-host-drill exec deploy/simple-host -- /simple-host migrate -status`
-   says the schema is current, and `/readyz` answers 200.
+   says the schema is current (in the server's container it reads the
+   schema as the application role; `make job ARGS="migrate -status"
+   OVERLAY=deploy/overlays/drill` runs it as the owning role), and
+   `/readyz` answers 200.
 4. `kubectl -n simple-host-drill exec deploy/simple-host -- /simple-host verify-storage`
    checks every live version and uploaded file the restored database
    depends on is in the bucket. It prints `storage OK` or one

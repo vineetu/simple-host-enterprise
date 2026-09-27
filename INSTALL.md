@@ -805,8 +805,10 @@ of `docs/configuration.md`.
 - **Audit**: every committed audit event is also one JSON line on the pod's
   stdout with `"type":"audit"` and its hash-chain `seq` and `hash`; point the cluster's log shipper at it to feed a
   SIEM (`docs/configuration.md`, "Streaming the audit log to a SIEM").
-  `simple-host audit-verify` checks the audit hash chain
-  (`docs/security-review.md`, 2(e)).
+  `make job ARGS="audit-verify"` checks the audit hash chain
+  (`docs/security-review.md`, 2(e)). It runs as a one-off Job from the prune
+  CronJob, which holds the database's owning credential; the server's own
+  container does not, so `kubectl exec` cannot run it.
 - **Uploads**: per-owner quotas default to 1000 sites and 10 GiB; set
   `CLAMD_ADDR` to scan uploads with clamd (`docs/configuration.md`).
 - **Keep** `deploy/overlays/byo/config.env`, `secrets.env`, and `db-ca.crt`

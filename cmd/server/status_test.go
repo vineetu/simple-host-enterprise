@@ -50,3 +50,19 @@ func TestRateLimitNamesMatchHandler(t *testing.T) {
 		}
 	}
 }
+
+// An owner-only command run through `kubectl exec` in the server's
+// container says to run it as a Job.
+func TestOwnerDatabaseInTheServerContainerNamesTheJob(t *testing.T) {
+	t.Setenv("DB_DSN", "")
+	t.Setenv("DB_HOST", "db.internal")
+	t.Setenv("DB_USER", "simplehost")
+	t.Setenv("DB_PASSWORD", "")
+	t.Setenv("DB_PASSWORD_FILE", "")
+	t.Setenv("DB_NAME", "simplehost")
+	t.Setenv("DB_APP_USER", "simplehost_app")
+	_, err := ownerDatabase("audit-verify")
+	if err == nil || !strings.Contains(err.Error(), `make job ARGS="audit-verify"`) {
+		t.Fatalf("ownerDatabase = %v, want the Job hint", err)
+	}
+}

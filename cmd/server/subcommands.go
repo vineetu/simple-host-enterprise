@@ -88,7 +88,16 @@ func runMigrate(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	dsn, err := config.LoadDatabase()
+	// -status only reads schema_migrations, which the application role may
+	// read too: connect as the server does, so it also works through
+	// `kubectl exec` in the server's container. Applying needs the owner.
+	var dsn string
+	var err error
+	if *status {
+		dsn, err = config.LoadServerDatabase()
+	} else {
+		dsn, err = ownerDatabase("migrate")
+	}
 	if err != nil {
 		return err
 	}
@@ -628,7 +637,7 @@ func runPrune(args []string) error {
 		return err
 	}
 
-	dsn, err := config.LoadDatabase()
+	dsn, err := ownerDatabase("prune")
 	if err != nil {
 		return err
 	}
@@ -692,7 +701,7 @@ func runAuditVerify(args []string) error {
 		}
 		expect = audit.ChainExpectation{Seq: n, Hash: raw}
 	}
-	dsn, err := config.LoadDatabase()
+	dsn, err := ownerDatabase("audit-verify")
 	if err != nil {
 		return err
 	}
@@ -722,6 +731,18 @@ func runAuditVerify(args []string) error {
 	}
 	fmt.Printf("audit chain OK: %d row(s) checked (seq %d to %d), head %d:%s\n", report.Rows, report.FirstSeq, report.HeadSeq, report.HeadSeq, report.HeadHash)
 	return nil
+}
+
+// ownerDatabase is config.LoadDatabase for a command that must connect as
+// the database's owning role. The server's own container blanks
+// DB_PASSWORD on purpose (it runs as the application role), so the command
+// run there through `kubectl exec` says where to run it instead.
+func ownerDatabase(command string) (string, error) {
+	dsn, err := config.LoadDatabase()
+	if err != nil && strings.TrimSpace(os.Getenv("DB_APP_USER")) != "" {
+		return "", fmt.Errorf("%w\n%s connects as the database's owning role, which the server's container does not hold by design; run it as a one-off Job from the prune CronJob instead: make job ARGS=\"%s\" (scripts/run-job.sh)", err, command, command)
+	}
+	return dsn, err
 }
 
 func waitForDatabase(ctx context.Context, db *sql.DB, wait time.Duration) error {

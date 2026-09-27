@@ -1009,7 +1009,12 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Subcommands.** No argument runs the server. Others: `migrate`, `restore`, `migrate-storage`,
   `reencrypt`, `verify-storage`, `rebuild-index` (section 6), `prune`,
   `audit-verify` (section 12), `owner-hosts` (section 19), `settings --json`
-  (below), `version`.
+  (below), `version`. `prune`, `audit-verify` and `migrate` (applying) need
+  the owning role, which only the migrate init container and the prune
+  CronJob hold: `make job ARGS="..."` (`scripts/run-job.sh`) runs one as a
+  one-off Job cloned from the CronJob, and through `kubectl exec` in the
+  server's container they refuse naming that command. `migrate -status`
+  reads as the server's own role, so it also works through `kubectl exec`.
 - **Settings registry and advanced docs.** `internal/config/settings.go` lists
   every variable `internal/config` reads with its area, a plain description,
   type, default, range, whether it is security-sensitive, required, or asked

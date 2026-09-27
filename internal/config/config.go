@@ -673,6 +673,29 @@ func LoadDatabase() (string, error) {
 	return dsn, nil
 }
 
+// LoadServerDatabase returns the DSN the server itself connects with (the
+// application role when DB_APP_USER is set), validated like LoadDatabase's.
+// Read-only operator commands that the application role can answer use it,
+// so they also work through `kubectl exec` in the server's container, which
+// holds no owning-role password.
+func LoadServerDatabase() (string, error) {
+	dsn, need, err := serverDatabaseDSN()
+	if err != nil {
+		return "", err
+	}
+	if err := missing(need).err(); err != nil {
+		return "", err
+	}
+	insecure, err := boolEnv("DB_INSECURE_ALLOWED", false)
+	if err != nil {
+		return "", err
+	}
+	if err := validateDatabaseSSL(dsn, insecure); err != nil {
+		return "", fmt.Errorf("database TLS: %w", err)
+	}
+	return dsn, nil
+}
+
 // LoadAppRolePassword returns the password the migrate subcommand sets on the
 // least-privilege application role. It is required whenever
 // migrate runs: a role granted in a migration with no password to give it
@@ -769,19 +792,9 @@ func LoadOwnerHosts() (OwnerHostsConfig, error) {
 		return OwnerHostsConfig{}, err
 	}
 	cfg.Interval = interval
-	dsn, missingDB, err := serverDatabaseDSN()
+	dsn, err := LoadServerDatabase()
 	if err != nil {
 		return OwnerHostsConfig{}, err
-	}
-	if err := missing(missingDB).err(); err != nil {
-		return OwnerHostsConfig{}, err
-	}
-	insecure, err := boolEnv("DB_INSECURE_ALLOWED", false)
-	if err != nil {
-		return OwnerHostsConfig{}, err
-	}
-	if err := validateDatabaseSSL(dsn, insecure); err != nil {
-		return OwnerHostsConfig{}, fmt.Errorf("database TLS: %w", err)
 	}
 	cfg.DSN = dsn
 	return cfg, nil

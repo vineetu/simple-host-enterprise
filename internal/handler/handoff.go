@@ -24,6 +24,7 @@ import (
 // colleague's browser redeem the resulting code, because the colleague's
 // browser never held the matching nonce.
 const handoffNonceCookie = "__Host-sh_handoff"
+
 // Long enough for a signed-out colleague to sign in at the company's
 // identity provider between the two legs (the OAuth state cookie's 10
 // minutes); the code itself still lives only briefly.
