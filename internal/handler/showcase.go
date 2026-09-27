@@ -160,16 +160,16 @@ func (h *ShowcaseHandler) page(w http.ResponseWriter, r *http.Request) {
 <main id="main-content" tabindex="-1">`)
 	b.WriteString(`<section class="filter-panel" aria-labelledby="showcase-filter-heading">
   <div class="filter-copy">
-    <h1 id="showcase-filter-heading">Filter sites</h1>
-    <p>Narrow the sites already listed by owner or site name.</p>
+    <h1 id="showcase-filter-heading">Search sites</h1>
+    <p>Find listed sites by owner, site name, or the words on their pages.</p>
   </div>
 	<form class="filter-form" action="/showcase" method="get">
-    <label for="showcase-filter">Filter sites</label>
+    <label for="showcase-filter">Search sites</label>
     <div class="filter-controls">
       <input id="showcase-filter" type="search" name="q" maxlength="200" value="`)
 	b.WriteString(html.EscapeString(query))
-	b.WriteString(`" placeholder="Owner or site name" autocomplete="off">
-      <button type="submit">Filter</button>
+	b.WriteString(`" placeholder="Owner, site name or words on the page" autocomplete="off">
+      <button type="submit">Search</button>
       <button id="showcase-filter-clear" class="filter-clear" type="button" hidden>Clear</button>
     </div>
     <input type="hidden" name="sort" value="`)
@@ -209,7 +209,7 @@ func (h *ShowcaseHandler) page(w http.ResponseWriter, r *http.Request) {
 		for _, e := range entries {
 			publicPath := hosts.SiteURL(e.owner, e.site.Name)
 			ranks := rankBySiteID[e.site.ID]
-			fmt.Fprintf(&b, `<div class="site" data-filter-text="%s"%s>
+			fmt.Fprintf(&b, `<div class="site" data-filter-text="%s" data-site-key="%s"%s>
   <div class="site-id">
     <div class="site-name"><a href="%s" target="_blank" rel="noopener">%s</a></div>
     <div class="site-owner"><a href="%s" target="_blank" rel="noopener">%s</a></div>
@@ -218,6 +218,7 @@ func (h *ShowcaseHandler) page(w http.ResponseWriter, r *http.Request) {
   <div class="site-traffic"><b>%s</b> views / <b>%s</b> visits today <span>%s views 7d</span></div>
 </div>`,
 				html.EscapeString(e.owner+" "+e.site.Name),
+				html.EscapeString(e.owner+"/"+e.site.Name),
 				ranks,
 				html.EscapeString(publicPath),
 				html.EscapeString(e.site.Name),
@@ -389,7 +390,7 @@ const showcaseHeadHTML = `<!doctype html>
        basis the flex row rewraps as the user types and moves the select. */
     flex:1 1 12ch;min-width:0;
   }
-  /* The same element also carries prose ("No sites match this filter."), which
+  /* The same element also carries prose ("No sites match this search."), which
      uppercase letterspaced mono is the wrong treatment for. */
   .list-count.is-message{
     font-family:var(--font-sans);font-size:14px;letter-spacing:normal;
@@ -563,14 +564,49 @@ const showcaseFilterScript = `<script>
     if (announce) { render(); }
   }
 
+  // A site shows when its owner or name contains the text, or when the
+  // company search (GET /api/search, the pages' full text) found it for the
+  // same text. The name match needs no network, so it answers every
+  // keystroke and stands on its own when search is unavailable.
+  var textMatches = null;
+  var textQuery = "";
+  var searchTimer = null;
+  var searchSeq = 0;
+
   function applyFilter() {
     var filterText = input.value.trim().toLowerCase();
+    var useText = textMatches !== null && textQuery === input.value.trim();
     sites.forEach(function (site) {
-      site.hidden = site.dataset.filterText.toLowerCase().indexOf(filterText) === -1;
+      var byName = site.dataset.filterText.toLowerCase().indexOf(filterText) !== -1;
+      site.hidden = !(byName || (useText && textMatches[site.getAttribute("data-site-key")] === true));
     });
 
     clear.hidden = input.value.length === 0;
     render();
+  }
+
+  function searchText() {
+    if (searchTimer) { clearTimeout(searchTimer); searchTimer = null; }
+    var q = input.value.trim();
+    var seq = ++searchSeq;
+    if (q === "" || typeof fetch !== "function") { textMatches = null; textQuery = ""; return; }
+    fetch("/api/search?q=" + encodeURIComponent(q.slice(0, 200)) + "&group=site&limit=50", { credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (body) {
+        if (seq !== searchSeq || !body || !body.results) { return; }
+        var found = {};
+        body.results.forEach(function (res) { found[res.owner + "/" + res.site] = true; });
+        textMatches = found;
+        textQuery = q;
+        applyFilter();
+      })
+      .catch(function () {});
+  }
+
+  function onInput() {
+    applyFilter();
+    if (searchTimer) { clearTimeout(searchTimer); }
+    searchTimer = setTimeout(searchText, 300);
   }
 
   // One live region for the tally, the empty case and the current order: it
@@ -583,7 +619,7 @@ const showcaseFilterScript = `<script>
 
     var message = "";
     if (shown === 0 && input.value.trim() !== "") {
-      message = "No sites match this filter.";
+      message = "No sites match this search.";
     } else if (shown === sites.length) {
       message = sites.length === 1 ? "1 site" : sites.length + " sites";
     } else {
@@ -607,13 +643,15 @@ const showcaseFilterScript = `<script>
     }, 250);
   }
 
-  input.addEventListener("input", applyFilter);
+  input.addEventListener("input", onInput);
   form.addEventListener("submit", function (event) {
     event.preventDefault();
     applyFilter();
+    searchText();
   });
   clear.addEventListener("click", function () {
     input.value = "";
+    searchText();
     applyFilter();
     input.focus();
   });
@@ -625,5 +663,6 @@ const showcaseFilterScript = `<script>
 
   applySort(false);
   applyFilter();
+  if (input.value.trim() !== "") { searchText(); }
 }());
 </script>`

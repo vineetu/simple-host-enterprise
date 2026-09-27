@@ -81,7 +81,7 @@ func TestShowcaseWithoutQueryPreservesPublicGallery(t *testing.T) {
 	for _, fragment := range []string{
 		`<header class="site-header">`,
 		`<form class="filter-form" action="/showcase" method="get">`,
-		`<h1 id="showcase-filter-heading">Filter sites</h1>`,
+		`<h1 id="showcase-filter-heading">Search sites</h1>`,
 		`name="q" maxlength="200" value=""`,
 		`<div class="sites" id="showcase-sites">`,
 		`<select id="showcase-sort" name="sort">`,
@@ -226,21 +226,21 @@ func TestShowcaseFilterScriptUsesSafeDOMAndNoNetwork(t *testing.T) {
 	body := response.Body.String()
 	for _, fragment := range []string{
 		`data-filter-text="alice portfolio"`,
-		`site.dataset.filterText.toLowerCase().indexOf(filterText) === -1`,
-		`site.hidden = site.dataset.filterText`,
+		`data-site-key="alice/portfolio"`,
+		`site.dataset.filterText.toLowerCase().indexOf(filterText) !== -1`,
+		`fetch("/api/search?q=" + encodeURIComponent(`,
 		`sortSel.addEventListener("change", function () { applySort(true); })`,
-		`input.addEventListener("input", applyFilter)`,
+		`input.addEventListener("input", onInput)`,
 		`event.preventDefault()`,
 		`clear.addEventListener("click"`,
-		`No sites match this filter.`,
-		`message = "No sites match this filter."`,
+		`message = "No sites match this search."`,
 		`input.value = ""`,
 	} {
 		if !strings.Contains(body, fragment) {
 			t.Errorf("response does not contain %q", fragment)
 		}
 	}
-	for _, forbidden := range []string{"innerHTML", "/api/search", "sendBeacon", "fetch(", `role="search"`} {
+	for _, forbidden := range []string{"innerHTML", "sendBeacon", `role="search"`} {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("filter page contains forbidden %q", forbidden)
 		}

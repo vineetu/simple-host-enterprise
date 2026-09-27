@@ -21,6 +21,7 @@ func appRoutes(t *testing.T) *http.ServeMux {
 	handler.NewUserHandler(nil, nil).Register(mux, passthrough, passthrough)
 	handler.NewSiteHandler(nil, nil, "", handler.HostModel{}, nil).Register(mux, passthrough, passthrough)
 	handler.NewTeamHandler(nil, nil).Register(mux, passthrough, passthrough, handler.HostModel{}, "")
+	handler.NewSearchHandler(nil, nil, handler.CookiePolicy{}).Register(mux, passthrough, passthrough)
 	return mux
 }
 
@@ -77,6 +78,7 @@ var fixtures = []fixture{
 	{"restore_state_version", []map[string]any{{"owner": "alice", "site": "demo", "id": float64(3)}}},
 	{"list_deleted_sites", []map[string]any{{}}},
 	{"export_site", []map[string]any{{"owner": "alice", "site": "demo"}}},
+	{"search_sites", []map[string]any{{"query": "pricing"}, {"query": "pricing model", "limit": float64(5)}}},
 	{"restore_site", []map[string]any{
 		{"site": "demo"},
 		{"site": "demo", "owner": "alice"},

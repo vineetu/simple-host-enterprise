@@ -680,7 +680,10 @@ Config names are documented in `docs/configuration.md`; schema in
   was ready, carry owner-host URLs, which redirect; each site's next deploy
   reindexes it); clicks and impressions are recorded
   pseudonymously and pruned by a background loop. `/showcase` is the gallery
-  of listed sites. The root of an owner host (`GET /` on `<owner>.<base>`,
+  of listed sites; its search box filters by owner and site name as you type
+  and adds the sites `GET /api/search` finds by the words on their pages
+  (after a pause in typing, or on submit; the name filter alone when search
+  fails). MCP `search_sites` is the same search for agents. The root of an owner host (`GET /` on `<owner>.<base>`,
   sign-in required) is the owner's index page, linking to each site's
   current address: everything to the owner (for a team, to each of its
   members), only listed sites to others, never a
@@ -688,7 +691,7 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Status.** Built.
 - **Routes.** `GET /api/search`, `POST /api/search/click`, `GET /showcase`.
   Host-gate: `GET /` on an owner host.
-- **MCP.** None.
+- **MCP.** `search_sites`.
 - **Skill.** `references/state-and-ai.md` (Public search).
 - **Pages.** `/showcase`; owner-host index.
 - **Go.** `internal/handler/search.go`, `showcase.go`, `owner_index.go`;

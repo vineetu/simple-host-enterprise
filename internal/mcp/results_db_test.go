@@ -22,6 +22,7 @@ import (
 	"github.com/vsriram/simple-host/internal/db"
 	"github.com/vsriram/simple-host/internal/handler"
 	"github.com/vsriram/simple-host/internal/migrate"
+	"github.com/vsriram/simple-host/internal/search"
 	"github.com/vsriram/simple-host/internal/storage"
 )
 
@@ -115,6 +116,23 @@ func realApp(t *testing.T, database *sql.DB) (*Server, *http.ServeMux, func(http
 	handler.NewUserHandler(database, limits).Register(mux, authMW, skillMW)
 	handler.NewSiteHandler(database, disk, base, hosts, limits).WithAudit(recorder).WithSigningKeys(keys).Register(mux, authMW, skillMW)
 	handler.NewTeamHandler(database, limits).WithAudit(recorder).Register(mux, authMW, skillMW, hosts, base)
+	backend, err := search.NewPostgreSQLPublicBackend(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	searchService, err := search.NewPublicService(backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.NewSearchHandler(database, searchService, handler.CookiePolicy{Secure: true}, limits).Register(mux, authMW, func(next http.Handler) http.Handler { return next })
+	worker, err := search.StartWorker(context.Background(), database, searchVersions{disk}, hosts.SiteURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		worker.Stop()
+		_ = worker.Wait(context.Background())
+	})
 	files := handler.NewSiteFiles(disk, database, handler.CookiePolicy{Secure: true}, keys, time.Hour)
 	siteAPI := handler.NewSiteAPIHandler(database, disk, storage.AssetLimits{MaxFileBytes: 1 << 20, MaxSiteBytes: 8 << 20, MaxSiteCount: 100}, recorder, hosts, limits)
 	handoff := handler.NewHandoffHandler(database, keys, hosts, recorder, limits)
@@ -146,20 +164,25 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	database := resultsTestDB(t)
 	s := realServer(t, database)
 	aliceKey := createPerson(t, database, "alice")
-	createPerson(t, database, "bob")
+	bobKey := createPerson(t, database, "bob")
 
 	byName := map[string]Tool{}
 	for _, tool := range Tools() {
 		byName[tool.Name] = tool
 	}
 	seen := map[string]map[string]bool{}
+	var callAs func(key, name string, args map[string]any) map[string]any
 	call := func(name string, args map[string]any) map[string]any {
+		t.Helper()
+		return callAs(aliceKey, name, args)
+	}
+	callAs = func(key, name string, args map[string]any) map[string]any {
 		t.Helper()
 		params, _ := json.Marshal(map[string]any{"name": name, "arguments": args})
 		body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":` +
 			strings.TrimSuffix(string(params), "}") + `,` + meta + `}}`
 		headers := modern("tools/call", name)
-		headers["X-API-Key"] = aliceKey
+		headers["X-API-Key"] = key
 		res, ok := decode(t, post(t, s, body, headers))["result"].(map[string]any)
 		if !ok {
 			t.Fatalf("%s: no result", name)
@@ -280,6 +303,29 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	if _, err := database.Exec(`INSERT INTO site_viewers (site_id, principal_id) SELECT s.id, u.id FROM sites s, users u WHERE s.name = 'bobs-notes' AND u.username = 'alice'`); err != nil {
 		t.Fatal(err)
 	}
+	// A listed site is found by the words on its pages once the index
+	// worker has read it.
+	// Bob publishes it, so alice's management calls stay within her rate limit.
+	callAs(bobKey, "deploy_site", map[string]any{"site": "handbook", "owner": "bob", "intent": "create", "files": []any{map[string]any{"path": "index.html", "content": "<title>Handbook</title><p>The Q3 pricing model for partners.</p>"}}})
+	callAs(bobKey, "set_site_access", map[string]any{"site": "handbook", "owner": "bob", "level": "listed"})
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		var n int
+		if err := database.QueryRow(`SELECT count(*) FROM site_search_documents d JOIN sites s ON s.id = d.site_id WHERE s.name = 'handbook'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the search worker never indexed handbook")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if found := call("search_sites", map[string]any{"query": "pricing model", "limit": 5}); found["result_count"] != float64(1) {
+		t.Errorf("search_sites = %v, want handbook", found)
+	}
+
 	all := call("list_sites", map[string]any{})["items"].([]any)
 	if last := all[len(all)-1].(map[string]any); last["name"] != "bobs-notes" || last["access_role"] != "viewer" || last["shared_via"] != "" {
 		t.Errorf("shared site entry = %v", last)
@@ -334,4 +380,15 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 			t.Errorf("%s declares properties no call returned: %v", name, unseen)
 		}
 	}
+}
+
+// searchVersions opens a site version for the search worker, as main.go's does.
+type searchVersions struct{ store *storage.Store }
+
+func (s searchVersions) OpenVersion(ctx context.Context, siteID string, version int) (search.OpenedVersion, error) {
+	lease, err := s.store.OpenVersion(ctx, siteID, version)
+	if err != nil {
+		return nil, err
+	}
+	return lease, nil
 }
