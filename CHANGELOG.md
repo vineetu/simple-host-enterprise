@@ -4,7 +4,7 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
-## Unreleased
+## v1.8.1 — 2026-09-27
 
 ### Fixed
 - A signed-out colleague who opens a shared link to a site that needs
