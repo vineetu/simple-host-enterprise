@@ -310,8 +310,12 @@ Config names are documented in `docs/configuration.md`; schema in
   signed out, the hand-off), `X-Robots-Tag: noindex`, `Cache-Control:
   no-store`, not counted as a visit. An expired link is 410; a signature
   that does not verify is ordinary content. A save or upload from a preview
-  page (Referer under a verifying preview path) is 403
-  `preview_read_only`. Make live is the rollback to that version ("Make
+  page is 403 `preview_read_only` when the browser reports the preview page
+  (Referer under a verifying preview path). Limitation: a previewed page
+  that suppresses its Referer (`<meta name="referrer" content="no-referrer">`
+  or `origin`, or `fetch` with `referrerPolicy: 'no-referrer'`) is not
+  recognised, and its saves reach the live site's data; only the owner and
+  team can open a preview, so this is not a way in for anyone else. Make live is the rollback to that version ("Make
   live" in Versions).
 
   **Download a site.** The owner or a team member gets a download address

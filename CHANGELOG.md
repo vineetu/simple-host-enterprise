@@ -22,7 +22,9 @@ before the new image. Skills are at 0.15.0 (0.11.0 still works).
   MCP `preview_version`, "Preview" in the Manage panel's Versions list):
   it still needs their own sign-in, nobody else can open it whatever the
   site's access level, it is never indexed or cached, and saves from it are
-  refused (`preview_read_only`). "Make live" (and `rollback_site`) publishes
+  refused (`preview_read_only`) when the browser reports the preview page as
+  the Referer (a page that suppresses its Referer can still save to the live
+  site's data). "Make live" (and `rollback_site`) publishes
   it. Version lists now say which version is `live`.
 - Download a whole site: the owner or a team member gets a single-use,
   10-minute download address (a second use answers 410; the request log

@@ -212,8 +212,11 @@ or `preview_version`. The answer's `url` (the site's address plus
 `_preview/<token>/`) works for one hour (`expires_at`) and opens only for the
 site's owner or a member of the owning team, signed in as themselves, whatever
 the site's access level; anyone else gets not-found even with the link. It
-reads the site's live saved data, but its saves are refused (`403`
-`preview_read_only`), and it is never indexed. Links written as absolute paths
+reads the site's live saved data, and its saves are refused (`403`
+`preview_read_only`) when the browser sends the preview page as the Referer,
+which browsers do by default; a page that turns the Referer off
+(`referrerPolicy: 'no-referrer'`, or a `referrer` meta tag) saves to the live
+data, so warn the user before previewing such a version. It is never indexed. Links written as absolute paths
 (`/about.html`) leave the preview for the live site; relative ones stay in it.
 Any kept version can be previewed the same way, which is how to look at an old
 version before rolling back to it.

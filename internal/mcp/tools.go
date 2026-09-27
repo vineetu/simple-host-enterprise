@@ -506,7 +506,7 @@ func toolList() []Tool {
 			Title: "Open a version before it is live",
 			Description: "Get a private address that shows one kept version of a site — one stored with deploy_site publish false, or an older one before rolling back to it — without changing what visitors see. " +
 				"Give the `url` to the user to open in their browser. It works for one hour (`expires_at`) and only for the site's owner or members of the owning team, signed in; anyone else is refused even with the link. " +
-				"The preview reads the site's live saved data, but saves from it are refused, and search engines are told not to index it. Pages that link with absolute paths (`/about.html`) leave the preview for the live site; relative links stay in it. " +
+				"The preview reads the site's live saved data; its saves are refused when the browser reports the preview page as the Referer (the default), but a page that turns its Referer off saves to the live data. Search engines are told not to index it. Pages that link with absolute paths (`/about.html`) leave the preview for the live site; relative links stay in it. " +
 				"When the user is happy, make it live with rollback_site to the same version (confirm first). Call list_site_versions for the version numbers.",
 			InputSchema: object(map[string]any{
 				"site":    str(siteArgDesc),

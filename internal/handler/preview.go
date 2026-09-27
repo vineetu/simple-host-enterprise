@@ -30,7 +30,10 @@ import (
 // previewTTL. The link alone opens nothing: the host gate still requires a
 // host session, and that person must be the site's owner or in its team
 // (previewAllowed), whatever the site's access level. A preview is never
-// indexed or cached, and the site API refuses a save from a preview page.
+// indexed or cached, and the site API refuses a save from a preview page
+// when the browser reports it as the Referer (fromPreview). A page that
+// suppresses its Referer is not recognised and saves to the live data: a
+// documented limitation, since only the owner and team open previews.
 // Making the version live is the ordinary rollback to it.
 
 const previewTTL = time.Hour

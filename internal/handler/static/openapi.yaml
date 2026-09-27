@@ -1063,7 +1063,9 @@ paths:
         changing what visitors see. It lasts one hour and opens only for the
         site's owner or a member of the owning team with their own sign-in,
         whatever the site's access level; it is not indexed or cached, and
-        saves and uploads from it are refused (403 `preview_read_only`). Make
+        saves and uploads from it are refused (403 `preview_read_only`) when
+        the browser reports the preview page as the Referer; a page that
+        suppresses its Referer can still save to the live site's data. Make
         it live with the rollback route. A publish-scope key may call it.
       tags: [Collaboration]
       security:
