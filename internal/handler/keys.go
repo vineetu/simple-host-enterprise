@@ -139,9 +139,12 @@ type mintKeyRequest struct {
 }
 
 type apiKeyResponse struct {
-	ID         string  `json:"id"`
-	Name       string  `json:"name"`
-	Prefix     string  `json:"prefix"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Prefix string `json:"prefix"`
+	// Last4 is the key's own last four characters, "" for a key minted
+	// before they were kept (shown as "earlier key").
+	Last4      string  `json:"last4,omitempty"`
 	CreatedAt  string  `json:"created_at"`
 	LastUsedAt *string `json:"last_used_at,omitempty"`
 	RevokedAt  *string `json:"revoked_at,omitempty"`
@@ -213,7 +216,7 @@ func (h *KeysHandler) mint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer audit.Rollback(tx)
-	key, err := db.CreateAPIKey(r.Context(), tx, user.ID, req.Name, hash, db.KeyPrefix(hash), time.Now().AddDate(0, 0, days), req.Scope)
+	key, err := db.CreateAPIKey(r.Context(), tx, user.ID, req.Name, hash, db.KeyPrefix(hash), plaintext[len(plaintext)-4:], time.Now().AddDate(0, 0, days), req.Scope)
 	if err != nil {
 		if isUniqueViolation(err) {
 			// A hash collision on 256 random bits is not a real-world event;
@@ -239,6 +242,7 @@ func (h *KeysHandler) mint(w http.ResponseWriter, r *http.Request) {
 		ID:        key.ID,
 		Name:      key.Name,
 		Prefix:    key.Prefix,
+		Last4:     key.Last4,
 		CreatedAt: key.CreatedAt.Format(time.RFC3339),
 		ExpiresAt: key.ExpiresAt.Format(time.RFC3339),
 		Scope:     key.Scope,
@@ -260,7 +264,7 @@ func (h *KeysHandler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]apiKeyResponse, 0, len(keys))
 	for _, k := range keys {
-		item := apiKeyResponse{ID: k.ID, Name: k.Name, Prefix: k.Prefix, CreatedAt: k.CreatedAt.Format(time.RFC3339), ExpiresAt: k.ExpiresAt.Format(time.RFC3339), Scope: k.Scope}
+		item := apiKeyResponse{ID: k.ID, Name: k.Name, Prefix: k.Prefix, Last4: k.Last4, CreatedAt: k.CreatedAt.Format(time.RFC3339), ExpiresAt: k.ExpiresAt.Format(time.RFC3339), Scope: k.Scope}
 		if k.LastUsedAt != nil {
 			s := k.LastUsedAt.Format(time.RFC3339)
 			item.LastUsedAt = &s
@@ -307,4 +311,36 @@ func (h *KeysHandler) revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
+}
+
+// keyLabel is how a key is told apart in a list: the end of the key itself,
+// which is what a person holding it (or finding it in a log) can see.
+func keyLabel(last4 string) string {
+	if last4 == "" {
+		return "earlier key"
+	}
+	return "ends …" + last4
+}
+
+// keyStatus is a key row's state: revoked, expired, "expires soon" inside
+// auth.KeyExpiryWarning, or active.
+func keyStatus(k db.APIKey, now time.Time) string {
+	switch {
+	case k.RevokedAt != nil:
+		return "revoked"
+	case !k.ExpiresAt.After(now):
+		return "expired"
+	case k.ExpiresAt.Sub(now) <= auth.KeyExpiryWarning:
+		return "expires soon"
+	default:
+		return "active"
+	}
+}
+
+// keyLastUsed is a key row's last-used text.
+func keyLastUsed(k db.APIKey) string {
+	if k.LastUsedAt == nil {
+		return "never used"
+	}
+	return "last used " + localTimeHTML(*k.LastUsedAt, "datetime")
 }

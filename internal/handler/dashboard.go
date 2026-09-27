@@ -112,24 +112,20 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 		offboardScopeOption(user.IsAdmin),
 	)
 	for _, k := range keys {
-		status := "active"
-		if k.RevokedAt != nil {
-			status = "revoked"
-		} else if !k.ExpiresAt.After(time.Now()) {
-			status = "expired"
-		}
+		status := keyStatus(k, time.Now())
 		fmt.Fprintf(&b, `<div class="rank-row" data-key-id="%s">
-  <span class="rank-name">%s <span class="rank-sub">%s · %s · created %s · expires %s</span></span>
+  <span class="rank-name">%s <span class="rank-sub">%s · %s · created %s · expires %s · %s</span></span>
   <span class="rank-metric">%s</span>`,
 			html.EscapeString(k.ID),
 			html.EscapeString(k.Name),
-			html.EscapeString(k.Prefix),
+			html.EscapeString(keyLabel(k.Last4)),
 			html.EscapeString(k.Scope),
 			localTimeHTML(k.CreatedAt, "datetime"),
 			localTimeHTML(k.ExpiresAt, "datetime"),
+			keyLastUsed(k),
 			html.EscapeString(status),
 		)
-		if status == "active" {
+		if status == "active" || status == "expires soon" {
 			fmt.Fprintf(&b, `<button type="button" class="btn-reject revoke-key" data-key-id="%s">Revoke</button>`, html.EscapeString(k.ID))
 		}
 		b.WriteString(`</div>`)
@@ -292,7 +288,7 @@ const dashboardScript = `<script>
     name.textContent = k.name + ' ';
     var sub = document.createElement('span');
     sub.className = 'rank-sub';
-    sub.textContent = k.prefix + ' · ' + k.scope + ' · created ' + new Date(k.created_at).toLocaleString() + ' · expires ' + new Date(k.expires_at).toLocaleString();
+    sub.textContent = (k.last4 ? 'ends …' + k.last4 : 'earlier key') + ' · ' + k.scope + ' · created ' + new Date(k.created_at).toLocaleString() + ' · expires ' + new Date(k.expires_at).toLocaleString() + ' · never used';
     name.appendChild(sub);
     var status = document.createElement('span');
     status.className = 'rank-metric';

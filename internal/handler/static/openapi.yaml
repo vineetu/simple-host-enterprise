@@ -1462,6 +1462,41 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/admin/keys/revoke:
+    post:
+      summary: Revoke a leaked API key
+      description: Admin only, browser session only (the "Revoke a leaked key" card on /admin). The pasted key is hashed and looked up, never stored or echoed; whichever person's key it is is revoked on its own, audited as `admin_key_revoke` with the owner's name.
+      tags: [Admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key]
+              properties:
+                key: {type: string}
+      responses:
+        '200':
+          description: '`revoked`, or `already revoked` with when'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string, enum: [revoked, already revoked]}
+                  owner: {type: string}
+                  name: {type: string}
+                  key_id: {type: string}
+                  label: {type: string, description: '"ends …abcd", or "earlier key" for a key minted before its last four were kept'}
+                  revoked_at: {type: string, format: date-time}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/admin/deleted-sites/{owner}/{sitename}/restore:
     post:
       summary: Restore a recently deleted site for its owner
@@ -3110,7 +3145,7 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     Unauthorized:
-      description: Missing or invalid API key
+      description: 'Missing or invalid credentials. For an `X-API-Key` that did not authenticate, `code` says why: `key_expired` (the body names the date; `expired_at` carries it), `key_revoked`, `key_owner_disabled` or `key_not_recognised`. A key with 14 days or less left gets `X-Key-Expires` (RFC 3339) and `X-Simple-Host-Notice` on every response.'
       content:
         application/json:
           schema:

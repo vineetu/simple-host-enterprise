@@ -23,7 +23,9 @@ the active skill version for `GET /api/me`:
 - `400 skill_version_required`: preserve it and follow the skill update/reload
   workflow. Do not ask for a new key.
 - `401`: preserve it and go to "Get a key" below — the key was revoked,
-  expired, or never valid.
+  expired, or never valid. The body's `code` says which: `key_expired`,
+  `key_revoked`, `key_owner_disabled` (the person was disabled; a new key
+  will not help, so stop and tell the user) or `key_not_recognised`.
 - `429`, network errors, or server errors: preserve it and retry verification
   only, honoring `Retry-After`. Do not ask for a new key.
 - Malformed or partial JSON, or a username mismatch: preserve it and stop with
@@ -141,6 +143,10 @@ there; tell the user and ask them to mint a fresh one and paste it back,
 exactly as in "Get a key" above. There is no email-based reset path and
 nothing to poll: the next signal you'll see either way is the next `GET
 /api/me` call.
+
+A key in its last 14 days answers every call with an `X-Key-Expires` header
+(and an `X-Simple-Host-Notice` line). When you see it, tell the user once,
+with the date, that the key needs replacing on the dashboard before then.
 
 Connected chat apps and browser sessions are listed on `{{BASE_URL}}/auth/sessions`.
 The person can disconnect one app there, or press **Sign out everywhere**,

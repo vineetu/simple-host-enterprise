@@ -87,7 +87,15 @@ Config names are documented in `docs/configuration.md`; schema in
   (admins only; `POST /api/admin/users/disable` and nothing else). Refusal is
   403 with a JSON `scope`. Existing keys became `full`. A minted key and
   its paste-back block stay on the dashboard until dismissed (the list
-  gains the row in place; nothing reloads).
+  gains the row in place; nothing reloads). Each key keeps its own last four
+  characters (`last4`, shown as "ends …abcd"; keys minted before 0050 show
+  "earlier key"), and the dashboard row shows last used and "expires soon"
+  inside 14 days. A refused key says why in a 401 `code`: `key_expired`
+  (with the date and "mint a new one on the dashboard"), `key_revoked`,
+  `key_owner_disabled` or `key_not_recognised`. While a key has 14 days or
+  less left, every response to it carries `X-Key-Expires` (RFC 3339) and an
+  `X-Simple-Host-Notice` line. An admin revokes a leaked key by pasting it on
+  /admin (`POST /api/admin/keys/revoke`, section 13).
 - **Status.** Built.
 - **Routes.** `GET /api/keys`, `POST /api/keys`, `DELETE /api/keys/{id}`.
 - **MCP.** None (by design).
@@ -96,8 +104,8 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Pages.** `/dashboard` "API keys" panel.
 - **Go.** `internal/handler/keys.go`, `dashboard.go`; `internal/db/api_keys.go`;
   `internal/auth/middleware.go`, `scope.go`.
-- **DB.** `api_keys` (0022, 0029 expiry, 0035 scope); `users.api_key`
-  dropped (0025).
+- **DB.** `api_keys` (0022, 0029 expiry, 0035 scope, 0050 `last4`);
+  `users.api_key` dropped (0025).
 - **Config.** `API_KEY_MAX_DAYS`.
 
 ## 3. MCP server, OAuth connector, plugin.zip
@@ -578,7 +586,10 @@ Config names are documented in `docs/configuration.md`; schema in
   and sites (views, storage from a cached bucket measurement, updated; each
   site links to its current address), new
   users, state-backend usage, visitors and activity, all sites (each with
-  Restrict, or the restriction's reason and Lift: section 7).
+  Restrict, or the restriction's reason and Lift: section 7). "Revoke a
+  leaked key": paste any person's key (a password field; never echoed, logged
+  or stored), that key alone is revoked and the answer names its owner, key
+  name and last four; audited `admin_key_revoke` with the owner's name.
 - **Status.** Built.
 - **Routes.** `GET /admin`, `POST /api/admin/users/{username}/disable`,
   `POST /api/admin/users/{username}/enable`,
@@ -597,13 +608,15 @@ Config names are documented in `docs/configuration.md`; schema in
   plus `site_delete` with `erasure` per site);
   `GET /api/admin/erased-identities`,
   `POST /api/admin/erased-identities/{id}/allow` (audited
-  `erased_identity_allowed`); plus the admin
+  `erased_identity_allowed`); `POST /api/admin/keys/revoke` (JSON `key`;
+  200 `revoked` or `already revoked` with owner, name, label; 404 when no
+  key matches); plus the admin
   routes in sections 7, 9, 12 (section 7 has restrict and unrestrict).
 - **MCP.** None.
 - **Pages.** `/admin`.
 - **Go.** `internal/handler/admin.go` (`leaverSiteActions`,
   `personDataActions`), `admin_move.go`, `admin_erase.go`, `internal/db/erase.go`,
-  `admin_rankings.go`, `admin_disk_usage.go`, `access.go`
+  `admin_rankings.go`, `admin_disk_usage.go`, `admin_keys.go`, `access.go`
   (`renderAccessRequests`), `site_restore.go` (`renderDeletedSites`).
 - **DB.** `users.disabled_at` (0023), `site_daily_analytics` (0003, 0013),
   `erased_owner_labels`, `erased_identities`, the

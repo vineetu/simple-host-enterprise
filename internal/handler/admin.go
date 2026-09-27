@@ -177,6 +177,7 @@ func (h *AdminHandler) Register(mux *http.ServeMux, authMiddleware, skillVersion
 	h.registerAccessRequestRoutes(mux, adminAPI, dashboardCheck)
 	h.registerMoveRoutes(mux, adminAPI, dashboardCheck)
 	h.registerEraseRoutes(mux, adminAPI, dashboardCheck)
+	h.registerKeyRoutes(mux, adminAPI)
 }
 
 // requireAdmin is auth.RequireAdmin plus an access_denied audit row when a
@@ -397,6 +398,7 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 	h.renderAccessRequests(r, &b, user)
 	h.renderDeletedSites(r, &b)
 	h.renderErasedIdentities(r, &b)
+	b.WriteString(leakedKeyCardHTML)
 
 	if len(users) == 0 {
 		b.WriteString(`<div class="empty">No users yet.</div>`)
@@ -518,6 +520,7 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 	b.WriteString(adminListScript)
 	b.WriteString(adminActivityScript)
 	b.WriteString(adminFormScript)
+	b.WriteString(adminLeakedKeyScript)
 	b.WriteString(`</body></html>`)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

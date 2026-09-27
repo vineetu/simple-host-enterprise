@@ -4,6 +4,21 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## Unreleased
+
+Schema 0050 (backward-compatible: nullable `api_keys.last4`).
+
+### API keys
+- A new key keeps its own last four characters; the dashboard shows
+  "ends …abcd" (older keys: "earlier key"), when it was last used, and
+  "expires soon" in its last 14 days.
+- A refused key says why: `key_expired` (with the date), `key_revoked`,
+  `key_owner_disabled` or `key_not_recognised`. A key with 14 days or less
+  left gets `X-Key-Expires` and `X-Simple-Host-Notice` on every response.
+- Admins revoke a leaked key by pasting it on /admin ("Revoke a leaked
+  key", `POST /api/admin/keys/revoke`): only that key stops working, and the
+  audit row (`admin_key_revoke`) names its owner.
+
 ## v1.4.0 — 2026-09-27
 
 Schema 0049 (from 0042). Run `simple-host migrate` before the new image.

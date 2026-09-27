@@ -13,10 +13,13 @@ import (
 // and never stored — key_hash (SHA-256 of the 32 random plaintext bytes)
 // is all this row ever holds.
 type APIKey struct {
-	ID         string
-	UserID     string
-	Name       string
-	Prefix     string
+	ID     string
+	UserID string
+	Name   string
+	Prefix string
+	// Last4 is the key's own last four characters (migration 0050), ""
+	// for a key minted before it was kept.
+	Last4      string
 	CreatedAt  time.Time
 	LastUsedAt *time.Time
 	RevokedAt  *time.Time
@@ -59,44 +62,51 @@ func KeyPrefix(hash []byte) string {
 // CreateAPIKey inserts a new key row. keyHash/prefix come from HashAPIKey /
 // KeyPrefix on the freshly generated plaintext, which the caller returns to
 // its client once and never persists.
-func CreateAPIKey(ctx context.Context, q Querier, userID, name string, keyHash []byte, prefix string, expiresAt time.Time, scope string) (APIKey, error) {
+func CreateAPIKey(ctx context.Context, q Querier, userID, name string, keyHash []byte, prefix, last4 string, expiresAt time.Time, scope string) (APIKey, error) {
 	const query = `
-		INSERT INTO api_keys (user_id, name, key_hash, prefix, expires_at, scope)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, user_id, name, prefix, created_at, last_used_at, revoked_at, expires_at, scope
+		INSERT INTO api_keys (user_id, name, key_hash, prefix, last4, expires_at, scope)
+		VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6, $7)
+		RETURNING id, user_id, name, prefix, COALESCE(last4, ''), created_at, last_used_at, revoked_at, expires_at, scope
 	`
 	var k APIKey
-	err := q.QueryRowContext(ctx, query, userID, name, keyHash, prefix, expiresAt, scope).Scan(
-		&k.ID, &k.UserID, &k.Name, &k.Prefix, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt, &k.ExpiresAt, &k.Scope,
+	err := q.QueryRowContext(ctx, query, userID, name, keyHash, prefix, last4, expiresAt, scope).Scan(
+		&k.ID, &k.UserID, &k.Name, &k.Prefix, &k.Last4, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt, &k.ExpiresAt, &k.Scope,
 	)
 	return k, err
 }
 
+// LiveAPIKey is what the X-API-Key hot path needs of the key it matched.
+type LiveAPIKey struct {
+	ID        string
+	Scope     string
+	ExpiresAt time.Time
+}
+
 // GetUserByAPIKeyHash looks up the (unrevoked, unexpired) key by its hash and returns
-// the owning user, the key's id and its scope. This is the X-API-Key hot
+// the owning user and the key's id, scope and expiry. This is the X-API-Key hot
 // path: one indexed lookup on key_hash's unique constraint, one join to users.
-func GetUserByAPIKeyHash(ctx context.Context, db *sql.DB, keyHash []byte) (User, string, string, error) {
+func GetUserByAPIKeyHash(ctx context.Context, db *sql.DB, keyHash []byte) (User, LiveAPIKey, error) {
 	const query = `
 		SELECT u.id, u.username, u.is_admin, u.created_at, u.kind, COALESCE(u.email, ''), u.disabled_at,
-		       k.id, k.scope
+		       k.id, k.scope, k.expires_at
 		FROM api_keys k
 		JOIN users u ON u.id = k.user_id
 		WHERE k.key_hash = $1 AND k.revoked_at IS NULL AND k.expires_at > now()
 	`
 	var user User
 	var disabledAt *time.Time
-	var keyID, scope string
+	var key LiveAPIKey
 	err := db.QueryRowContext(ctx, query, keyHash).Scan(
 		&user.ID, &user.Username, &user.IsAdmin, &user.CreatedAt, &user.Kind, &user.Email, &disabledAt,
-		&keyID, &scope,
+		&key.ID, &key.Scope, &key.ExpiresAt,
 	)
 	if err != nil {
-		return User{}, "", "", err
+		return User{}, LiveAPIKey{}, err
 	}
 	if disabledAt != nil {
-		return User{}, "", "", sql.ErrNoRows
+		return User{}, LiveAPIKey{}, sql.ErrNoRows
 	}
-	return user, keyID, scope, nil
+	return user, key, nil
 }
 
 // touchAPIKeyInterval mirrors touchSessionInterval: last_used_at is display
@@ -120,7 +130,7 @@ func TouchAPIKey(ctx context.Context, db *sql.DB, keyID string) error {
 // can see what they turned off.
 func ListAPIKeysForUser(ctx context.Context, db *sql.DB, userID string) ([]APIKey, error) {
 	const query = `
-		SELECT id, user_id, name, prefix, created_at, last_used_at, revoked_at, expires_at, scope
+		SELECT id, user_id, name, prefix, COALESCE(last4, ''), created_at, last_used_at, revoked_at, expires_at, scope
 		FROM api_keys
 		WHERE user_id = $1
 		ORDER BY created_at DESC
@@ -133,7 +143,7 @@ func ListAPIKeysForUser(ctx context.Context, db *sql.DB, userID string) ([]APIKe
 	var out []APIKey
 	for rows.Next() {
 		var k APIKey
-		if err := rows.Scan(&k.ID, &k.UserID, &k.Name, &k.Prefix, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt, &k.ExpiresAt, &k.Scope); err != nil {
+		if err := rows.Scan(&k.ID, &k.UserID, &k.Name, &k.Prefix, &k.Last4, &k.CreatedAt, &k.LastUsedAt, &k.RevokedAt, &k.ExpiresAt, &k.Scope); err != nil {
 			return nil, err
 		}
 		out = append(out, k)
@@ -175,3 +185,46 @@ func RevokeAllAPIKeysForUser(ctx context.Context, q Querier, userID string) erro
 // before it ever reaches the database (kept here so the handler and any
 // future caller share one message).
 var ErrAPIKeyNameRequired = errors.New("api key name is required")
+
+// APIKeyRecord is one key found by its hash whatever its state, with its
+// owner's name: what the refusal of a key that stopped working explains,
+// and what an admin revoking a leaked key acts on.
+type APIKeyRecord struct {
+	APIKey
+	Owner         string
+	OwnerDisabled bool
+}
+
+// GetAPIKeyByHash returns the key with this hash, live or not, with its
+// owner. sql.ErrNoRows when no key ever had it. Never on the hot path: only
+// after GetUserByAPIKeyHash has refused a key, and for the admin's revoke.
+func GetAPIKeyByHash(ctx context.Context, q Querier, keyHash []byte) (APIKeyRecord, error) {
+	const query = `
+		SELECT k.id, k.user_id, k.name, k.prefix, COALESCE(k.last4, ''), k.created_at, k.last_used_at,
+		       k.revoked_at, k.expires_at, k.scope, u.username, u.disabled_at IS NOT NULL
+		FROM api_keys k
+		JOIN users u ON u.id = k.user_id
+		WHERE k.key_hash = $1
+	`
+	var r APIKeyRecord
+	err := q.QueryRowContext(ctx, query, keyHash).Scan(
+		&r.ID, &r.UserID, &r.Name, &r.Prefix, &r.Last4, &r.CreatedAt, &r.LastUsedAt,
+		&r.RevokedAt, &r.ExpiresAt, &r.Scope, &r.Owner, &r.OwnerDisabled,
+	)
+	return r, err
+}
+
+// RevokeAPIKeyByID revokes one key whoever holds it, for an admin revoking
+// a leaked key. sql.ErrNoRows when it is already revoked (or gone).
+func RevokeAPIKeyByID(ctx context.Context, q Querier, keyID string) error {
+	result, err := q.ExecContext(ctx, `UPDATE api_keys SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL`, keyID)
+	if err != nil {
+		return err
+	}
+	if n, err := result.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
