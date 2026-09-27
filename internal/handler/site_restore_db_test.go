@@ -2,8 +2,8 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 	"time"

@@ -724,15 +724,19 @@ still in the bucket, and each site's manifest says whose it is.
 1. Create an empty database and apply the overlay against it (the migrate
    init container builds the schema).
 2. People sign in again; accounts are created from the identity provider as
-   on day one. Former team members create their teams again with the same
-   names.
+   on day one. Former team members create their teams again.
 3. `kubectl -n simple-host exec deploy/simple-host -- /simple-host rebuild-index`
    lists every site in the bucket: owner, name, versions, uploaded files,
-   and whether it is recoverable now or waiting for its owner. It changes
-   nothing.
+   and whether it is recoverable now (and to whom), waiting for its owner,
+   or refused, and what needs you (teams to map, owners to check). It
+   changes nothing. The owners come from the bucket: read the list.
 4. `kubectl -n simple-host exec deploy/simple-host -- /simple-host rebuild-index -apply`
    recreates the recoverable ones (same site id, every kept version, the
-   live one live, uploaded files). Run it again as more people sign in.
+   live one live, uploaded files; deleted and restricted sites as they
+   were). A person's sites go to the account with the same sign-in
+   identity; a team's need `-map <old team>=<team now>` once the team is
+   back. Run it again as more people sign in, with `-force-live-db` (the
+   first `-apply` needs an empty database).
 
 Saved data, its history, access levels, viewers, keys and the audit log
 were only in the database and do not come back; recreated sites open only

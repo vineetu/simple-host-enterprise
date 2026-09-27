@@ -33,13 +33,22 @@ before deploying. Skills are at 0.15.3.
   versions, the database with its backups, and the secrets kept elsewhere.
 
 ### Rebuilding from the bucket
-- Each site now keeps `sites/<id>/manifest.json` in the bucket: its owner,
-  name, live version and uploaded files' names and types, rewritten after
-  every deploy, rollback, rename, hand-over and file change. If the
+- Each site now keeps `sites/<id>/manifest.json` in the bucket: its owner
+  (name, and a hash of a person's sign-in identity or a team's id; never an
+  email), name, live version, whether it is deleted or restricted, and
+  uploaded files' names and types, rewritten after every deploy, rollback,
+  rename, hand-over, delete, restore, restriction and file change. If the
   database is lost together with its point-in-time recovery,
   `simple-host rebuild-index` lists every site the bucket can bring back,
-  and `-apply` recreates each whose owner has signed in again: same site
-  id, every kept version, the live one live, uploaded files. Saved data,
+  and `-apply` recreates each whose owner is found: same site id, every
+  kept version, the live one live, uploaded files, deleted and restricted
+  sites as they were. A person's sites go only to the account with the
+  same sign-in identity, never to whoever has the username now; a team's
+  need `-map <old>=<team>` once it is created again. Every field is checked
+  as a create would check it, a site whose live version's archive is
+  missing is refused rather than given a version nobody made live, and
+  `-apply` refuses a database that already has sites unless
+  `-force-live-db`. Saved data,
   access levels, viewers and team members were only in the database and
   are not recovered. A site gets its manifest at its next deploy (or
   rollback, rename or file change) after this release.

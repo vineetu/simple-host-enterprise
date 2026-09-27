@@ -456,14 +456,48 @@ in `docs/install.md`, "Restore drill".
 ## Rebuilding from the bucket alone
 
 If the database is lost together with its point-in-time recovery, each
-site's `manifest.json` still says whose it is. `simple-host rebuild-index`
-lists every site in the bucket with its owner, name, versions and uploaded
-files, and what it would do; `-apply` recreates each one whose owner is in
-the database again, under the same site id (so the objects' keys still
-match), with every kept version, the version that was live, and its
-uploaded files. It audits each as `site_restore` with `from:
+site's `manifest.json` still says whose it is: the owner's name and, for a
+person, a SHA-256 of their sign-in identity (`OIDC_ISSUER` and subject,
+hashed as `erased_identities` hashes it; never an email), for a team, the
+team's id; whether the site was in Recently deleted or restricted by an
+admin (with the reason). Each write is numbered one past the last and
+writes of one site take turns, so an older manifest never replaces a newer
+one (`reencrypt` rewrites manifests the same way).
+
+`simple-host rebuild-index` lists every site in the bucket with its owner,
+name, versions and uploaded files, and what it would do; `-apply`
+recreates each one whose owner is found, under the same site id (so the
+objects' keys still match), with every kept version, the version that was
+live, and its uploaded files. It audits each as `site_restore` with `from:
 bucket_rebuild`. Run it again as more people sign in; a site already in
 the database is left alone.
+
+- **Who gets a site.** A person's sites go only to the account with the
+  same sign-in identity, whatever username it was given this time; never
+  to whoever now holds the old username. A team's go only to a team with
+  the same id, which a team created again does not have: after checking,
+  map it explicitly, `-map team-ops=team-ops` (the manifest's owner, then
+  the account or team now). `-map` also serves a person whose identity
+  changed, and is refused when it contradicts an identity that does match.
+  Owners whose manifests disagree (one name, two identities) are refused
+  and listed; restore those by hand.
+- **Checked first.** The owner and site names must be ones a create would
+  accept, every uploaded file's id, name, type, size and digest must be
+  well formed; a manifest that fails is refused and listed. The manifests
+  come from the bucket, so anyone who could write to it could have edited
+  one: read the list before `-apply`.
+- **Only the approved version goes live.** A site whose live version's
+  archive is missing is refused and listed rather than given a newer one,
+  which may have been stored without ever being made live.
+- **Deleted and restricted.** A site that was in Recently deleted comes
+  back there, with its recovery window counted from the original delete
+  (one whose window has ended is refused); a site an admin restricted comes
+  back restricted, with the reason. A purged or erased site's manifest is
+  deleted when it goes, so it is never brought back.
+- **Only into an empty database.** `-apply` refuses a database that
+  already has sites, where a site deleted or purged since the bucket was
+  written could come back; `-force-live-db` overrides that for a run that
+  continues an earlier rebuild.
 
 What comes back and what does not:
 
@@ -475,13 +509,12 @@ What comes back and what does not:
   access log. They were only ever in Postgres.
 - A person comes back when they sign in again (the account is created from
   the identity provider as on day one). A team comes back when one of its
-  former members creates it again with the same name, then adds the
-  others.
+  former members creates it again, then adds the others; its sites follow
+  with `-map`.
 - A site deployed before manifests were written (before this release) has
   no manifest until its next deploy; rebuild-index lists its id and
   newest version, and `restore -from-site-id <id> -version <n> -owner
   <owner> -site <name>` brings its pages back once you know whose it was.
-- A site in Recently deleted still has its manifest until it is purged,
-  so it is listed and recreated too; delete it again if it should stay
-  gone.
+- A site in Recently deleted comes back in Recently deleted, and is purged
+  when its original window ends.
 
