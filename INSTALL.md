@@ -363,7 +363,8 @@ edits to them.
    you want a non-default one, uncomment it and set a name from
    `kubectl get ingressclass`. Keep only the request-body-size and timeout
    annotations for that controller (the file lists nginx, Traefik, AWS ALB,
-   GKE, and Azure AGIC). Uploads are up to 100 MiB; a controller left at its
+   GKE, and Azure AGIC). Uploads are up to `MAX_ARCHIVE_BYTES` (100 MiB by
+   default; keep the body limit above it); a controller left at its
    default refuses them and it looks like an application bug.
 4. `db-ca.crt`: the database CA bundle from section 2.
 5. Storage: sites live in the bucket; pods keep only a disposable cache.
@@ -771,7 +772,7 @@ of `docs/configuration.md`.
   the bucket against the database).
 - **Idle sites** (optional, off by default): `IDLE_CLEANUP_DAYS` in
   `config.env` marks sites nobody has used for that many days and moves them
-  to Recently deleted 30 days later unless kept; `SMTP_URL` (in
+  to Recently deleted `IDLE_CLEANUP_GRACE_DAYS` (30) days later unless kept; `SMTP_URL` (in
   `secrets.env`, it carries a password) and `SMTP_FROM` add an email to the
   dashboard notice (`docs/configuration.md`). Ask the human before turning it on.
 - **Monitoring**: `docs/install.md` section 12. Metrics are on pod port 9090

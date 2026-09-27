@@ -132,9 +132,15 @@ type RateLimit struct {
 func RateLimitDefaults() map[string]RateLimit {
 	out := make(map[string]RateLimit, len(configurablePolicies))
 	for _, p := range configurablePolicies {
-		out[p.Name] = RateLimit{Burst: p.Burst, Every: time.Duration(float64(time.Second) / p.RefillPerSecond)}
+		out[p.Name] = RateLimit{Burst: p.Burst, Every: refillInterval(*p)}
 	}
 	return out
+}
+
+// refillInterval is how long a policy takes to refill one request, to the
+// nearest microsecond.
+func refillInterval(p ratelimit.Policy) time.Duration {
+	return time.Duration(math.Round(float64(time.Second)/p.RefillPerSecond/1e3)) * time.Microsecond
 }
 
 // ConfigureRateLimits applies RATE_LIMIT_* overrides. It is called once at
@@ -175,7 +181,7 @@ func ConfigureRateLimits(overrides map[string]RateLimit) error {
 func rateLimitPlaceholders() []string {
 	out := make([]string, 0, 2*len(configurablePolicies))
 	for _, p := range configurablePolicies {
-		every := time.Duration(float64(time.Second) / p.RefillPerSecond)
+		every := refillInterval(*p)
 		out = append(out, "{{RATE_LIMIT_"+strings.ToUpper(strings.ReplaceAll(p.Name, "-", "_"))+"}}",
 			fmt.Sprintf("%d at once, then one more every %s", p.Burst, oplimits.Duration(every)))
 	}

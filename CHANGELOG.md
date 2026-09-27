@@ -4,6 +4,34 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## Unreleased
+
+No schema change. Skills are at 0.15.2 (0.11.0 still works).
+
+### Configuration
+- Every operational time and limit an operator may reasonably change is now
+  an environment setting, defaulting to the value it had before, and
+  refused at startup when out of range (`docs/configuration.md`,
+  "Operational times and limits"): `DELETED_RETENTION_DAYS` (30),
+  `IDLE_CLEANUP_GRACE_DAYS` (30), `IDLE_CLEANUP_MAX_EMAILS` (0, no limit:
+  with it set, one run marks and emails at most that many sites, the rest
+  on later runs), `PREVIEW_LINK_TTL` (1h), `EXPORT_LINK_TTL` (10m),
+  `API_KEY_DEFAULT_DAYS` (90), `API_KEY_EXPIRY_WARNING_DAYS` (14),
+  `MAX_TEAMS_PER_PERSON` (10), `MAX_TEAM_MEMBERS` (50), `MAX_SITE_VIEWERS`
+  (50), `MAX_ARCHIVE_BYTES` (100 MiB; raise the ingress body limit with it),
+  `MAX_FILES_PER_SITE` (50,000), `UPLOAD_CONCURRENCY` (2),
+  `SEARCH_TELEMETRY_RETENTION_DAYS` (180) and `SEARCH_SESSION_MAX_AGE`
+  (4320h).
+- Each rate limiter is set with `RATE_LIMIT_<NAME>=<burst>/<interval>`, for
+  example `RATE_LIMIT_AUTH_EMAIL=5/50s`; an unknown name, another shape, or a
+  limit counted across replicas whose window would exceed 30 minutes refuses
+  startup.
+- What people and agents are told follows the setting: the dashboard,
+  `/admin` (the "This instance" card lists the new values), the idle-cleanup
+  email, refusal messages (team, member and viewer limits now name the
+  number; a too-large upload names the limit), MCP tool descriptions and
+  hints, the served skills and plugin, `/openapi.yaml` and the home page.
+
 ## v1.5.0 — 2026-09-27
 
 Schema 0053 (from 0049), all four backward-compatible: nullable

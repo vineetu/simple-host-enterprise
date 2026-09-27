@@ -66,7 +66,8 @@ the default two replicas. A small managed plan can be lower than that
   in-cluster MinIO component or an S3-to-Blob proxy such as `s3proxy`
   (`docs/cloud/aks.md` section 3).
 - **Versioning on, with a lifecycle rule.** Required. Expire noncurrent
-  versions after a retention window (30 days is a reasonable start) and
+  versions after a retention window (30 days is a reasonable start; keep it
+  at least `DELETED_RETENTION_DAYS`) and
   abort incomplete multipart uploads after 7 days. With the AWS CLI (add
   `--endpoint-url https://<endpoint>` for any other S3-compatible
   provider):
@@ -113,10 +114,11 @@ truth for what is live, the state documents, and the users.
 When a version is retired, its object is queued in the database and deleted
 from the bucket by the server one hour after it stops being referenced.
 
-A deleted site is different: for 30 days it stays whole (its database row
+A deleted site is different: for `DELETED_RETENTION_DAYS` (30 by default,
+`docs/configuration.md`) it stays whole (its database row
 and every object under `sites/<id>/`), so its owner, a member of its team or
 an admin can restore it exactly as it was ("Recently deleted" on the
-dashboard and on `/admin`, or the `restore_site` tool). After 30 days the
+dashboard and on `/admin`, or the `restore_site` tool). After that the
 server's sweeper purges the row and queues the objects, which go an hour
 later. After that only bucket versioning keeps them, until the lifecycle
 rule expires them. A team's deletion removes its sites at once.
@@ -417,7 +419,7 @@ kubectl -n simple-host exec deploy/simple-host -- /simple-host restore -from-sit
 
 `-owner` is the account's username; for a team, its full `team-<name>`.
 `-set-current=false` adds the version without making it live. A site
-deleted in the last 30 days is best restored from "Recently deleted"; if
+deleted within `DELETED_RETENTION_DAYS` is best restored from "Recently deleted"; if
 `restore` is pointed at its name it undeletes that row (saved data, viewers
 and assets included), and with its own id and live version it does only
 that. A deleted site's id is in the audit log (its `site_delete` event). If the object has

@@ -93,7 +93,7 @@ Config names are documented in `docs/configuration.md`; schema in
 ## 2. API keys (CI and automation)
 
 - **What.** A signed-in person mints, lists and revokes their own keys
-  (`shk_` prefix, stored hashed, 90 days by default, at most
+  (`shk_` prefix, stored hashed, `API_KEY_DEFAULT_DAYS` (90) by default, at most
   `API_KEY_MAX_DAYS`). Managing keys requires a browser session, never a key.
   Sent as `X-API-Key`. People and their agents use OIDC/MCP; keys are for CI.
   Each key has a scope chosen at mint, enforced in `auth.Middleware` against
@@ -107,11 +107,11 @@ Config names are documented in `docs/configuration.md`; schema in
   gains the row in place; nothing reloads). Each key keeps its own last four
   characters (`last4`, shown as "ends …abcd"; keys minted before 0050 show
   "earlier key"), and the dashboard row shows last used and "expires soon"
-  inside 14 days. A refused key says why in a 401 `code`: `key_expired`
+  inside `API_KEY_EXPIRY_WARNING_DAYS` (14). A refused key says why in a 401 `code`: `key_expired`
   (with the date and "mint a new one on the dashboard"), `key_revoked` or
   `key_not_recognised` (also for any key of a disabled person, so a found
-  key does not reveal that its owner left). While a key has 14 days or
-  less left, every response to it carries `X-Key-Expires` (RFC 3339) and an
+  key does not reveal that its owner left). While a key has
+  `API_KEY_EXPIRY_WARNING_DAYS` or less left, every response to it carries `X-Key-Expires` (RFC 3339) and an
   `X-Simple-Host-Notice` line. An admin revokes a leaked key by pasting it on
   /admin (`POST /api/admin/keys/revoke`, section 13).
 - **Status.** Built.
@@ -124,7 +124,7 @@ Config names are documented in `docs/configuration.md`; schema in
   `internal/auth/middleware.go`, `scope.go`.
 - **DB.** `api_keys` (0022, 0029 expiry, 0035 scope, 0050 `last4`);
   `users.api_key` dropped (0025).
-- **Config.** `API_KEY_MAX_DAYS`.
+- **Config.** `API_KEY_MAX_DAYS`, `API_KEY_DEFAULT_DAYS`, `API_KEY_EXPIRY_WARNING_DAYS`.
 
 ## 3. MCP server, OAuth connector, plugin.zip
 
@@ -201,8 +201,8 @@ Config names are documented in `docs/configuration.md`; schema in
   per-owner lock (409 `site_limit`, 413 `storage_quota`), and, with
   `CLAMD_ADDR` set, every file is scanned before anything is stored (422
   `malware_found`, 503 `scanner_unavailable`, fail closed). Rollback
-  makes an earlier version live. Delete is recoverable for 30 days
-  (`db.DeletedSiteRetention`): the row is marked `deleted_at` and stops
+  makes an earlier version live. Delete is recoverable for
+  `DELETED_RETENTION_DAYS` (30; `db.DeletedSiteRetention`): the row is marked `deleted_at` and stops
   serving and listing at once, while its versions, objects, saved data and
   history, access level, viewers and asset records stay; its name stays
   held (409 `name_held`). The owner or a team member lists them
@@ -232,7 +232,7 @@ Config names are documented in `docs/configuration.md`; schema in
   it gone. A visit, deploy, saved-data read or write, or restore
   unmarks it (`site_idle_cleared`); Keep (`POST .../keep`, `{"keep": false}`
   undoes it; `sites.idle_keep`; `site_idle_keep`) takes it out for good.
-  30 days after marking (`db.IdleGrace`), still unused and not kept, it
+  `IDLE_CLEANUP_GRACE_DAYS` (30) after marking (`db.IdleGrace`), still unused and not kept, it
   moves to Recently deleted like an owner's delete (`site_delete`, `system`,
   `reason` `idle`). An admin restores any from `/admin`, and an
   admin's "Delete sites" for a leaver lands there too. After the window the
@@ -306,7 +306,7 @@ Config names are documented in `docs/configuration.md`; schema in
   .../versions/{version}/preview`, MCP `preview_version`, "Preview" in the
   Manage panel's Versions list): the site's own address plus
   `_preview/<version>-<expiry>-<HMAC>/`, signed with the session signing key
-  over site id, version and expiry, valid one hour. The host gate serves it
+  over site id, version and expiry, valid `PREVIEW_LINK_TTL` (1h). The host gate serves it
   (on the site host, and on the fallback owner path) only to a host session
   of the owner or a team member (`db.PreviewAllowed`, whatever the access
   level; anyone else 404, audited `access_denied` `not_owner_preview`;
@@ -323,7 +323,7 @@ Config names are documented in `docs/configuration.md`; schema in
 
   **Download a site.** The owner or a team member gets a download address
   (`POST .../export-link`, full-scope key or session; `{url, expires_at}`)
-  that works once, within 10 minutes, with no key or cookie (`GET
+  that works once, within `EXPORT_LINK_TTL` (10m), with no key or cookie (`GET
   /api/site-export/{token}`; the first download to start uses it up,
   `site_export_links_used`, and a second answers 410; HEAD answers headers
   only, without building the zip, auditing or using the link; the request
@@ -403,7 +403,10 @@ Config names are documented in `docs/configuration.md`; schema in
   (all backward-compatible).
 - **Config.** `PUBLIC_BASE_URL`, `RESERVED_LABELS`, `QUOTA_MAX_SITES`,
   `QUOTA_MAX_BYTES`, `QUOTA_MAX_VERSIONS`, `CLAMD_ADDR`, `CLAMD_TIMEOUT`,
-  `IDLE_CLEANUP_DAYS`, `SMTP_URL`, `SMTP_FROM`.
+  `IDLE_CLEANUP_DAYS`, `SMTP_URL`, `SMTP_FROM`, `DELETED_RETENTION_DAYS`,
+  `IDLE_CLEANUP_GRACE_DAYS`, `IDLE_CLEANUP_MAX_EMAILS`, `PREVIEW_LINK_TTL`,
+  `EXPORT_LINK_TTL`, `MAX_ARCHIVE_BYTES`, `MAX_FILES_PER_SITE`,
+  `UPLOAD_CONCURRENCY`.
 
 ## 6. Bucket storage, cache, retire sweep, migrate-storage, restore and reencrypt
 
@@ -536,7 +539,7 @@ Config names are documented in `docs/configuration.md`; schema in
   `grant_emails.go` (email check); `internal/db/site_viewers.go`,
   `pending_grants.go`.
 - **DB.** `site_viewers` (0024), `pending_site_viewers` (0045).
-- **Config.** None. See `docs/site-isolation.md`.
+- **Config.** `MAX_SITE_VIEWERS`. See `docs/site-isolation.md`.
 
 ## 9. Teams
 
@@ -587,7 +590,7 @@ Config names are documented in `docs/configuration.md`; schema in
 - **DB.** `team_members`, `team_audit`, `users.kind` = `team` (0019); 0041
   renames teams to `team-<name>` (rows only, marked backward-compatible);
   `pending_team_members` (0045).
-- **Config.** None.
+- **Config.** `MAX_TEAMS_PER_PERSON`, `MAX_TEAM_MEMBERS`.
 
 ## 10. Saved state and its history
 
@@ -791,7 +794,7 @@ Config names are documented in `docs/configuration.md`; schema in
   bytes; the same numbers `GET /api/me` returns as `usage`), "Teams"
   (section 9), "Shared with
   me" (section 5; hidden when empty), "Recently
-  deleted" (the person's and their teams' sites deleted in the last 30 days,
+  deleted" (the person's and their teams' sites deleted within `DELETED_RETENTION_DAYS`,
   each with Restore; hidden when empty), "Not used lately" (sites the idle
   cleanup marked, with the date each moves, Keep and Download; section 5;
   hidden when none), and a link to sessions. Key rows show the key's last
@@ -837,7 +840,7 @@ Config names are documented in `docs/configuration.md`; schema in
 - **DB.** `site_search_documents`, `site_search_queue`,
   `site_search_index_status`, `site_search_queries`,
   `site_search_impressions`, `site_search_clicks` (0011).
-- **Config.** None.
+- **Config.** `SEARCH_TELEMETRY_RETENTION_DAYS`, `SEARCH_SESSION_MAX_AGE`, `RATE_LIMIT_SEARCH_QUERY_PEER`, `RATE_LIMIT_SEARCH_QUERY_SESSION`.
 
 ## 16. Metrics, health, request log, rate limits
 
@@ -860,7 +863,8 @@ Config names are documented in `docs/configuration.md`; schema in
 - **DB.** `site_daily_analytics` (0003, 0013), `site_file_downloads` (0009),
   `rate_limit_counters` (0039).
 - **Config.** `METRICS_PORT`, `PORT`, `HTTPS_REDIRECT_PORT`, `SECURE_MODE`,
-  `TRUSTED_PROXY_CIDRS`.
+  `TRUSTED_PROXY_CIDRS`, `RATE_LIMIT_<NAME>` (`<burst>/<interval>`, one per
+  limiter), `UPLOAD_CONCURRENCY`.
 
 ## 17. Landing and static pages
 
@@ -884,7 +888,11 @@ Config names are documented in `docs/configuration.md`; schema in
   `SESSION_SIGNING_KEY`, `BACKUP_ENVELOPE_KEY` or `TRUSTED_PROXY_CIDRS`;
   `API_KEY_MAX_DAYS` outside 1–365; `SESSION_TTL` over 24h, `SESSION_IDLE`
   over 8h or over `SESSION_TTL`, `OAUTH_ACCESS_TTL` over 24h or over
-  `OAUTH_REFRESH_TTL`, `OAUTH_REFRESH_TTL` over 90 days; clashing ports; `DB_APP_PASSWORD` equal to
+  `OAUTH_REFRESH_TTL`, `OAUTH_REFRESH_TTL` over 90 days; an operational
+  time or limit (`DELETED_RETENTION_DAYS`, `PREVIEW_LINK_TTL`,
+  `MAX_ARCHIVE_BYTES`, the rest in `docs/configuration.md`, "Operational
+  times and limits") outside its range; a `RATE_LIMIT_*` of the wrong shape,
+  an unknown name, or a shared window over 30 minutes; clashing ports; `DB_APP_PASSWORD` equal to
   `DB_PASSWORD`; `DB_APP_USER` combined with `DB_DSN`; a schema newer than the
   binary unless every newer migration is marked backward-compatible.
   Startup also warns (log line and `simplehost_config_warning{check}`),
@@ -896,7 +904,12 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Subcommands.** No argument runs the server. Others: `migrate`, `restore`, `migrate-storage`,
   `reencrypt` (section 6), `prune`, `audit-verify` (section 12), `owner-hosts`
   (section 19), `version`.
-- **Go.** `internal/config/config.go`; `internal/migrate/`;
+  The operational values live in `internal/oplimits`, set once at startup
+  (`cmd/server` `loadConfig`); every surface that states one (dashboard,
+  `/admin`, idle email, refusals, MCP descriptions, served skills,
+  `/openapi.yaml`, the home page) reads it there, the static documents
+  through `{{NAME}}` placeholders.
+- **Go.** `internal/config/config.go`, `oplimits.go`; `internal/oplimits/`; `internal/migrate/`;
   `cmd/server/main.go`, `subcommands.go`.
 - **DB.** `simplehost_app` grants (0020); every migration.
 - **Config.** `DB_DSN` or `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`,

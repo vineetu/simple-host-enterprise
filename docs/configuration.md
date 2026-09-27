@@ -85,11 +85,11 @@ shell.
 | `SESSION_IDLE` | No | `30m` | How long a sign-in survives unused. At most `8h` and never longer than `SESSION_TTL`; refused at startup otherwise. Default: ends an unattended browser's session well inside the working day. |
 | `OAUTH_ACCESS_TTL` | No | `1h` | Lifetime of an access token an AI app holds for `/mcp` (the OAuth connector). At most `24h`, never longer than `OAUTH_REFRESH_TTL`. Short, because a copy of the token held elsewhere stays usable until it expires even after the app is revoked. |
 | `OAUTH_REFRESH_TTL` | No | `720h` (30 days) | How long an AI app stays connected before the person must sign in at the IdP again. At most `2160h` (90 days). Measured from the sign-in that connected the app, not from the last refresh: rotating the refresh token never extends it. Go durations have no day unit; write days as hours. |
-| `IDLE_CLEANUP_DAYS` | No | `0` (off) | Opt-in cleanup of sites nobody uses: a site nobody has opened (its owner and team count; bots and previews do not), deployed to, or read or written saved data on for this many days (1 to 3650) is marked. Use is recorded at most hourly per site (`sites.last_used_at`); sites that existed before migration 0053 count as used when it ran, so nothing is marked until this many days after that upgrade; its owner (or every member of its team) sees "Not used lately" on the dashboard with the date it moves, Keep and Download, and admins see the list on `/admin`. 30 days later, still unused and not kept, it moves to Recently deleted (restorable for 30 more days). Opening it, a deploy, a saved-data read or write, or a restore unmarks it; Keep (`POST .../keep`, MCP `keep_site`) takes it out for good. Every mark, unmark, keep and delete is audited (`site_idle_marked`, `site_idle_cleared`, `site_idle_keep`, `site_delete` with `reason` `idle`). Checked hourly by every replica. |
+| `IDLE_CLEANUP_DAYS` | No | `0` (off) | Opt-in cleanup of sites nobody uses: a site nobody has opened (its owner and team count; bots and previews do not), deployed to, or read or written saved data on for this many days (1 to 3650) is marked. Use is recorded at most hourly per site (`sites.last_used_at`); sites that existed before migration 0053 count as used when it ran, so nothing is marked until this many days after that upgrade; its owner (or every member of its team) sees "Not used lately" on the dashboard with the date it moves, Keep and Download, and admins see the list on `/admin`. `IDLE_CLEANUP_GRACE_DAYS` (30) days later, still unused and not kept, it moves to Recently deleted (restorable for `DELETED_RETENTION_DAYS`, 30 by default). Opening it, a deploy, a saved-data read or write, or a restore unmarks it; Keep (`POST .../keep`, MCP `keep_site`) takes it out for good. Every mark, unmark, keep and delete is audited (`site_idle_marked`, `site_idle_cleared`, `site_idle_keep`, `site_delete` with `reason` `idle`). Checked hourly by every replica. |
 | `SMTP_URL` | No | none | With `IDLE_CLEANUP_DAYS`, also email the owner (or a team's members) when a site is marked: `smtp://user:password@host:587` (STARTTLS required: a server that does not offer it is refused, unless the URL ends in `?insecure=1` for an internal relay without TLS; a password is only ever sent over TLS) or `smtps://host:465`. Put it in the Secret: it carries a password. Without it the dashboard notice is the only one. Nothing else sends mail. |
 | `SMTP_FROM` | With `SMTP_URL` | none | The sender address, e.g. `Simple Host <hosting@example.com>`: the display name goes in the From header, the bare address is the envelope sender. Subjects with non-ASCII site names are RFC 2047 encoded. |
 | `NETWORK_ACCESS_APPROVALS` | No | `1` | How many different admins must approve a request to open a site to the network (`network` access, no sign-in): `1` or `2`; anything else refuses startup. The person who made the request never counts, even if they are an admin. With `2`, the first approval leaves the request pending ("1 of 2 approvals" on `/admin` and in the owner's view) and the second opens the site; a decline, the owner changing the level, or a new request starts the count from zero. An approval from an admin who is later disabled still counts: it was valid when given. |
-| `API_KEY_MAX_DAYS` | No | `365` | The longest lifetime an API key may be minted with; must be 1 to 365. API keys are for CI and other automation (people and their agents sign in through OIDC): a new key lives 90 days unless the mint request names `expires_in_days` (or the maximum, if it is below 90), an expired key is refused like a revoked one, and every new key starts with `shk_` so secret scanners can find it. Each key carries a scope chosen when it is minted: `publish` (the default: deploy, update, roll back and list sites, their versions, archives, saved data and assets except deleting an uploaded file, `/api/me` and `/mcp`), `full` (everything the person can do through the REST API except administration), or `offboard` (admins only: `POST /api/admin/users/disable` and nothing else). |
+| `API_KEY_MAX_DAYS` | No | `365` | The longest lifetime an API key may be minted with; must be 1 to 365. API keys are for CI and other automation (people and their agents sign in through OIDC): a new key lives `API_KEY_DEFAULT_DAYS` (90) days unless the mint request names `expires_in_days` (or the maximum, if it is below that), an expired key is refused like a revoked one, and every new key starts with `shk_` so secret scanners can find it. Each key carries a scope chosen when it is minted: `publish` (the default: deploy, update, roll back and list sites, their versions, archives, saved data and assets except deleting an uploaded file, `/api/me` and `/mcp`), `full` (everything the person can do through the REST API except administration), or `offboard` (admins only: `POST /api/admin/users/disable` and nothing else). |
 
 **Matching your IdP.** Set `SESSION_TTL` and `SESSION_IDLE` to match your
 IdP's session policy. Simple Host re-checks the IdP only at sign-in, so these
@@ -202,6 +202,62 @@ refused with `503`; raise `MaxFileSize` and `MaxScanSize` to match, since
 clamd reports content beyond those limits as clean without scanning it.
 Files are scanned one connection each, so a deploy of many files takes a
 little longer with the scan on.
+
+## Operational times and limits
+
+Read by `config.Load()` (`internal/config/oplimits.go`). Each defaults to what
+every release before it could be set did, so an installation that sets none
+of them behaves exactly as before. A value outside its range refuses startup
+with a message naming the variable and the range. Times are Go durations
+(`90m`, `24h`; Go has no day unit, so write days as hours) except the ones
+named `_DAYS`, which are whole days. Everything a person or an agent is told
+about one of these (the dashboard, `/admin`, the idle email, refusal
+messages, MCP tool descriptions, the served skills, `/openapi.yaml`, the
+home page) states the value in force, not the default.
+
+| Variable | Required | Default | Refusal it triggers when set wrong |
+|---|---|---|---|
+| `DELETED_RETENTION_DAYS` | No | `30` | Must be 1 to 365. How long a deleted site stays in Recently deleted: restorable whole by its owner, a team member or an admin, its name held, and counted toward its owner's quota; then the sweeper purges it. Keep the bucket's noncurrent-version retention (`docs/storage.md`) at least this long. |
+| `IDLE_CLEANUP_GRACE_DAYS` | No | `30` | Must be 1 to 365. With `IDLE_CLEANUP_DAYS` on, how long a marked site waits before it moves to Recently deleted. |
+| `IDLE_CLEANUP_MAX_EMAILS` | No | `0` (no limit) | Must be 0 to 100000. With `IDLE_CLEANUP_DAYS` and `SMTP_URL` set, the most sites one hourly run marks and emails about (the longest unused first); the rest are marked on later runs, so a first run over a large backlog does not send a flood. Without `SMTP_URL` it has no effect. |
+| `PREVIEW_LINK_TTL` | No | `1h` | Must be `1m` to `24h`. How long a preview link to a kept version works (`GET .../versions/{version}/preview`, MCP `preview_version`). |
+| `EXPORT_LINK_TTL` | No | `10m` | Must be `1m` to `24h`. How long a whole-site download address works (it works once either way). |
+| `API_KEY_DEFAULT_DAYS` | No | `90`, or `API_KEY_MAX_DAYS` when that is lower | Must be 1 to `API_KEY_MAX_DAYS`. A new API key's lifetime when the mint request names no `expires_in_days` (every key minted on the dashboard). |
+| `API_KEY_EXPIRY_WARNING_DAYS` | No | `14` | Must be 1 to 365. A key this close to expiry shows "expires soon" on the dashboard and answers every call with `X-Key-Expires` and `X-Simple-Host-Notice`. |
+| `MAX_TEAMS_PER_PERSON` | No | `10` | Must be 1 to 1000. A person who belongs to this many teams cannot create another (`409` `team_limit`); an admin can still add them to one. |
+| `MAX_TEAM_MEMBERS` | No | `50` | Must be 1 to 1000. Members of one team, pending ones (added by email, not yet signed in) included (`409` `member_limit`). |
+| `MAX_SITE_VIEWERS` | No | `50` | Must be 1 to 1000. Entries on one site's viewer list, people and teams, pending ones included. |
+| `MAX_ARCHIVE_BYTES` | No | `104857600` (100 MiB) | Must be 1048576 (1 MiB) to 524288000 (500 MiB). The largest compressed archive one deploy may send (`413` above it). The uncompressed limits stay fixed (500 MiB per file and in total). The ingress must accept a body this large: raise its body-size limit with it (the shipped overlays' `ingress-patch.yaml` set 100 MiB). |
+| `MAX_FILES_PER_SITE` | No | `50000` | Must be 1 to 100000. Entries one uploaded archive may hold. |
+| `UPLOAD_CONCURRENCY` | No | `2` | Must be 1 to 64. Uploads, and separately archive downloads, one replica processes at once, across everyone; a request over it gets `429` with `Retry-After`. Each upload holds its archive in memory, so raise the pod's memory limit with it. |
+| `SEARCH_TELEMETRY_RETENTION_DAYS` | No | `180` | Must be 1 to 3650. How long search queries, their impressions and clicks are kept before the pruner deletes them. |
+| `SEARCH_SESSION_MAX_AGE` | No | `4320h` (180 days) | Must be `1h` to `9600h` (400 days, the longest browsers keep a cookie). Lifetime of the anonymous search session cookie used for search rate limits and telemetry. |
+
+**Rate limits.** Each limiter can be changed with `RATE_LIMIT_<NAME>=<burst>/<interval>`:
+`<burst>` requests at once (1 to 100000), then one more every `<interval>` (a
+Go duration, `1ms` to `1h`). `RATE_LIMIT_AUTH_EMAIL=5/50s` is the default
+sign-in limit per email address. A name not in this table, or a value of
+another shape, refuses startup. The limits marked *shared* are counted in
+Postgres across every replica, in a fixed window of burst times interval,
+which must be at most 30 minutes; the others are per replica.
+
+| Variable | Default | What it limits |
+|---|---|---|
+| `RATE_LIMIT_AUTH_CLIENT` | `20/5s` (*shared*) | Sign-in, the session hand-off and the connector's authorize, per client address. |
+| `RATE_LIMIT_AUTH_EMAIL` | `5/50s` | Sign-in attempts per email address. |
+| `RATE_LIMIT_MANAGEMENT_CLIENT` | `60/1s` | The management API per client address. |
+| `RATE_LIMIT_MANAGEMENT_USER` | `30/10s` | Management changes per person. |
+| `RATE_LIMIT_API_KEY_MINT` | `30/10s` (*shared*) | API key mints per person. |
+| `RATE_LIMIT_STATE_CLIENT` | `60/1s` | Saved-data writes per client. |
+| `RATE_LIMIT_STATE_SITE` | `60/1s` | Saved-data writes per site. |
+| `RATE_LIMIT_STATE_READ_CLIENT` | `120/500ms` | Saved-data reads per client. |
+| `RATE_LIMIT_STATE_READ_SITE` | `300/200ms` | Saved-data reads per site. |
+| `RATE_LIMIT_ADMIN_CLIENT` | `10/10s` | Admin actions per client address. |
+| `RATE_LIMIT_ADMIN_IDENTITY` | `10/10s` | Admin actions per admin. |
+| `RATE_LIMIT_SEARCH_QUERY_PEER` | `200/50ms` | Site searches per network peer (coarse load shedding). |
+| `RATE_LIMIT_SEARCH_QUERY_SESSION` | `60/1s` | Site searches per search session. |
+| `RATE_LIMIT_OAUTH_REGISTER` | `30/10s` (*shared*) | AI app registrations on the connector, per client address. |
+| `RATE_LIMIT_OAUTH_TOKEN` | `120/500ms` (*shared*) | Connector token requests per client address. |
 
 ## Retention and visibility (audit sink)
 
@@ -390,9 +446,10 @@ equivalent here; do not set them.
 - `deploy/overlays/staging`, `deploy/overlays/production` — reuse `byo`'s
   `.example` files by convention; they have none of their own yet.
 
-Neither overlay sets the Assets, Upload limits or Retention variables
-above; they are left at their code defaults unless an installation
-overrides them.
+Neither overlay sets the Assets, Upload limits, Operational times and
+limits, or Retention variables above; they are left at their code defaults
+unless an installation overrides them (`byo`'s `config.env.example` lists
+them, commented out, at their defaults).
 
 Editing `config.env` or `secrets.env` and re-applying does not restart the
 pods (the generated ConfigMap and Secret keep fixed names). Run

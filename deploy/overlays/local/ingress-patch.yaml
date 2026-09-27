@@ -9,7 +9,8 @@ metadata:
     # controller is silently ignored by another rather than refused.
     #
     # proxy-body-size is the one that matters: uploads are archives up to
-    # 100 MiB, and ingress-nginx defaults to 1 MiB.
+    # MAX_ARCHIVE_BYTES (100 MiB by default), and ingress-nginx defaults to
+    # 1 MiB.
     nginx.ingress.kubernetes.io/proxy-body-size: 128m
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"

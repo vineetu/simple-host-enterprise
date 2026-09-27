@@ -158,21 +158,24 @@ func RegisterUIRoutes(mux *http.ServeMux, baseURL string) {
 	mux.HandleFunc("GET /skills.zip", serveSkillsZip(baseURL))
 	mux.HandleFunc("GET /skills/version", serveSkillsVersion(baseURL))
 	mux.HandleFunc("GET /skills/sha256/{digest}/skills.zip", serveImmutableSkillsZip(baseURL))
-	mux.HandleFunc("GET /openapi.yaml", serveOpenAPI)
+	mux.HandleFunc("GET /openapi.yaml", serveExpandedStatic("openapi.yaml", "application/yaml; charset=utf-8"))
+	mux.HandleFunc("GET /{$}", serveExpandedStatic("index.html", "text/html; charset=utf-8"))
 	mux.Handle("GET /", fileServer)
 }
 
-// serveOpenAPI is the embedded openapi.yaml with this installation's
-// operational values filled in (internal/oplimits placeholders), so the
-// reference states the limits this server enforces.
-func serveOpenAPI(w http.ResponseWriter, r *http.Request) {
-	body, err := fs.ReadFile(staticFiles, "static/openapi.yaml")
-	if err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return
+// serveExpandedStatic serves an embedded static file with this
+// installation's operational values filled in (expandServedText), so a page
+// or the API reference states the limits this server enforces.
+func serveExpandedStatic(name, contentType string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		body, err := fs.ReadFile(staticFiles, "static/"+name)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", contentType)
+		http.ServeContent(w, r, name, skillsModTime, strings.NewReader(expandServedText(string(body))))
 	}
-	w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
-	http.ServeContent(w, r, "openapi.yaml", skillsModTime, strings.NewReader(expandServedText(string(body))))
 }
 
 func serveAgentSkillsDiscoveryIndex(baseURL string) http.HandlerFunc {

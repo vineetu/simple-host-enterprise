@@ -7,7 +7,8 @@ metadata:
     # the platform team configured for it.
     cert-manager.io/cluster-issuer: letsencrypt-dns
     # --- Request body cap: set the line for YOUR controller and delete the
-    # rest. Uploads are archives up to 100 MiB. A controller left at its own
+    # rest. Uploads are archives up to MAX_ARCHIVE_BYTES (100 MiB by default;
+    # keep this above it if you raise it). A controller left at its own
     # default refuses them before the application is reached, and the failure
     # reads as an application bug. This is the one setting you must not skip.
     #
