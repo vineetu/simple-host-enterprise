@@ -1,110 +1,103 @@
-# Simple Host
+# Simple Host Enterprise
 
-A single Go service that hosts static sites for the people in one
-organisation. Someone signs in through your own OIDC provider, their coding
-agent publishes a directory, and the result is live at its own hostname
-under that person's name (`todo.alice.<base>`), with a JSON data store and
-an asset store behind it. A new site is open only to its owner (or their
-team); the owner then shares it with named people or teams (404 to everyone
-else), the
-whole company, the company showcase, or — once an admin approves — anyone
-on the network without sign-in. Every mutation and every visit is recorded
-to an audit trail and access log; owners see view counts, admins see who. The same process serves the API, the sites, the
-dashboard, and an MCP endpoint through which agents publish and manage
-sites, teams, sharing, and site state.
+Every person in a company gets a place for what their AI agent builds, at `<site>.<person>.<internal-domain>`, behind the company's sign-in.
 
-This repository is the installable package: the server, its schema
-migrations, a container image, and Kubernetes manifests that run on any
-cluster with Postgres and an S3-compatible bucket. `docs/install.md` is the
-step-by-step guide this section summarizes.
+- **Overview:** https://simple-host.app/enterprise
+- **Brief:** https://simple-host.app/enterprise/brief
+- **Architecture:** https://simple-host.app/enterprise/architecture
+- **Install:** [INSTALL.md](INSTALL.md) (runbook for an agent) · [docs/install.md](docs/install.md) (full guide) · [docs/](docs/)
+- **Security:** [SECURITY.md](SECURITY.md) · [docs/security-review.md](docs/security-review.md)
+- **Releases:** [CHANGELOG.md](CHANGELOG.md) · latest [v1.5.0](https://github.com/vineetu/simple-host-enterprise/releases/tag/v1.5.0). Pin the image by digest; the current digest is in [INSTALL.md](INSTALL.md).
+- **Hosted edition** (for individuals): https://simple-host.app/ · [github.com/vineetu/simple-host](https://github.com/vineetu/simple-host)
 
-## Install with your AI agent
+## Install
 
-`INSTALL.md` is a runbook written for a coding agent. Point the agent at a
-clone of this repository with access to your cluster, and it provisions the
-database and bucket, writes the configuration, stops for the few steps only
-a person can do (registering the OIDC app, the DNS records), applies the
-manifests, and checks the result. It asks only what it cannot find out, and
-never prints a secret.
+`INSTALL.md` is a runbook written for a coding agent. Point the agent at a clone of this repository with access to your cluster. It provisions the database and bucket, writes the configuration, stops for the steps only a person can do (registering the sign-in app, the DNS records), applies the manifests and checks the result. It never prints a secret.
 
 ```text
 Read INSTALL.md in this repository and install Simple Host on our Kubernetes cluster; ask me only what you cannot find out yourself.
 ```
 
+## Features
+
+### Identity and sign-in
+- Sign-in only through the company's OIDC provider. Accounts are created at first sign-in.
+- Admins come from a list of emails or an OIDC claim. There is no admin key.
+- Sessions with idle and absolute limits. A person sees and revokes their sessions and connected apps, or signs out everywhere.
+- API keys for CI, with a scope (`publish`, `full`, `offboard`) and an expiry.
+
+### Sites, versions, preview, hand-over
+- Publish a folder. Every publish is a new version; roll back to any kept version.
+- Every site on its own origin: `<site>.<person>.<internal-domain>`, with a certificate issued per person.
+- Preview before live: store a version without publishing, open a one-hour preview link, then make it live.
+- Rename a site or move it into a team. Old addresses keep redirecting.
+- Delete is recoverable for 30 days. Download a whole site as one zip.
+- Per-person quotas for sites and storage. Optional malware scan of every upload.
+- Optional idle-site cleanup, with a warning, a Keep button and email.
+
+### Who can see a site
+- Five access levels: only me (the default), named viewers, the whole company, listed in the company showcase, and anyone on the network.
+- Named viewers are people or teams, added by company email, even before they have signed in.
+- Teams: a shared place for sites; every member can do everything.
+- Opening a site to the network needs an admin's approval, or two admins' if configured.
+- Someone without access sees the same page as for a site that does not exist.
+- Company showcase and full-text search across listed sites.
+
+### Saved data and files
+- Each site has one JSON document its pages read and write, plain or versioned.
+- The last 20 changes are kept; the owner restores any of them.
+- Pages upload files (images, video, PDFs and more), with per-site limits and the same malware scan.
+
+### Agents
+- An MCP server at `<base>/mcp`, connected through the company's own sign-in. Every tool call runs as that person.
+- Skills for publishing and planning sites, served from the instance with version checks.
+- An installable plugin at `<base>/plugin.zip`, already pointing at the instance.
+
+### Admin and audit
+- Take down: restrict any site with a reason, and lift it later.
+- Leavers: disable a person (sessions, keys and apps revoked at once), move or delete their sites, export their data as one zip, or erase them for good.
+- Revoke a leaked key by pasting it.
+- Every change is written to an audit log with a hash chain; `simple-host audit-verify` checks it.
+- Every audit event is also streamed as a JSON line to stdout, for a SIEM.
+- A visit log per site: owners see view counts, admins see who.
+
+### Operations
+- Runs on any Kubernetes cluster with Postgres and an S3-compatible bucket. Manifests for local, staging and production.
+- Site files live in the bucket, with server-side encryption and an optional client-side envelope. Pods are stateless and serve through a local cache.
+- Backups and a tested restore drill (`simple-host restore`, `simple-host verify-storage`).
+- Settings are environment variables. Nothing that identifies an install has a default, and the server refuses to start on an unsafe value.
+- Health, readiness and metrics endpoints; rate limits shared across replicas.
+- Per-cloud checklists in [docs/cloud/](docs/cloud/) (AWS, GCP, Azure, Oracle Cloud, UpCloud).
+
 ## Run it locally
 
-To evaluate it on a laptop before a real install: Docker Desktop with
-Kubernetes enabled (or minikube), `kubectl`, `kustomize`, and `mkcert`.
-Then:
+Docker Desktop with Kubernetes enabled (or minikube), `kubectl`, `kustomize` and `mkcert`. Then:
 
 ```sh
-make local     # ingress-nginx, cert-manager, Postgres, MinIO, Dex, the app; ~5 minutes cold
-make smoke     # signs in, hands off sessions between hosts, publishes and restricts a site, reads/writes state and assets
+make local       # ingress-nginx, cert-manager, Postgres, MinIO, Dex, the app; about 5 minutes cold
+make smoke       # signs in, publishes and restricts a site, reads and writes state and assets
 make local-down
 ```
 
-The instance answers at `https://simple-host.127-0-0-1.nip.io`, which resolves
-to loopback through public DNS; every owner is one label beneath it, and every
-site one label beneath its owner (`todo.alice.<base>`), with a wildcard
-certificate per owner that cert-manager issues on the owner's first site.
-Every certificate comes from the mkcert CA, so the browser trusts them once
-`mkcert -install` has been accepted. `make local` prints two Dex test
-accounts (`admin@example.com` / `person@example.com`) to sign in with; see
-`docs/install.md` section 4 for signing in with a real provider like Google.
-
-## Layout
-
-- `cmd/server` — the binary. `simple-host` serves; `simple-host version`
-  prints the release, commit and schema; `simple-host migrate`
-  applies the schema and is what the pod's init container runs;
-  `simple-host restore` copies a stored version of any site, live or
-  deleted, into a site as its next version; `simple-host migrate-storage`
-  moves an older install's site volume into the bucket
-  (`docs/storage.md`); `simple-host reencrypt` rewrites every stored
-  object under the current envelope key, so old keys can be removed;
-  `simple-host prune` drops
-  expired audit/access-log partitions on a daily `CronJob`
-  (`deploy/base/cronjob-prune.yaml`), under the database's owning
-  credential rather than the application's own role;
-  `simple-host audit-verify` checks the audit log's hash chain;
-  `simple-host owner-hosts` is the reconciler that gets each owner's
-  certificate issued (`deploy/components/owner-hosts`).
-- `internal/` — one package per concern. `handler` is the HTTP surface,
-  `db` the queries, `storage` the bucket-backed site store and its cache, `migrate`
-  the embedded schema, `oidc` sign-in, `audit` the action/access log sink
-  (recorder, batching access writer, reader, and retention pruning),
-  `reqlog` the request log, `mcp` the tool adapter.
-- `deploy/base` — the application's manifests, including the `prune`
-  CronJob. `deploy/components` add the owner-hosts reconciler, an
-  in-cluster Postgres (evaluation only), MinIO, or Dex. `deploy/overlays` are environments:
-  `local` is complete, `byo` / `staging` / `production` are templates for
-  managed services.
-- `simple-host-plugin/` — the skill bundle agents install.
-- `scripts/smoke.sh` — the end-to-end check every rollout runs; `scripts/smoke-remote.sh` (`make smoke BASE=https://<base> KEY_FILE=<key file>`) is its public-HTTPS-only counterpart for a real install.
-- `test/pentest` — the scripted half of the pen-test list in
-  `docs/security-review.md`, gated behind the `pentest` build tag and a
-  live local overlay.
+The instance answers at `https://simple-host.127-0-0-1.nip.io`. `make local` prints two test accounts (`admin@example.com` and `person@example.com`). See [docs/install.md](docs/install.md) section 4 for a real identity provider.
 
 ## Configuration
 
-Everything that identifies an installation is required and has no default:
-the public base URL, the OIDC provider, the database, the bucket, the
-session signing key. Startup fails with the list of what is missing.
-`deploy/overlays/byo/config.env.example` and `secrets.env.example` name
-every variable; `docs/configuration.md` documents each one in full.
+Required, with no default: the public base URL, the OIDC provider, the database, the bucket and the session signing key. Startup fails with the list of what is missing.
 
-The database DSN must use `sslmode=verify-full` with a root certificate, and
-the bucket endpoint must be `https://`; the process refuses to start
-otherwise, unless `DB_INSECURE_ALLOWED` / `BACKUP_STORAGE_INSECURE_ALLOWED` opt
-into the weaker mode a local evaluation cluster uses. The server itself
-connects to Postgres as `simplehost_app`, a least-privilege role migration
-0020 creates; migrations always run as the owning role instead. There is no
-admin key and no synthetic admin principal: admin status follows
-`ADMIN_EMAILS`/`OIDC_ADMIN_CLAIM` on a real signed-in person.
+- [docs/configuration.md](docs/configuration.md): every variable, its default, and what it refuses.
+- `deploy/overlays/byo/config.env.example` and `secrets.env.example` name every variable.
+- [docs/storage.md](docs/storage.md): the bucket, the cache, encryption and key rotation.
+- [docs/site-isolation.md](docs/site-isolation.md): every site on its own origin, and the redirects.
 
-Sites and assets live in the bucket (`docs/storage.md`). Every object carries a server-side-encryption header (`BACKUP_SSE`, default
-`AES256`) and, optionally, a client-side envelope (`BACKUP_ENVELOPE_KEY`)
-encrypted before the object ever reaches the bucket.
+## Layout
+
+- `cmd/server`: the binary and its subcommands (`migrate`, `restore`, `reencrypt`, `verify-storage`, `audit-verify`, `prune`, `owner-hosts`, `version`).
+- `internal/`: one package per concern (`handler`, `db`, `storage`, `migrate`, `oidc`, `audit`, `mcp`).
+- `deploy/`: the manifests, optional components and environment overlays.
+- `simple-host-plugin/`: the skills and plugin agents install.
+- `scripts/smoke.sh`: the end-to-end check every rollout runs.
+- `test/pentest`: the scripted pen-test list.
 
 ## Development
 
@@ -114,22 +107,8 @@ make test-db   # go test ./... on a throwaway Postgres, as CI runs it
 make vuln      # govulncheck
 ```
 
-## More
-
-- `INSTALL.md` — the install runbook an AI agent follows on a real cluster.
-- `docs/install.md` — the full install guide, local cluster through a real
-  one with your own Postgres, bucket, and OIDC provider.
-- `docs/configuration.md` — every environment variable, its default, and
-  the refusal it triggers when set wrong.
-- `docs/security-review.md` — threat model, controls matrix, pen-test list.
-- `docs/site-isolation.md` — every site on its own origin
-  (`<site>.<owner>.<base>`), the fallback until an owner's certificate is
-  ready, and the redirects.
-- `docs/storage.md` — the bucket, the cache, encryption and key rotation.
-- `docs/cloud/` — per-cloud checklists for the platform pieces a real
-  install needs (AWS, GCP, Azure, Oracle Cloud, UpCloud).
-- `CHANGELOG.md` — the releases.
+Working rules: [AGENTS.md](AGENTS.md). What it does today, surface by surface: [FEATURES.md](FEATURES.md). Why: [INTENT.md](INTENT.md).
 
 ## Licence
 
-Apache License 2.0 — see `LICENSE` and `NOTICE`.
+Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
