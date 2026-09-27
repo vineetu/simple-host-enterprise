@@ -148,11 +148,11 @@ cloud in section 4 (Bucket) of each `docs/cloud/*.md`:
 - Oracle: Object Storage's S3 Compatibility API with a Customer Secret Key.
   The endpoint contains the tenancy's object-storage namespace.
 
-**Image.** Use the current release, `ghcr.io/vineetu/simple-host-enterprise:v1.8.0`
+**Image.** Use the current release, `ghcr.io/vineetu/simple-host-enterprise:v1.8.1`
 (public, linux/amd64 and linux/arm64), pinned by its digest:
 
 ```
-sha256:99470c54a8dbdb838e1ae840a8a7ae2081aba94b352a2fe00e5fca2118145c32
+sha256:437ba30a66f0b09e833ddcc1f4c8ff269878e245b367eacfa5de14da5456df8f
 ```
 
 That is what section 5 step 1 puts in the overlay. The release workflow
@@ -362,7 +362,7 @@ edits to them.
 
 1. `kustomization.yaml`, `images:` entry (name `ghcr.io/vineetu/simple-host-enterprise`): set `newName` to
    `ghcr.io/vineetu/simple-host-enterprise` (or your mirror) and `digest`
-   to the verified digest from section 3 (for v1.8.0, `sha256:99470c54a8dbdb838e1ae840a8a7ae2081aba94b352a2fe00e5fca2118145c32`).
+   to the verified digest from section 3 (for v1.8.1, `sha256:437ba30a66f0b09e833ddcc1f4c8ff269878e245b367eacfa5de14da5456df8f`).
    The overlay ships `sha256:REPLACE_WITH_THE_SCANNED_IMAGE_DIGEST` and the
    base `sha256:REPLACE_WITH_THE_RELEASE_DIGEST`; `make preflight` refuses
    either. Paste the digest you verified, not the one in the comment.
