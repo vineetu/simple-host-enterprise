@@ -6,11 +6,12 @@ release, commit and schema.
 
 ## Unreleased
 
-Schema 0047 (from 0042). Run `simple-host migrate` before the new image.
+Schema 0048 (from 0042). Run `simple-host migrate` before the new image.
 0043 (`site_redirects`), 0045 (`pending_site_viewers`,
 `pending_team_members`), 0046 (rewrites `audit_ensure_partitions`, creates
-audit and access-log partitions twelve months ahead) and 0047 (nullable
-`sites.access_decision*` columns) are backward-compatible. 0044
+audit and access-log partitions twelve months ahead), 0047 (nullable
+`sites.access_decision*` columns) and 0048 (`erased_owner_labels`, a
+trigger on `users`, `access_log_erase_visitor()`) are backward-compatible. 0044
 (`sites.deleted_at`, `sites.deleted_by`) is not: an older binary would serve
 sites in their recovery window again, so it refuses to start on this
 schema, and rolling back to v1.3.1 needs the database restored from before
@@ -97,6 +98,19 @@ the migration. Skills are at 0.14.0 (0.11.0 still works).
   Recently deleted, restorable for 30 days); a team with no active member
   offers "Move to team…" beside "Delete team". Nobody else's sites can be
   moved or deleted by an admin.
+- Data subject requests: a disabled person's row on `/admin` offers
+  "Export data" (`GET /api/admin/users/{username}/export`, one zip of their
+  account, teams, viewer grants, key/connected-app/session metadata, every
+  site with its live files, saved data and history, versions and assets, and
+  their audit events) and "Delete person and all data"
+  (`POST /api/admin/users/{username}/erase`, username typed to confirm):
+  sites skip Recently deleted and their objects are queued for the sweep;
+  keys, connected apps, sessions, memberships, viewer grants, pending grants
+  for their email and the access-log rows of their visits go too. Refused
+  while they are a team's last member. Audit rows stay (hash chain), keep
+  the opaque id, and the new `user_erased` row names nobody. The name stays
+  held so nobody inherits old links. Audited as `admin_user_export` and
+  `user_erased`.
 
 ### Operations
 - Startup warns when no admin is configured (neither `ADMIN_EMAILS` nor

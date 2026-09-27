@@ -175,6 +175,7 @@ func (h *AdminHandler) Register(mux *http.ServeMux, authMiddleware, skillVersion
 	mux.Handle("POST /api/admin/deleted-sites/{owner}/{sitename}/restore", dashboardCheck(adminAPI(http.HandlerFunc(h.restoreDeletedSiteAsAdmin))))
 	h.registerAccessRequestRoutes(mux, adminAPI, dashboardCheck)
 	h.registerMoveRoutes(mux, adminAPI, dashboardCheck)
+	h.registerEraseRoutes(mux, adminAPI, dashboardCheck)
 }
 
 // requireAdmin is auth.RequireAdmin plus an access_denied audit row when a
@@ -548,6 +549,7 @@ func writeUserBlockHeader(b *strings.Builder, hosts HostModel, u db.User, siteCo
 	} else if u.DisabledAt != nil {
 		nameChips = ` <span class="chip chip-warn">disabled</span>`
 		actions += leaverSiteActions(u.Username, siteCount, true)
+		actions += personDataActions(u.Username)
 		actions += fmt.Sprintf(`<form method="POST" action="/api/admin/users/%s/enable" onsubmit="return confirm('Re-enable %s? They will be able to sign in again.');"><button type="submit" class="btn-reset">Enable</button></form>`,
 			html.EscapeString(u.Username),
 			html.EscapeString(u.Username),
@@ -596,6 +598,22 @@ func leaverSiteActions(username string, siteCount int, person bool) string {
 			name, sites, name)
 	}
 	return actions
+}
+
+// personDataActions are a disabled person's data-request actions: export
+// everything held about them, and delete them with all of it, confirmed by
+// typing the username.
+func personDataActions(username string) string {
+	base := "/api/admin/users/" + url.PathEscape(username)
+	question, _ := json.Marshal("Delete " + username + " and all their data? This cannot be undone. " +
+		"Their sites (including recently deleted ones) with their files, saved data, history and assets, " +
+		"their API keys, connected apps, sessions, team memberships, the viewer access they hold, " +
+		"grants waiting for their email, and the record of their visits are deleted for good. " +
+		"The audit log keeps its rows under an anonymous id. Their name stays reserved so nobody inherits their links. " +
+		"Type " + username + " to confirm:")
+	onsubmit := "var n = prompt(" + string(question) + ", ''); if (n === null || !n.trim()) return false; this.confirm.value = n; return true;"
+	return fmt.Sprintf(`<a class="btn-view" href="%s/export" download>Export data</a><form method="POST" action="%s/erase" onsubmit="%s"><input type="hidden" name="confirm"><button type="submit" class="btn-reject">Delete person and all data</button></form>`,
+		html.EscapeString(base), html.EscapeString(base), html.EscapeString(onsubmit))
 }
 
 // writeSiteRow emits one row of a site list. The grouped list under each user

@@ -77,7 +77,7 @@ func TestArchiveStreamKeepsWebsiteContentsAtZipRoot(t *testing.T) {
 	}
 	var output bytes.Buffer
 	writer := zip.NewWriter(&output)
-	if err := streamArchiveEntries(context.Background(), writer, root, entries); err != nil {
+	if err := streamArchiveEntries(context.Background(), writer, root, entries, ""); err != nil {
 		t.Fatalf("streamArchiveEntries: %v", err)
 	}
 	if err := writer.Close(); err != nil {

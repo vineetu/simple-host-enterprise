@@ -1,0 +1,234 @@
+package handler
+
+import (
+	"archive/zip"
+	"bytes"
+	"context"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/vsriram/simple-host/internal/audit"
+	db "github.com/vsriram/simple-host/internal/db"
+)
+
+// personWithData gives alice a live site with saved data and an asset, a
+// recently deleted site, a team, viewer access to vera's site, and a team
+// site she deleted; then disables her.
+func personWithData(t *testing.T) *accessWorld {
+	t.Helper()
+	w := newAccessWorld(t)
+	w.deploy("alice", "/api/sites/tracker")
+	if rec := w.siteRequest("alice", http.MethodPut, "tracker.alice."+accessBase, "/api/site/state/versioned", `{"version":0,"state":{"n":1}}`); rec.Code != http.StatusOK {
+		t.Fatalf("save state = %d %s", rec.Code, rec.Body)
+	}
+	if rec := w.uploadAsset("alice", "alice", "tracker", "photo.txt", []byte("asset bytes")); rec.Code >= 300 {
+		t.Fatalf("upload asset = %d %s", rec.Code, rec.Body)
+	}
+	w.deploy("alice", "/api/sites/old")
+	if rec := w.api("alice", http.MethodDelete, "/api/sites/old", nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete old = %d %s", rec.Code, rec.Body)
+	}
+	w.newTeam("crew", "alice", "mo")
+	w.deploy("mo", "/api/collaboration/sites/team-crew/board")
+	if rec := w.api("alice", http.MethodDelete, "/api/collaboration/sites/team-crew/board", nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete team site = %d %s", rec.Code, rec.Body)
+	}
+	w.deploy("vera", "/api/sites/notes")
+	if rec := w.api("vera", http.MethodPost, "/api/collaboration/sites/vera/notes/viewers", map[string]any{"usernames": []string{"alice"}}); rec.Code != http.StatusOK {
+		t.Fatalf("grant viewer = %d %s", rec.Code, rec.Body)
+	}
+	w.cookie("alice", "")
+	return w
+}
+
+func TestExportPersonData(t *testing.T) {
+	w := personWithData(t)
+	if rec := w.admin(http.MethodGet, "/api/admin/users/alice/export"); rec.Code != http.StatusConflict {
+		t.Fatalf("export of a person who can sign in = %d %s, want 409", rec.Code, rec.Body)
+	}
+	w.disable("alice")
+	rec := w.admin(http.MethodGet, "/api/admin/users/alice/export")
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/zip" {
+		t.Fatalf("export = %d %s", rec.Code, rec.Header())
+	}
+	archive, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{}
+	for _, f := range archive.File {
+		r, _ := f.Open()
+		body, _ := io.ReadAll(r)
+		r.Close()
+		files[f.Name] = string(body)
+	}
+	for name, want := range map[string]string{
+		"account.json":                          `"email":"alice@example.com"`,
+		"teams.json":                            `"team":"team-crew"`,
+		"viewer-grants.json":                    `"owner":"vera"`,
+		"api-keys.json":                         `"name":"test"`,
+		"sessions.json":                         `"created_at"`,
+		"connected-apps.json":                   `[]`,
+		"sites/tracker/site.json":               `"name":"tracker"`,
+		"sites/tracker/saved-data.json":         `"n": 1`,
+		"sites/tracker/saved-data-history.json": `"n": 1`,
+		"sites/tracker/versions.json":           `"version":1`,
+		"sites/tracker/assets.json":             `"name":"photo.txt"`,
+		"sites/tracker/files/index.html":        `<h1>hi</h1>`,
+		"sites/old/site.json":                   `"name":"old"`,
+		"audit-events.jsonl":                    `"action":"site_create"`,
+	} {
+		if !strings.Contains(files[name], want) {
+			t.Errorf("%s = %q, want it to contain %q", name, files[name], want)
+		}
+	}
+	if strings.Contains(files["sites/old/site.json"], `"deleted_at":null`) {
+		t.Errorf("recently deleted site not marked deleted: %s", files["sites/old/site.json"])
+	}
+	assetFiles := 0
+	for name, body := range files {
+		if strings.HasPrefix(name, "sites/tracker/assets/") {
+			assetFiles++
+			if body != "asset bytes" {
+				t.Errorf("asset %s = %q", name, body)
+			}
+		}
+	}
+	if assetFiles != 1 {
+		t.Errorf("asset files = %d, want 1", assetFiles)
+	}
+	// Never a secret.
+	all := strings.Join(func() []string {
+		var out []string
+		for _, b := range files {
+			out = append(out, b)
+		}
+		return out
+	}(), "\n")
+	if strings.Contains(all, w.apiKeys["alice"]) || strings.Contains(all, "key_hash") {
+		t.Error("export carries key material")
+	}
+	if n := w.count(`SELECT count(*) FROM audit_events WHERE action = 'admin_user_export' AND detail->>'subject_id' = $1`, w.users["alice"]); n != 1 {
+		t.Errorf("admin_user_export rows = %d, want 1", n)
+	}
+}
+
+func TestErasePersonRefusals(t *testing.T) {
+	w := newAccessWorld(t)
+	if rec := w.adminPost("/api/admin/users/alice/erase", "confirm=alice"); rec.Code != http.StatusConflict {
+		t.Errorf("erase of a person who can sign in = %d %s, want 409", rec.Code, rec.Body)
+	}
+	w.disable("alice")
+	if rec := w.adminPost("/api/admin/users/alice/erase", "confirm=alic"); rec.Code != http.StatusBadRequest {
+		t.Errorf("erase with the wrong confirmation = %d %s, want 400", rec.Code, rec.Body)
+	}
+	// alice is the last member of team-solo: refused until the team goes.
+	w.newTeam("solo", "mo")
+	if _, err := w.database.Exec(`UPDATE team_members SET user_id = $1 WHERE team_id = (SELECT id FROM users WHERE username = 'team-solo')`, w.users["alice"]); err != nil {
+		t.Fatal(err)
+	}
+	rec := w.adminPost("/api/admin/users/alice/erase", "confirm=alice")
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "team-solo") {
+		t.Errorf("erase of a team's last member = %d %s, want 409 naming the team", rec.Code, rec.Body)
+	}
+	if n := w.count(`SELECT count(*) FROM users WHERE id = $1`, w.users["alice"]); n != 1 {
+		t.Error("a refused erasure removed the account")
+	}
+	if rec := w.adminPost("/api/admin/teams/team-solo/delete", ""); rec.Code != http.StatusOK {
+		t.Fatalf("delete team = %d %s", rec.Code, rec.Body)
+	}
+	if rec := w.adminPost("/api/admin/users/alice/erase", "confirm=alice"); rec.Code != http.StatusOK {
+		t.Errorf("erase after the team went = %d %s", rec.Code, rec.Body)
+	}
+	if rec := w.adminPost("/api/admin/users/nobody/erase", "confirm=nobody"); rec.Code != http.StatusNotFound {
+		t.Errorf("erase of a missing name = %d", rec.Code)
+	}
+}
+
+func TestErasePersonRemovesEverything(t *testing.T) {
+	w := personWithData(t)
+	w.disable("alice")
+	alice := w.users["alice"]
+	ctx := context.Background()
+	siteIDs := []string{w.siteID("alice", "tracker")}
+	var oldID string
+	_ = w.database.QueryRow(`SELECT id::text FROM sites WHERE user_id = $1 AND name = 'old'`, alice).Scan(&oldID)
+	siteIDs = append(siteIDs, oldID)
+	notes := w.siteID("vera", "notes")
+	for _, stmt := range []string{
+		`INSERT INTO pending_site_viewers (site_id, email) VALUES ('` + notes + `', 'alice@example.com')`,
+		`INSERT INTO access_log (user_id, owner_label, site_name, path, method, status) VALUES ('` + alice + `', 'vera', 'notes', '/', 'GET', 200)`,
+		`INSERT INTO access_log (user_id, owner_label, site_name, path, method, status) VALUES ('` + w.users["mo"] + `', 'vera', 'notes', '/', 'GET', 200)`,
+		`INSERT INTO oauth_clients (client_id, client_name, redirect_uris) VALUES ('c1', 'Agent', '[]')`,
+		`INSERT INTO oauth_grants (user_id, client_id, resource) VALUES ('` + alice + `', 'c1', 'https://x')`,
+	} {
+		if _, err := w.database.Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+
+	rec := w.adminPost("/api/admin/users/alice/erase", "confirm=alice")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("erase = %d %s", rec.Code, rec.Body)
+	}
+
+	// Nothing outside the audit log names her id.
+	for _, ref := range []string{
+		"users.id", "sites.user_id", "sites.deleted_by", "sites.network_requested_by", "versions.uploaded_by",
+		"site_assets.created_by", "site_state_history.written_by", "site_viewers.principal_id", "site_viewers.added_by",
+		"team_members.user_id", "team_members.added_by", "pending_site_viewers.added_by", "pending_team_members.added_by",
+		"sessions.user_id", "api_keys.user_id", "oauth_grants.user_id", "oauth_codes.user_id", "access_log.user_id",
+		"team_audit.actor_id", "team_audit.subject_id", "network_access_approvals.admin_id",
+	} {
+		table, column, _ := strings.Cut(ref, ".")
+		if n := w.count(`SELECT count(*) FROM `+table+` WHERE `+column+` = $1`, alice); n != 0 {
+			t.Errorf("%s still names her: %d rows", ref, n)
+		}
+	}
+	if n := w.count(`SELECT count(*) FROM rate_limit_counters WHERE strpos(key, $1) > 0`, alice); n != 0 {
+		t.Errorf("rate-limit rows left: %d", n)
+	}
+	if n := w.count(`SELECT count(*) FROM pending_site_viewers WHERE email = 'alice@example.com'`); n != 0 {
+		t.Errorf("pending grants naming her email left: %d", n)
+	}
+	if n := w.count(`SELECT count(*) FROM access_log WHERE user_id = $1`, w.users["mo"]); n != 1 {
+		t.Errorf("somebody else's visits were removed: %d left, want 1", n)
+	}
+	for _, id := range siteIDs {
+		if n := w.count(`SELECT count(*) FROM storage_retired WHERE object_key = $1`, "sites/"+id+"/"); n != 1 {
+			t.Errorf("site %s files queued %d times, want 1", id, n)
+		}
+	}
+	// The team she was in lives on with mo, and the site she deleted there
+	// is still restorable by its team.
+	if !w.teamExists("team-crew") || w.count(`SELECT count(*) FROM sites s JOIN users u ON u.id = s.user_id WHERE u.username = 'team-crew' AND s.deleted_at IS NOT NULL`) != 1 {
+		t.Error("the team or its recently deleted site went with her")
+	}
+
+	// One user_erased row, naming her by id only.
+	var detail string
+	if err := w.database.QueryRow(`SELECT detail::text FROM audit_events WHERE action = 'user_erased'`).Scan(&detail); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(detail, alice) || strings.Contains(detail, "alice@") || strings.Contains(detail, `"alice"`) || !strings.Contains(detail, `"sites_deleted": 2`) {
+		t.Errorf("user_erased detail = %s", detail)
+	}
+	if n := w.count(`SELECT count(*) FROM audit_events WHERE actor_id = $1`, alice); n == 0 {
+		t.Error("her earlier audit rows were removed")
+	}
+	report, err := audit.VerifyChain(ctx, w.database, audit.ChainExpectation{})
+	if err != nil || report.Break != nil {
+		t.Fatalf("audit chain after erase: %+v %v", report, err)
+	}
+
+	// Her name stays held: a new sign-in gets a suffixed name, not her links.
+	_, err = db.CreateOIDCUser(ctx, w.database, "alice", "sub-new", "alice@example.com", false)
+	if !isOwnerLabelViolation(err) {
+		t.Errorf("new account under the erased name: %v", err)
+	}
+	if code := w.view("", "alice", "tracker", false); code != http.StatusNotFound {
+		t.Errorf("old address = %d, want 404", code)
+	}
+}

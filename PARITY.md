@@ -60,6 +60,7 @@ that should get it). Last derived from both `FEATURES.md` files and code on 2026
 | Rate limits and abuse caps | per-IP token buckets in memory; size caps; write auth; reserved names | per-pod buckets plus Postgres-shared counters for sign-in, hand-off, key mint, connector | `different on purpose` — one process needs no shared counters |
 | Security headers and CSP | `SecurityHeaders`, nonce CSP on apex pages | `security.go`, same approach | `same` |
 | Admin | admin key or admin user; usage, bulk participant accounts, delete account, API traffic | IdP admins; disable/enable (revokes sessions, keys, apps), offboard by email, access requests, rankings, export | `different on purpose` — event organiser vs company IT |
+| Erase a person's data (data subject requests) | self-serve account delete (being built) | admin only, for a disabled person: export one zip of everything held, or delete the person and all their data for good (audit rows keep an opaque id; name held) | `different on purpose` — self-serve on hosted, admin on enterprise: the company controls a work account |
 | Admin take-down of one site | none (only deleting the whole account) | Restrict any site to only-me with a reason the owner sees; sticky (the owner cannot raise it, `site_restricted_by_admin`) and kept through rename or hand-over; only an admin's Lift restores it; audited | `gap → hosted` — abuse reports need a reversible take-down that keeps the evidence |
 | Dashboard | `/dashboard`, owner app, per-site analytics page | `/dashboard`: keys, sites, access, viewers, assets, usage | `same` — each shows its own features |
 | AI create and voice input | Grok sidecar only, local speech-to-text | none | `different on purpose` — enterprise: the publisher is the person's own agent via MCP; content stays in the cluster |
@@ -119,7 +120,7 @@ Every numbered `FEATURES.md` section, per repo, and the rows above that cover it
 | enterprise | Saved state and its history | Saved state; Saved-state history |
 | enterprise | Assets (uploaded files) | Assets |
 | enterprise | Audit log, access log, export, retention | Audit log |
-| enterprise | Admin page | Admin; Admin take-down of one site |
+| enterprise | Admin page | Admin; Admin take-down of one site; Erase a person's data |
 | enterprise | Dashboard | Dashboard |
 | enterprise | Search, showcase, owner index | Search and company showcase; Person / owner index page |
 | enterprise | Metrics, health, request log, rate limits | Health and metrics; Rate limits and abuse caps; Analytics |
