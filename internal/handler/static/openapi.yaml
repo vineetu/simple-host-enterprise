@@ -3564,7 +3564,7 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     Unauthorized:
-      description: 'Missing or invalid credentials. For an `X-API-Key` that did not authenticate, `code` says why: `key_expired` (the body names the date; `expired_at` carries it), `key_revoked`, `key_owner_disabled` or `key_not_recognised`. A key with 14 days or less left gets `X-Key-Expires` (RFC 3339) and `X-Simple-Host-Notice` on every response.'
+      description: 'Missing or invalid credentials. For an `X-API-Key` that did not authenticate, `code` says why: `key_expired` (the body names the date; `expired_at` carries it), `key_revoked` or `key_not_recognised` (also given for any key of a disabled person). A key with 14 days or less left gets `X-Key-Expires` (RFC 3339) and `X-Simple-Host-Notice` on every response.'
       content:
         application/json:
           schema:

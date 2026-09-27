@@ -52,8 +52,9 @@ before the new image. Skills are at 0.15.0 (0.11.0 still works).
 - A new key keeps its own last four characters; the dashboard shows
   "ends …abcd" (older keys: "earlier key"), when it was last used, and
   "expires soon" in its last 14 days.
-- A refused key says why: `key_expired` (with the date), `key_revoked`,
-  `key_owner_disabled` or `key_not_recognised`. A key with 14 days or less
+- A refused key says why: `key_expired` (with the date), `key_revoked` or
+  `key_not_recognised` (also the answer for a disabled person's key, so a
+  found key does not reveal that its owner left). A key with 14 days or less
   left gets `X-Key-Expires` and `X-Simple-Host-Notice` on every response.
 - Admins revoke a leaked key by pasting it on /admin ("Revoke a leaked
   key", `POST /api/admin/keys/revoke`): only that key stops working, and the

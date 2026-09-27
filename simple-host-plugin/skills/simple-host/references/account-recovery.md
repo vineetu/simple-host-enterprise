@@ -24,8 +24,7 @@ the active skill version for `GET /api/me`:
   workflow. Do not ask for a new key.
 - `401`: preserve it and go to "Get a key" below — the key was revoked,
   expired, or never valid. The body's `code` says which: `key_expired`,
-  `key_revoked`, `key_owner_disabled` (the person was disabled; a new key
-  will not help, so stop and tell the user) or `key_not_recognised`.
+  `key_revoked` or `key_not_recognised`.
 - `429`, network errors, or server errors: preserve it and retry verification
   only, honoring `Retry-After`. Do not ask for a new key.
 - Malformed or partial JSON, or a username mismatch: preserve it and stop with

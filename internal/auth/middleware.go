@@ -169,7 +169,8 @@ func warnKeyExpiry(h http.Header, expiresAt, now time.Time) {
 }
 
 // keyRefusal is the 401 body for an X-API-Key that did not authenticate:
-// which of expired, revoked, owner disabled or not recognised applies, so a
+// which of expired, revoked or not recognised applies (a disabled person's
+// key is "not recognised", whatever its state), so a
 // failing job's log says why. Only the key's own holder can learn this, and
 // only for the key they hold.
 type keyRefusal struct {
@@ -190,7 +191,11 @@ func refusedKey(ctx context.Context, database *sql.DB, apiKey string) keyRefusal
 	}
 	switch {
 	case rec.OwnerDisabled:
-		return keyRefusal{Error: "the person this API key belongs to has been disabled, so their keys no longer work", Code: "key_owner_disabled"}
+		// Keys are secret, but one can turn up where its holder no longer
+		// controls it (an old commit): it must not tell whoever finds it
+		// that its owner was disabled (has most likely left). Only that
+		// owner's own session could be told, and a disabled person has none.
+		return keyRefusal{Error: "this API key is not recognised; mint a new one on the dashboard", Code: "key_not_recognised"}
 	case rec.RevokedAt != nil:
 		return keyRefusal{Error: "this API key was revoked on " + rec.RevokedAt.UTC().Format("2006-01-02") + "; mint a new one on the dashboard", Code: "key_revoked"}
 	default:

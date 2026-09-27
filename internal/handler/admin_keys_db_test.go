@@ -108,7 +108,9 @@ func TestKeyRefusalSaysWhy(t *testing.T) {
 		t.Fatalf("expired key = %d %s", rec.Code, rec.Body)
 	}
 	w.disable("olly")
-	if rec := w.withKey(disabled); !containsCode(rec.Body.Bytes(), "key_owner_disabled") {
+	// A disabled person's key does not say so: to whoever holds it, it is
+	// just not recognised.
+	if rec := w.withKey(disabled); rec.Code != http.StatusUnauthorized || !containsCode(rec.Body.Bytes(), "key_not_recognised") || strings.Contains(rec.Body.String(), "disabled") {
 		t.Fatalf("disabled owner's key = %d %s", rec.Code, rec.Body)
 	}
 	if rec := w.withKey("shk_" + strings.Repeat("0", 64)); rec.Code != http.StatusUnauthorized || !containsCode(rec.Body.Bytes(), "key_not_recognised") {

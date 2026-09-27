@@ -108,8 +108,9 @@ Config names are documented in `docs/configuration.md`; schema in
   characters (`last4`, shown as "ends …abcd"; keys minted before 0050 show
   "earlier key"), and the dashboard row shows last used and "expires soon"
   inside 14 days. A refused key says why in a 401 `code`: `key_expired`
-  (with the date and "mint a new one on the dashboard"), `key_revoked`,
-  `key_owner_disabled` or `key_not_recognised`. While a key has 14 days or
+  (with the date and "mint a new one on the dashboard"), `key_revoked` or
+  `key_not_recognised` (also for any key of a disabled person, so a found
+  key does not reveal that its owner left). While a key has 14 days or
   less left, every response to it carries `X-Key-Expires` (RFC 3339) and an
   `X-Simple-Host-Notice` line. An admin revokes a leaked key by pasting it on
   /admin (`POST /api/admin/keys/revoke`, section 13).
