@@ -222,7 +222,9 @@ Config names are documented in `docs/configuration.md`; schema in
   (`sites.idle_since`; audited `site_idle_marked` as `system`), its owner or
   every team member sees "Not used lately" on the dashboard (the date it
   moves, Keep, and Download: the whole-site zip of section 5's download
-  link) and, with `SMTP_URL`, gets an
+  link) and, with `SMTP_URL` (STARTTLS required unless `?insecure=1`;
+  `SMTP_FROM` may carry a display name; non-ASCII subjects RFC 2047
+  encoded), gets an
   email ("not opened or changed in N days"); admins see the list on /admin.
   The final check and the delete run under the site's lock and row lock, so
   a use or Keep in flight either lands first (and saves the site) or finds

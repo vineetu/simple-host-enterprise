@@ -18,8 +18,8 @@ type IdleCleanupConfig struct {
 	// or wrote saved data on for this many days is marked, and moves to Recently deleted 30 days later
 	// unless someone keeps it or it is used again.
 	Days int
-	// SMTPURL is SMTP_URL (smtp://user:pass@host:587, STARTTLS when the
-	// server offers it, or smtps://host:465): when set, the owner (or every
+	// SMTPURL is SMTP_URL (smtp://user:pass@host:587, STARTTLS required
+	// unless it ends in ?insecure=1, or smtps://host:465): when set, the owner (or every
 	// member of a team) is emailed when a site is marked. Without it the
 	// dashboard notice and the admin list are the only notice.
 	SMTPURL string
@@ -44,8 +44,9 @@ func loadIdleCleanup() (IdleCleanupConfig, error) {
 		return cfg, nil
 	}
 	u, err := url.Parse(cfg.SMTPURL)
-	if err != nil || (u.Scheme != "smtp" && u.Scheme != "smtps") || u.Hostname() == "" {
-		return IdleCleanupConfig{}, fmt.Errorf("SMTP_URL must look like smtp://user:password@host:587 or smtps://host:465")
+	if err != nil || (u.Scheme != "smtp" && u.Scheme != "smtps") || u.Hostname() == "" ||
+		(u.RawQuery != "" && u.RawQuery != "insecure=1") || (u.Scheme == "smtps" && u.RawQuery != "") {
+		return IdleCleanupConfig{}, fmt.Errorf("SMTP_URL must look like smtp://user:password@host:587 (STARTTLS required; add ?insecure=1 only for a relay without TLS) or smtps://host:465")
 	}
 	if _, err := mail.ParseAddress(cfg.SMTPFrom); err != nil {
 		return IdleCleanupConfig{}, fmt.Errorf("SMTP_FROM must be an email address when SMTP_URL is set")

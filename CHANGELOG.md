@@ -82,7 +82,8 @@ before the new image. Skills are at 0.15.0 (0.11.0 still works).
   upgrade; its owner or team sees "Not used
   lately" on the dashboard with the date, Keep and Download, admins see the
   list on /admin, and with `SMTP_URL`/`SMTP_FROM` the owner (or each team
-  member) is emailed. 30 days later, still unused and not kept, it moves to
+  member) is emailed (STARTTLS required on `smtp://` unless the URL ends in
+  `?insecure=1`; a display-name `SMTP_FROM` works). 30 days later, still unused and not kept, it moves to
   Recently deleted. Any use unmarks it; Keep (`POST .../keep`, MCP
   `keep_site`) takes it out for good. Every step is audited.
 
