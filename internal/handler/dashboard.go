@@ -385,9 +385,9 @@ const dashboardSitesScript = `<script>
       '<button type="button" class="btn-login access-button">Save</button></div>' +
       '<p class="share-help access-status">' + (site.network_request ? 'Network access requested; waiting for ' + (site.network_request.approvals_required > 1 ? 'two admins' + approvalProgress(site.network_request) : 'an admin') + '. The site keeps its current level until then.' : '') + '</p></div>' +
       '<div class="site-subsection"><h4>Viewers</h4>' +
-      '<p class="share-help">Named viewers can open the site while it is set to specific people or teams. Adding one sets that level.</p>' +
+      '<p class="share-help">Named viewers can open the site while it is set to specific people or teams. Adding one sets that level. Someone who hasn\'t signed in yet can be added by work email; they can open the site after their first sign-in.</p>' +
       '<div class="viewer-list" aria-live="polite"></div>' +
-      '<div class="add-row"><input type="text" class="add-viewer-input" placeholder="username, another-username" autocomplete="off">' +
+      '<div class="add-row"><input type="text" class="add-viewer-input" placeholder="username or work email, another" autocomplete="off">' +
       '<button type="button" class="btn-login add-viewer-button">Add</button></div></div>' +
       '<div class="site-subsection"><h4>Assets</h4><div class="asset-list" aria-live="polite"></div></div>' +
       '<div class="site-subsection site-tabs"><div class="site-tab-buttons">' +
@@ -476,7 +476,7 @@ const dashboardSitesScript = `<script>
           viewers.forEach(function(v){
             var row = document.createElement('div');
             row.className = 'rank-row';
-            row.innerHTML = '<span class="rank-name">' + esc(v.username) + ' <span class="rank-sub">' + esc(v.kind) + '</span></span>' +
+            row.innerHTML = '<span class="rank-name">' + esc(v.username) + ' <span class="rank-sub">' + (v.pending ? 'hasn\'t signed in yet' : esc(v.kind)) + '</span></span>' +
               '<button type="button" class="btn-reject remove-viewer" data-username="' + esc(v.username) + '">Remove</button>';
             viewerList.appendChild(row);
           });

@@ -345,9 +345,33 @@ func (h *AuthHandler) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer audit.Rollback(tx)
-	session, err := db.CreateSession(r.Context(), tx, user.ID, expiresAt, ip, r.UserAgent())
+	// Sites and teams shared with this email before the person had an
+	// account become theirs now. refuseIdentity above has already required a
+	// verified email at an allowed domain. Checked at every sign-in, not only
+	// the first, so a grant that raced the account's creation still lands.
+	converted, err := db.ConvertPendingGrants(r.Context(), tx, user.ID, email)
+	var session db.Session
+	if err == nil {
+		session, err = db.CreateSession(r.Context(), tx, user.ID, expiresAt, ip, r.UserAgent())
+	}
 	if err == nil {
 		err = h.audit.RecordTx(r.Context(), tx, audit.Event{ActorID: user.ID, Action: "sign_in", Detail: "session " + session.ID, RequestID: auditRequestID(r.Context())})
+	}
+	for _, grant := range converted {
+		if err != nil {
+			break
+		}
+		extra := map[string]any{"email": email}
+		if grant.SiteID != "" {
+			extra["site_id"] = grant.SiteID
+		} else {
+			extra["team_id"] = grant.TeamID
+		}
+		err = h.audit.RecordTx(r.Context(), tx, audit.Event{
+			ActorID: user.ID, Action: "pending_grant_converted",
+			OwnerID: grant.OwnerID, SiteID: grant.SiteID, TeamID: grant.TeamID,
+			RequestID: auditRequestID(r.Context()), Extra: extra,
+		})
 	}
 	if err == nil {
 		err = audit.Commit(tx)

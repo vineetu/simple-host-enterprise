@@ -20,6 +20,9 @@ type SiteViewer struct {
 	Kind        string // "person" or "team", from users.kind
 	AddedBy     *string
 	CreatedAt   time.Time
+	// Pending marks a person named by email who has not signed in yet:
+	// Username is then the address and PrincipalID is empty.
+	Pending bool
 }
 
 // ViewerCandidate is a person or team that could be added to a site's viewer
@@ -144,15 +147,23 @@ func ListRestrictedSiteIDs(ctx context.Context, q Querier) (map[string]bool, err
 }
 
 const listSiteViewersQuery = `
-	SELECT u.id::text, u.username, u.kind, sv.added_by::text, sv.created_at
-	FROM site_viewers sv
-	INNER JOIN users u ON u.id = sv.principal_id
-	WHERE sv.site_id = $1::uuid
-	ORDER BY lower(u.username), u.username, u.id
+	SELECT principal_id, username, kind, added_by, created_at, pending
+	FROM (
+		SELECT u.id::text AS principal_id, u.username, u.kind, sv.added_by::text AS added_by, sv.created_at, false AS pending
+		FROM site_viewers sv
+		INNER JOIN users u ON u.id = sv.principal_id
+		WHERE sv.site_id = $1::uuid
+		UNION ALL
+		SELECT '', p.email, 'person', p.added_by::text, p.created_at, true
+		FROM pending_site_viewers p
+		WHERE p.site_id = $1::uuid
+	) v
+	ORDER BY pending, lower(username), username, principal_id
 `
 
 // ListSiteViewers returns a site's current viewer list, people and teams
-// together, for the dashboard's viewer-list page.
+// together, then the people named by email who have not signed in yet
+// (Pending), for the dashboard's viewer-list page.
 func ListSiteViewers(ctx context.Context, q Querier, siteID string) ([]SiteViewer, error) {
 	rows, err := q.QueryContext(ctx, listSiteViewersQuery, siteID)
 	if err != nil {
@@ -164,7 +175,7 @@ func ListSiteViewers(ctx context.Context, q Querier, siteID string) ([]SiteViewe
 	for rows.Next() {
 		var v SiteViewer
 		var addedBy sql.NullString
-		if err := rows.Scan(&v.PrincipalID, &v.Username, &v.Kind, &addedBy, &v.CreatedAt); err != nil {
+		if err := rows.Scan(&v.PrincipalID, &v.Username, &v.Kind, &addedBy, &v.CreatedAt, &v.Pending); err != nil {
 			return nil, err
 		}
 		if addedBy.Valid {
@@ -227,7 +238,10 @@ const resolveRequestedViewersQuery = `
 `
 
 // GrantSiteViewers resolves a bounded username batch and adds them to a
-// site's viewer list, restricting the site the moment the first row lands.
+// site's viewer list. An email names the person whose account carries it,
+// or, when nobody has signed in with it yet, is kept as a pending grant
+// (counted against MaxSiteViewers) until they do. The caller has checked
+// each email's shape and domain. It restricts the site the moment the first row lands.
 // Granting also moves the site to the named-viewers level (AccessSpecific):
 // a viewer list means nothing at any other level. It takes the same
 // LockSiteCollaboration advisory lock deploys and access changes take.
@@ -242,12 +256,16 @@ func GrantSiteViewers(ctx context.Context, tx *sql.Tx, ownerID, siteName, siteID
 		return nil, err
 	}
 
-	normalized, err := normalizeUsernames(usernames)
+	requested, err := normalizeUsernames(usernames)
 	if err != nil {
 		return nil, err
 	}
-	if len(normalized) == 0 {
+	if len(requested) == 0 {
 		return ListSiteViewers(ctx, tx, siteID)
+	}
+	normalized, pending, err := resolveEmailNames(ctx, tx, requested)
+	if err != nil {
+		return nil, err
 	}
 
 	resolvedRows, err := tx.QueryContext(ctx, resolveRequestedViewersQuery, pq.Array(normalized))
@@ -283,11 +301,20 @@ func GrantSiteViewers(ctx context.Context, tx *sql.Tx, ownerID, siteName, siteID
 	}
 	existing := make(map[string]struct{}, len(current))
 	for _, v := range current {
-		existing[v.PrincipalID] = struct{}{}
+		if v.Pending {
+			existing["@"+v.Username] = struct{}{}
+		} else {
+			existing[v.PrincipalID] = struct{}{}
+		}
 	}
 	newViewers := 0
 	for _, id := range ids {
 		if _, ok := existing[id]; !ok {
+			newViewers++
+		}
+	}
+	for _, email := range pending {
+		if _, ok := existing["@"+email]; !ok {
 			newViewers++
 		}
 	}
@@ -297,6 +324,11 @@ func GrantSiteViewers(ctx context.Context, tx *sql.Tx, ownerID, siteName, siteID
 
 	if len(ids) > 0 {
 		if _, err := tx.ExecContext(ctx, grantSiteViewersQuery, siteID, pq.Array(ids), addedByID); err != nil {
+			return nil, err
+		}
+	}
+	if len(pending) > 0 {
+		if _, err := tx.ExecContext(ctx, addPendingSiteViewersQuery, siteID, pq.Array(pending), addedByID); err != nil {
 			return nil, err
 		}
 	}
@@ -313,15 +345,36 @@ const revokeSiteViewerQuery = `
 `
 
 // RevokeSiteViewer removes one principal from a site's viewer list. It
-// reports whether a row was actually removed.
-func RevokeSiteViewer(ctx context.Context, tx *sql.Tx, ownerID, siteName, siteID, username string) (bool, error) {
+// reports whether a row was actually removed, and whether that row was a
+// pending grant. An email removes the pending grant for it, or else the
+// viewer whose account carries it.
+func RevokeSiteViewer(ctx context.Context, tx *sql.Tx, ownerID, siteName, siteID, username string) (removed, pending bool, err error) {
 	if err := LockSiteCollaboration(ctx, tx, ownerID, siteName); err != nil {
-		return false, err
+		return false, false, err
 	}
 	if err := requireSiteIncarnation(ctx, tx, ownerID, siteName, siteID); err != nil {
-		return false, err
+		return false, false, err
 	}
-	result, err := tx.ExecContext(ctx, revokeSiteViewerQuery, siteID, username)
+	if IsEmailName(username) {
+		removed, err := execAffected(ctx, tx, removePendingSiteViewerQuery, siteID, username)
+		if err != nil || removed {
+			return removed, removed, err
+		}
+		byEmail, _, err := resolveEmails(ctx, tx, []string{username})
+		if err != nil {
+			return false, false, err
+		}
+		if byEmail[username] == "" {
+			return false, false, nil
+		}
+		username = byEmail[username]
+	}
+	removed, err = execAffected(ctx, tx, revokeSiteViewerQuery, siteID, username)
+	return removed, false, err
+}
+
+func execAffected(ctx context.Context, tx *sql.Tx, query string, args ...any) (bool, error) {
+	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return false, err
 	}

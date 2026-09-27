@@ -6,9 +6,11 @@ release, commit and schema.
 
 ## Unreleased
 
-Schema 0043 (`sites.deleted_at`, `sites.deleted_by`) is not marked
+Schema 0044. 0043 (`sites.deleted_at`, `sites.deleted_by`) is not marked
 backward-compatible: an older binary would serve sites in their recovery
-window again, so it refuses to start on this schema.
+window again, so it refuses to start on this schema. 0044 is
+backward-compatible (adds `pending_site_viewers` and `pending_team_members`).
+Skills are at 0.13.2.
 
 ### Sites
 - Deleting a site can be undone for 30 days. It stops serving and leaves
@@ -32,6 +34,16 @@ window again, so it refuses to start on this schema.
   exported as `simplehost_config_warning{check="no_admin"|"bucket_versioning"}`.
   The bucket credentials need `s3:GetBucketVersioning` for the check; without
   it the status is logged as unknown.
+
+### Sharing
+- Site viewers and team members can be named by company email, including
+  someone who has not signed in yet. The email adds the account that carries
+  it; with no such account, it is kept as a pending grant, listed with
+  `pending: true` ("hasn't signed in yet" on the dashboard), counted toward
+  the 50 limit, and removable by that email. At the person's first sign-in
+  with that verified email it becomes the real grant, audited as
+  `pending_grant_converted`. Emails outside `ALLOWED_EMAIL_DOMAINS` are
+  refused when that is set.
 
 ## v1.3.1 — 2026-09-26
 

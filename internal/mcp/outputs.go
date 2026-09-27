@@ -140,8 +140,9 @@ func stateVersionSchema() map[string]any {
 
 func viewerSchema() map[string]any {
 	return outObject(map[string]any{
-		"username": outString("The viewer's username or team name."),
+		"username": outString("The viewer's username or team name; for a pending viewer, the email they were added by."),
 		"kind":     outEnum("Whether the viewer is a person or a team.", "person", "team"),
+		"pending":  outBool("True when the viewer was added by email and hasn't signed in yet; they can open the site after their first sign-in."),
 	}, "username", "kind")
 }
 
@@ -165,11 +166,13 @@ func leaveSchema() map[string]any {
 func membersSchema() map[string]any {
 	return outObject(map[string]any{
 		"team": outString("The team's name."),
-		"members": outArray("Everyone in the team.", outObject(map[string]any{
-			"user_id":   outString("The member's id."),
-			"username":  outString("The member's username."),
-			"joined_at": outString("When they joined."),
-		}, "user_id", "username", "joined_at")),
+		"members": outArray("Everyone in the team, then anyone added by email who hasn't signed in yet.", outObject(map[string]any{
+			"user_id":   outString("The member's id. Absent for a pending member."),
+			"username":  outString("The member's username; for a pending member, the email they were added by."),
+			"joined_at": outString("When they joined. Absent for a pending member."),
+			"pending":   outBool("True when the member was added by email and hasn't signed in yet; they join at their first sign-in."),
+			"added_at":  outString("When a pending member was added."),
+		}, "username")),
 	}, "team", "members")
 }
 

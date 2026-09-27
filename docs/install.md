@@ -439,6 +439,10 @@ Named viewers are managed under a site's "Viewers" section or through the
 API (`GET`/`POST /api/collaboration/sites/{owner}/{sitename}/viewers`,
 `DELETE .../viewers/{username}`). Adding one sets the site to `specific`;
 removing the last one leaves it there, open only to the owner or team.
+Viewers and team members can be named by company email (within
+`ALLOWED_EMAIL_DOMAINS` when set) before that person has ever signed in:
+they are listed as "hasn't signed in yet" and get access at their first
+sign-in with that verified email.
 Anyone a site is not shared with gets `404`, not `403`, so the site's
 existence is never confirmed to someone it isn't shown to.
 
@@ -526,7 +530,8 @@ group without its audit row cannot commit: `site_create`, `site_update`,
 `network_access_declined`,
 `network_access_reverted`, `state_restore`, `viewer_grant`,
 `viewer_revoke`, `team_create`,
-`team_delete`, `member_add`, `member_remove`, `sign_in`, `session_revoke`,
+`team_delete`, `member_add`, `member_remove`, `sign_in`,
+`pending_grant_converted`, `session_revoke`,
 `key_mint`, `key_revoke`, `connector_sign_in`, `connector_revoke`,
 `admin_disable_user`, `admin_enable_user`, `state_write`,
 `asset_create`, and `asset_delete` — the last three from the site-facing

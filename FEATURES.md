@@ -37,7 +37,10 @@ Config names are documented in `docs/configuration.md`; schema in
   host redeems, nonce-bound against login CSRF); the first visit to each site
   host hands off transparently, one redirect round trip, no prompt. Every session cookie is bound
   to the host it was minted for; a hand-off cookie shares the sign-in's
-  session row and expiry, so it never outlives it.
+  session row and expiry, so it never outlives it. Every sign-in (verified
+  email, allowed domain) turns any pending viewer or team grants for that
+  email (sections 8, 9) into real ones in the session's transaction, each
+  audited as `pending_grant_converted`.
 - **Status.** Built.
 - **Routes.** `GET /auth/login`, `GET /auth/callback`, `POST /auth/logout`,
   `GET /auth/sessions` (sessions page), `POST /auth/sessions/{id}/revoke`,
@@ -51,7 +54,8 @@ Config names are documented in `docs/configuration.md`; schema in
   `internal/auth/` (`middleware.go`, `session_cookie.go`, `hostsession.go`);
   `internal/oidc/`; `internal/db/identity.go`, `sessions.go`, `handoff.go`.
 - **DB.** `users` (0001, 0017 email, 0023 OIDC identity), `sessions` (0021),
-  `handoff_codes` (0024).
+  `handoff_codes` (0024); converts `pending_site_viewers`,
+  `pending_team_members` (0044).
 - **Config.** `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`,
   `OIDC_SCOPES`, `OIDC_USERNAME_CLAIM`, `OIDC_EMAIL_CLAIM`, `OIDC_HINT_DOMAIN`,
   `OIDC_ADMIN_CLAIM`, `OIDC_ADMIN_VALUE`, `ADMIN_EMAILS`,
@@ -298,7 +302,12 @@ Config names are documented in `docs/configuration.md`; schema in
   it is served on its own host like every site, and only
   listed viewers (and the owner or team) can open it. Viewers
   read, never write. Removing the last viewer keeps the level at `specific`,
-  narrowing the site to its owner.
+  narrowing the site to its owner. A viewer may be named by company email
+  (refused outside `ALLOWED_EMAIL_DOMAINS` when set): the account carrying
+  it, or, if nobody has signed in with it yet, a pending viewer, listed with
+  `pending: true` and the email as `username` ("hasn't signed in yet" on the
+  dashboard), counted toward the 50, removed by that email, and converted at
+  their first sign-in (section 1).
 - **Status.** Built.
 - **Routes.** `GET /api/collaboration/sites/{owner}/{sitename}/viewers`,
   `POST /api/collaboration/sites/{owner}/{sitename}/viewers`,
@@ -314,8 +323,9 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Go.** `internal/handler/viewers.go`, `host_gate.go`
   (`serveSiteHost`, `serveOwnerPath`, `serveLegacySiteHost`), `host.go`
   (`SplitSiteLabel`);
-  `internal/db/site_viewers.go`.
-- **DB.** `site_viewers` (0024).
+  `grant_emails.go` (email check); `internal/db/site_viewers.go`,
+  `pending_grants.go`.
+- **DB.** `site_viewers` (0024), `pending_site_viewers` (0044).
 - **Config.** None. See `docs/site-isolation.md`.
 
 ## 9. Teams
@@ -335,7 +345,11 @@ Config names are documented in `docs/configuration.md`; schema in
   deleted — refused with `409 confirm_team_delete` and `site_count` until the
   call carries `?confirm_name=<team>`; delete works the same way. A team whose
   members are all disabled is deleted by an admin. A team has no key and no
-  sign-in.
+  sign-in. A member may be named by company email (refused `invalid_email`
+  outside `ALLOWED_EMAIL_DOMAINS` when set): the account carrying it, or a
+  pending member (listed with `pending: true`, the email as `username`,
+  counted toward the 50, removed by that email) who joins at their first
+  sign-in (section 1).
 - **Status.** Built.
 - **Routes.** `POST /api/teams`, `GET /api/teams`,
   `GET /api/teams/{team}/members`, `GET /api/teams/{team}/member-candidates`,
@@ -351,10 +365,11 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Pages.** `/admin` orphan-team delete.
 - **Go.** `internal/handler/team.go` (`teamName`), `admin.go`
   (`deleteOrphanTeam`), `auth.go` (handle prefix), `owner_index.go`,
-  `host_gate.go` (`currentOwnerLabel`); `internal/db/teams.go`
-  (`TeamPrefix`, `LegacyTeamName`).
+  `host_gate.go` (`currentOwnerLabel`), `grant_emails.go`;
+  `internal/db/teams.go` (`TeamPrefix`, `LegacyTeamName`), `pending_grants.go`.
 - **DB.** `team_members`, `team_audit`, `users.kind` = `team` (0019); 0041
-  renames teams to `team-<name>` (rows only, marked backward-compatible).
+  renames teams to `team-<name>` (rows only, marked backward-compatible);
+  `pending_team_members` (0044).
 - **Config.** None.
 
 ## 10. Saved state and its history

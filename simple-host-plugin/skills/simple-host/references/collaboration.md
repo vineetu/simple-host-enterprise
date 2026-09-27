@@ -254,7 +254,13 @@ DELETE /api/collaboration/sites/<owner>/<site>/viewers/<username>
 ```
 
 Granting a viewer (a person or a team) sets the level to `specific`. The
-site's address does not change.
+site's address does not change. A company email works wherever a username
+does: it adds the person whose account carries it, or, if they have not
+signed in yet, adds them as pending. A pending viewer is listed with
+`"pending": true` and the email as `username`, counts toward the 50-viewer
+limit, is removed by that email, and can open the site after their first
+sign-in. Tell the user that is when access starts. An email outside the
+company's sign-in domains is refused with `400`.
 Removing the last viewer leaves the site at `specific`, open only to the owner
 or team, until the level is changed. Connector tools: `find_users`,
 `list_site_viewers`, `grant_site_viewer`, `revoke_site_viewer`.

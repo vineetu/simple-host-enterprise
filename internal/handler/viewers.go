@@ -20,9 +20,21 @@ import (
 // than silently widening. Owner-role gate, in-transaction recheck,
 // bounded-batch grant.
 
+// siteViewerResponse is one viewer. A person named by email who has not
+// signed in yet is Pending, with the address as Username (what removing
+// them takes).
 type siteViewerResponse struct {
 	Username string `json:"username"`
 	Kind     string `json:"kind"`
+	Pending  bool   `json:"pending,omitempty"`
+}
+
+func siteViewerResponses(viewers []db.SiteViewer) []siteViewerResponse {
+	response := make([]siteViewerResponse, 0, len(viewers))
+	for _, v := range viewers {
+		response = append(response, siteViewerResponse{Username: v.Username, Kind: v.Kind, Pending: v.Pending})
+	}
+	return response
 }
 
 type viewerCandidateResponse struct {
@@ -57,11 +69,7 @@ func (h *SiteHandler) listSiteViewers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	response := make([]siteViewerResponse, 0, len(viewers))
-	for _, v := range viewers {
-		response = append(response, siteViewerResponse{Username: v.Username, Kind: v.Kind})
-	}
-	writeJSON(w, http.StatusOK, response)
+	writeJSON(w, http.StatusOK, siteViewerResponses(viewers))
 }
 
 func (h *SiteHandler) searchViewerCandidates(w http.ResponseWriter, r *http.Request) {
@@ -140,6 +148,10 @@ func (h *SiteHandler) mutateSiteViewers(w http.ResponseWriter, r *http.Request, 
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "too many usernames"})
 			return
 		}
+		if refusal := checkGrantEmails(request.Usernames, h.allowedEmailDomains); refusal != "" {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: refusal})
+			return
+		}
 		usernames = request.Usernames
 	} else {
 		username := strings.ToLower(strings.TrimSpace(r.PathValue("username")))
@@ -173,11 +185,24 @@ func (h *SiteHandler) mutateSiteViewers(w http.ResponseWriter, r *http.Request, 
 	}
 
 	var viewers []db.SiteViewer
+	var pending []string
 	if grant {
 		viewers, err = db.GrantSiteViewers(r.Context(), tx, locked.OwnerID, siteName, locked.Site.ID, &user.ID, usernames)
+		requested := map[string]bool{}
+		for _, name := range usernames {
+			requested[strings.ToLower(strings.TrimSpace(name))] = true
+		}
+		for _, v := range viewers {
+			if v.Pending && requested[v.Username] {
+				pending = append(pending, v.Username)
+			}
+		}
 	} else {
-		var removed bool
-		removed, err = db.RevokeSiteViewer(r.Context(), tx, locked.OwnerID, siteName, locked.Site.ID, usernames[0])
+		var removed, wasPending bool
+		removed, wasPending, err = db.RevokeSiteViewer(r.Context(), tx, locked.OwnerID, siteName, locked.Site.ID, usernames[0])
+		if wasPending {
+			pending = usernames
+		}
 		if err == nil && !removed {
 			writeJSON(w, http.StatusNotFound, errorResponse{Error: "viewer not found"})
 			return
@@ -190,6 +215,8 @@ func (h *SiteHandler) mutateSiteViewers(w http.ResponseWriter, r *http.Request, 
 		switch {
 		case errors.Is(err, db.ErrUserNotFound):
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "one or more usernames do not exist"})
+		case errors.Is(err, db.ErrAmbiguousEmail):
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "more than one account has that email; use the username"})
 		case errors.Is(err, db.ErrViewerLimit):
 			writeJSON(w, http.StatusConflict, errorResponse{Error: "a site can have at most 50 listed viewers"})
 		case errors.Is(err, sql.ErrNoRows):
@@ -204,12 +231,17 @@ func (h *SiteHandler) mutateSiteViewers(w http.ResponseWriter, r *http.Request, 
 	if grant {
 		action = "viewer_grant"
 	}
+	extra := map[string]any{"usernames": usernames}
+	if len(pending) > 0 {
+		// Named by email, not signed in yet: a pending grant.
+		extra["pending"] = pending
+	}
 	actorKind, keyID := auditActorKind(r.Context())
 	if err := h.audit.RecordTx(r.Context(), tx, audit.Event{
 		ActorID: user.ID, ActorKind: actorKind, KeyID: keyID,
 		Action: action, OwnerID: locked.OwnerID, SiteID: locked.Site.ID,
 		RequestID: auditRequestID(r.Context()),
-		Extra:     map[string]any{"usernames": usernames},
+		Extra:     extra,
 	}); err != nil {
 		log.Printf("record audit for %s %s/%s: %v", action, ownerUsername, siteName, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
@@ -224,9 +256,13 @@ func (h *SiteHandler) mutateSiteViewers(w http.ResponseWriter, r *http.Request, 
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	response := make([]siteViewerResponse, 0, len(viewers))
-	for _, v := range viewers {
-		response = append(response, siteViewerResponse{Username: v.Username, Kind: v.Kind})
-	}
-	writeJSON(w, http.StatusOK, response)
+	writeJSON(w, http.StatusOK, siteViewerResponses(viewers))
+}
+
+// WithAllowedEmailDomains sets ALLOWED_EMAIL_DOMAINS: a viewer named by
+// email must be at one of them, the same rule sign-in applies. Empty means
+// any domain.
+func (h *SiteHandler) WithAllowedEmailDomains(domains []string) *SiteHandler {
+	h.allowedEmailDomains = domains
+	return h
 }

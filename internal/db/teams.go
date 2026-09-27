@@ -37,6 +37,9 @@ type TeamMember struct {
 	UserID    string
 	Username  string
 	CreatedAt time.Time
+	// Pending marks a person named by email who has not signed in yet:
+	// Username is then the address and UserID is empty.
+	Pending bool
 }
 
 // NamespaceAccess answers "may this actor create a site under this name",
@@ -136,17 +139,22 @@ func ListTeamsForUser(ctx context.Context, q Querier, userID string) ([]Team, er
 }
 
 const listTeamMembersQuery = `
-	SELECT
-		member.id::text,
-		member.username,
-		tm.created_at
-	FROM team_members tm
-	INNER JOIN users member ON member.id = tm.user_id
-	WHERE tm.team_id = $1::uuid
-	ORDER BY lower(member.username), member.username, member.id
+	SELECT user_id, username, created_at, pending
+	FROM (
+		SELECT member.id::text AS user_id, member.username, tm.created_at, false AS pending
+		FROM team_members tm
+		INNER JOIN users member ON member.id = tm.user_id
+		WHERE tm.team_id = $1::uuid
+		UNION ALL
+		SELECT '', p.email, p.created_at, true
+		FROM pending_team_members p
+		WHERE p.team_id = $1::uuid
+	) m
+	ORDER BY pending, lower(username), username, user_id
 `
 
-// ListTeamMembers returns everyone in the team. There is no role to report:
+// ListTeamMembers returns everyone in the team, then the people named by
+// email who have not signed in yet (Pending). There is no role to report:
 // every row here carries the same access.
 func ListTeamMembers(ctx context.Context, q Querier, teamID string) ([]TeamMember, error) {
 	rows, err := q.QueryContext(ctx, listTeamMembersQuery, teamID)
@@ -158,7 +166,7 @@ func ListTeamMembers(ctx context.Context, q Querier, teamID string) ([]TeamMembe
 	var members []TeamMember
 	for rows.Next() {
 		var member TeamMember
-		if err := rows.Scan(&member.UserID, &member.Username, &member.CreatedAt); err != nil {
+		if err := rows.Scan(&member.UserID, &member.Username, &member.CreatedAt, &member.Pending); err != nil {
 			return nil, fmt.Errorf("list team members: %w", err)
 		}
 		members = append(members, member)
@@ -187,9 +195,9 @@ func IsTeamMember(ctx context.Context, q Querier, teamID, userID string) (bool, 
 }
 
 const countTeamMembersQuery = `
-	SELECT count(*)::int
-	FROM team_members
-	WHERE team_id = $1::uuid
+	SELECT
+		(SELECT count(*) FROM team_members WHERE team_id = $1::uuid) +
+		(SELECT count(*) FROM pending_team_members WHERE team_id = $1::uuid)
 `
 
 const resolveRequestedMembersQuery = `
@@ -223,45 +231,67 @@ const addTeamMembersQuery = `
 // the caller asked for a set, not a best effort. Detection is by count: the
 // requested names must end up either newly inserted or already present.
 //
+// An email names the person whose account carries it, or, when nobody has
+// signed in with it yet, is kept as a pending grant (counted against
+// MaxTeamMembers) until they do; those addresses are returned. The caller
+// has checked each email's shape and domain.
+//
 // The caller is expected to hold LockTeam in the same transaction, so the cap
 // check and the insert cannot interleave with a concurrent add.
-func AddTeamMembers(ctx context.Context, q Querier, teamID string, usernames []string, addedBy string) error {
-	normalized, err := normalizeTeamUsernames(usernames)
+func AddTeamMembers(ctx context.Context, q Querier, teamID string, usernames []string, addedBy string) (pending []string, err error) {
+	requested, err := normalizeTeamUsernames(usernames)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if len(normalized) == 0 {
-		return nil
+	if len(requested) == 0 {
+		return nil, nil
 	}
-	if len(normalized) > MaxTeamMembers {
-		return ErrTeamMemberLimit
+	if len(requested) > MaxTeamMembers {
+		return nil, ErrTeamMemberLimit
+	}
+	normalized, pending, err := resolveEmailNames(ctx, q, requested)
+	if err != nil {
+		return nil, err
 	}
 
 	var current int
 	if err := q.QueryRowContext(ctx, countTeamMembersQuery, teamID).Scan(&current); err != nil {
-		return fmt.Errorf("count team members: %w", err)
+		return nil, fmt.Errorf("count team members: %w", err)
 	}
 
 	var resolved, alreadyMembers int
 	if err := q.QueryRowContext(ctx, resolveRequestedMembersQuery, teamID, pq.Array(normalized)).Scan(&resolved, &alreadyMembers); err != nil {
-		return fmt.Errorf("resolve requested team members: %w", err)
+		return nil, fmt.Errorf("resolve requested team members: %w", err)
 	}
-	if current+(resolved-alreadyMembers) > MaxTeamMembers {
-		return ErrTeamMemberLimit
+	var alreadyPending int
+	if len(pending) > 0 {
+		if err := q.QueryRowContext(ctx, countPendingTeamMembersQuery, teamID, pq.Array(pending)).Scan(&alreadyPending); err != nil {
+			return nil, fmt.Errorf("count pending team members: %w", err)
+		}
+	}
+	if current+(resolved-alreadyMembers)+(len(pending)-alreadyPending) > MaxTeamMembers {
+		return nil, ErrTeamMemberLimit
 	}
 
-	result, err := q.ExecContext(ctx, addTeamMembersQuery, teamID, pq.Array(normalized), nullableID(addedBy))
-	if err != nil {
-		return fmt.Errorf("add team members: %w", err)
+	if len(normalized) > 0 {
+		result, err := q.ExecContext(ctx, addTeamMembersQuery, teamID, pq.Array(normalized), nullableID(addedBy))
+		if err != nil {
+			return nil, fmt.Errorf("add team members: %w", err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return nil, fmt.Errorf("add team members: %w", err)
+		}
+		if int(affected)+alreadyMembers != len(normalized) {
+			return nil, ErrTeamMemberNotFound
+		}
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("add team members: %w", err)
+	if len(pending) > 0 {
+		if _, err := q.ExecContext(ctx, addPendingTeamMembersQuery, teamID, pq.Array(pending), nullableID(addedBy)); err != nil {
+			return nil, fmt.Errorf("add pending team members: %w", err)
+		}
 	}
-	if int(affected)+alreadyMembers != len(normalized) {
-		return ErrTeamMemberNotFound
-	}
-	return nil
+	return pending, nil
 }
 
 const removeTeamMemberQuery = `

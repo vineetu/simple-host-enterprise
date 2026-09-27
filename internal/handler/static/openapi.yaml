@@ -1848,12 +1848,12 @@ paths:
       tags: [Teams]
       responses:
         '200':
-          description: '`{"team", "members": [{"user_id", "username", "joined_at"}]}`'
+          description: '`{"team", "members": [{"user_id", "username", "joined_at"}]}`. Anyone added by email who has not signed in yet follows as `{"username": "<email>", "pending": true, "added_at"}`.'
         '404':
           $ref: '#/components/responses/NotFound'
     post:
       summary: Add people to a team
-      description: 'Body `{"usernames": [...]}`, at most 50.'
+      description: 'Body `{"usernames": [...]}`, at most 50. An entry may be a company email (refused with `400` `invalid_email` outside `ALLOWED_EMAIL_DOMAINS` when that is set): it adds the person whose account carries it, or, when nobody has signed in with it yet, a pending member who joins at their first sign-in with that verified email. Pending members count toward the 50.'
       tags: [Teams]
       responses:
         '200':
@@ -1864,7 +1864,7 @@ paths:
   /api/teams/{team}/members/{username}:
     delete:
       summary: Remove a member
-      description: Removing yourself is the same as `POST /api/teams/{team}/leave`, including its `confirm_name`.
+      description: Removing yourself is the same as `POST /api/teams/{team}/leave`, including its `confirm_name`. `username` may be an email, which removes that pending member (or the member whose account carries it).
       tags: [Teams]
       parameters:
         - $ref: '#/components/parameters/team'

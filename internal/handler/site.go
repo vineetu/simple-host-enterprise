@@ -48,6 +48,9 @@ type SiteHandler struct {
 	// when CLAMD_ADDR is unset).
 	quota   UploadQuota
 	scanner scan.Scanner
+	// allowedEmailDomains is ALLOWED_EMAIL_DOMAINS, for viewers named by
+	// email (viewers.go).
+	allowedEmailDomains []string
 }
 
 // WithUploadLimits sets the per-owner quota and the malware scanner (nil for

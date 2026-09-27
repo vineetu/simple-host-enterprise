@@ -240,7 +240,7 @@ Typical combinations:
     | Level | Who can open it |
     |---|---|
     | `only_me` | You, or the team's members. The default. |
-    | `specific` | Also named people or teams (`grant_site_viewer`). |
+    | `specific` | Also named people or teams (`grant_site_viewer`; a company email adds someone who has not signed in yet, who gets access at first sign-in). |
     | `company` | Anyone signed in at the company with the link. |
     | `listed` | Company, and shown in the showcase and search. |
     | `network` | Anyone who can reach the server, no sign-in. Needs an admin's approval. |
