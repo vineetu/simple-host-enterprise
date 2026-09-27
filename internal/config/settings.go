@@ -224,11 +224,11 @@ func Settings() []Setting {
 			Description: "Lifetime of the anonymous cookie site search uses for its limits and counts."},
 
 		// Cleanup and retention.
-		{Name: "DELETED_RETENTION_DAYS", Group: "cleanup", Type: "int", Default: itoa(int64(op.DeletedRetentionDays)), Min: 1, Max: maxDeletedRetentionDays, Unit: "days",
+		{Name: "DELETED_RETENTION_DAYS", Group: "cleanup", Type: "int", Default: itoa(int64(op.DeletedRetentionDays)), Min: minDeletedRetentionDays, Max: maxDeletedRetentionDays, Unit: "days",
 			Description: "How long a deleted site stays restorable in Recently deleted. Keep the bucket's old-version retention at least this long."},
 		{Name: "IDLE_CLEANUP_DAYS", Group: "cleanup", Type: "int", Default: "0", Min: 0, Max: maxIdleCleanupDays, Unit: "days",
-			Description: "Idle cleanup: a site nobody opened, deployed to or saved to for this many days is marked. 0 turns it off."},
-		{Name: "IDLE_CLEANUP_GRACE_DAYS", Group: "cleanup", Type: "int", Default: itoa(int64(op.IdleGraceDays)), Min: 1, Max: maxIdleGraceDays, Unit: "days",
+			Description: "Idle cleanup: a site nobody opened, deployed to or saved to for this many days is marked. 0 turns it off; otherwise at least 30."},
+		{Name: "IDLE_CLEANUP_GRACE_DAYS", Group: "cleanup", Type: "int", Default: itoa(int64(op.IdleGraceDays)), Min: minIdleGraceDays, Max: maxIdleGraceDays, Unit: "days",
 			Description: "Idle cleanup: how long a marked site waits before it moves to Recently deleted."},
 		{Name: "IDLE_CLEANUP_MAX_EMAILS", Group: "cleanup", Type: "int", Default: itoa(int64(op.IdleMaxEmails)), Min: 0, Max: maxIdleMaxEmails, Unit: "emails",
 			Description: "Idle cleanup: sites one hourly run marks and emails about. 0 is no limit."},

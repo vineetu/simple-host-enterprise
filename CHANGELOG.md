@@ -20,6 +20,12 @@ release, commit and schema.
   download is recorded as the key when a key asked for it. Links asked for
   before this release stop working (they last 10 minutes by default).
 
+### Configuration
+- Safer lower bounds, refused at startup with a message naming the range:
+  `IDLE_CLEANUP_DAYS` is 0 (off) or 30 to 3650, `IDLE_CLEANUP_GRACE_DAYS`
+  and `DELETED_RETENTION_DAYS` are 7 to 365 (they were 1). An install that
+  set a lower value must raise it before upgrading.
+
 ### Fixes
 - Two download links asked for within the same second were the same link,
   so using one used up the other; each link is now distinct.

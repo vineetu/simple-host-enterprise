@@ -104,6 +104,8 @@ func TestLoadAPIKeyDefaultDaysFollowsTheMaximum(t *testing.T) {
 func TestLoadRefusesBadOpLimits(t *testing.T) {
 	for _, c := range []struct{ key, value string }{
 		{"DELETED_RETENTION_DAYS", "0"},
+		{"DELETED_RETENTION_DAYS", "6"},
+		{"IDLE_CLEANUP_GRACE_DAYS", "6"},
 		{"DELETED_RETENTION_DAYS", "366"},
 		{"DELETED_RETENTION_DAYS", "thirty"},
 		{"IDLE_CLEANUP_GRACE_DAYS", "0"},

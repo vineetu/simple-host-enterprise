@@ -24,6 +24,7 @@ func TestLoadIdleCleanup(t *testing.T) {
 		"smtps with option":   {"SMTP_URL", "smtps://relay.corp.test:465?insecure=1"},
 		"days too high":       {"IDLE_CLEANUP_DAYS", "4000"},
 		"negative days":       {"IDLE_CLEANUP_DAYS", "-1"},
+		"days too low":        {"IDLE_CLEANUP_DAYS", "29"},
 		"not an smtp url":     {"SMTP_URL", "https://mail.corp.test"},
 		"from not an address": {"SMTP_FROM", "nobody"},
 	} {

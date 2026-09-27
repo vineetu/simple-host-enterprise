@@ -8,8 +8,12 @@ import (
 	"strings"
 )
 
-// maxIdleCleanupDays caps IDLE_CLEANUP_DAYS at ten years.
-const maxIdleCleanupDays = 3650
+// IDLE_CLEANUP_DAYS is 0 (off) or 30 days to ten years: a shorter window
+// would mark sites that were only unused over a holiday.
+const (
+	minIdleCleanupDays = 30
+	maxIdleCleanupDays = 3650
+)
 
 // IdleCleanupConfig is the opt-in cleanup of sites nobody visits or
 // updates. Days 0 (the default) turns it off.
@@ -32,8 +36,8 @@ func loadIdleCleanup() (IdleCleanupConfig, error) {
 	if err != nil {
 		return IdleCleanupConfig{}, err
 	}
-	if days > maxIdleCleanupDays {
-		return IdleCleanupConfig{}, fmt.Errorf("IDLE_CLEANUP_DAYS must be 0 (off) to %d, got %d", maxIdleCleanupDays, days)
+	if days != 0 && (days < minIdleCleanupDays || days > maxIdleCleanupDays) {
+		return IdleCleanupConfig{}, fmt.Errorf("IDLE_CLEANUP_DAYS must be 0 (off) or %d to %d, got %d", minIdleCleanupDays, maxIdleCleanupDays, days)
 	}
 	cfg := IdleCleanupConfig{
 		Days:     int(days),

@@ -17,9 +17,9 @@ earlier than it was told.
 <!-- settings:group=cleanup -->
 | Setting | Default | Allowed | What it does |
 |---|---|---|---|
-| `DELETED_RETENTION_DAYS` | `30` | 1–365 days | How long a deleted site stays restorable in Recently deleted. Keep the bucket's old-version retention at least this long. |
-| `IDLE_CLEANUP_DAYS` | `0` | 0–3650 days | Idle cleanup: a site nobody opened, deployed to or saved to for this many days is marked. 0 turns it off. |
-| `IDLE_CLEANUP_GRACE_DAYS` | `30` | 1–365 days | Idle cleanup: how long a marked site waits before it moves to Recently deleted. |
+| `DELETED_RETENTION_DAYS` | `30` | 7–365 days | How long a deleted site stays restorable in Recently deleted. Keep the bucket's old-version retention at least this long. |
+| `IDLE_CLEANUP_DAYS` | `0` | 0–3650 days | Idle cleanup: a site nobody opened, deployed to or saved to for this many days is marked. 0 turns it off; otherwise at least 30. |
+| `IDLE_CLEANUP_GRACE_DAYS` | `30` | 7–365 days | Idle cleanup: how long a marked site waits before it moves to Recently deleted. |
 | `IDLE_CLEANUP_MAX_EMAILS` | `0` | 0–100000 emails | Idle cleanup: sites one hourly run marks and emails about. 0 is no limit. |
 | `AUDIT_RETENTION_DAYS` | `400` | at least 1 days | How long the audit log is kept. |
 | `ACCESS_LOG_RETENTION_DAYS` | `90` | at least 1 days | How long the access log, and ended sessions with their IP and browser, are kept. |

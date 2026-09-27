@@ -15,7 +15,9 @@ import (
 // setting from switching a feature off by accident; the high ends stop a
 // typo (8760h for 8h, an extra zero) from turning a limit into none.
 const (
+	minDeletedRetentionDays     = 7 // a long weekend must not purge a deleted site
 	maxDeletedRetentionDays     = 365
+	minIdleGraceDays            = 7
 	maxIdleGraceDays            = 365
 	maxIdleMaxEmails            = 100_000
 	minLinkTTL                  = time.Minute
@@ -72,8 +74,8 @@ func loadOpLimits(apiKeyMaxDays int64) (oplimits.Values, error) {
 		}
 		return d
 	}
-	v.DeletedRetentionDays = intIn("DELETED_RETENTION_DAYS", v.DeletedRetentionDays, 1, maxDeletedRetentionDays)
-	v.IdleGraceDays = intIn("IDLE_CLEANUP_GRACE_DAYS", v.IdleGraceDays, 1, maxIdleGraceDays)
+	v.DeletedRetentionDays = intIn("DELETED_RETENTION_DAYS", v.DeletedRetentionDays, minDeletedRetentionDays, maxDeletedRetentionDays)
+	v.IdleGraceDays = intIn("IDLE_CLEANUP_GRACE_DAYS", v.IdleGraceDays, minIdleGraceDays, maxIdleGraceDays)
 	v.IdleMaxEmails = intIn("IDLE_CLEANUP_MAX_EMAILS", v.IdleMaxEmails, 0, maxIdleMaxEmails)
 	v.PreviewLinkTTL = durationIn("PREVIEW_LINK_TTL", v.PreviewLinkTTL, minLinkTTL, maxLinkTTL)
 	v.ExportLinkTTL = durationIn("EXPORT_LINK_TTL", v.ExportLinkTTL, minLinkTTL, maxLinkTTL)
