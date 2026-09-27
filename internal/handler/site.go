@@ -985,6 +985,7 @@ func (h *SiteHandler) deleteSiteForTarget(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
+	refreshSiteManifest(r.Context(), h.database, h.store, site.ID)
 
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/vsriram/simple-host/internal/audit"
 	"github.com/vsriram/simple-host/internal/db"
+	"github.com/vsriram/simple-host/internal/storage"
 )
 
 // IdleCleanup is the opt-in cleanup of sites nobody uses
@@ -31,6 +32,15 @@ type IdleCleanup struct {
 	idleFor  time.Duration
 	mailer   Mailer
 	base     string
+	// store is for the site manifests a move to Recently deleted rewrites.
+	store *storage.Store
+}
+
+// WithStore sets the site store, whose bucket manifests record a site's
+// move to Recently deleted.
+func (c *IdleCleanup) WithStore(store *storage.Store) *IdleCleanup {
+	c.store = store
+	return c
 }
 
 // Mailer sends one plain-text message. SMTPMailer is the real one.
@@ -176,7 +186,11 @@ func (c *IdleCleanup) moveToRecentlyDeleted(ctx context.Context, s db.IdleSite) 
 	}); err != nil {
 		return err
 	}
-	return audit.Commit(tx)
+	if err := audit.Commit(tx); err != nil {
+		return err
+	}
+	refreshSiteManifest(ctx, c.database, c.store, s.ID)
+	return nil
 }
 
 // notify emails the owner (or every member of the team) that a site was

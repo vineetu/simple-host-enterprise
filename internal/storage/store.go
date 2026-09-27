@@ -31,6 +31,8 @@ type Store struct {
 	objects Objects
 	index   SiteIndex
 	cache   *cache
+	// ownerIssuer is Options.OwnerIssuer.
+	ownerIssuer string
 }
 
 // SiteIndex answers which sites exist and which version of each is live. The
@@ -55,6 +57,9 @@ type Options struct {
 	CacheDir string
 	// CacheMaxBytes bounds the unpinned cache.
 	CacheMaxBytes int64
+	// OwnerIssuer is OIDC_ISSUER: site manifests record a person owner's
+	// sign-in identity as a hash of it and the subject.
+	OwnerIssuer string
 }
 
 // indexTimeout bounds a site lookup made on behalf of a caller that has no
@@ -69,8 +74,11 @@ func New(options Options) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{objects: options.Objects, index: options.Index, cache: cache}, nil
+	return &Store{objects: options.Objects, index: options.Index, cache: cache, ownerIssuer: options.OwnerIssuer}, nil
 }
+
+// OwnerIssuer is Options.OwnerIssuer.
+func (s *Store) OwnerIssuer() string { return s.ownerIssuer }
 
 func (s *Store) Close() error { return s.cache.close() }
 

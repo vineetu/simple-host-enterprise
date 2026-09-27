@@ -360,7 +360,7 @@ func run() (runErr error) {
 			notice = "dashboard and email"
 		}
 		log.Printf("idle cleanup: sites unused for %d days are marked, and move to Recently deleted %s later (notice: %s)", days, oplimits.Days(cfg.Limits.IdleGraceDays), notice)
-		cleanup := handler.NewIdleCleanup(database, auditRecorder, days, mailer, cfg.PublicBaseURL)
+		cleanup := handler.NewIdleCleanup(database, auditRecorder, days, mailer, cfg.PublicBaseURL).WithStore(siteStore)
 		resources.workers = append(resources.workers, startLoop(ctx, cleanup.Run))
 	}
 
@@ -413,6 +413,7 @@ func openStore(cfg config.Config, database *sql.DB) (*storage.Store, error) {
 		Index:         storage.NewDBIndex(database),
 		CacheDir:      cfg.CacheDir,
 		CacheMaxBytes: cfg.CacheMaxBytes,
+		OwnerIssuer:   cfg.OIDC.Issuer,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create site store: %w", err)

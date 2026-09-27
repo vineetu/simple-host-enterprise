@@ -37,8 +37,8 @@ func TestListRecoverableSites(t *testing.T) {
 	if a.SiteID != testSiteA || a.Manifest == nil || a.Manifest.Owner != "alice" || a.Manifest.Site != "notes" || len(a.Versions) != 3 || !a.AssetIDs[testSiteB] {
 		t.Fatalf("first = %+v, want alice/notes with three versions and the asset", a)
 	}
-	if a.NewestVersion() != 2 {
-		t.Fatalf("NewestVersion = %d, want the manifest's live version 2", a.NewestVersion())
+	if a.NewestVersion() != 3 || !a.LiveArchive() {
+		t.Fatalf("NewestVersion = %d, LiveArchive %t; want 3 and the live v2's archive there", a.NewestVersion(), a.LiveArchive())
 	}
 	b := sites[1]
 	if b.SiteID != testSiteB || b.Manifest != nil || b.ManifestErr != nil || b.NewestVersion() != 1 {

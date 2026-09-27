@@ -140,6 +140,13 @@ func (s *Store) purgeBatch(ctx context.Context, database *sql.DB) (int, error) {
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
+	// The manifests go now rather than with the retire sweep, so a rebuild
+	// from the bucket in between never brings a purged site back.
+	for _, site := range due {
+		if err := DeleteSiteManifest(ctx, s.objects, site.ID); err != nil {
+			log.Printf("storage sweep: delete the manifest of purged site %s: %v", site.ID, err)
+		}
+	}
 	return len(due), nil
 }
 

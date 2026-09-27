@@ -187,6 +187,29 @@ func classifyContentType(sniffed, declared string) (string, bool) {
 	}
 }
 
+// StoredAssetType reports whether contentType is one classifyContentType
+// stores: what an uploaded file's recorded type can be.
+func StoredAssetType(contentType string) bool {
+	if contentType != mediaTypeBase(contentType) || strings.ContainsAny(contentType, " \t\"\\;,") {
+		return false
+	}
+	major, minor, ok := strings.Cut(contentType, "/")
+	if !ok || minor == "" || strings.Contains(minor, "/") {
+		return false
+	}
+	switch major {
+	case "image", "video", "audio":
+		return true
+	}
+	// Text is stored under the type the upload declared (JSON, CSV).
+	for _, sniffed := range []string{contentType, "text/plain; charset=utf-8"} {
+		if stored, ok := classifyContentType(sniffed, contentType); ok && stored == contentType {
+			return true
+		}
+	}
+	return false
+}
+
 // mediaTypeBase strips parameters (";charset=..." and the like) and
 // lower-cases a content type. mime.ParseMediaType rejects a handful of
 // inputs http.DetectContentType and multipart clients still produce (an

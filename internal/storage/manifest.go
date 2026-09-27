@@ -8,12 +8,16 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // A site's manifest, sites/<site-id>/manifest.json, is the one object that
-// says whose a site is: its owner and name, the version that was live and
-// its uploaded files' names and types, as of the last deploy, rollback,
-// rename, hand-over or file change. The database is the source of truth and
+// says whose a site is: its owner (by name, and by a hash of their sign-in
+// identity or their team's id), its name, the version that was live, whether
+// it was deleted or restricted by an admin, and its uploaded files' names
+// and types, as of the last deploy, rollback, rename, hand-over, delete,
+// restore, restriction or file change. Never an email address. The database is the source of truth and
 // nothing serving reads the manifest; it exists so that a lost database can
 // be rebuilt from the bucket alone (`simple-host rebuild-index`). It is
 // written through the same Objects as everything else, so it is encrypted
@@ -31,12 +35,113 @@ const maxManifestBytes = 16 << 20
 
 // SiteManifest is the manifest's JSON.
 type SiteManifest struct {
-	SiteID      string          `json:"site_id"`
-	Owner       string          `json:"owner"`
-	Site        string          `json:"site"`
-	LiveVersion int             `json:"live_version"`
-	WrittenAt   time.Time       `json:"written_at"`
-	Assets      []ManifestAsset `json:"assets"`
+	SiteID string `json:"site_id"`
+	// Seq is one more than the manifest it replaced: writes are made one at
+	// a time per site (handler.WriteSiteManifest), so a larger Seq is newer.
+	Seq   int64  `json:"seq"`
+	Owner string `json:"owner"`
+	// OwnerKind is "person" or "team".
+	OwnerKind string `json:"owner_kind"`
+	// OwnerIdentity is a person's sign-in identity as hex SHA-256 of issuer
+	// and subject (db.ErasedSubjectHash), "" for an account with none.
+	OwnerIdentity string `json:"owner_identity,omitempty"`
+	// TeamID is a team owner's id.
+	TeamID      string     `json:"team_id,omitempty"`
+	Site        string     `json:"site"`
+	LiveVersion int        `json:"live_version"`
+	DeletedAt   *time.Time `json:"deleted_at,omitempty"`
+	// Restricted is an admin's take-down (access_decision 'restricted'),
+	// with the admin's reason.
+	Restricted       bool            `json:"restricted,omitempty"`
+	RestrictedReason string          `json:"restricted_reason,omitempty"`
+	WrittenAt        time.Time       `json:"written_at"`
+	Assets           []ManifestAsset `json:"assets"`
+}
+
+// Owner kinds a manifest records.
+const (
+	ManifestOwnerPerson = "person"
+	ManifestOwnerTeam   = "team"
+)
+
+// maxManifestReasonLen bounds a restriction's reason as the manifest keeps it.
+const maxManifestReasonLen = 4000
+
+// maxManifestAssetName bounds an uploaded file's name as the manifest keeps it.
+const maxManifestAssetName = 1024
+
+// Validate checks every field a rebuild would write into the database, so a
+// manifest edited in the bucket (or written by a bug) is refused rather
+// than recreated. Names of the owner and the site are checked by the caller
+// against the rules a create applies (handler.ValidateRebuiltNames).
+func (m SiteManifest) Validate() error {
+	if !isUUID(m.SiteID) {
+		return errors.New("site_id is not an id")
+	}
+	if m.Seq < 0 || m.LiveVersion < 1 {
+		return errors.New("seq or live_version out of range")
+	}
+	switch m.OwnerKind {
+	case ManifestOwnerPerson:
+		if m.TeamID != "" || (m.OwnerIdentity != "" && !isHex(m.OwnerIdentity, 64)) {
+			return errors.New("a person's owner_identity is not a SHA-256, or a team_id is set")
+		}
+	case ManifestOwnerTeam:
+		if !isUUID(m.TeamID) || m.OwnerIdentity != "" {
+			return errors.New("a team's team_id is not an id, or an owner_identity is set")
+		}
+	default:
+		return fmt.Errorf("owner_kind %q is neither person nor team", m.OwnerKind)
+	}
+	if !m.Restricted && m.RestrictedReason != "" {
+		return errors.New("restricted_reason without restricted")
+	}
+	if len(m.RestrictedReason) > maxManifestReasonLen || !plainText(m.RestrictedReason) {
+		return errors.New("restricted_reason is too long or has control characters")
+	}
+	seen := map[string]bool{}
+	for _, a := range m.Assets {
+		switch {
+		case !isUUID(a.ID) || seen[a.ID]:
+			return fmt.Errorf("asset id %q is not an id or is listed twice", a.ID)
+		case a.Name == "" || len(a.Name) > maxManifestAssetName || !plainText(a.Name):
+			return fmt.Errorf("asset %s: name is empty, too long or has control characters", a.ID)
+		case !StoredAssetType(a.ContentType):
+			return fmt.Errorf("asset %s: content type %q is not one an upload stores", a.ID, a.ContentType)
+		case a.Size < 0 || a.Size > maxVersionObjectBytes:
+			return fmt.Errorf("asset %s: size %d out of range", a.ID, a.Size)
+		case !isHex(a.SHA256, 64):
+			return fmt.Errorf("asset %s: sha256 is not a SHA-256", a.ID)
+		}
+		seen[a.ID] = true
+	}
+	return nil
+}
+
+func isHex(s string, n int) bool {
+	if len(s) != n {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// plainText is valid UTF-8 with no control or format characters.
+func plainText(s string) bool {
+	if !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return false
+		}
+	}
+	return true
 }
 
 // ManifestAsset is one uploaded file as the manifest records it: enough to
@@ -74,6 +179,20 @@ func PutSiteManifest(ctx context.Context, objects Objects, m SiteManifest) error
 	return objects.Put(ctx, key, body, "application/json")
 }
 
+// DeleteSiteManifest deletes a site's manifest, for a site gone for good
+// (purged, erased), so a rebuild from the bucket never brings it back.
+func DeleteSiteManifest(ctx context.Context, objects Objects, siteID string) error {
+	key, err := ManifestKey(siteID)
+	if err != nil {
+		return err
+	}
+	err = objects.Delete(ctx, key)
+	if errors.Is(err, ErrObjectNotFound) {
+		return nil
+	}
+	return err
+}
+
 // PutSiteManifest is PutSiteManifest on the store's bucket.
 func (s *Store) PutSiteManifest(ctx context.Context, m SiteManifest) error {
 	return PutSiteManifest(ctx, s.objects, m)
@@ -90,17 +209,51 @@ type RecoverableSite struct {
 	AssetIDs    map[string]bool
 }
 
-// NewestVersion is the version to make live on a rebuild: the manifest's
-// live version when its archive is there, else the newest archive, else 0.
+// NewestVersion is the newest version archive there, 0 for none: what an
+// operator restores by hand for a site with no manifest.
 func (r RecoverableSite) NewestVersion() int {
 	newest := 0
 	for _, v := range r.Versions {
-		if r.Manifest != nil && v == r.Manifest.LiveVersion {
-			return v
-		}
 		newest = max(newest, v)
 	}
 	return newest
+}
+
+// LiveArchive reports whether the manifest's live version's archive is
+// there. A rebuild makes only that version live, never another: a newer
+// archive may be a version stored without being made live, which nobody
+// approved.
+func (r RecoverableSite) LiveArchive() bool {
+	if r.Manifest == nil {
+		return false
+	}
+	for _, v := range r.Versions {
+		if v == r.Manifest.LiveVersion {
+			return true
+		}
+	}
+	return false
+}
+
+// GetSiteManifest reads one site's manifest. ErrObjectNotFound when it has
+// none.
+func GetSiteManifest(ctx context.Context, objects Objects, siteID string) (*SiteManifest, error) {
+	key, err := ManifestKey(siteID)
+	if err != nil {
+		return nil, err
+	}
+	body, err := objects.Get(ctx, key, maxManifestBytes)
+	if err != nil {
+		return nil, err
+	}
+	var m SiteManifest
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, fmt.Errorf("manifest unreadable: %w", err)
+	}
+	if m.SiteID != siteID {
+		return nil, fmt.Errorf("manifest names site %q, not %q", m.SiteID, siteID)
+	}
+	return &m, nil
 }
 
 // ListRecoverableSites walks everything under sites/ and groups it by site,
@@ -139,16 +292,10 @@ func ListRecoverableSites(ctx context.Context, objects Objects) ([]RecoverableSi
 	out := make([]RecoverableSite, 0, len(byID))
 	for id, s := range byID {
 		sort.Ints(s.Versions)
-		key, _ := ManifestKey(id)
-		body, err := objects.Get(ctx, key, maxManifestBytes)
+		m, err := GetSiteManifest(ctx, objects, id)
 		switch {
 		case err == nil:
-			var m SiteManifest
-			if err := json.Unmarshal(body, &m); err != nil || m.SiteID != id {
-				s.ManifestErr = fmt.Errorf("manifest unreadable: %v", err)
-			} else {
-				s.Manifest = &m
-			}
+			s.Manifest = m
 		case errors.Is(err, ErrObjectNotFound):
 		default:
 			s.ManifestErr = err

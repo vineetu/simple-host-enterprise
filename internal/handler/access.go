@@ -639,6 +639,7 @@ func (h *AdminHandler) setSiteRestriction(w http.ResponseWriter, r *http.Request
 		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
 		return
 	}
+	refreshSiteManifest(r.Context(), h.database, h.store, site.ID)
 	status := "restricted"
 	if !restrict {
 		status = "restriction lifted"

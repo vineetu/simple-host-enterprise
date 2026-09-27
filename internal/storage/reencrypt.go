@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -27,6 +28,11 @@ type ReencryptOptions struct {
 	// VersionCommitted reports whether a committed versions row names
 	// siteID's version. Required: see Reencrypt for why.
 	VersionCommitted func(ctx context.Context, siteID string, version int) (bool, error)
+	// RewriteManifest rewrites a site's manifest under the current key in
+	// turn with the server's own writes of it (handler.ReencryptSiteManifest),
+	// so it never puts back a manifest older than one written meanwhile.
+	// nil copies the bytes, and skips a manifest rewritten while running.
+	RewriteManifest func(ctx context.Context, siteID string) error
 	// Logf receives one line per skipped or failed object (and, under
 	// DryRun, per object that would be rewritten), and the periodic
 	// progress line.
@@ -191,6 +197,9 @@ func (o *S3Objects) reencryptOne(ctx context.Context, key string, opts Reencrypt
 		}
 	}
 	from := describeEnvelope(metadata)
+	if strings.HasSuffix(key, "/"+manifestName) {
+		return o.reencryptManifest(ctx, key, siteID, from, opts)
+	}
 
 	plaintext, err := o.Get(ctx, key, maxVersionObjectBytes)
 	if errors.Is(err, ErrObjectNotFound) {
@@ -221,6 +230,57 @@ func (o *S3Objects) reencryptOne(ctx context.Context, key string, opts Reencrypt
 	}
 	if !o.isCurrent(metadata) {
 		return reencryptFailed, "read back after rewrite: not under the first key in format 2 (" + describeEnvelope(metadata) + ")"
+	}
+	return reencryptRewritten, from
+}
+
+// reencryptManifest rewrites a site's manifest. The manifest, unlike an
+// asset or a committed version, changes: a copy of bytes read earlier could
+// put back an older one over a newer one written meanwhile.
+func (o *S3Objects) reencryptManifest(ctx context.Context, key, siteID, from string, opts ReencryptOptions) (reencryptOutcome, string) {
+	seqOf := func() (int64, []byte, error) {
+		body, err := o.Get(ctx, key, maxManifestBytes)
+		if err != nil {
+			return 0, nil, err
+		}
+		var m SiteManifest
+		if err := json.Unmarshal(body, &m); err != nil {
+			return 0, nil, fmt.Errorf("manifest unreadable: %w", err)
+		}
+		return m.Seq, body, nil
+	}
+	seq, body, err := seqOf()
+	if errors.Is(err, ErrObjectNotFound) {
+		return reencryptSkipped, "deleted while running"
+	}
+	if err != nil {
+		return reencryptFailed, fmt.Sprintf("%v; left untouched", err)
+	}
+	if opts.DryRun {
+		return reencryptRewritten, from
+	}
+	if opts.RewriteManifest != nil {
+		if err := opts.RewriteManifest(ctx, siteID); err != nil {
+			return reencryptFailed, fmt.Sprintf("rewrite: %v", err)
+		}
+	} else {
+		// A write since the read above is already under the current key.
+		if again, _, err := seqOf(); err != nil || again != seq {
+			return reencryptSkipped, "rewritten while running"
+		}
+		if err := o.Put(ctx, key, body, "application/json"); err != nil {
+			return reencryptFailed, fmt.Sprintf("rewrite: %v", err)
+		}
+	}
+	metadata, err := o.head(ctx, key)
+	if err != nil {
+		return reencryptFailed, fmt.Sprintf("read back after rewrite: %v", err)
+	}
+	if !o.isCurrent(metadata) {
+		return reencryptFailed, "read back after rewrite: not under the first key in format 2 (" + describeEnvelope(metadata) + ")"
+	}
+	if after, _, err := seqOf(); err != nil || after < seq {
+		return reencryptFailed, fmt.Sprintf("read back after rewrite: older than before (%v)", err)
 	}
 	return reencryptRewritten, from
 }

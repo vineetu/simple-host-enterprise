@@ -169,7 +169,7 @@ func (h *AdminHandler) deleteLeaverSites(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	var deleted int
+	var deleted []audit.Event
 	err := func() error {
 		tx, err := h.database.BeginTx(r.Context(), nil)
 		if err != nil {
@@ -189,7 +189,7 @@ func (h *AdminHandler) deleteLeaverSites(w http.ResponseWriter, r *http.Request)
 				return err
 			}
 		}
-		deleted = len(events)
+		deleted = events
 		return audit.Commit(tx)
 	}()
 	if err != nil {
@@ -197,7 +197,10 @@ func (h *AdminHandler) deleteLeaverSites(w http.ResponseWriter, r *http.Request)
 		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
 		return
 	}
-	h.respondAdmin(w, r, http.StatusOK, pluralize(deleted, "1 site", formatCount(int64(deleted))+" sites")+" deleted")
+	for _, event := range deleted {
+		refreshSiteManifest(r.Context(), h.database, h.store, event.SiteID)
+	}
+	h.respondAdmin(w, r, http.StatusOK, pluralize(len(deleted), "1 site", formatCount(int64(len(deleted)))+" sites")+" deleted")
 }
 
 // softDeleteSites marks every one of ownerID's sites listed deleted, in tx,

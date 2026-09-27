@@ -196,7 +196,7 @@ func runRestore(args []string) error {
 	}
 	defer database.Close()
 	return restoreVersion(context.Background(), database, objects, cfg.PublicBaseURL, restoreRequest{
-		fromSiteID: *fromSiteID, version: *version, owner: *owner, site: *site, setCurrent: *setCurrent,
+		fromSiteID: *fromSiteID, version: *version, owner: *owner, site: *site, setCurrent: *setCurrent, issuer: cfg.OIDC.Issuer,
 	})
 }
 
@@ -207,6 +207,8 @@ type restoreRequest struct {
 	owner      string
 	site       string
 	setCurrent bool
+	// issuer is OIDC_ISSUER, for the site manifest's owner identity.
+	issuer string
 }
 
 // restoreVersion is the restore itself, apart from reading the
@@ -309,7 +311,7 @@ func restoreVersion(ctx context.Context, database *sql.DB, objects storage.Objec
 	if err := audit.Commit(tx); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
-	if err := handler.WriteSiteManifest(ctx, database, objects, target.ID); err != nil {
+	if err := handler.WriteSiteManifest(ctx, database, objects, req.issuer, target.ID); err != nil {
 		log.Printf("restore: write the site's bucket manifest: %v (the next deploy writes it)", err)
 	}
 	log.Printf("restored %s v%d into %s/%s as v%d (site %s, live=%t)", *fromSiteID, *version, *owner, *site, newVersion, target.ID, *setCurrent || created)
@@ -518,6 +520,9 @@ func runReencrypt(args []string) error {
 		Concurrency: *concurrency,
 		VersionCommitted: func(ctx context.Context, siteID string, version int) (bool, error) {
 			return db.VersionExists(ctx, database, siteID, version)
+		},
+		RewriteManifest: func(ctx context.Context, siteID string) error {
+			return handler.ReencryptSiteManifest(ctx, database, objects, cfg.OIDC.Issuer, siteID)
 		},
 		Logf: log.Printf,
 	})

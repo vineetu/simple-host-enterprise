@@ -317,6 +317,7 @@ func (h *AdminHandler) erasePerson(w http.ResponseWriter, r *http.Request) {
 	}
 	person = again
 	var sitesDeleted int
+	var erasedSites []string
 	err = func() error {
 		if len(lastOf) > 0 {
 			return errLastTeamMember{teams: lastOf}
@@ -334,6 +335,9 @@ func (h *AdminHandler) erasePerson(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		sitesDeleted = len(events)
+		for _, event := range events {
+			erasedSites = append(erasedSites, event.SiteID)
+		}
 		counts, err := db.ErasePerson(r.Context(), tx, person, ownerLabel(person.Username), h.oidcIssuer, adminActorID(r))
 		if err != nil {
 			return err
@@ -364,6 +368,10 @@ func (h *AdminHandler) erasePerson(w http.ResponseWriter, r *http.Request) {
 		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
 		return
 	}
+	// Their sites' manifests go now, not with the retire sweep: a rebuild
+	// from the bucket in between must not bring an erased person's sites
+	// back.
+	dropSiteManifests(r.Context(), h.store, erasedSites)
 	h.respondAdmin(w, r, http.StatusOK, person.Username+" and all their data deleted ("+
 		pluralize(sitesDeleted, "1 site", formatCount(int64(sitesDeleted))+" sites")+")")
 }

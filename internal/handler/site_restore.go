@@ -225,6 +225,7 @@ func (h *SiteHandler) restoreSiteForTarget(w http.ResponseWriter, r *http.Reques
 		writeRestoreError(w, refusal, err, target.OwnerUsername+"/"+siteName)
 		return
 	}
+	refreshSiteManifest(r.Context(), h.database, h.store, site.ID)
 	writeJSON(w, http.StatusOK, restoredSiteResponse{
 		Owner: target.OwnerUsername, Site: site.Name, ActiveVersion: site.ActiveVersion, Access: site.Access,
 		URL: h.siteURL(r.Context(), target.OwnerUsername, site.Name, site.ID),
@@ -265,7 +266,7 @@ func (h *AdminHandler) restoreDeletedSiteAsAdmin(w http.ResponseWriter, r *http.
 	if actor := auth.GetUser(r.Context()); actor != nil {
 		actorID = actor.ID
 	}
-	_, refusal, err := restoreDeletedSite(r.Context(), h.database, h.quota, h.audit, owner.ID, siteName, audit.Event{
+	restored, refusal, err := restoreDeletedSite(r.Context(), h.database, h.quota, h.audit, owner.ID, siteName, audit.Event{
 		ActorID: actorID, RequestID: auditRequestID(r.Context()),
 		Extra: map[string]any{"by_admin": true},
 	})
@@ -280,6 +281,7 @@ func (h *AdminHandler) restoreDeletedSiteAsAdmin(w http.ResponseWriter, r *http.
 		log.Printf("admin: restore %s/%s: %v", ownerUsername, siteName, err)
 		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
 	default:
+		refreshSiteManifest(r.Context(), h.database, h.store, restored.ID)
 		h.respondAdmin(w, r, http.StatusOK, "restored: "+ownerUsername+"/"+siteName)
 	}
 }

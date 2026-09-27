@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -191,6 +192,94 @@ func TestParseStoreKey(t *testing.T) {
 		_, version, asset, ok := parseStoreKey(tc.key)
 		if ok != tc.ok || (ok && (version != tc.version || asset != tc.asset)) {
 			t.Errorf("parseStoreKey(%q) = %d %v %v", tc.key, version, asset, ok)
+		}
+	}
+}
+
+// A manifest is rewritten by RewriteManifest (the server's own write, in
+// turn with its other writes), never from bytes read earlier; without it,
+// the bytes are copied as they are.
+func TestReencryptManifest(t *testing.T) {
+	ctx := context.Background()
+	fake := newFakeS3()
+	oldKey, newKey := testKey("old", 0x31), testKey("new", 0x32)
+	oldClient := newS3Objects(fake, fake.bucket, "p", types.ServerSideEncryptionAes256, "", []EnvelopeKey{oldKey})
+	rotated := newS3Objects(fake, fake.bucket, "p", types.ServerSideEncryptionAes256, "", []EnvelopeKey{newKey, oldKey})
+	for _, id := range []string{testSiteA, testSiteB} {
+		if err := PutSiteManifest(ctx, oldClient, SiteManifest{SiteID: id, Seq: 3, Owner: "alice", OwnerKind: "person", Site: "notes", LiveVersion: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var rewrote []string
+	opts := ReencryptOptions{
+		VersionCommitted: committedVersions(),
+		RewriteManifest: func(ctx context.Context, siteID string) error {
+			rewrote = append(rewrote, siteID)
+			if siteID != testSiteA {
+				return nil
+			}
+			// What the server's write does: the state now, one past.
+			return PutSiteManifest(ctx, rotated, SiteManifest{SiteID: siteID, Seq: 4, Owner: "alicia", OwnerKind: "person", Site: "notes", LiveVersion: 2})
+		},
+	}
+	// testSiteB's callback writes nothing: the object stays under the old
+	// key and the run reports it.
+	stats, err := rotated.Reencrypt(ctx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Rewritten != 1 || stats.Failed != 1 || len(rewrote) != 2 {
+		t.Fatalf("stats = %v, rewrote %v", stats, rewrote)
+	}
+	m, err := GetSiteManifest(ctx, rotated, testSiteA)
+	if err != nil || m.Seq != 4 || m.Owner != "alicia" {
+		t.Fatalf("manifest after = %+v, %v; want the server's newer one", m, err)
+	}
+	// Without a callback the bytes are copied under the new key.
+	opts.RewriteManifest = nil
+	stats, err = rotated.Reencrypt(ctx, opts)
+	if err != nil || stats.Rewritten != 1 || stats.Current != 1 {
+		t.Fatalf("second run = %v, %v", stats, err)
+	}
+	newOnly := newS3Objects(fake, fake.bucket, "p", types.ServerSideEncryptionAes256, "", []EnvelopeKey{newKey})
+	if m, err := GetSiteManifest(ctx, newOnly, testSiteB); err != nil || m.Seq != 3 {
+		t.Fatalf("copied manifest = %+v, %v", m, err)
+	}
+}
+
+// Validate refuses what a rebuild must not write.
+func TestSiteManifestValidate(t *testing.T) {
+	good := SiteManifest{SiteID: testSiteA, Owner: "alice", OwnerKind: "person", OwnerIdentity: strings.Repeat("a", 64), Site: "notes", LiveVersion: 1,
+		Assets: []ManifestAsset{{ID: testSiteB, Name: "photo 1.png", ContentType: "image/png", Size: 10, SHA256: strings.Repeat("0", 64)},
+			{ID: testSiteC, Name: "data.json", ContentType: "application/json", Size: 2, SHA256: strings.Repeat("1", 64)}}}
+	if err := good.Validate(); err != nil {
+		t.Fatalf("good manifest refused: %v", err)
+	}
+	for name, change := range map[string]func(*SiteManifest){
+		"kind":          func(m *SiteManifest) { m.OwnerKind = "robot" },
+		"identity":      func(m *SiteManifest) { m.OwnerIdentity = "alice@example.com" },
+		"team id":       func(m *SiteManifest) { m.OwnerKind, m.OwnerIdentity, m.TeamID = "team", "", "nope" },
+		"live":          func(m *SiteManifest) { m.LiveVersion = 0 },
+		"reason":        func(m *SiteManifest) { m.RestrictedReason = "x" },
+		"reason chars":  func(m *SiteManifest) { m.Restricted, m.RestrictedReason = true, "a‮b" },
+		"asset id":      func(m *SiteManifest) { m.Assets[0].ID = "../../x" },
+		"asset twice":   func(m *SiteManifest) { m.Assets[1].ID = m.Assets[0].ID },
+		"asset name":    func(m *SiteManifest) { m.Assets[0].Name = "a\nb" },
+		"asset type":    func(m *SiteManifest) { m.Assets[0].ContentType = "text/html" },
+		"type params":   func(m *SiteManifest) { m.Assets[0].ContentType = "image/png; x=1" },
+		"asset size":    func(m *SiteManifest) { m.Assets[0].Size = -1 },
+		"asset sha256":  func(m *SiteManifest) { m.Assets[0].SHA256 = "zz" },
+		"site id":       func(m *SiteManifest) { m.SiteID = "x" },
+		"negative seq":  func(m *SiteManifest) { m.Seq = -1 },
+		"empty name":    func(m *SiteManifest) { m.Assets[0].Name = "" },
+		"huge size":     func(m *SiteManifest) { m.Assets[0].Size = 1 << 62 },
+		"identity team": func(m *SiteManifest) { m.TeamID = testSiteC },
+	} {
+		m := good
+		m.Assets = append([]ManifestAsset(nil), good.Assets...)
+		change(&m)
+		if err := m.Validate(); err == nil {
+			t.Errorf("%s: accepted", name)
 		}
 	}
 }

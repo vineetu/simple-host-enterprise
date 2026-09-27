@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -165,11 +166,8 @@ func TestPurgeAfterRetentionWindow(t *testing.T) {
 	if rec := w.api("alice", http.MethodDelete, "/api/sites/demo", nil); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete = %d", rec.Code)
 	}
-	store, err := storage.New(storage.Options{Objects: storage.NewMemoryObjects(), Index: storage.NewDBIndex(w.database), CacheDir: t.TempDir(), CacheMaxBytes: 1 << 20})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
+	store := w.store
+	manifestKey, _ := storage.ManifestKey(id)
 	if n, err := store.PurgeDeletedSites(context.Background(), w.database); err != nil || n != 0 {
 		t.Fatalf("purge inside the window = %d, %v", n, err)
 	}
@@ -181,6 +179,10 @@ func TestPurgeAfterRetentionWindow(t *testing.T) {
 	}
 	if n := w.count(`SELECT count(*) FROM sites WHERE id = $1`, id); n != 0 {
 		t.Fatal("purged site's row remains")
+	}
+	// Its manifest goes at once, so a rebuild never brings it back.
+	if _, err := store.Objects().Get(context.Background(), manifestKey, 1<<20); !errors.Is(err, storage.ErrObjectNotFound) {
+		t.Fatalf("purged site's manifest: %v", err)
 	}
 	if n := w.count(`SELECT count(*) FROM storage_retired WHERE object_key = $1`, "sites/"+id+"/"); n != 1 {
 		t.Fatalf("purged site's objects queued %d times, want 1", n)
