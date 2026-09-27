@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"github.com/vsriram/simple-host/internal/oplimits"
 	"time"
 )
@@ -27,14 +28,30 @@ type DeletedSite struct {
 	DeletedAt     time.Time
 	// DeletedBy is the username of whoever deleted it, "" when unknown.
 	DeletedBy string
+	// purgeAt is the date stored when it was deleted (NULL for sites deleted
+	// before migration 0054).
+	purgeAt sql.NullTime
 }
 
-// PurgeAt is when the site stops being recoverable.
-func (d DeletedSite) PurgeAt() time.Time { return d.DeletedAt.Add(DeletedSiteRetention()) }
+// PurgeAt is when the site stops being recoverable: the date given when it
+// was deleted, so a later DELETED_RETENTION_DAYS change applies to new
+// deletions only.
+func (d DeletedSite) PurgeAt() time.Time {
+	if d.purgeAt.Valid {
+		return d.purgeAt.Time
+	}
+	return d.DeletedAt.Add(DeletedSiteRetention())
+}
+
+// sitePurgeAt is the SQL for a deleted site's (alias s) purge date; $%d is
+// DeletedSiteRetention in seconds, for rows deleted before it was stored.
+func sitePurgeAt(p int) string {
+	return fmt.Sprintf(`COALESCE(s.purge_at, s.deleted_at + $%d * interval '1 second')`, p)
+}
 
 const deletedSiteColumns = `
 	s.id::text, s.user_id::text, owner.username, s.name, s.active_version, s.access,
-	s.deleted_at, COALESCE(deleter.username, '')
+	s.deleted_at, COALESCE(deleter.username, ''), s.purge_at
 	FROM sites s
 	JOIN users owner ON owner.id = s.user_id
 	LEFT JOIN users deleter ON deleter.id = s.deleted_by`
@@ -44,7 +61,7 @@ func scanDeletedSites(rows *sql.Rows) ([]DeletedSite, error) {
 	var out []DeletedSite
 	for rows.Next() {
 		var d DeletedSite
-		if err := rows.Scan(&d.ID, &d.OwnerID, &d.Owner, &d.Name, &d.ActiveVersion, &d.Access, &d.DeletedAt, &d.DeletedBy); err != nil {
+		if err := rows.Scan(&d.ID, &d.OwnerID, &d.Owner, &d.Name, &d.ActiveVersion, &d.Access, &d.DeletedAt, &d.DeletedBy, &d.purgeAt); err != nil {
 			return nil, err
 		}
 		out = append(out, d)
@@ -52,16 +69,19 @@ func scanDeletedSites(rows *sql.Rows) ([]DeletedSite, error) {
 	return out, rows.Err()
 }
 
-// SoftDeleteSite marks a live site deleted. It stops serving and leaves every
-// listing at once; nothing else about the row changes. The row must still be
+// SoftDeleteSite marks a live site deleted, recording when it stops being
+// recoverable. It stops serving and leaves every listing at once; nothing
+// else about the row changes. The row must still be
 // siteID under ownerID and name: a caller holding that name's
 // LockSiteCollaboration but working from an earlier read (a bulk delete's
 // list) never deletes a site that has since moved to someone else.
 // sql.ErrNoRows when it no longer matches.
 func SoftDeleteSite(ctx context.Context, q Querier, siteID, ownerID, name, actorID string) error {
 	result, err := q.ExecContext(ctx, `
-		UPDATE sites SET deleted_at = now(), deleted_by = NULLIF($4, '')::uuid
-		WHERE id = $1::uuid AND user_id = $2::uuid AND name = $3 AND deleted_at IS NULL`, siteID, ownerID, name, actorID)
+		UPDATE sites SET deleted_at = now(), deleted_by = NULLIF($4, '')::uuid,
+		       purge_at = now() + $5 * interval '1 second'
+		WHERE id = $1::uuid AND user_id = $2::uuid AND name = $3 AND deleted_at IS NULL`,
+		siteID, ownerID, name, actorID, int64(DeletedSiteRetention()/time.Second))
 	if err != nil {
 		return err
 	}
@@ -80,7 +100,7 @@ func SoftDeleteSite(ctx context.Context, q Querier, siteID, ownerID, name, actor
 func GetDeletedSite(ctx context.Context, tx *sql.Tx, ownerID, name string) (DeletedSite, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT `+deletedSiteColumns+`
 		WHERE s.user_id = $1::uuid AND s.name = $2 AND s.deleted_at IS NOT NULL
-		  AND s.deleted_at > now() - $3 * interval '1 second'
+		  AND `+sitePurgeAt(3)+` > now()
 		FOR UPDATE OF s`, ownerID, name, int64(DeletedSiteRetention()/time.Second))
 	if err != nil {
 		return DeletedSite{}, err
@@ -125,7 +145,7 @@ func ListAllDeletedSites(ctx context.Context, q Querier) ([]DeletedSite, error) 
 // UndeleteSite brings a deleted site back exactly as it was.
 func UndeleteSite(ctx context.Context, q Querier, siteID string) error {
 	result, err := q.ExecContext(ctx, `
-		UPDATE sites SET deleted_at = NULL, deleted_by = NULL, updated_at = now()
+		UPDATE sites SET deleted_at = NULL, deleted_by = NULL, purge_at = NULL, updated_at = now()
 		WHERE id = $1::uuid AND deleted_at IS NOT NULL`, siteID)
 	if err != nil {
 		return err
@@ -150,14 +170,15 @@ func SiteStoredBytes(ctx context.Context, q Querier, siteID string) (int64, erro
 }
 
 // ClaimExpiredDeletedSites locks up to limit deleted sites whose recovery
-// window has ended, for the calling transaction to purge. SKIP LOCKED lets
-// every replica's sweeper run at once.
+// window has ended (the date stored at deletion; retention for rows from
+// before it was stored), for the calling transaction to purge. SKIP LOCKED
+// lets every replica's sweeper run at once.
 func ClaimExpiredDeletedSites(ctx context.Context, tx *sql.Tx, retention time.Duration, limit int) ([]DeletedSite, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT `+deletedSiteColumns+`
-		WHERE s.deleted_at IS NOT NULL AND s.deleted_at <= now() - make_interval(secs => $1)
+		WHERE s.deleted_at IS NOT NULL AND `+sitePurgeAt(1)+` <= now()
 		ORDER BY s.deleted_at
 		LIMIT $2
-		FOR UPDATE OF s SKIP LOCKED`, retention.Seconds(), limit)
+		FOR UPDATE OF s SKIP LOCKED`, int64(retention/time.Second), limit)
 	if err != nil {
 		return nil, err
 	}

@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/vsriram/simple-host/internal/audit"
 	db "github.com/vsriram/simple-host/internal/db"
+	"github.com/vsriram/simple-host/internal/oplimits"
 )
 
 // What counts as use for the idle cleanup: the owner or a team member
@@ -61,7 +63,7 @@ func TestIdleCleanupCountsEveryUse(t *testing.T) {
 	}
 
 	// A held deploy after the mark (and after the grace) saves the site too.
-	if _, err := w.database.Exec(`UPDATE sites SET idle_since = now() - interval '31 days' WHERE name = 'bots'`); err != nil {
+	if _, err := w.database.Exec(`UPDATE sites SET idle_since = now() - interval '31 days', idle_delete_at = now() - interval '1 day' WHERE name = 'bots'`); err != nil {
 		t.Fatal(err)
 	}
 	if rec := w.api("alice", http.MethodPut, "/api/sites/bots?publish=false", zipOf(t, map[string][]byte{"index.html": []byte("draft")})); rec.Code != http.StatusOK {
@@ -84,7 +86,7 @@ func TestIdleCleanupWaitsForUseInFlight(t *testing.T) {
 	ctx := context.Background()
 	w.deploy("alice", "/api/sites/due")
 	w.makeUnused("due")
-	if _, err := w.database.Exec(`UPDATE sites SET idle_since = now() - interval '31 days' WHERE name = 'due'`); err != nil {
+	if _, err := w.database.Exec(`UPDATE sites SET idle_since = now() - interval '31 days', idle_delete_at = now() - interval '1 day' WHERE name = 'due'`); err != nil {
 		t.Fatal(err)
 	}
 	cleanup := NewIdleCleanup(w.database, audit.NewDBRecorder(w.database), 60, nil, "https://"+accessBase)
@@ -141,5 +143,35 @@ func TestKeepAfterDeleteRefused(t *testing.T) {
 	}
 	if _, kept, _ := w.idleSince("gone"); kept {
 		t.Fatal("a deleted site was kept")
+	}
+}
+
+// A site marked idle keeps the delete date it was given: a shorter
+// IDLE_CLEANUP_GRACE_DAYS set after the mark does not bring it forward.
+func TestIdleMarkKeepsPromisedDate(t *testing.T) {
+	w := newAccessWorld(t)
+	ctx := context.Background()
+	w.deploy("alice", "/api/sites/marked")
+	w.makeUnused("marked")
+	marked, err := db.MarkIdleSites(ctx, w.database, time.Hour, 0)
+	if err != nil || len(marked) != 1 || marked[0].DeleteOn().Before(time.Now().Add(29*24*time.Hour)) {
+		t.Fatalf("marked = %+v, %v; want one site due in 30 days", marked, err)
+	}
+	before := oplimits.Get()
+	t.Cleanup(func() { oplimits.Set(before) })
+	shorter := before
+	shorter.IdleGraceDays = 1
+	oplimits.Set(shorter)
+	if _, err := w.database.Exec(`UPDATE sites SET idle_since = now() - interval '2 days' WHERE name = 'marked'`); err != nil {
+		t.Fatal(err)
+	}
+	if due, err := db.DueIdleSites(ctx, w.database); err != nil || len(due) != 0 {
+		t.Fatalf("due = %v, %v; want none before the date given", due, err)
+	}
+	if _, err := w.database.Exec(`UPDATE sites SET idle_delete_at = NULL WHERE name = 'marked'`); err != nil {
+		t.Fatal(err)
+	}
+	if due, err := db.DueIdleSites(ctx, w.database); err != nil || len(due) != 1 {
+		t.Fatalf("due = %v, %v; a mark without a stored date follows the setting", due, err)
 	}
 }

@@ -6,7 +6,9 @@ release, commit and schema.
 
 ## Unreleased
 
-No schema change. Skills are at 0.15.2 (0.11.0 still works).
+Schema 0054 (backward-compatible: nullable `sites.purge_at` and
+`sites.idle_delete_at`); run `simple-host migrate` before deploying. Skills
+are at 0.15.2 (0.11.0 still works).
 
 ### Configuration
 - Every operational time and limit an operator may reasonably change is now
@@ -23,9 +25,20 @@ No schema change. Skills are at 0.15.2 (0.11.0 still works).
   `SEARCH_TELEMETRY_RETENTION_DAYS` (180) and `SEARCH_SESSION_MAX_AGE`
   (4320h).
 - Each rate limiter is set with `RATE_LIMIT_<NAME>=<burst>/<interval>`, for
-  example `RATE_LIMIT_AUTH_EMAIL=5/50s`; an unknown name, another shape, or a
-  limit counted across replicas whose window would exceed 30 minutes refuses
-  startup.
+  example `RATE_LIMIT_AUTH_EMAIL=5/50s`; another shape, or a limit counted
+  across replicas whose window would exceed 30 minutes, refuses startup. An
+  unknown `RATE_LIMIT_*` name (a typo, or another program's variable) is
+  ignored with a startup warning. The security-sensitive limits (sign-in,
+  the email code, API key mint, admin, the connector's registration and
+  token endpoints) may be made stricter freely but at most 4 times looser
+  than the default (startup names the ceiling); any other limit set more
+  than 10 times looser logs a warning.
+- A deleted site keeps the purge date it was given, and a site marked idle
+  the delete date it was given (stored in the new columns), so changing
+  `DELETED_RETENTION_DAYS` or `IDLE_CLEANUP_GRACE_DAYS` applies to new
+  deletions and marks only. `docs/configuration.md` also gives the memory an
+  upload needs (`UPLOAD_CONCURRENCY` × (`MAX_ARCHIVE_BYTES` + 500 MiB)) and
+  notes that installed skills keep old numbers until reinstalled.
 - What people and agents are told follows the setting: the dashboard,
   `/admin` (the "This instance" card lists the new values), the idle-cleanup
   email, refusal messages (team, member and viewer limits now name the

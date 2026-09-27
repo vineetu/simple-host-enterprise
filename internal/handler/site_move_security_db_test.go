@@ -162,7 +162,7 @@ func TestRestoreRefusedPastWindow(t *testing.T) {
 	if rec := w.api("alice", http.MethodDelete, "/api/sites/late", nil); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete = %d %s", rec.Code, rec.Body)
 	}
-	if _, err := w.database.Exec(`UPDATE sites SET deleted_at = now() - interval '31 days' WHERE name = 'late'`); err != nil {
+	if _, err := w.database.Exec(`UPDATE sites SET deleted_at = now() - interval '31 days', purge_at = now() - interval '1 day' WHERE name = 'late'`); err != nil {
 		t.Fatal(err)
 	}
 	if rec := w.api("alice", http.MethodPost, "/api/sites/late/restore", nil); rec.Code != http.StatusNotFound {

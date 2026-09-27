@@ -172,10 +172,10 @@ func TestIdleCleanup(t *testing.T) {
 	}
 
 	// 30 days after it was marked, still unused: Recently deleted.
-	if _, err := w.database.Exec(`UPDATE sites SET idle_since = now() - interval '31 days' WHERE name IN ('old', 'board')`); err != nil {
+	if _, err := w.database.Exec(`UPDATE sites SET idle_since = now() - interval '31 days', idle_delete_at = now() - interval '1 day' WHERE name IN ('old', 'board')`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.database.Exec(`UPDATE sites SET idle_keep = true, idle_since = now() - interval '31 days' WHERE name = 'board'`); err != nil {
+	if _, err := w.database.Exec(`UPDATE sites SET idle_keep = true, idle_since = now() - interval '31 days', idle_delete_at = now() - interval '1 day' WHERE name = 'board'`); err != nil {
 		t.Fatal(err)
 	}
 	if err := cleanup.RunOnce(ctx); err != nil {

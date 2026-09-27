@@ -202,7 +202,8 @@ Config names are documented in `docs/configuration.md`; schema in
   `CLAMD_ADDR` set, every file is scanned before anything is stored (422
   `malware_found`, 503 `scanner_unavailable`, fail closed). Rollback
   makes an earlier version live. Delete is recoverable for
-  `DELETED_RETENTION_DAYS` (30; `db.DeletedSiteRetention`): the row is marked `deleted_at` and stops
+  `DELETED_RETENTION_DAYS` (30; `db.DeletedSiteRetention`; the purge date is stored
+  in `sites.purge_at` at deletion, so a later change applies to new deletions): the row is marked `deleted_at` and stops
   serving and listing at once, while its versions, objects, saved data and
   history, access level, viewers and asset records stay; its name stays
   held (409 `name_held`). The owner or a team member lists them
@@ -399,8 +400,9 @@ Config names are documented in `docs/configuration.md`; schema in
   `versions.size_bytes`), 0018 owner label uniqueness, `site_redirects`
   (0043, backward-compatible), 0044 `sites.deleted_at`/`deleted_by`,
   0051 `sites.idle_since`/`idle_keep`, 0052 `site_viewers_principal_idx`
-  (Shared with me), 0053 `sites.last_used_at` and `site_export_links_used`
-  (all backward-compatible).
+  (Shared with me), 0053 `sites.last_used_at` and `site_export_links_used`,
+  0054 `sites.purge_at`/`idle_delete_at` (dates given at deletion and idle
+  mark) (all backward-compatible).
 - **Config.** `PUBLIC_BASE_URL`, `RESERVED_LABELS`, `QUOTA_MAX_SITES`,
   `QUOTA_MAX_BYTES`, `QUOTA_MAX_VERSIONS`, `CLAMD_ADDR`, `CLAMD_TIMEOUT`,
   `IDLE_CLEANUP_DAYS`, `SMTP_URL`, `SMTP_FROM`, `DELETED_RETENTION_DAYS`,
@@ -893,7 +895,10 @@ Config names are documented in `docs/configuration.md`; schema in
   time or limit (`DELETED_RETENTION_DAYS`, `PREVIEW_LINK_TTL`,
   `MAX_ARCHIVE_BYTES`, the rest in `docs/configuration.md`, "Operational
   times and limits") outside its range; a `RATE_LIMIT_*` of the wrong shape,
-  an unknown name, or a shared window over 30 minutes; clashing ports; `DB_APP_PASSWORD` equal to
+  a security-sensitive limit more than 4 times looser than its default
+  (`handler.SensitiveRateLimit`), or a shared window over 30 minutes (an
+  unknown `RATE_LIMIT_*` name, or another limit over 10 times looser, only
+  warns); clashing ports; `DB_APP_PASSWORD` equal to
   `DB_PASSWORD`; `DB_APP_USER` combined with `DB_DSN`; a schema newer than the
   binary unless every newer migration is marked backward-compatible.
   Startup also warns (log line and `simplehost_config_warning{check}`),

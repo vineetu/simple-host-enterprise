@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	db "github.com/vsriram/simple-host/internal/db"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"github.com/vsriram/simple-host/internal/storage"
 )
 
@@ -171,7 +173,7 @@ func TestPurgeAfterRetentionWindow(t *testing.T) {
 	if n, err := store.PurgeDeletedSites(context.Background(), w.database); err != nil || n != 0 {
 		t.Fatalf("purge inside the window = %d, %v", n, err)
 	}
-	if _, err := w.database.Exec(`UPDATE sites SET deleted_at = now() - interval '31 days' WHERE id = $1`, id); err != nil {
+	if _, err := w.database.Exec(`UPDATE sites SET deleted_at = now() - interval '31 days', purge_at = now() - interval '1 day' WHERE id = $1`, id); err != nil {
 		t.Fatal(err)
 	}
 	if n, err := store.PurgeDeletedSites(context.Background(), w.database); err != nil || n != 1 {
@@ -194,4 +196,52 @@ func containsCode(body []byte, code string) bool {
 		Code string `json:"code"`
 	}
 	return json.Unmarshal(body, &out) == nil && out.Code == code
+}
+
+// A deleted site keeps the purge date it was given when it was deleted: a
+// shorter DELETED_RETENTION_DAYS set later applies to new deletions only.
+// A row deleted before the date was stored falls back to the setting.
+func TestPurgeKeepsPromisedDate(t *testing.T) {
+	w := newAccessWorld(t)
+	w.deploy("alice", "/api/sites/kept")
+	w.deploy("alice", "/api/sites/legacy")
+	kept, legacy := w.siteID("alice", "kept"), w.siteID("alice", "legacy")
+	for _, name := range []string{"kept", "legacy"} {
+		if rec := w.api("alice", http.MethodDelete, "/api/sites/"+name, nil); rec.Code != http.StatusNoContent {
+			t.Fatalf("delete %s = %d", name, rec.Code)
+		}
+	}
+	before := oplimits.Get()
+	t.Cleanup(func() { oplimits.Set(before) })
+	shorter := before
+	shorter.DeletedRetentionDays = 1
+	oplimits.Set(shorter)
+	if _, err := w.database.Exec(`UPDATE sites SET deleted_at = now() - interval '2 days' WHERE id IN ($1, $2)`, kept, legacy); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.database.Exec(`UPDATE sites SET purge_at = NULL WHERE id = $1`, legacy); err != nil {
+		t.Fatal(err)
+	}
+	store, err := storage.New(storage.Options{Objects: storage.NewMemoryObjects(), Index: storage.NewDBIndex(w.database), CacheDir: t.TempDir(), CacheMaxBytes: 1 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if n, err := store.PurgeDeletedSites(context.Background(), w.database); err != nil || n != 1 {
+		t.Fatalf("purge = %d, %v; want only the site without a stored date", n, err)
+	}
+	if n := w.count(`SELECT count(*) FROM sites WHERE id = $1`, kept); n != 1 {
+		t.Fatal("a site was purged before the date it was given")
+	}
+	var listed []struct {
+		Name    string    `json:"site"`
+		PurgeAt time.Time `json:"restorable_until"`
+	}
+	_ = json.Unmarshal(w.api("alice", http.MethodGet, "/api/deleted-sites", nil).Body.Bytes(), &listed)
+	if len(listed) != 1 || listed[0].Name != "kept" || listed[0].PurgeAt.Before(time.Now().Add(29*24*time.Hour)) {
+		t.Fatalf("deleted list = %+v, want kept with its 30-day date", listed)
+	}
+	if rec := w.api("alice", http.MethodPost, "/api/sites/kept/restore", nil); rec.Code != http.StatusOK {
+		t.Fatalf("restore inside the promised window = %d %s", rec.Code, rec.Body)
+	}
 }

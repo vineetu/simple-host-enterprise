@@ -215,10 +215,27 @@ about one of these (the dashboard, `/admin`, the idle email, refusal
 messages, MCP tool descriptions, the served skills, `/openapi.yaml`, the
 home page) states the value in force, not the default.
 
+Changes apply to new deletions and warnings: the date a site's owner was
+given is stored when it is given (`sites.purge_at` when a site is deleted,
+`sites.idle_delete_at` when it is marked idle, migration 0054), and the
+sweeps honour it, so shortening `DELETED_RETENTION_DAYS` or
+`IDLE_CLEANUP_GRACE_DAYS` never removes a site earlier than it was told, and
+lengthening one does not extend what was already given. Likewise, tightened
+token and session lifetimes (`SESSION_TTL`, `SESSION_IDLE`, the connector's
+tokens, `PREVIEW_LINK_TTL`, `EXPORT_LINK_TTL`, `API_KEY_DEFAULT_DAYS`) don't
+shorten ones already issued: each carries the expiry it was issued with.
+
+The skills served by `/skills.zip` and `/skills/...` state the values in
+force, but their advertised version (`/skills/version`) follows the skills'
+text, not these settings: an agent that installed them before a change keeps
+the old numbers until it reinstalls, and while replicas roll out a change,
+`/skills/version`'s checksum from one replica can differ from the zip another
+serves. Reinstall the skills after the rollout.
+
 | Variable | Required | Default | Refusal it triggers when set wrong |
 |---|---|---|---|
-| `DELETED_RETENTION_DAYS` | No | `30` | Must be 1 to 365. How long a deleted site stays in Recently deleted: restorable whole by its owner, a team member or an admin, its name held, and counted toward its owner's quota; then the sweeper purges it. Keep the bucket's noncurrent-version retention (`docs/storage.md`) at least this long. |
-| `IDLE_CLEANUP_GRACE_DAYS` | No | `30` | Must be 1 to 365. With `IDLE_CLEANUP_DAYS` on, how long a marked site waits before it moves to Recently deleted. |
+| `DELETED_RETENTION_DAYS` | No | `30` | Must be 1 to 365. How long a deleted site stays in Recently deleted: restorable whole by its owner, a team member or an admin, its name held, and counted toward its owner's quota; then the sweeper purges it. Applies to sites deleted after the change. Keep the bucket's noncurrent-version retention (`docs/storage.md`) at least this long. |
+| `IDLE_CLEANUP_GRACE_DAYS` | No | `30` | Must be 1 to 365. With `IDLE_CLEANUP_DAYS` on, how long a marked site waits before it moves to Recently deleted. Applies to sites marked after the change. |
 | `IDLE_CLEANUP_MAX_EMAILS` | No | `0` (no limit) | Must be 0 to 100000. With `IDLE_CLEANUP_DAYS` and `SMTP_URL` set, the most sites one hourly run marks and emails about (the longest unused first); the rest are marked on later runs, so a first run over a large backlog does not send a flood. Without `SMTP_URL` it has no effect. |
 | `PREVIEW_LINK_TTL` | No | `1h` | Must be `1m` to `24h`. How long a preview link to a kept version works (`GET .../versions/{version}/preview`, MCP `preview_version`). |
 | `EXPORT_LINK_TTL` | No | `10m` | Must be `1m` to `24h`. How long a whole-site download address works (it works once either way). |
@@ -227,37 +244,47 @@ home page) states the value in force, not the default.
 | `MAX_TEAMS_PER_PERSON` | No | `10` | Must be 1 to 1000. A person who belongs to this many teams cannot create another (`409` `team_limit`); an admin can still add them to one. |
 | `MAX_TEAM_MEMBERS` | No | `50` | Must be 1 to 1000. Members of one team, pending ones (added by email, not yet signed in) included (`409` `member_limit`). |
 | `MAX_SITE_VIEWERS` | No | `50` | Must be 1 to 1000. Entries on one site's viewer list, people and teams, pending ones included. |
-| `MAX_ARCHIVE_BYTES` | No | `104857600` (100 MiB) | Must be 1048576 (1 MiB) to 524288000 (500 MiB). The largest compressed archive one deploy may send (`413` above it). The uncompressed limits stay fixed (500 MiB per file and in total). The ingress must accept a body this large: raise its body-size limit with it (the shipped overlays' `ingress-patch.yaml` set 100 MiB). |
+| `MAX_ARCHIVE_BYTES` | No | `104857600` (100 MiB) | Must be 1048576 (1 MiB) to 524288000 (500 MiB). The largest compressed archive one deploy may send (`413` above it). The uncompressed limits stay fixed (500 MiB per file and in total). The ingress must accept a body this large: raise its body-size limit with it (the shipped overlays' `ingress-patch.yaml` set 100 MiB). Each upload in flight holds the whole archive in memory as well as up to 500 MiB extracted, so a replica needs about `UPLOAD_CONCURRENCY` × (`MAX_ARCHIVE_BYTES` + 500 MiB) for uploads, plus headroom: raise the pod's memory limit when raising either. |
 | `MAX_FILES_PER_SITE` | No | `50000` | Must be 1 to 100000. Entries one uploaded archive may hold. |
-| `UPLOAD_CONCURRENCY` | No | `2` | Must be 1 to 64. Uploads, and separately archive downloads, one replica processes at once, across everyone; a request over it gets `429` with `Retry-After`. Each upload holds its archive in memory, so raise the pod's memory limit with it. |
+| `UPLOAD_CONCURRENCY` | No | `2` | Must be 1 to 64. Uploads, and separately archive downloads (the same number sets both), one replica processes at once, across everyone; a request over it gets `429` with `Retry-After`. Each upload holds its archive and its extracted files in memory, so memory for uploads is about `UPLOAD_CONCURRENCY` × (`MAX_ARCHIVE_BYTES` + 500 MiB): raise the pod's memory limit with it (the default 2 × (100 MiB + 500 MiB) is about 1.2 GiB). |
 | `SEARCH_TELEMETRY_RETENTION_DAYS` | No | `180` | Must be 1 to 3650. How long search queries, their impressions and clicks are kept before the pruner deletes them. |
 | `SEARCH_SESSION_MAX_AGE` | No | `4320h` (180 days) | Must be `1h` to `9600h` (400 days, the longest browsers keep a cookie). Lifetime of the anonymous search session cookie used for search rate limits and telemetry. |
 
 **Rate limits.** Each limiter can be changed with `RATE_LIMIT_<NAME>=<burst>/<interval>`:
 `<burst>` requests at once (1 to 100000), then one more every `<interval>` (a
 Go duration, `1ms` to `1h`). `RATE_LIMIT_AUTH_EMAIL=5/50s` is the default
-sign-in limit per email address. A name not in this table, or a value of
-another shape, refuses startup. The limits marked *shared* are counted in
-Postgres across every replica, in a fixed window of burst times interval,
-which must be at most 30 minutes; the others are per replica.
+sign-in limit per email address. A value of another shape refuses startup.
+A `RATE_LIMIT_*` name not in this table (a typo, or a variable another
+program in the pod reads) is ignored, with a `WARNING` naming it in the
+startup log. The limits marked *shared* are counted in Postgres across every
+replica, in a fixed window of burst times interval, which must be at most 30
+minutes; the others are per replica.
 
-| Variable | Default | What it limits |
-|---|---|---|
-| `RATE_LIMIT_AUTH_CLIENT` | `20/5s` (*shared*) | Sign-in, the session hand-off and the connector's authorize, per client address. |
-| `RATE_LIMIT_AUTH_EMAIL` | `5/50s` | Sign-in attempts per email address. |
-| `RATE_LIMIT_MANAGEMENT_CLIENT` | `60/1s` | The management API per client address. |
-| `RATE_LIMIT_MANAGEMENT_USER` | `30/10s` | Management changes per person. |
-| `RATE_LIMIT_API_KEY_MINT` | `30/10s` (*shared*) | API key mints per person. |
-| `RATE_LIMIT_STATE_CLIENT` | `60/1s` | Saved-data writes per client. |
-| `RATE_LIMIT_STATE_SITE` | `60/1s` | Saved-data writes per site. |
-| `RATE_LIMIT_STATE_READ_CLIENT` | `120/500ms` | Saved-data reads per client. |
-| `RATE_LIMIT_STATE_READ_SITE` | `300/200ms` | Saved-data reads per site. |
-| `RATE_LIMIT_ADMIN_CLIENT` | `10/10s` | Admin actions per client address. |
-| `RATE_LIMIT_ADMIN_IDENTITY` | `10/10s` | Admin actions per admin. |
-| `RATE_LIMIT_SEARCH_QUERY_PEER` | `200/50ms` | Site searches per network peer (coarse load shedding). |
-| `RATE_LIMIT_SEARCH_QUERY_SESSION` | `60/1s` | Site searches per search session. |
-| `RATE_LIMIT_OAUTH_REGISTER` | `30/10s` (*shared*) | AI app registrations on the connector, per client address. |
-| `RATE_LIMIT_OAUTH_TOKEN` | `120/500ms` (*shared*) | Connector token requests per client address. |
+The **security-sensitive** limits (sign-in, the email code, API key mint,
+admin actions, and the connector's registration and token endpoints) can be
+made stricter freely but at most 4 times looser than the default: a burst at
+most 4 times it and an interval at least a quarter of it. Anything looser
+refuses startup with a message naming the ceiling, which the Loosest column
+gives. The others keep the wide range, and the startup log prints a
+`WARNING` for any set more than 10 times looser than its default.
+
+| Variable | Default | Loosest | What it limits |
+|---|---|---|---|
+| `RATE_LIMIT_AUTH_CLIENT` | `20/5s` (*shared*) | **`80/1.25s`** (security-sensitive) | Sign-in, the session hand-off and the connector's authorize, per client address. |
+| `RATE_LIMIT_AUTH_EMAIL` | `5/50s` | **`20/12.5s`** (security-sensitive) | Sign-in attempts per email address. |
+| `RATE_LIMIT_MANAGEMENT_CLIENT` | `60/1s` | any (warns past 10×) | The management API per client address. |
+| `RATE_LIMIT_MANAGEMENT_USER` | `30/10s` | any (warns past 10×) | Management changes per person. |
+| `RATE_LIMIT_API_KEY_MINT` | `30/10s` (*shared*) | **`120/2.5s`** (security-sensitive) | API key mints per person. |
+| `RATE_LIMIT_STATE_CLIENT` | `60/1s` | any (warns past 10×) | Saved-data writes per client. |
+| `RATE_LIMIT_STATE_SITE` | `60/1s` | any (warns past 10×) | Saved-data writes per site. |
+| `RATE_LIMIT_STATE_READ_CLIENT` | `120/500ms` | any (warns past 10×) | Saved-data reads per client. |
+| `RATE_LIMIT_STATE_READ_SITE` | `300/200ms` | any (warns past 10×) | Saved-data reads per site. |
+| `RATE_LIMIT_ADMIN_CLIENT` | `10/10s` | **`40/2.5s`** (security-sensitive) | Admin actions per client address. |
+| `RATE_LIMIT_ADMIN_IDENTITY` | `10/10s` | **`40/2.5s`** (security-sensitive) | Admin actions per admin. |
+| `RATE_LIMIT_SEARCH_QUERY_PEER` | `200/50ms` | any (warns past 10×) | Site searches per network peer (coarse load shedding). |
+| `RATE_LIMIT_SEARCH_QUERY_SESSION` | `60/1s` | any (warns past 10×) | Site searches per search session. |
+| `RATE_LIMIT_OAUTH_REGISTER` | `30/10s` (*shared*) | **`120/2.5s`** (security-sensitive) | AI app registrations on the connector, per client address. |
+| `RATE_LIMIT_OAUTH_TOKEN` | `120/500ms` (*shared*) | **`480/125ms`** (security-sensitive) | Connector token requests per client address. |
 
 ## Retention and visibility (audit sink)
 
