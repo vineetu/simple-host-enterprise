@@ -112,7 +112,7 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 
 <section>
   <h2 class="section-title">API keys</h2>
-  <p class="login-copy">A key authenticates CI or other automation as you. Mint one per job or machine so each can be revoked without touching the others. Keys expire after {{API_KEY_DEFAULT_DAYS}} days; mint a fresh one when yours does. A publish key can deploy, update and roll back your sites and use their saved data and files; a full key can do everything you can, except administration.</p>
+  <p class="login-copy">A key authenticates CI or other automation as you. Mint one per job or machine so each can be revoked without touching the others. Keys expire after {{API_KEY_DEFAULT_DAYS}} days; mint a fresh one when yours does. A publish key can deploy, update and roll back your sites, read and write their saved data, and upload files; a full key can also delete sites and uploaded files, download a whole site, and change who can open it. No key can do administration, which needs a browser sign-in.</p>
   <form id="mint-form" class="login-form" onsubmit="return false">
     <input type="text" id="key-name" placeholder="Name (e.g. laptop, CI)" maxlength="200" autocomplete="off">
     <select id="key-scope" aria-label="What the key can do">

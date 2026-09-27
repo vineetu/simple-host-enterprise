@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/vsriram/simple-host/internal/db"
 )
@@ -183,6 +184,22 @@ func KeyScopeAllows(scope, pattern string) bool {
 		return access == keyOffboard
 	}
 	return false
+}
+
+// KeyScopeRefusal is the 403 message for a key KeyScopeAllows refused on
+// pattern. A route no key of any scope may call (administration, the pages
+// that authenticate nobody) says so, instead of suggesting another scope.
+func KeyScopeRefusal(scope, pattern string) string {
+	if scope == db.APIKeyScopeOffboard {
+		return "an offboard key calls only POST /api/admin/users/disable"
+	}
+	if access, ok := routeKeyAccess[pattern]; ok && access == keyNever {
+		if strings.Contains(pattern, " /api/admin/") || strings.HasSuffix(pattern, " /admin") {
+			return "admin routes need a browser sign-in; no API key of any scope can call them (sign in on /admin)"
+		}
+		return "this route needs a browser sign-in; no API key of any scope can call it"
+	}
+	return "this API key's scope (" + scope + ") does not allow this request; a person can mint a key with the scope it needs on the dashboard"
 }
 
 // requestPattern is what the scope table is keyed on for r.

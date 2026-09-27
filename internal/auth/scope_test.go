@@ -94,6 +94,23 @@ func TestKeyScopeAllows(t *testing.T) {
 	}
 }
 
+// A refusal on a route no key may call says a browser sign-in is needed,
+// not that another scope would do.
+func TestKeyScopeRefusal(t *testing.T) {
+	for _, c := range []struct{ scope, pattern, want string }{
+		{db.APIKeyScopeFull, "POST /api/admin/access-requests/{owner}/{sitename}/approve", "admin routes need a browser sign-in"},
+		{db.APIKeyScopePublish, "GET /api/admin/export", "admin routes need a browser sign-in"},
+		{db.APIKeyScopeFull, "GET /admin", "admin routes need a browser sign-in"},
+		{db.APIKeyScopeFull, "GET /dashboard", "needs a browser sign-in"},
+		{db.APIKeyScopePublish, "DELETE /api/sites/{sitename}", "mint a key with the scope it needs"},
+		{db.APIKeyScopeOffboard, "GET /api/me", "only POST /api/admin/users/disable"},
+	} {
+		if got := KeyScopeRefusal(c.scope, c.pattern); !strings.Contains(got, c.want) {
+			t.Errorf("KeyScopeRefusal(%q, %q) = %q, want it to contain %q", c.scope, c.pattern, got, c.want)
+		}
+	}
+}
+
 // An OAuth access token is refused off /mcp before any lookup: the nil
 // database would panic if Middleware tried one.
 func TestBearerRefusedWithoutMCPMark(t *testing.T) {

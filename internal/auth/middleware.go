@@ -83,7 +83,7 @@ func Middleware(database *sql.DB, signingKeys []SigningKey, sessionIdle time.Dur
 				reqlog.SetUser(r.Context(), user.ID)
 				if !KeyScopeAllows(scope, requestPattern(r)) {
 					writeJSON(w, http.StatusForbidden, map[string]string{
-						"error": "this API key's scope (" + scope + ") does not allow this request; a person can mint a key with the scope it needs on the dashboard",
+						"error": KeyScopeRefusal(scope, requestPattern(r)),
 						"scope": scope,
 					})
 					return

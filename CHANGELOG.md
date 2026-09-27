@@ -12,6 +12,11 @@ release, commit and schema.
   `{"error":"unauthorized"}` page. Scripts, agents and API-key calls still
   get the 401 JSON. The hand-off's nonce cookie now lasts 10 minutes, long
   enough for a sign-in with a second factor.
+- An API key calling an admin route is told that admin routes need a
+  browser sign-in, instead of being told to mint a key with another scope
+  (no key can call them). An offboard key is told the one route it calls.
+- The dashboard's key help says what a publish key cannot do: delete
+  uploaded files or download a whole site (a full key can).
 
 ## v1.8.0 — 2026-09-27
 
