@@ -188,7 +188,8 @@ at any point; it runs next to the live servers.
    `-concurrency` (default 4) sets how many objects are worked at once;
    each is held in memory while it is rewritten, so lower it if the pod is
    short of memory. If the session drops, run it again: it carries on
-   where it stopped.
+   where it stopped. Each run (not `-dry-run`) is recorded in the audit
+   log as one `storage_reencrypt` event with these counts.
 5. Run it a second time. It must end with `0 rewritten` and `0 failed`.
 6. Remove the old key (`k2:<new>` alone), re-apply, restart and wait. Keep
    the old key in escrow until the bucket's lifecycle rule has expired the
@@ -280,7 +281,8 @@ any site in the bucket. Replace `<digest>` with the new release's digest
    step 1's backup undoes them). Then `migrate-storage` uploads every
    site's retained versions and live assets, re-downloads each to verify
    it, and exits non-zero if anything failed or is missing. It is safe to
-   re-run.
+   re-run. Each run (not `-dry-run`) is recorded in the audit log as one
+   `storage_migrate` event with its counts.
 6. Check the log ends with zero failures:
    `kubectl -n simple-host logs job/simple-host-migrate-storage -c migrate-storage`
 7. Apply the new release's manifests.

@@ -221,7 +221,10 @@ Config names are documented in `docs/configuration.md`; schema in
   object under the first `BACKUP_ENVELOPE_KEY` in the key-bound form, so old
   keys can be removed and a plaintext install can adopt the envelope;
   idempotent, verified read-back, rewrites a version only once a committed
-  row names it). A bucket fault does not fail `/readyz`
+  row names it). `restore`, `migrate-storage` and `reencrypt` each record
+  one `system` audit event per run (`site_restore`, `storage_migrate`,
+  `storage_reencrypt`, with counts; not for `-dry-run`); a failed audit
+  write makes the command exit non-zero. A bucket fault does not fail `/readyz`
   (`simplehost_bucket_ok` instead).
 - **Status.** Built.
 - **Routes.** None of its own. **MCP.** None.

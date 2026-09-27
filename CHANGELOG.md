@@ -11,6 +11,9 @@ creates audit and access-log partitions twelve months ahead. It is marked
 backward-compatible, so rolling back to v1.3.1 is safe.
 
 ### Operations
+- `simple-host migrate-storage` and `simple-host reencrypt` record one
+  audit event per run with their counts (`storage_migrate`,
+  `storage_reencrypt`), like `restore`; dry runs are not recorded.
 - Retention no longer wedges after a long gap: rows that reached the
   default partition while `prune` was not running are moved into their
   months' partitions, unchanged and still hash-chained, instead of every
