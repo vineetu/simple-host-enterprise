@@ -2702,7 +2702,7 @@ paths:
   /api/admin/users/{username}/erase:
     post:
       summary: Delete a disabled person and all their data
-      description: Admin only, browser session only. Permanent, with no recovery window - their sites (live and recently deleted) with files, saved data and its history, versions and assets (bucket objects queued for the retire sweep), API keys, connected apps, sessions, team memberships, viewer grants they hold, pending grants for their email (when the identity provider vouched for it), the access-log rows of their own visits, redirects from their old addresses to sites they handed on (those addresses answer not found), and the account. Audit rows stay and keep the opaque user id, and some keep their username or email in the detail, until retention prunes them; the `user_erased` row names them by id only. The address label stays held, and their sign-in identity is held as a SHA-256 of issuer and subject and of their verified email, so they cannot sign in again until an admin allows it (`/api/admin/erased-identities`). Send `confirm` (form or JSON) equal to the username.
+      description: Admin only, browser session only. Permanent, with no recovery window - their sites (live and recently deleted) with files, saved data and its history, versions and assets (bucket objects queued for the retire sweep), API keys, connected apps, sessions, team memberships, viewer grants they hold, pending grants for their email (when the identity provider vouched for it), the access-log rows of their own visits, redirects from their old addresses to sites they handed on (those addresses answer not found), and the account. Audit rows stay and keep the opaque user id, and some keep their username or email in the detail, until retention prunes them; the `user_erased` row names them by id only. The address label stays held (every label they had before a rename too), and their sign-in identity is held as a SHA-256 of issuer and subject and of their verified email, so they cannot sign in again until an admin allows it (`/api/admin/erased-identities`). Send `confirm` (form or JSON) equal to the username.
       tags: [Admin]
       parameters:
         - name: username
@@ -2738,6 +2738,47 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: The person can still sign in, or is the last member of a team
+
+  /api/admin/users/{username}/rename:
+    post:
+      summary: Rename a person's address after a name change
+      description: Admin only, browser session only. The username, which is the label in every one of the person's addresses, becomes `name`. Their sites keep their ids, files, saved data, access and viewers and answer under the new name (at `<new>.<base>/<site>/` until the owner-hosts reconciler has the new name's certificate). Each old site address, and its pre-v1.3 forms, redirects to the new one only for someone who may open the site; the old owner page redirects anyone signed in. The old name is held so no sign-in or rename takes it (the person may take it back). Audited as `admin_rename_user` with `from` and `to`.
+      tags: [Admin]
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  description: Lowercase letters, numbers and single hyphens, starting and ending with a letter or number, at most 63 characters; no dots, not a reserved name, not beginning with `team-`.
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Renamed
+        '400':
+          description: The name cannot be an address, begins with `team-`, or is already theirs
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Another person or team has the name, it is held (someone had it before a rename or an erasure), it is a team's pre-v1.3 address, or the account is a team
 
   /api/admin/erased-identities:
     get:

@@ -124,6 +124,18 @@ func (g *hostGate) serveOwnerIndex(w http.ResponseWriter, r *http.Request, label
 			g.redirectToHost(w, r, current, "/")
 			return
 		}
+		// A person an admin renamed: their page is at the new name. Given
+		// only past the session check, to someone signed in, who could
+		// open anyone's page here.
+		if g.renamedOwner != nil {
+			if current, ok, err := g.renamedOwner(r, label); err != nil {
+				log.Printf("host gate: renamed owner lookup %q: %v", label, err)
+			} else if ok {
+				status = http.StatusMovedPermanently
+				g.redirectToHost(w, r, ownerLabel(current), "/")
+				return
+			}
+		}
 		status = http.StatusNotFound
 		http.NotFound(w, r)
 		return

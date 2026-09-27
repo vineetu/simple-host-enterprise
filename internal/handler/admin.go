@@ -173,6 +173,7 @@ func (h *AdminHandler) Register(mux *http.ServeMux, authMiddleware, skillVersion
 	}
 	mux.Handle("POST /api/admin/users/disable", offboard(http.HandlerFunc(h.disableUserByEmail)))
 	mux.Handle("POST /api/admin/users/{username}/enable", dashboardCheck(adminAPI(http.HandlerFunc(h.enableUser))))
+	mux.Handle("POST /api/admin/users/{username}/rename", dashboardCheck(adminAPI(http.HandlerFunc(h.renameUser))))
 	mux.Handle("POST /api/admin/teams/{team}/delete", dashboardCheck(adminAPI(http.HandlerFunc(h.deleteOrphanTeam))))
 	mux.Handle("GET /api/admin/export", adminAPI(http.HandlerFunc(h.exportAuditOrAccess)))
 	mux.Handle("GET /api/admin/deleted-sites", adminAPI(http.HandlerFunc(h.listAllDeletedSites)))
@@ -570,11 +571,13 @@ func writeUserBlockHeader(b *strings.Builder, hosts HostModel, u db.User, siteCo
 		}
 	} else if u.DisabledAt != nil {
 		nameChips = ` <span class="chip chip-warn">disabled</span>`
+		actions += renameUserAction(u.Username)
 		actions += leaverSiteActions(u.Username, siteCount, true)
 		actions += personDataActions(u.Username)
 		actions += confirmForm("/api/admin/users/"+url.PathEscape(u.Username)+"/enable",
 			fmt.Sprintf("Re-enable %s? They will be able to sign in again.", u.Username), "Enable")
 	} else {
+		actions += renameUserAction(u.Username)
 		actions += confirmForm("/api/admin/users/"+url.PathEscape(u.Username)+"/disable",
 			fmt.Sprintf("Disable %s? Their sessions and API keys are revoked immediately and they cannot sign in again until re-enabled. Their sites keep serving.", u.Username), "Disable")
 	}
@@ -597,6 +600,16 @@ func writeUserBlockHeader(b *strings.Builder, hosts HostModel, u db.User, siteCo
 		pluralize(siteCount, "1 site", fmt.Sprintf("%d sites", siteCount)),
 		actions,
 	)
+}
+
+// renameUserAction renames a person's address after a name change.
+func renameUserAction(username string) string {
+	return promptForm("/api/admin/users/"+url.PathEscape(username)+"/rename",
+		"New name for "+username+"? It becomes the name in every one of their addresses (<site>.<name>.…). "+
+			"Their sites move with it; each old address redirects to the new one for people who can open the site, "+
+			"and "+username+" stays reserved so nobody else takes over those links. "+
+			"Sites answer at the new name's own addresses once its certificate is issued. Lowercase letters, numbers and hyphens:",
+		"name", "btn-reset", "Rename…")
 }
 
 // leaverSiteActions are the header actions for a namespace nobody can act on
@@ -1568,7 +1581,7 @@ const adminActivityScript = `<script>
 // auditActions is every action the audit log records, offered as
 // suggestions in the Activity search.
 var auditActions = []string{
-	"access_denied", "admin_disable_user", "admin_enable_user", "admin_export", "admin_key_revoke",
+	"access_denied", "admin_disable_user", "admin_enable_user", "admin_export", "admin_key_revoke", "admin_rename_user",
 	"asset_delete", "connector_revoke", "connector_sign_in", "email_change", "hand_off",
 	"key_mint", "key_revoke", "member_add", "member_remove", "network_access_approved",
 	"network_access_declined", "network_access_requested", "network_access_reverted", "network_access_revoked",

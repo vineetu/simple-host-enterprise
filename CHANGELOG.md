@@ -6,6 +6,22 @@ release, commit and schema.
 
 ## Unreleased
 
+Schema 0055–0057 (all backward-compatible); run `simple-host migrate`
+before deploying. Skills are at 0.15.3.
+
+### Renaming a person's address
+- After a name change an admin presses **Rename…** on the person's row in
+  `/admin` (`POST /api/admin/users/{username}/rename`). The new name becomes
+  the label in all their addresses; their sites answer under it. Every old
+  site address and its older forms redirect to the new one only for people
+  who may open the site, the old owner page redirects anyone signed in,
+  and the owner-hosts reconciler requests the new name's certificate
+  (until it is ready the sites answer at `<new>.<base>/<site>/`). The old
+  name is held so no sign-in or rename takes it; erasing the person keeps
+  every name they had held. Collisions (another person or team, a held
+  name, a team's old address) are refused. Audited as `admin_rename_user`.
+  Schema 0057 (backward-compatible).
+
 ### Docs
 - `docs/uninstall.md`: removing a real install, in order — what to export
   first (sites, the audit and access logs, a full database and bucket copy

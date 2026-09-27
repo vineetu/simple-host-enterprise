@@ -276,6 +276,10 @@ func ErasePerson(ctx context.Context, tx *sql.Tx, p ErasablePerson, label, issue
 		// their own, but nothing needs to keep them.
 		{`DELETE FROM rate_limit_counters WHERE strpos(key, $1) > 0`, []any{p.ID}},
 		{`INSERT INTO erased_owner_labels (owner_label) VALUES ($1) ON CONFLICT DO NOTHING`, []any{label}},
+		// Labels they had before an admin renamed them stay held too, and
+		// stop redirecting, like their last one.
+		{`DELETE FROM site_redirects WHERE owner_label IN (SELECT owner_label FROM renamed_owner_labels WHERE user_id = $1::uuid)`, []any{p.ID}},
+		{`INSERT INTO erased_owner_labels (owner_label) SELECT owner_label FROM renamed_owner_labels WHERE user_id = $1::uuid ON CONFLICT DO NOTHING`, []any{p.ID}},
 	} {
 		if _, err := tx.ExecContext(ctx, stmt.query, stmt.args...); err != nil {
 			return c, fmt.Errorf("erase person: %w", err)

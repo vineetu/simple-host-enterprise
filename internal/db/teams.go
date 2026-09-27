@@ -698,6 +698,7 @@ const legacyTeamLabelQuery = `
 	WHERE t.kind = 'team' AND t.username = 'team-' || $1
 	  AND NOT EXISTS (SELECT 1 FROM users u WHERE lower(replace(u.username, '.', '-')) = $1)
 	  AND NOT EXISTS (SELECT 1 FROM erased_owner_labels e WHERE e.owner_label = $1)
+	  AND NOT EXISTS (SELECT 1 FROM renamed_owner_labels h WHERE h.owner_label = $1)
 `
 
 // LegacyTeamName reports the team a pre-v1.3 team address now belongs to:

@@ -369,6 +369,11 @@ rename or move it instead of deleting and republishing:
 `POST .../transfer {"to": "<team>"}` (`transfer_site`). Saved data, history, uploads, access and viewers stay with
 the site, and the old address redirects. See [`teams.md`](teams.md).
 
+The person's own name in their addresses (`<site>.<name>.<base>`) cannot be
+changed by them or by you. After a name change, an admin renames it on the
+`/admin` page; every old address then redirects. Tell the user to ask their
+admin; do not rename or move sites to imitate it.
+
 A deleted site stops serving at once but can be restored for {{DELETED_RETENTION}}, whole:
 its versions, saved data and history, who can open it, viewers and uploaded
 files. Its name stays taken until then (a create answers `409` `name_held`:

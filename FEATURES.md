@@ -27,7 +27,9 @@ Config names are documented in `docs/configuration.md`; schema in
 ## 1. Identity: OIDC sign-in, sessions, hand-off
 
 - **What.** People sign in only through the company's OIDC provider; an
-  account is created at first sign-in (username/email from claims). Admin is
+  account is created at first sign-in (username/email from claims; the
+  username is not refreshed from later claims: an admin renames it,
+  section 13). Admin is
   `ADMIN_EMAILS` or an OIDC claim. Revocable session rows, `__Host-` cookies
   signed with `SESSION_SIGNING_KEY`, idle and absolute limits
   (`SESSION_IDLE` 30m, `SESSION_TTL` 8h by default; capped at 8h and 24h,
@@ -750,7 +752,20 @@ Config names are documented in `docs/configuration.md`; schema in
 
 - **What.** Server-rendered `/admin` for admins: users (disable/enable —
   disabling revokes sessions, API keys and connected apps in the same
-  transaction as its audit row), orphan teams, a disabled person's or orphan
+  transaction as its audit row; "Rename…" changes a person's address after
+  a name change: the username, which is the label in every address, becomes
+  the new name, their sites (same ids) answer under it, every old
+  `<site>.<old>.<base>` address and the pre-v1.3 forms redirect through
+  `site_redirects` (only for people who may open the site), the old owner
+  page redirects anyone signed in, the owner-hosts reconciler requests the
+  new label's certificate (sites answer at `<new>.<base>/<site>/` until it
+  is ready) and keeps the old one's for the redirects, search reindexes
+  their sites, and the old label is held in `renamed_owner_labels` so no
+  sign-in or rename takes it (the person may take it back); refused for a
+  team, a name another person or team has, one held after a rename or an
+  erasure, a team's pre-v1.3 address, `team-` names, dots, and anything
+  that is not a valid label; audited `admin_rename_user` with `from`/`to`;
+  erasure holds every old label too), orphan teams, a disabled person's or orphan
   team's sites ("Move to team…" moves them all to a team or person, all or
   none; "Delete sites" for a disabled person), a disabled person's data
   ("Export data": one zip of their account, teams, viewer grants, key,
@@ -779,6 +794,8 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Status.** Built.
 - **Routes.** `GET /admin`, `POST /api/admin/users/{username}/disable`,
   `POST /api/admin/users/{username}/enable`,
+  `POST /api/admin/users/{username}/rename` (form or JSON `name`; 409 on a
+  collision, 400 for a name that cannot be an address),
   `POST /api/admin/users/disable` (offboarding by `{"email"}`: every person
   account with that address, idempotent, 404 when none; an admin's session
   or an admin's `offboard` key);
@@ -801,14 +818,17 @@ Config names are documented in `docs/configuration.md`; schema in
 - **MCP.** None.
 - **Pages.** `/admin`.
 - **Go.** `internal/handler/admin.go` (`leaverSiteActions`,
-  `personDataActions`), `admin_move.go`, `admin_erase.go`, `internal/db/erase.go`,
+  `personDataActions`, `renameUserAction`), `admin_move.go`, `admin_erase.go`,
+  `admin_rename.go`, `internal/db/erase.go`, `internal/db/rename.go`,
   `admin_rankings.go`, `admin_disk_usage.go`, `admin_keys.go`,
   `admin_status.go` (filled by `cmd/server/status.go`), `access.go`
   (`renderAccessRequests`), `site_restore.go` (`renderDeletedSites`).
 - **DB.** `users.disabled_at` (0023), `site_daily_analytics` (0003, 0013),
   `erased_owner_labels`, `erased_identities`, the
   `users_refuse_erased_label` trigger and `access_log_erase_visitor()`
-  (0048); definer functions' search path pinned (0049).
+  (0048); definer functions' search path pinned (0049);
+  `renamed_owner_labels` and the `users_refuse_renamed_label` trigger
+  (0057).
 - **Config.** `ADMIN_EMAILS`, `OIDC_ADMIN_CLAIM`, `OIDC_ADMIN_VALUE`. See
   INSTALL.md "Sessions and leavers" and docs/configuration.md "Data subject
   requests".

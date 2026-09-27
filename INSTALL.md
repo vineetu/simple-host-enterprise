@@ -278,6 +278,14 @@ serving; to take one site down, press Restrict on it in `/admin` with a
 reason (the site drops to only its owner or team, the owner sees the
 reason, and Lift puts it back).
 
+A person's username is taken from the IdP once, at first sign-in, and is
+the name in every one of their addresses. After a name change, an admin
+presses **Rename…** on their row in `/admin`: their sites answer under the
+new name, the old addresses redirect for people who may open each site,
+and the old name stays reserved so nobody else inherits the links. The new
+name's certificate is requested by the owner-hosts reconciler; until it is
+ready the sites answer at `<new>.<base>/<site>/`.
+
 People can cut off their own access too: `/auth/sessions` lists their
 connected apps with Disconnect, and "Sign out everywhere" ends every
 session and, by default, revokes their API keys and connected apps.

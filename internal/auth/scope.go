@@ -124,6 +124,7 @@ var routeKeyAccess = map[string]keyAccess{
 	"GET /admin": keyNever,
 	"POST /api/admin/users/{username}/disable":                   keyNever,
 	"POST /api/admin/users/{username}/enable":                    keyNever,
+	"POST /api/admin/users/{username}/rename":                    keyNever,
 	"POST /api/admin/teams/{team}/delete":                        keyNever,
 	"POST /api/admin/sites/{owner}/{sitename}/transfer":          keyNever,
 	"POST /api/admin/users/{username}/transfer-sites":            keyNever,

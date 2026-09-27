@@ -534,7 +534,7 @@ group without its audit row cannot commit: `site_create`, `site_update`,
 `team_delete`, `member_add`, `member_remove`, `sign_in`,
 `pending_grant_converted`, `session_revoke`,
 `key_mint`, `key_revoke`, `connector_sign_in`, `connector_revoke`,
-`admin_disable_user`, `admin_enable_user`, `user_erased`,
+`admin_disable_user`, `admin_enable_user`, `admin_rename_user`, `user_erased`,
 `erased_identity_allowed`, `state_write`,
 `asset_create`, and `asset_delete` — the last three from the site-facing
 API (`internal/handler/site_api.go`'s `PutState`/`PutStateVersioned`/

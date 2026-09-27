@@ -98,6 +98,9 @@ type hostGate struct {
 	// legacyTeam is db.LegacyTeamName by default: which team a pre-v1.3
 	// team address now belongs to. nil redirects nothing.
 	legacyTeam func(r *http.Request, label string) (string, bool, error)
+	// renamedOwner is db.RenamedOwner by default: whom an owner label
+	// belonged to before an admin renamed them.
+	renamedOwner func(r *http.Request, label string) (string, bool, error)
 	// movedSite is db.SiteRedirect by default: where a site handed over or
 	// renamed away from an address now lives. nil redirects nothing.
 	movedSite func(r *http.Request, address db.SiteAddress) (owner, site string, ok bool, err error)
@@ -176,6 +179,9 @@ func NewHostGate(hosts HostModel, files *SiteFiles, database *sql.DB, signingKey
 		},
 		movedSite: func(r *http.Request, address db.SiteAddress) (string, string, bool, error) {
 			return db.SiteRedirect(r.Context(), database, address)
+		},
+		renamedOwner: func(r *http.Request, label string) (string, bool, error) {
+			return db.RenamedOwner(r.Context(), database, label)
 		},
 		recordAccess: func(event audit.AccessEvent) {
 			if files != nil {
