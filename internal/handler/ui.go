@@ -28,7 +28,9 @@ const (
 	skillBundleName      = "simple-host-skills"
 	skillBundleURL       = "/skills.zip"
 	// skillReleaseType is hand-set, so it has to move with the version above
-	// it. 0.14.1 corrects the hand-over text (only into a team the caller
+	// it. 0.14.2 documents downloading a whole site (export_site, export-link),
+	// sites shared with the caller (list_sites viewer entries), search_sites,
+	// and the dashboard's version, saved-data and team controls; 0.14.1 corrects the hand-over text (only into a team the caller
 	// is in; a restricted site cannot be renamed or moved); 0.14.0 documents handing a site over and renaming it
 	// (transfer_site, rename_site), restoring a deleted site (list_deleted_sites,
 	// restore_site), and viewers and team members named by email before they

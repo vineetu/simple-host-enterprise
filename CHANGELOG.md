@@ -4,6 +4,31 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## Unreleased
+
+Schema 0050 (from 0049): an index on `site_viewers (principal_id)`,
+backward-compatible. Skills are at 0.14.2 (0.11.0 still works).
+
+### Sites
+- Download a whole site: the owner or a team member gets a 10-minute
+  download address (`POST .../export-link`, MCP `export_site`, "Download
+  site" in the dashboard's Manage panel) for one zip of the live files, the
+  saved data and its history, the version list and the uploaded files. The
+  address needs no sign-in; the person who asked must still own the site or
+  be in its team when it is opened. Audited as `site_export`.
+- Shared with me: `GET /api/collaboration/sites?include=shared` and MCP
+  `list_sites` add the sites shared with the caller by name or through a
+  team, as `access_role: "viewer"` entries with `shared_via`.
+
+### Dashboard
+- Each site links to its address and shows its live version and last update.
+- The Manage panel adds Versions (Make live), Saved data (history with
+  Restore), Download site, and Delete (type the site name; it goes to
+  Recently deleted).
+- A "Shared with me" section lists the sites shared with you.
+- With no sites yet, the list shows how to connect an AI app: the `/mcp`
+  address, `plugin.zip` and the install page.
+
 ## v1.4.0 — 2026-09-27
 
 Schema 0049 (from 0042). Run `simple-host migrate` before the new image.

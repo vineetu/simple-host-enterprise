@@ -113,7 +113,7 @@ func realApp(t *testing.T, database *sql.DB) (*Server, *http.ServeMux, func(http
 
 	mux := http.NewServeMux()
 	handler.NewUserHandler(database, limits).Register(mux, authMW, skillMW)
-	handler.NewSiteHandler(database, disk, base, hosts, limits).WithAudit(recorder).Register(mux, authMW, skillMW)
+	handler.NewSiteHandler(database, disk, base, hosts, limits).WithAudit(recorder).WithSigningKeys(keys).Register(mux, authMW, skillMW)
 	handler.NewTeamHandler(database, limits).WithAudit(recorder).Register(mux, authMW, skillMW, hosts, base)
 	files := handler.NewSiteFiles(disk, database, handler.CookiePolicy{Secure: true}, keys, time.Hour)
 	siteAPI := handler.NewSiteAPIHandler(database, disk, storage.AssetLimits{MaxFileBytes: 1 << 20, MaxSiteBytes: 8 << 20, MaxSiteCount: 100}, recorder, hosts, limits)
@@ -268,7 +268,22 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	}
 	call("revoke_site_viewer", map[string]any{"site": "demo", "owner": "alice", "username": "guest@example.com"})
 
-	call("list_sites", map[string]any{})
+	if got := call("export_site", map[string]any{"site": "demo", "owner": "alice"}); !strings.HasPrefix(got["url"].(string), "https://hosting.corp.test/api/site-export/") {
+		t.Errorf("export_site = %v", got)
+	}
+
+	// A site of bob's that alice is a named viewer of is listed after hers,
+	// as a viewer entry.
+	if _, err := database.Exec(`INSERT INTO sites (user_id, name, access) SELECT id, 'bobs-notes', 'specific' FROM users WHERE username = 'bob'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO site_viewers (site_id, principal_id) SELECT s.id, u.id FROM sites s, users u WHERE s.name = 'bobs-notes' AND u.username = 'alice'`); err != nil {
+		t.Fatal(err)
+	}
+	all := call("list_sites", map[string]any{})["items"].([]any)
+	if last := all[len(all)-1].(map[string]any); last["name"] != "bobs-notes" || last["access_role"] != "viewer" || last["shared_via"] != "" {
+		t.Errorf("shared site entry = %v", last)
+	}
 	if got := call("rename_site", map[string]any{"site": "other", "name": "other-two"}); got["name"] != "other-two" || got["previous_url_status"] != "redirects" {
 		t.Errorf("rename_site = %v", got)
 	}

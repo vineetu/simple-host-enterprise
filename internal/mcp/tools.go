@@ -333,8 +333,11 @@ func toolList() []Tool {
 		{
 			Name:  "list_sites",
 			Title: "List sites I can act on",
-			Description: "List every site the account can act on: sites it owns and sites owned by a team it belongs to. " +
-				"Each entry gives the site name, its owner, its `access_role` — owner, or member (the site belongs to a team you are in) — its `access` level, any pending `network_request`, the last admin `access_decision` if any, and its address: " +
+			Description: "List every site the account can act on — sites it owns and sites owned by a team it belongs to — followed by the sites shared with it. " +
+				"Each entry gives the site name, its owner, its `access_role`, its `access` level, and its address. " +
+				"`access_role` is owner, member (the site belongs to a team you are in), or viewer: the site is shared with you, or with a team you are in (`shared_via` names the team; empty means you were named yourself). " +
+				"A viewer entry can be opened in a browser and nothing more: no other tool acts on it, so never deploy to, roll back or change a site whose role is viewer. " +
+				"Owner and member entries also give any pending `network_request` and the last admin `access_decision`. " +
 				"`url` is absolute, and `public_path` is the address to hand out, " +
 				"which may be absolute rather than a path, so use it exactly as returned and never prefix it with the server origin. " +
 				"Call this first when acting on a site that already exists — " +
@@ -343,7 +346,7 @@ func toolList() []Tool {
 			Annotations: readOnly(),
 			family:      familySite,
 			call: func(map[string]any) (upstream, error) {
-				return upstream{Method: "GET", Path: "/api/collaboration/sites"}, nil
+				return upstream{Method: "GET", Path: "/api/collaboration/sites?include=shared"}, nil
 			},
 		},
 		{
@@ -494,6 +497,22 @@ func toolList() []Tool {
 					return upstream{Method: "POST", Path: collaboration}, nil
 				}
 				return upstream{Method: "POST", Path: ownerScoped}, nil
+			},
+		},
+		{
+			Name:  "export_site",
+			Title: "Download a copy of a site",
+			Description: "Get a download address for one zip of a site: its live files, its current saved data and the saved-data history, its version list, and its uploaded files with a list naming them. " +
+				"The address works for 10 minutes without signing in, so hand it to the user to open in their browser rather than fetching it yourself, and do not post it anywhere others can see it. " +
+				"Works for your own sites and for sites of a team you are in.",
+			InputSchema: object(map[string]any{
+				"site":  str(siteArgDesc),
+				"owner": str(ownerArgDesc),
+			}, "site", "owner"),
+			Annotations: writes(false, false),
+			family:      familySite,
+			call: func(args map[string]any) (upstream, error) {
+				return collaborationSuffix(args, "export-link", "POST", nil)
 			},
 		},
 		{

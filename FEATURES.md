@@ -247,6 +247,26 @@ Config names are documented in `docs/configuration.md`; schema in
   deletes the sites of a disabled person or of a team with no active member
   (section 13); nobody else's. Visitor counts are kept per address, so a
   moved site's Visitors tab starts again.
+  **Download a site.** The owner or a team member gets a download address
+  (`POST .../export-link`, full-scope key or session; `{url, expires_at}`)
+  that works for 10 minutes with no key or cookie (`GET
+  /api/site-export/{token}`): one zip of `site.json`, `saved-data.json`,
+  `saved-data-history.json`, `versions.json`, `assets.json`, the live
+  version's files under `files/` and each uploaded file under
+  `assets/<id>`, written by the same code as the admin's person export
+  (`writeSiteExport`). The token is HMAC-signed with the session signing
+  keys under its own domain string (a session cookie never verifies as one)
+  and names the site id and the caller; at download the caller must still
+  be active and still own the site or belong to its team, and the site must
+  be the same one (not deleted, not re-created under the name), else 404.
+  Audited `site_export` when downloaded. **Shared with me.** `GET
+  /api/collaboration/sites?include=shared` appends the sites the caller, or
+  a team they are in, is a named viewer of (not their own or their teams',
+  not while the site is `only_me`) as entries with `access_role: "viewer"`
+  and `shared_via` (the team's name, or empty for a grant naming the caller),
+  without analytics, network request or admin decision. It is a listing
+  only: no management route resolves a viewer. MCP `list_sites` always asks
+  for them.
 - **Status.** Built.
 - **Routes.** `POST /api/sites/{sitename}`, `PUT /api/sites/{sitename}`,
   `DELETE /api/sites/{sitename}`, `POST /api/sites/{sitename}/rollback`,
@@ -266,7 +286,9 @@ Config names are documented in `docs/configuration.md`; schema in
   `POST /api/sites/{sitename}/transfer`,
   `POST /api/collaboration/sites/{owner}/{sitename}/transfer`,
   `POST /api/sites/{sitename}/rename`,
-  `POST /api/collaboration/sites/{owner}/{sitename}/rename`.
+  `POST /api/collaboration/sites/{owner}/{sitename}/rename`,
+  `POST /api/collaboration/sites/{owner}/{sitename}/export-link`,
+  `GET /api/site-export/{token}`.
   Host-gate: every path on the site host `<site>.<owner>.<base>` (hosted
   content, root-served); `/{site}/...` on the owner host (served before the
   owner is ready, redirected after); every path on a v1.2
@@ -274,21 +296,25 @@ Config names are documented in `docs/configuration.md`; schema in
 - **MCP.** `list_sites`, `get_site`, `deploy_site`, `list_site_versions`,
   `rollback_site`, `delete_site`, `list_deleted_sites`, `restore_site`,
   `list_site_files`, `read_site_file` (the last
-  two read a version archive), `transfer_site`, `rename_site`.
+  two read a version archive), `transfer_site`, `rename_site`,
+  `export_site` (returns the download address).
 - **Skill.** `SKILL.md` §3, Canonical deployment workflow, Core collaboration
   and conflict rules; `references/packaging-and-validation.md`,
   `references/collaboration.md` §1–5 and §8, `references/frameworks.md`;
   `skills/fix-paths-for-subpath-hosting/`, `skills/simple-host-builder/`.
-- **Pages.** `/dashboard` "Your sites" (Manage: Rename, Move to a team; both off while an admin's restriction stands) and
-  "Recently deleted"; `/admin` "Recently deleted".
+- **Pages.** `/dashboard` "Your sites" (each links to its address with its live version and last update; Manage: Versions with
+  Make live, Download site, Rename, Move to a team, Delete with the site name typed back; Rename and Move are off while an admin's
+  restriction stands), "Shared with me" and "Recently deleted"; `/admin` "Recently deleted".
 - **Go.** `internal/handler/site.go`, `site_restore.go`, `collaboration.go`, `site_mutation.go`,
-  `site_move.go`, `admin_move.go`,
+  `site_move.go`, `admin_move.go`, `site_export.go`, `admin_erase.go` (`writeSiteExport`),
   `upload_limits.go`, `serve.go`, `serve_self_traffic.go`, `host_gate.go`, `host.go`, `names.go`,
   `security.go`; `internal/tarball/`; `internal/scan/clamd.go`;
-  `internal/db/queries.go`, `collaboration.go`, `quota.go`, `site_move.go`, `deleted_sites.go`.
+  `internal/db/queries.go`, `collaboration.go` (`ListSharedSites`), `quota.go`, `site_move.go`, `deleted_sites.go`,
+  `erase.go` (`SiteExportQueries`).
 - **DB.** `sites`, `versions` (0001; 0012 `versions.uploaded_by`; 0037
   `versions.size_bytes`), 0018 owner label uniqueness, `site_redirects`
-  (0043, backward-compatible), 0044 `sites.deleted_at`/`deleted_by`.
+  (0043, backward-compatible), 0044 `sites.deleted_at`/`deleted_by`, 0050
+  `site_viewers_principal_idx` (Shared with me; backward-compatible).
 - **Config.** `PUBLIC_BASE_URL`, `RESERVED_LABELS`, `QUOTA_MAX_SITES`,
   `QUOTA_MAX_BYTES`, `QUOTA_MAX_VERSIONS`, `CLAMD_ADDR`, `CLAMD_TIMEOUT`.
 
@@ -408,7 +434,7 @@ Config names are documented in `docs/configuration.md`; schema in
 - **MCP.** `find_users`, `list_site_viewers`, `grant_site_viewer`,
   `revoke_site_viewer`.
 - **Skill.** `references/collaboration.md` §7 (Named viewers).
-- **Pages.** `/dashboard` viewers panel.
+- **Pages.** `/dashboard` viewers panel; "Shared with me" (section 5).
 - **Go.** `internal/handler/viewers.go`, `host_gate.go`
   (`serveSiteHost`, `serveOwnerPath`, `serveLegacySiteHost`), `host.go`
   (`SplitSiteLabel`);
@@ -618,13 +644,20 @@ Config names are documented in `docs/configuration.md`; schema in
 - **What.** `/dashboard` on the base host: sign-in prompt when signed out;
   when signed in, API keys (mint/list/revoke; a new key stays on screen
   until dismissed), "Your sites" across the
-  person's and their teams' namespaces with access level (and the last
+  person's and their teams' namespaces, each name linking to the site's
+  address with its live version and last update, with access level (and the last
   admin decision: declined, revoked or restricted, with the note), viewers, assets,
-  rename and hand over (section 5), visitor counts, each namespace's usage against its quota (sites, stored
-  bytes; the same numbers `GET /api/me` returns as `usage`), "Recently
+  versions with Make live (rollback with the listed ETag; a 412 says to
+  reload), saved-data history with Restore (the newest is marked current),
+  Download site (section 5), rename and hand over (section 5), Delete (the
+  site name typed back; it goes to Recently deleted), visitor counts, each namespace's usage against its quota (sites, stored
+  bytes; the same numbers `GET /api/me` returns as `usage`), "Shared with
+  me" (section 5; hidden when empty), "Recently
   deleted" (the person's and their teams' sites deleted in the last 30 days,
-  each with Restore; hidden when empty), and a link to sessions. Calls the JSON routes of sections
-  2, 5, 7, 8, 11 and 12 with the session cookie.
+  each with Restore; hidden when empty), and a link to sessions. With no
+  sites, the list shows the connect step instead: the `/mcp` address,
+  `plugin.zip` and the install page. Calls the JSON routes of sections
+  2, 5, 7, 8, 10, 11 and 12 with the session cookie.
 - **Status.** Built.
 - **Routes.** `GET /dashboard`.
 - **MCP.** None.

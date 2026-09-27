@@ -96,7 +96,7 @@ func siteProperties() map[string]any {
 		"owner_username": outString("The namespace (person or team) that owns the site."),
 		"owner_id":       outString("The owner's unchanging id."),
 		"user_id":        outString("The owner's unchanging id (older routes)."),
-		"access_role":    outEnum("This account's role on the site.", "owner", "member"),
+		"access_role":    outEnum("This account's role on the site. viewer (list_sites only): shared with you; you can open it, nothing more.", "owner", "member", "viewer"),
 		"access":         outEnum("Who can open the site.", "only_me", "specific", "company", "listed", "network"),
 
 		"active_version": outInteger("The version visitors see now."),
@@ -213,7 +213,11 @@ func outputSchemas() map[string]map[string]any {
 			}, "owner", "sites", "max_sites", "bytes", "max_bytes")),
 		}, "id", "username", "is_admin", "kind", "teams", "usage"),
 
-		"list_sites":  listOf("Every site this account can act on.", collaborationSiteSchema()),
+		"list_sites": listOf("Every site this account can act on, then the sites shared with it (access_role viewer).", func() map[string]any {
+			schema := collaborationSiteSchema()
+			schema["properties"].(map[string]any)["shared_via"] = outString("On a viewer entry only: the team the site is shared with, or empty when it is shared with you by name.")
+			return schema
+		}()),
 		"get_site":    collaborationSiteSchema(),
 		"deploy_site": siteSchema("url"),
 		"list_site_versions": listOf("Retained versions, newest first.", outObject(map[string]any{
@@ -224,6 +228,10 @@ func outputSchemas() map[string]map[string]any {
 			"created_at":     outString("When it was deployed."),
 		}, "version_number", "status", "created_at")),
 		"rollback_site": siteSchema(),
+		"export_site": outObject(map[string]any{
+			"url":        outString("The download address. Give it to the user; it works without signing in until expires_at."),
+			"expires_at": outString("When the address stops working (RFC 3339)."),
+		}, "url", "expires_at"),
 		"set_site_access": func() map[string]any {
 			schema := collaborationSiteSchema()
 			schema["properties"].(map[string]any)["note"] = outString("What happened, in words.")

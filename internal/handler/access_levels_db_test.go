@@ -85,7 +85,7 @@ func newAccessWorldFull(t *testing.T, approvals int, quota UploadQuota, scanner 
 	limits := NewAbuseLimits()
 	recorder := audit.NewDBRecorder(database)
 	mux := http.NewServeMux()
-	NewSiteHandler(database, store, base, hosts, limits).WithAudit(recorder).WithNetworkAccessApprovals(approvals).WithUploadLimits(quota, scanner).Register(mux, authMW, skillMW)
+	NewSiteHandler(database, store, base, hosts, limits).WithAudit(recorder).WithNetworkAccessApprovals(approvals).WithUploadLimits(quota, scanner).WithSigningKeys(keys).Register(mux, authMW, skillMW)
 	NewUserHandler(database, limits).WithQuota(quota).Register(mux, authMW, skillMW)
 	NewAdminHandler(database, base, hosts, CookiePolicy{Secure: true}, keys, time.Hour, recorder, limits).WithNetworkAccessApprovals(approvals).WithStore(store).WithAuditReader(audit.NewReader(database)).WithOIDCIssuer(accessIssuer).Register(mux, authMW, skillMW)
 	NewAuditHandler(database, audit.NewReader(database), "", limits).Register(mux, authMW, skillMW)

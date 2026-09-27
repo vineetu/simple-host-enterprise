@@ -61,7 +61,7 @@ var routeKeyAccess = map[string]keyAccess{
 	"GET /mcp":     keyPublish,
 	"DELETE /mcp":  keyPublish,
 
-	// Full only: deleting, handing over or renaming a site, who can open it, viewers, teams, the
+	// Full only: deleting, handing over, renaming or downloading a site, who can open it, viewers, teams, the
 	// audit and access logs, search. A key on the audit and access logs
 	// sees only its owner's own namespace and teams, even an admin's: the
 	// company-wide view needs a browser session (handler/audit_access.go).
@@ -74,6 +74,7 @@ var routeKeyAccess = map[string]keyAccess{
 	"GET /api/deleted-sites":                                                keyFull,
 	"POST /api/sites/{sitename}/restore":                                    keyFull,
 	"POST /api/collaboration/sites/{owner}/{sitename}/restore":              keyFull,
+	"POST /api/collaboration/sites/{owner}/{sitename}/export-link":          keyFull,
 	"POST /api/sites/{sitename}/access":                                     keyFull,
 	"POST /api/collaboration/sites/{owner}/{sitename}/access":               keyFull,
 	"GET /api/collaboration/sites/{owner}/{sitename}/viewers":               keyFull,
@@ -135,6 +136,7 @@ var routeKeyAccess = map[string]keyAccess{
 	"GET /readyz":                            keyNever,
 	"GET /metrics":                           keyNever,
 	"GET /dashboard":                         keyNever,
+	"GET /api/site-export/{token}":           keyNever,
 	"GET /showcase":                          keyNever,
 	"GET /plugin.zip":                        keyNever,
 	"GET /skills.zip":                        keyNever,

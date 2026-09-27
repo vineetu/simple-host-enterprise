@@ -209,6 +209,24 @@ Content-Type: application/json
 
 Handle `412` and `428` exactly like deployment.
 
+### Download a whole site
+
+For a copy of everything (before a big change, or to keep), ask for a
+download address:
+
+```
+POST /api/collaboration/sites/<owner>/<site>/export-link
+X-API-Key: <actor key (full scope)>
+X-Skill-Version: <installed skill version>
+```
+
+The answer is `{"url", "expires_at"}`. The `url` downloads one zip of the
+live files (`files/`), the current saved data and its history, the version
+list, and the uploaded files with a list naming them. It works for 10
+minutes without signing in: give it to the user to open, and never post it
+where others can see it. Connector tool: `export_site`. The user can also use
+"Download site" in the site's Manage panel on `/dashboard`.
+
 ## 6. Who can open the site
 
 A new site opens only for its owner (for a team site, the team's members).
@@ -277,6 +295,13 @@ company's sign-in domains is refused with `400`.
 Removing the last viewer leaves the site at `specific`, open only to the owner
 or team, until the level is changed. Connector tools: `find_users`,
 `list_site_viewers`, `grant_site_viewer`, `revoke_site_viewer`.
+
+Sites other people shared with the user are listed by
+`GET /api/collaboration/sites?include=shared` (and by `list_sites`) after
+their own, with `access_role` `viewer` and `shared_via` (the team it was
+shared with, or empty when shared with them by name). A viewer can open such a
+site at its `url` and use its saved data in the browser; no management route
+acts on it, so never try to deploy to, roll back, share or delete it.
 
 ## 8. Deletion
 

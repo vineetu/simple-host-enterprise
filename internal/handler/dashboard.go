@@ -142,9 +142,15 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 
 <section>
   <h2 class="section-title">Your sites</h2>
-  <p class="login-copy">Choose who can open each site, name its viewers, manage the files it has uploaded, rename it, or hand it to a team or another person. A new site opens only for you (or your team). Deploying and rolling back are done with the skill or MCP.</p>
+  <p class="login-copy">Open each site, choose who can open it, name its viewers, manage the files it has uploaded, make an earlier version live, restore its saved data, download it, rename it, hand it to a team, or delete it. A new site opens only for you (or your team). Publishing is done by your AI app.</p>
   ` + usageHTML + `
   <div id="site-list" class="rank-list" role="region" aria-label="Sites"></div>
+</section>
+
+<section id="shared-section" hidden>
+  <h2 class="section-title">Shared with me</h2>
+  <p class="login-copy">Sites other people have shared with you by name, or with a team you are in.</p>
+  <div id="shared-list" class="rank-list" role="region" aria-label="Sites shared with me"></div>
 </section>
 
 <section id="deleted-section" hidden>
@@ -380,9 +386,13 @@ const dashboardSitesScript = `<script>
   }
 
   function loadSites() {
-    fetch('/api/collaboration/sites', {credentials: 'same-origin', headers: CH})
+    fetch('/api/collaboration/sites?include=shared', {credentials: 'same-origin', headers: CH})
       .then(function(r){ return r.json(); })
-      .then(renderSites)
+      .then(function(all){
+        all = all || [];
+        renderShared(all.filter(function(s){ return s.access_role === 'viewer'; }));
+        renderSites(all.filter(function(s){ return s.access_role !== 'viewer'; }));
+      })
       .catch(function(){ container.innerHTML = '<div class="rank-empty">Could not load sites.</div>'; });
   }
 
@@ -423,16 +433,71 @@ const dashboardSitesScript = `<script>
     return {restricted: ' · restricted by an admin', declined: ' · network access declined', revoked: ' · network access revoked'}[d.decision] || '';
   }
 
+  // safeURL keeps only http(s) addresses as link targets.
+  function safeURL(u) { return /^https?:\/\//i.test(u || '') ? u : '#'; }
+  function when(s) { var d = new Date(s); return isNaN(d) ? '' : d.toLocaleString(); }
+  function liveLine(site) {
+    var v = site.active_version > 0 ? 'version ' + site.active_version + ' live' : 'nothing published';
+    return v + ' · updated ' + when(site.updated_at);
+  }
+
+  // renderFirstRun is the empty state: sites come from connecting an AI
+  // app, so the one step that does that is shown in place of an empty list.
+  function renderFirstRun() {
+    container.innerHTML = '';
+    var box = document.createElement('div');
+    box.className = 'first-run';
+    var lead = document.createElement('p');
+    lead.className = 'login-copy';
+    lead.textContent = 'No sites yet. Your sites come from your AI app: add this server to ChatGPT, Claude, Copilot, Cursor or Codex, sign in with your work account when it asks, then ask it to publish something.';
+    var pre = document.createElement('pre');
+    pre.className = 'mcp-address';
+    pre.style.cssText = 'white-space:pre-wrap;word-break:break-all;background:var(--ps-blue-50);padding:12px;border-radius:4px';
+    pre.textContent = location.origin + '/mcp';
+    var more = document.createElement('p');
+    more.className = 'login-copy';
+    more.appendChild(document.createTextNode('Or install the plugin, which adds the server and the skills in one step: '));
+    var zip = document.createElement('a');
+    zip.href = '/plugin.zip';
+    zip.setAttribute('download', '');
+    zip.textContent = 'Download plugin.zip';
+    more.appendChild(zip);
+    more.appendChild(document.createTextNode('. Every other way to connect is on the '));
+    var inst = document.createElement('a');
+    inst.href = '/install.html';
+    inst.textContent = 'install page';
+    more.appendChild(inst);
+    more.appendChild(document.createTextNode('.'));
+    box.appendChild(lead);
+    box.appendChild(pre);
+    box.appendChild(more);
+    container.appendChild(box);
+  }
+
+  // renderShared lists the sites shared with the person: open only.
+  function renderShared(sites) {
+    var section = document.getElementById('shared-section');
+    var list = document.getElementById('shared-list');
+    if (!section || !list) return;
+    section.hidden = !sites.length;
+    list.innerHTML = sites.map(function(site){
+      var via = site.shared_via ? 'shared with ' + site.shared_via : 'shared with you';
+      return '<div class="rank-row"><span class="rank-name"><a href="' + esc(safeURL(site.url)) + '">' + esc(site.owner_username) + '/' + esc(site.name) + '</a>' +
+        ' <span class="rank-sub">' + esc(via) + ' · updated ' + esc(when(site.updated_at)) + '</span></span></div>';
+    }).join('');
+  }
+
   function renderSites(sites) {
-    if (!sites || !sites.length) { container.innerHTML = '<div class="rank-empty">No sites yet.</div>'; return; }
+    if (!sites || !sites.length) { renderFirstRun(); return; }
     container.innerHTML = '';
     sites.forEach(function(site){
       var canManage = site.access_role === 'owner' || site.access_role === 'member';
       var row = document.createElement('div');
       row.className = 'rank-row site-row';
-      row.innerHTML = '<span class="rank-name">' + esc(site.owner_username) + '/' + esc(site.name) +
+      row.innerHTML = '<span class="rank-name"><a href="' + esc(safeURL(site.url)) + '">' + esc(site.owner_username) + '/' + esc(site.name) + '</a>' +
         ' <span class="rank-sub">' + esc(site.access_role) + ' · ' + esc(levelLabel(site.access)) +
-        (site.network_request ? ' · network access requested' + approvalProgress(site.network_request) : esc(decisionShort(site))) + '</span></span>' +
+        (site.network_request ? ' · network access requested' + approvalProgress(site.network_request) : esc(decisionShort(site))) +
+        ' · ' + esc(liveLine(site)) + '</span></span>' +
         (canManage ? '<button type="button" class="btn-reject manage-toggle">Manage</button>' : '');
       var panel = document.createElement('div');
       panel.className = 'site-panel';
@@ -469,6 +534,15 @@ const dashboardSitesScript = `<script>
       '<div class="add-row"><input type="text" class="add-viewer-input" placeholder="username or work email, another" autocomplete="off"' + locked + '>' +
       '<button type="button" class="btn-login add-viewer-button"' + locked + '>Add</button></div></div>' +
       '<div class="site-subsection"><h4>Assets</h4><div class="asset-list" aria-live="polite"></div></div>' +
+      '<div class="site-subsection"><h4>Versions</h4>' +
+      '<p class="share-help">Make an earlier version live again. Visitors see it at once; the newer versions stay here.</p>' +
+      '<div class="version-list" aria-live="polite"></div></div>' +
+      '<div class="site-subsection"><h4>Saved data</h4>' +
+      '<p class="share-help">The last versions of what the site\'s pages have saved. Restore puts an earlier one back as the current saved data; the data it replaces stays in this list.</p>' +
+      '<div class="state-list" aria-live="polite"></div></div>' +
+      '<div class="site-subsection"><h4>Download</h4>' +
+      '<p class="share-help">One zip of the live files, the current saved data and its history, the version list and the uploaded files.</p>' +
+      '<div class="add-row"><button type="button" class="btn-login download-button">Download site</button></div></div>' +
       '<div class="site-subsection"><h4>Rename</h4>' +
       '<p class="share-help">The site gets a new address. The old one sends visitors on to it until another site takes the name.</p>' +
       '<div class="add-row"><input type="text" class="rename-input" placeholder="new-name" autocomplete="off"' + locked + '>' +
@@ -477,6 +551,9 @@ const dashboardSitesScript = `<script>
       '<p class="share-help">Move the site into a team you are in. Its files, versions, saved data, uploads, access and viewers go with it, and the old address sends visitors on to the new one. Network access has to be requested again.</p>' +
       '<div class="add-row"><input type="text" class="transfer-input" placeholder="team-name" autocomplete="off"' + locked + '>' +
       '<button type="button" class="btn-login transfer-button"' + locked + '>Move</button></div></div>' +
+      '<div class="site-subsection"><h4>Delete</h4>' +
+      '<p class="share-help">The site stops being served at once. It stays in Recently deleted for 30 days with its files, saved data, viewers and uploads, and can be restored from there.</p>' +
+      '<div class="add-row"><button type="button" class="btn-reject delete-site-button">Delete site</button></div></div>' +
       '<div class="site-subsection site-tabs"><div class="site-tab-buttons">' +
       '<button type="button" class="btn-reject site-tab-button active" data-tab="activity">Activity</button>' +
       '<button type="button" class="btn-reject site-tab-button" data-tab="visitors">Visitors</button>' +
@@ -490,6 +567,8 @@ const dashboardSitesScript = `<script>
     var assetList = panel.querySelector('.asset-list');
     var activityList = panel.querySelector('.activity-list');
     var visitorList = panel.querySelector('.visitor-list');
+    var versionList = panel.querySelector('.version-list');
+    var stateList = panel.querySelector('.state-list');
     var auditQuery = '/api/audit?owner=' + encodeURIComponent(owner) + '&site=' + encodeURIComponent(name);
     var accessQuery = '/api/access?owner=' + encodeURIComponent(owner) + '&site=' + encodeURIComponent(name);
 
@@ -668,6 +747,113 @@ const dashboardSitesScript = `<script>
         .catch(function(){ alert('Network error deleting asset.'); });
     });
 
+    function loadVersions() {
+      fetch(base + '/versions', {credentials: 'same-origin', headers: CH})
+        .then(function(r){ return r.json(); })
+        .then(function(versions){
+          versionList.innerHTML = '';
+          if (!versions || !versions.length) { versionList.innerHTML = '<div class="rank-empty">No versions yet.</div>'; return; }
+          versions.forEach(function(v){
+            var live = v.version_number === site.active_version;
+            var row = document.createElement('div');
+            row.className = 'rank-row';
+            row.innerHTML = '<span class="rank-name">Version ' + esc(v.version_number) +
+              ' <span class="rank-sub">' + esc(when(v.created_at)) + (v.uploaded_by ? ' · by ' + esc(v.uploaded_by) : '') + '</span></span>' +
+              (live ? '<span class="rank-metric">live</span>' :
+                '<button type="button" class="btn-login make-live" data-version="' + esc(v.version_number) + '">Make live</button>');
+            versionList.appendChild(row);
+          });
+        })
+        .catch(function(){ versionList.innerHTML = '<div class="rank-empty">Could not load versions.</div>'; });
+    }
+
+    function loadStateVersions() {
+      fetch(base + '/state-versions', {credentials: 'same-origin', headers: CH})
+        .then(function(r){ return r.json(); })
+        .then(function(entries){
+          stateList.innerHTML = '';
+          if (!entries || !entries.length) { stateList.innerHTML = '<div class="rank-empty">Nothing saved yet.</div>'; return; }
+          entries.forEach(function(e, i){
+            var row = document.createElement('div');
+            row.className = 'rank-row';
+            row.innerHTML = '<span class="rank-name">Saved data version ' + esc(e.version) +
+              ' <span class="rank-sub">' + esc(when(e.created_at)) + (e.written_by ? ' · by ' + esc(e.written_by) : '') + ' · ' + fmtBytes(e.bytes || 0) + '</span></span>' +
+              (i === 0 ? '<span class="rank-metric">current</span>' :
+                '<button type="button" class="btn-login restore-state" data-id="' + esc(e.id) + '" data-version="' + esc(e.version) + '">Restore</button>');
+            stateList.appendChild(row);
+          });
+        })
+        .catch(function(){ stateList.innerHTML = '<div class="rank-empty">Could not load saved data history.</div>'; });
+    }
+
+    versionList.addEventListener('click', function(ev){
+      var button = ev.target.closest('.make-live');
+      if (!button) return;
+      var version = parseInt(button.getAttribute('data-version'), 10);
+      if (!confirm('Make version ' + version + ' of ' + site.name + ' live? Visitors see it at once.')) return;
+      button.disabled = true;
+      fetch(base + '/rollback', {
+        method: 'POST', credentials: 'same-origin',
+        headers: Object.assign({'Content-Type': 'application/json', 'If-Match': site.etag}, CH),
+        body: JSON.stringify({version: version}),
+      }).then(function(r){
+        return r.json().then(function(b){
+          if (!r.ok) {
+            alert(r.status === 412 ? 'The site changed since this page loaded. Reload and try again.' : 'Could not make it live: ' + (b.error || 'unknown error'));
+            button.disabled = false;
+            return;
+          }
+          site.active_version = b.active_version;
+          site.etag = b.etag;
+          loadVersions();
+          loadSites();
+        });
+      }).catch(function(){ alert('Network error changing the live version.'); button.disabled = false; });
+    });
+
+    stateList.addEventListener('click', function(ev){
+      var button = ev.target.closest('.restore-state');
+      if (!button) return;
+      if (!confirm('Restore saved data version ' + button.getAttribute('data-version') + '? It replaces what the pages have saved now; the data it replaces stays in this list.')) return;
+      button.disabled = true;
+      fetch(base + '/state-versions/' + encodeURIComponent(button.getAttribute('data-id')) + '/restore', {method: 'POST', credentials: 'same-origin', headers: CH})
+        .then(function(r){
+          return r.json().then(function(b){
+            if (!r.ok) { alert('Could not restore: ' + (b.error || 'unknown error')); button.disabled = false; return; }
+            loadStateVersions();
+          });
+        })
+        .catch(function(){ alert('Network error restoring saved data.'); button.disabled = false; });
+    });
+
+    panel.querySelector('.download-button').addEventListener('click', function(){
+      var button = this;
+      button.disabled = true;
+      fetch(base + '/export-link', {method: 'POST', credentials: 'same-origin', headers: CH})
+        .then(function(r){
+          return r.json().then(function(b){
+            button.disabled = false;
+            if (!r.ok || !b.url) { alert('Could not prepare the download: ' + (b.error || 'unknown error')); return; }
+            location.href = b.url;
+          });
+        })
+        .catch(function(){ alert('Network error preparing the download.'); button.disabled = false; });
+    });
+
+    panel.querySelector('.delete-site-button').addEventListener('click', function(){
+      var typed = prompt('Delete ' + owner + '/' + name + '? It stops being served at once and stays in Recently deleted for 30 days. Type the site name to confirm:');
+      if (typed === null) return;
+      if (typed.trim() !== name) { alert('The name did not match, so nothing was deleted.'); return; }
+      fetch(base, {method: 'DELETE', credentials: 'same-origin', headers: CH})
+        .then(function(r){
+          if (r.ok) { location.reload(); return; }
+          return r.json().then(function(b){ alert('Could not delete: ' + (b.error || 'unknown error')); });
+        })
+        .catch(function(){ alert('Network error deleting the site.'); });
+    });
+
+    loadVersions();
+    loadStateVersions();
     loadViewers();
     loadAssets();
     loadActivity();

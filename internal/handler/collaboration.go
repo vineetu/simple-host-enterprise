@@ -51,7 +51,16 @@ type collaborationSiteResponse struct {
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 	Analytics  analytics `json:"analytics"`
+	// SharedVia is set only on a viewer entry (access_role "viewer", listed
+	// with include=shared): the team whose viewer grant lets the caller
+	// open the site, or empty when the grant names the caller.
+	SharedVia *string `json:"shared_via,omitempty"`
 }
+
+// collaborationRoleViewer marks a "Shared with me" entry: a site the caller
+// is a named viewer of. It is a listing label only; no resolver grants it,
+// so every management route still answers such a site with not found.
+const collaborationRoleViewer db.CollaborationRole = "viewer"
 
 type accessDecisionResponse struct {
 	Decision string    `json:"decision"`
@@ -249,6 +258,26 @@ func (h *SiteHandler) listCollaborationSites(w http.ResponseWriter, r *http.Requ
 			summaries[accessible.Site.ID],
 			downloads[accessible.Site.ID],
 		))
+	}
+	// include=shared adds the sites the caller can open as a named viewer
+	// (their own grant or a team's). They carry no analytics, network
+	// request or admin decision: those are for the owner.
+	if r.URL.Query().Get("include") == "shared" {
+		shared, err := db.ListSharedSites(r.Context(), h.database, user.ID)
+		if err != nil {
+			log.Printf("list shared sites for actor %s: %v", user.ID, err)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+			return
+		}
+		for _, s := range shared {
+			if !validateStoredUsername(w, s.OwnerUsername) {
+				return
+			}
+			entry := h.collaborationSiteResponse(r, s.Site, s.OwnerUsername, collaborationRoleViewer, db.SiteAnalyticsSummary{}, nil)
+			via := s.SharedVia
+			entry.SharedVia = &via
+			response = append(response, entry)
+		}
 	}
 	writeJSON(w, http.StatusOK, response)
 }

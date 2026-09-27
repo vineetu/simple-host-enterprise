@@ -76,6 +76,7 @@ var fixtures = []fixture{
 	}},
 	{"restore_state_version", []map[string]any{{"owner": "alice", "site": "demo", "id": float64(3)}}},
 	{"list_deleted_sites", []map[string]any{{}}},
+	{"export_site", []map[string]any{{"owner": "alice", "site": "demo"}}},
 	{"restore_site", []map[string]any{
 		{"site": "demo"},
 		{"site": "demo", "owner": "alice"},
