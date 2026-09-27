@@ -5,6 +5,9 @@
 - `configuration.md` — every environment variable the server reads.
 - `ci.md` — deploying a site from a build pipeline with one call and a
   publish-scoped API key.
+- `uninstall.md` — removing a real install: what to export first, DNS
+  records before the load balancer, the cluster, the identity provider,
+  the bucket, the database and the secrets kept elsewhere.
 - `storage.md` — the bucket, the pod cache, encryption and key rotation.
 - `security-review.md` — the controls, the pen-test list and what was run,
   and the accepted limitations.

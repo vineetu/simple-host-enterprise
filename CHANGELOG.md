@@ -6,6 +6,15 @@ release, commit and schema.
 
 ## Unreleased
 
+### Docs
+- `docs/uninstall.md`: removing a real install, in order — what to export
+  first (sites, the audit and access logs, a full database and bucket copy
+  with the envelope key), the DNS records before the load balancer is
+  released (a dangling `*.<base>` record lets someone else serve under the
+  company's domain), the namespace and reconciler, a ClusterIssuer made
+  only for this, the OIDC application, the bucket with its noncurrent
+  versions, the database with its backups, and the secrets kept elsewhere.
+
 ### Rebuilding from the bucket
 - Each site now keeps `sites/<id>/manifest.json` in the bucket: its owner,
   name, live version and uploaded files' names and types, rewritten after

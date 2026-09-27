@@ -120,6 +120,7 @@ section 8.
 
 Tear down with `make local-down`, which deletes everything the overlay
 created, the Postgres and MinIO volumes included — local data is disposable by design.
+A real install is removed with `docs/uninstall.md`.
 
 ## 3. Local cluster: minikube (alternate)
 

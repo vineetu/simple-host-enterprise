@@ -798,3 +798,6 @@ of `docs/configuration.md`.
   somewhere the platform team can find them (their secret store), or move
   to External Secrets as `docs/configuration.md` describes. They are not in
   git by design.
+- **Removing it**: `docs/uninstall.md`, in order. Delete the `<base>` and
+  `*.<base>` DNS records before the namespace (which releases the load
+  balancer), and export what should be kept first.
