@@ -173,6 +173,9 @@ type Config struct {
 	// overrides, which it hands to handler.ConfigureRateLimits.
 	Limits     oplimits.Values
 	RateLimits map[string]RateLimit
+	// Warnings are settings that loaded but deserve a line in the startup
+	// log (an unknown RATE_LIMIT_* name, which is ignored).
+	Warnings []string
 }
 
 // defaultOAuthRedirectHosts covers the AI apps a company is most likely to
@@ -506,7 +509,7 @@ func Load() (Config, error) {
 	if cfg.Limits, err = loadOpLimits(cfg.APIKeyMaxDays); err != nil {
 		return Config{}, err
 	}
-	if cfg.RateLimits, err = loadRateLimits(); err != nil {
+	if cfg.RateLimits, cfg.Warnings, err = loadRateLimits(); err != nil {
 		return Config{}, err
 	}
 

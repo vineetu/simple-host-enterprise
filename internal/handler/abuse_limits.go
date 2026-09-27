@@ -11,6 +11,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -121,6 +122,41 @@ var configurablePolicies = []*ratelimit.Policy{
 	&oauthRegisterPolicy, &oauthTokenPolicy,
 }
 
+// sensitivePolicies guard sign-in, the email code, API key mint, the admin
+// API and the connector's OAuth. An installation may make them stricter
+// freely but at most sensitiveLoosen times looser than the built-in value:
+// a burst at most that many times it, an interval at least that fraction of
+// it. Any other limit may go further, with a startup warning past
+// warnLoosen times.
+var sensitivePolicies = map[string]bool{
+	authClientPolicy.Name: true, authEmailPolicy.Name: true, apiKeyMintPolicy.Name: true,
+	adminClientPolicy.Name: true, adminIdentityPolicy.Name: true,
+	oauthRegisterPolicy.Name: true, oauthTokenPolicy.Name: true,
+}
+
+const (
+	sensitiveLoosen = 4
+	warnLoosen      = 10
+)
+
+// builtinRateLimits are the limits as shipped, before any RATE_LIMIT_*
+// override: the reference the ceilings and warnings measure from.
+var builtinRateLimits = RateLimitDefaults()
+
+// SensitiveRateLimit reports whether the named limit is security-sensitive,
+// and its loosest allowed setting.
+func SensitiveRateLimit(name string) (RateLimit, bool) {
+	if !sensitivePolicies[name] {
+		return RateLimit{}, false
+	}
+	d := builtinRateLimits[name]
+	return RateLimit{Burst: d.Burst * sensitiveLoosen, Every: d.Every / sensitiveLoosen}, true
+}
+
+func rateLimitEnv(name string) string {
+	return "RATE_LIMIT_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
+}
+
 // RateLimit is one limit override: Burst requests at once, then one more
 // every Every.
 type RateLimit struct {
@@ -144,35 +180,57 @@ func refillInterval(p ratelimit.Policy) time.Duration {
 }
 
 // ConfigureRateLimits applies RATE_LIMIT_* overrides. It is called once at
-// startup, before any handler serves, and refuses an unknown name or a
-// limit counted across replicas (sharedPolicies) whose window, burst times
-// interval, is longer than the shared counter keeps (ratelimit.MaxSharedWindow).
-func ConfigureRateLimits(overrides map[string]RateLimit) error {
+// startup, before any handler serves. It refuses a security-sensitive limit
+// (sensitivePolicies) looser than its ceiling, and a limit counted across
+// replicas (sharedPolicies) whose window, burst times interval, is longer
+// than the shared counter keeps (ratelimit.MaxSharedWindow). It returns
+// warnings for the log: an unknown name (a typo, or another program's
+// variable), which is ignored, and any other limit set more than warnLoosen
+// times looser than built in.
+func ConfigureRateLimits(overrides map[string]RateLimit) ([]string, error) {
 	byName := make(map[string]*ratelimit.Policy, len(configurablePolicies))
 	for _, p := range configurablePolicies {
 		byName[p.Name] = p
 	}
-	for name, limit := range overrides {
+	var warnings []string
+	names := make([]string, 0, len(overrides))
+	for name := range overrides {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		limit := overrides[name]
 		p, ok := byName[name]
 		if !ok {
-			return fmt.Errorf("RATE_LIMIT_%s: no such limit", strings.ToUpper(strings.ReplaceAll(name, "-", "_")))
+			warnings = append(warnings, rateLimitEnv(name)+" is not a limit this server has, so it changes nothing (docs/configuration.md lists them)")
+			continue
 		}
 		if limit.Burst < 1 || limit.Every <= 0 {
-			return fmt.Errorf("RATE_LIMIT_%s: burst and interval must be positive", strings.ToUpper(strings.ReplaceAll(name, "-", "_")))
+			return nil, fmt.Errorf("%s: burst and interval must be positive", rateLimitEnv(name))
+		}
+		def := builtinRateLimits[name]
+		if loosest, ok := SensitiveRateLimit(name); ok {
+			if limit.Burst > loosest.Burst || limit.Every < loosest.Every {
+				return nil, fmt.Errorf("%s: too loose for a security-sensitive limit: at most %d/%s (%d times the built-in %d/%s); it can be made stricter freely",
+					rateLimitEnv(name), loosest.Burst, loosest.Every, sensitiveLoosen, def.Burst, def.Every)
+			}
+		} else if limit.Burst > def.Burst*warnLoosen || limit.Every < def.Every/warnLoosen {
+			warnings = append(warnings, fmt.Sprintf("%s=%d/%s is more than %d times looser than the built-in %d/%s", rateLimitEnv(name), limit.Burst, limit.Every, warnLoosen, def.Burst, def.Every))
 		}
 		next := ratelimit.Policy{Name: p.Name, Burst: limit.Burst, RefillPerSecond: float64(time.Second) / float64(limit.Every)}
 		if sharedPolicies[p.Name] {
 			if _, window := ratelimit.FixedWindow(next); window <= 0 || window > ratelimit.MaxSharedWindow {
-				return fmt.Errorf("RATE_LIMIT_%s: burst times interval must be at most %s for this limit, which is counted across replicas", strings.ToUpper(strings.ReplaceAll(name, "-", "_")), ratelimit.MaxSharedWindow)
+				return nil, fmt.Errorf("%s: burst times interval must be at most %s for this limit, which is counted across replicas", rateLimitEnv(name), ratelimit.MaxSharedWindow)
 			}
 		}
 	}
 	for name, limit := range overrides {
-		p := byName[name]
-		p.Burst = limit.Burst
-		p.RefillPerSecond = float64(time.Second) / float64(limit.Every)
+		if p := byName[name]; p != nil {
+			p.Burst = limit.Burst
+			p.RefillPerSecond = float64(time.Second) / float64(limit.Every)
+		}
 	}
-	return nil
+	return warnings, nil
 }
 
 // rateLimitPlaceholders are "{{RATE_LIMIT_<NAME>}}" for every configurable

@@ -3,8 +3,10 @@ package handler
 import (
 	"archive/zip"
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -47,11 +49,12 @@ func TestConfigureRateLimits(t *testing.T) {
 		}
 	})
 
-	if err := ConfigureRateLimits(map[string]RateLimit{"sign-in": {1, time.Second}}); err == nil || !strings.Contains(err.Error(), "RATE_LIMIT_SIGN_IN") {
-		t.Fatalf("unknown name: err = %v", err)
+	// An unknown name is a warning, not a refusal.
+	if w, err := ConfigureRateLimits(map[string]RateLimit{"sign-in": {1, time.Second}}); err != nil || len(w) != 1 || !strings.Contains(w[0], "RATE_LIMIT_SIGN_IN") {
+		t.Fatalf("unknown name: warnings %v, err = %v", w, err)
 	}
 	// auth-client is counted across replicas: 20 x 2m is a 40-minute window.
-	err := ConfigureRateLimits(map[string]RateLimit{"auth-email": {9, time.Second}, "auth-client": {20, 2 * time.Minute}})
+	_, err := ConfigureRateLimits(map[string]RateLimit{"auth-email": {9, time.Second}, "auth-client": {20, 2 * time.Minute}})
 	if err == nil || !strings.Contains(err.Error(), "RATE_LIMIT_AUTH_CLIENT") {
 		t.Fatalf("shared window over 30m: err = %v", err)
 	}
@@ -59,7 +62,7 @@ func TestConfigureRateLimits(t *testing.T) {
 		t.Fatal("a refused configuration was partly applied")
 	}
 	// A per-pod limit may have a long window.
-	if err := ConfigureRateLimits(map[string]RateLimit{"auth-email": {3, time.Hour}, "oauth-token": {240, 250 * time.Millisecond}}); err != nil {
+	if _, err := ConfigureRateLimits(map[string]RateLimit{"auth-email": {3, time.Hour}, "oauth-token": {240, 250 * time.Millisecond}}); err != nil {
 		t.Fatal(err)
 	}
 	if authEmailPolicy.Burst != 3 || authEmailPolicy.RefillPerSecond != 1.0/3600 || oauthTokenPolicy.Burst != 240 || oauthTokenPolicy.RefillPerSecond != 4 {
@@ -70,6 +73,59 @@ func TestConfigureRateLimits(t *testing.T) {
 	}
 	if !strings.Contains(expandServedText("{{RATE_LIMIT_OAUTH_TOKEN}}"), "240 at once, then one more every 250ms") {
 		t.Fatalf("placeholder = %q", expandServedText("{{RATE_LIMIT_OAUTH_TOKEN}}"))
+	}
+}
+
+// Security-sensitive limits may be made stricter freely but at most 4 times
+// looser than built in; any other limit loosened past 10 times is a warning.
+func TestSensitiveRateLimitCeilings(t *testing.T) {
+	saved := make(map[*ratelimit.Policy]ratelimit.Policy)
+	for _, p := range configurablePolicies {
+		saved[p] = *p
+	}
+	t.Cleanup(func() {
+		for p, v := range saved {
+			*p = v
+		}
+	})
+	for _, name := range []string{"auth-client", "auth-email", "api-key-mint", "admin-client", "admin-identity", "oauth-register", "oauth-token"} {
+		loosest, ok := SensitiveRateLimit(name)
+		if !ok {
+			t.Errorf("%s is not security-sensitive", name)
+			continue
+		}
+		def := builtinRateLimits[name]
+		if loosest != (RateLimit{def.Burst * 4, def.Every / 4}) {
+			t.Errorf("%s loosest = %+v, want 4x %+v", name, loosest, def)
+		}
+		if _, err := ConfigureRateLimits(map[string]RateLimit{name: {loosest.Burst + 1, def.Every}}); err == nil || !strings.Contains(err.Error(), "security-sensitive") {
+			t.Errorf("%s: burst past 4x accepted: %v", name, err)
+		}
+		if _, err := ConfigureRateLimits(map[string]RateLimit{name: {def.Burst, loosest.Every - time.Millisecond}}); err == nil || !strings.Contains(err.Error(), rateLimitEnv(name)) {
+			t.Errorf("%s: interval under a quarter accepted: %v", name, err)
+		}
+	}
+	// Exactly 4x on a per-pod limit, and far stricter, both load.
+	if _, err := ConfigureRateLimits(map[string]RateLimit{"auth-email": {20, 12500 * time.Millisecond}, "admin-client": {1, time.Hour}}); err != nil {
+		t.Fatal(err)
+	}
+	docs, err := os.ReadFile("../../docs/configuration.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"auth-client", "auth-email", "api-key-mint", "admin-client", "admin-identity", "oauth-register", "oauth-token"} {
+		loosest, _ := SensitiveRateLimit(name)
+		if want := fmt.Sprintf("**`%d/%s`** (security-sensitive)", loosest.Burst, loosest.Every); !strings.Contains(string(docs), "| `"+rateLimitEnv(name)+"` |") ||
+			!strings.Contains(string(docs), want) {
+			t.Errorf("docs/configuration.md does not mark %s security-sensitive with %s", rateLimitEnv(name), want)
+		}
+	}
+	if _, ok := SensitiveRateLimit("state-client"); ok {
+		t.Error("state-client is marked security-sensitive")
+	}
+	w, err := ConfigureRateLimits(map[string]RateLimit{"state-client": {601, time.Second}, "state-site": {600, 100 * time.Millisecond}})
+	if err != nil || len(w) != 1 || !strings.Contains(w[0], "RATE_LIMIT_STATE_CLIENT=601/1s") {
+		t.Fatalf("warnings %v, err %v", w, err)
 	}
 }
 

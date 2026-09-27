@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"github.com/vsriram/simple-host/internal/oplimits"
+	"log"
 	"time"
 
 	"github.com/vsriram/simple-host/internal/config"
@@ -128,8 +129,12 @@ func loadConfig() (config.Config, error) {
 	for name, r := range cfg.RateLimits {
 		rates[name] = handler.RateLimit{Burst: r.Burst, Every: r.Every}
 	}
-	if err := handler.ConfigureRateLimits(rates); err != nil {
+	warnings, err := handler.ConfigureRateLimits(rates)
+	if err != nil {
 		return config.Config{}, err
+	}
+	for _, w := range append(cfg.Warnings, warnings...) {
+		log.Printf("WARNING: %s", w)
 	}
 	oplimits.Set(cfg.Limits)
 	return cfg, nil

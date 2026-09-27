@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/vsriram/simple-host/internal/config"
+	"github.com/vsriram/simple-host/internal/handler"
 	"github.com/vsriram/simple-host/internal/oplimits"
 )
 
@@ -32,6 +33,20 @@ func TestInstanceLimitsStateTheOperationalSettings(t *testing.T) {
 	} {
 		if !strings.Contains(all.String(), want) {
 			t.Errorf("instance card does not say %q:\n%s", want, all.String())
+		}
+	}
+}
+
+// config.RateLimitNames (what the config reads) and the handler's
+// configurable limits (what it applies) are the same set.
+func TestRateLimitNamesMatchHandler(t *testing.T) {
+	handlerNames := handler.RateLimitDefaults()
+	if len(handlerNames) != len(config.RateLimitNames) {
+		t.Fatalf("handler has %d limits, config reads %d", len(handlerNames), len(config.RateLimitNames))
+	}
+	for _, n := range config.RateLimitNames {
+		if _, ok := handlerNames[n]; !ok {
+			t.Errorf("config reads %s, which the handler does not have", n)
 		}
 	}
 }

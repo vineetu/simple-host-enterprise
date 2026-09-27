@@ -145,6 +145,25 @@ func TestLoadRefusesBadOpLimits(t *testing.T) {
 	}
 }
 
+// An unknown RATE_LIMIT_* name (a typo, or another program's variable such
+// as a service mesh's RATE_LIMIT_ENABLED) is a startup warning, not a
+// refusal, and is not read.
+func TestLoadWarnsOnUnknownRateLimit(t *testing.T) {
+	opLimitsEnv(t)
+	t.Setenv("RATE_LIMIT_ENABLED", "true")
+	t.Setenv("RATE_LIMIT_AUTH_EMAIL", "3/1m")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Warnings) != 1 || !strings.Contains(cfg.Warnings[0], "RATE_LIMIT_ENABLED") {
+		t.Fatalf("Warnings = %v", cfg.Warnings)
+	}
+	if len(cfg.RateLimits) != 1 || cfg.RateLimits["auth-email"] != (RateLimit{3, time.Minute}) {
+		t.Fatalf("RateLimits = %v", cfg.RateLimits)
+	}
+}
+
 func TestLoadRefusesBadRateLimits(t *testing.T) {
 	for _, value := range []string{"20", "20/", "/5s", "twenty/5s", "20/5", "0/5s", "100001/1s", "20/0s", "20/500us", "20/2h", "-1/5s"} {
 		t.Run(value, func(t *testing.T) {

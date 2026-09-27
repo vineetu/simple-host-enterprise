@@ -98,12 +98,29 @@ func loadOpLimits(apiKeyMaxDays int64) (oplimits.Values, error) {
 	return v, nil
 }
 
+// RateLimitNames are the limits RATE_LIMIT_<NAME> may set: the configurable
+// limiter names in internal/handler (a handler test keeps the two lists
+// equal).
+var RateLimitNames = []string{
+	"auth-client", "auth-email", "management-client", "management-user", "api-key-mint",
+	"state-client", "state-site", "state-read-client", "state-read-site",
+	"admin-client", "admin-identity", "search-query-peer", "search-query-session",
+	"oauth-register", "oauth-token",
+}
+
 // loadRateLimits reads every RATE_LIMIT_<NAME> variable in the environment.
 // The names are the limiter names in internal/handler (RATE_LIMIT_AUTH_CLIENT
-// is "auth-client"); the handler refuses a name it does not have. The value is
+// is "auth-client"). A name that is not one of RateLimitNames (a typo, or a
+// variable another program in the pod reads) is not read: it comes back as a
+// warning for the startup log instead of stopping the server. The value is
 // "<burst>/<interval>": RATE_LIMIT_AUTH_EMAIL=5/50s allows 5 at once and one
 // more every 50 seconds.
-func loadRateLimits() (map[string]RateLimit, error) {
+func loadRateLimits() (map[string]RateLimit, []string, error) {
+	known := make(map[string]bool, len(RateLimitNames))
+	for _, n := range RateLimitNames {
+		known[n] = true
+	}
+	var warnings []string
 	out := map[string]RateLimit{}
 	var keys []string
 	for _, entry := range os.Environ() {
@@ -118,14 +135,18 @@ func loadRateLimits() (map[string]RateLimit, error) {
 		if raw == "" {
 			continue
 		}
+		name := strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(key, rateLimitPrefix), "_", "-"))
+		if !known[name] {
+			warnings = append(warnings, key+" is not a limit this server has, so it changes nothing (docs/configuration.md lists them)")
+			continue
+		}
 		limit, err := parseRateLimit(raw)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", key, err)
+			return nil, nil, fmt.Errorf("%s: %w", key, err)
 		}
-		name := strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(key, rateLimitPrefix), "_", "-"))
 		out[name] = limit
 	}
-	return out, nil
+	return out, warnings, nil
 }
 
 func parseRateLimit(raw string) (RateLimit, error) {
