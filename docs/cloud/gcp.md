@@ -143,5 +143,5 @@ Use Workload Identity Federation for cert-manager (section 2).
 kubectl -n simple-host rollout status deploy/simple-host
 curl -fsS https://<base>/healthz
 kubectl -n simple-host run oidc-check --rm -i --restart=Never --image=curlimages/curl -- curl -fsS https://<issuer>/.well-known/openid-configuration
-make smoke BASE=https://<base> KEY_FILE=<path-to-admin-api-key>
+make smoke BASE=https://<base> KEY_FILE=<path-to-admin-full-api-key>
 ```

@@ -273,7 +273,7 @@ person's address rather than the ingress's (`docs/configuration.md`).
    in the redirect URI.
 9. `curl https://<base>/readyz` should return `{"status":"ok"}`; sign in at
    `https://<base>/auth/login` as one of your `ADMIN_EMAILS` addresses.
-10. Mint an API key on `/dashboard`, save it to a file, and run
+10. Mint an API key with scope **Full** on `/dashboard`, save it to a file, and run
     `make smoke BASE=https://<base> KEY_FILE=<that file>`. It publishes,
     restricts and deletes a throwaway site over public HTTPS only; the key
     is never printed. Revoke the key afterwards.

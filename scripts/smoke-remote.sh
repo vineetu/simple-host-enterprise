@@ -2,7 +2,8 @@
 # Smoke test against a real installation, over public HTTPS only. No
 # kubectl, no database, no test identity provider: everything goes through
 # the same endpoints an agent uses, authenticated by one API key an admin
-# minted on /dashboard.
+# minted on /dashboard with scope Full (it stops before publishing with a
+# publish key, which cannot delete what the run creates).
 #
 #   make smoke BASE=https://sites.example.com KEY_FILE=~/.simple-host-install-key
 #   BASE=sites.example.com SIMPLE_HOST_API_KEY=... ./scripts/smoke-remote.sh
@@ -54,8 +55,13 @@ owner=""
 # shellcheck disable=SC2329  # called by the EXIT trap
 cleanup() {
   if [ -n "$site" ] && [ -n "$owner" ] && [ -f "$work/key.hdr" ]; then
-    curl -sS -o /dev/null -X DELETE -H @"$work/key.hdr" -H "X-Skill-Version: $SKILL_VERSION" \
-      "https://$BASE/api/collaboration/sites/$owner/$site" 2>/dev/null || true
+    local c
+    c="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 60 -X DELETE -H @"$work/key.hdr" -H "X-Skill-Version: $SKILL_VERSION" \
+      "https://$BASE/api/collaboration/sites/$owner/$site" 2>/dev/null)" || c="ERR"
+    case "$c" in
+      2[0-9][0-9]|404) ;;
+      *) echo "smoke-remote: could not delete the throwaway site $owner/$site ($c); delete it on /dashboard" >&2 ;;
+    esac
   fi
   rm -rf "$work"
 }
@@ -166,6 +172,20 @@ if [ "$code" != 200 ]; then echo "the key does not authenticate; stopping (was i
 owner="$(json 'd["username"]')"
 [ -n "$owner" ] || { bad "GET /api/me carried no username"; finish; }
 ok "key belongs to $owner (admin: $(json 'd.get("is_admin")'))"
+# The run deletes an uploaded file, changes viewers and deletes its site,
+# which a publish key cannot do: check the scope before publishing anything,
+# so a wrong key leaves nothing behind.
+req "$BASE" /api/deleted-sites "${K[@]}"
+if [ "$code" = 403 ]; then
+  bad "the key's scope is $(json 'd.get("scope","")'); make smoke needs a key with scope Full (mint one on /dashboard, INSTALL.md HUMAN STEP D)"
+  echo "nothing was published; stopping"
+  finish
+elif [ "$code" = 200 ]; then
+  ok "the key has scope Full"
+else
+  bad "scope check: GET /api/deleted-sites got $code (want 200)"
+  finish
+fi
 
 site="smoke-$(od -An -N4 -tx1 /dev/urandom | tr -d " \n")"
 echo "== publish $owner/$site"

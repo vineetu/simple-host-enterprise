@@ -688,7 +688,10 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://install-check.<base>/healthz
 
 1. Sign in at `https://<base>/auth/login`, then open `https://<base>/api/me`
    in the same browser and confirm it shows `"is_admin": true`.
-2. On `/dashboard`, mint an API key named `install-check`.
+2. On `/dashboard`, mint an API key named `install-check` with scope
+   **Full** (the dashboard defaults to Publish; `make smoke` deletes the
+   site it creates, which a publish key cannot do, so it stops before
+   publishing with one).
 3. Save it for you with this hidden prompt (stored outside the repository,
    readable only by them):
 
@@ -704,7 +707,7 @@ make smoke BASE=https://<base> KEY_FILE="$HOME/.simple-host-install-key"
 
 This is `scripts/smoke-remote.sh`. It uses only public HTTPS and the admin's
 key from HUMAN STEP D (read from the file, never printed): probes and TLS,
-key auth, publish, update and roll back a throwaway `smoke-…` site, the
+key auth and its scope (Full, or it stops before publishing), publish, update and roll back a throwaway `smoke-…` site, the
 owner host, state read/write, an asset upload, list and delete, restricting
 the site (its own host then refuses anyone it is not shared with), then deletes the site, on
 failure too. Every line reads `ok` or `FAIL`; the exit status is the number

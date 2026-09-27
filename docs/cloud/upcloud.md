@@ -143,7 +143,7 @@ the UpCloud console.
 kubectl --context "$CTX" -n simple-host rollout status deploy/simple-host
 curl -fsS https://<base>/readyz
 kubectl --context "$CTX" -n simple-host run oidc-check --rm -i --restart=Never --image=curlimages/curl -- curl -fsS https://<issuer>/.well-known/openid-configuration
-make smoke BASE=https://<base> KEY_FILE=<path-to-admin-api-key>
+make smoke BASE=https://<base> KEY_FILE=<path-to-admin-full-api-key>
 ```
 
 Also check that the certificate `https://<base>` presents is yours, not the load

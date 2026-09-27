@@ -140,7 +140,7 @@ local-down:
 #
 # With BASE set, smoke targets a real install instead, over public HTTPS
 # only (scripts/smoke-remote.sh): no kubectl, no database, no Dex. It needs
-# an API key an admin minted on /dashboard, read from KEY_FILE, else from
+# a Full-scope API key an admin minted on /dashboard, read from KEY_FILE, else from
 # SIMPLE_HOST_API_KEY, else from a hidden prompt; it is never printed.
 #   make smoke BASE=https://sites.example.com KEY_FILE=~/.simple-host-install-key
 # OTHER_KEY_FILE (optional) is a second, non-admin person's key; with it the

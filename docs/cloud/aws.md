@@ -131,5 +131,5 @@ The role needs `s3:ListBucket` (and, for the startup versioning check, `s3:GetBu
 kubectl -n simple-host rollout status deploy/simple-host
 curl -fsS https://<base>/healthz
 kubectl -n simple-host run oidc-check --rm -i --restart=Never --image=curlimages/curl -- curl -fsS https://<issuer>/.well-known/openid-configuration
-make smoke BASE=https://<base> KEY_FILE=<path-to-admin-api-key>
+make smoke BASE=https://<base> KEY_FILE=<path-to-admin-full-api-key>
 ```

@@ -112,5 +112,5 @@ identity. Put the store's static key pair in `BACKUP_STORAGE_ACCESS_KEY_ID` /
 kubectl -n simple-host rollout status deploy/simple-host
 curl -fsS https://<base>/healthz
 kubectl -n simple-host run oidc-check --rm -i --restart=Never --image=curlimages/curl -- curl -fsS https://<issuer>/.well-known/openid-configuration
-make smoke BASE=https://<base> KEY_FILE=<path-to-admin-api-key>
+make smoke BASE=https://<base> KEY_FILE=<path-to-admin-full-api-key>
 ```

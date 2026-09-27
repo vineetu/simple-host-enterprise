@@ -15,6 +15,11 @@ release, commit and schema.
 - An API key calling an admin route is told that admin routes need a
   browser sign-in, instead of being told to mint a key with another scope
   (no key can call them). An offboard key is told the one route it calls.
+- `make smoke` against a real install checks the key's scope first and
+  stops before publishing when it is not Full, instead of failing four
+  checks and leaving its throwaway site behind; if the site cannot be
+  deleted on exit it says so. INSTALL.md HUMAN STEP D now says to mint the
+  key with scope Full.
 - The dashboard's key help says what a publish key cannot do: delete
   uploaded files or download a whole site (a full key can).
 
