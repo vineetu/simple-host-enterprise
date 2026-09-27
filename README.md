@@ -9,7 +9,7 @@ Every person in a company gets a place for what their AI agent builds, at `<site
 - **Architecture:** https://simple-host.app/enterprise/architecture
 - **Install:** [INSTALL.md](INSTALL.md) (runbook for an agent) · [docs/install.md](docs/install.md) (full guide) · [docs/](docs/)
 - **Security:** [SECURITY.md](SECURITY.md) · [docs/security-review.md](docs/security-review.md)
-- **Releases:** [CHANGELOG.md](CHANGELOG.md) · latest [v1.6.0](https://github.com/vineetu/simple-host-enterprise/releases/tag/v1.6.0). Pin the image by digest; the current digest is in [INSTALL.md](INSTALL.md).
+- **Releases:** [CHANGELOG.md](CHANGELOG.md) · latest [v1.7.0](https://github.com/vineetu/simple-host-enterprise/releases/tag/v1.7.0). Pin the image by digest; the current digest is in [INSTALL.md](INSTALL.md).
 - **Hosted edition** (for individuals): https://simple-host.app/ · [github.com/vineetu/simple-host](https://github.com/vineetu/simple-host)
 
 ## Install
