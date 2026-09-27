@@ -44,7 +44,10 @@ Config names are documented in `docs/configuration.md`; schema in
   email (sections 8, 9) into real ones in the session's transaction, each
   audited as `pending_grant_converted`, but only when the verified `email`
   claim is plain ASCII and is the address the account now holds from a
-  claim (exact, lower-cased match; not an address another account keeps). Every sign-in also refreshes
+  claim (exact, lower-cased match; not an address another account keeps);
+  a grant on a site in Recently deleted stays pending. Conversion locks the
+  person, the teams and whoever made the grants (one sorted pass) before it
+  takes any grant, the order an erasure uses. Every sign-in also refreshes
   the stored email from the verified claim (the account is found by
   subject); an address another person already holds is not taken over
   (`email_change` / `email_change_skipped` in the audit log). The sessions
