@@ -244,6 +244,16 @@ Tell the user that. Anonymous visitors to a network site can read its
 pages and saved data but cannot change anything. Moving to any lower level
 takes it off the network at once; going back needs a new request.
 
+`access_decision` on `get_site` and the site list is the last admin
+decision, with `at` and the admin's `reason` when they gave one: `declined`
+(a network request was turned down), `revoked` (the site was taken off the
+network) or `restricted` (an admin set the site to `only_me`, for example
+because it exposed something it should not). Tell the user about it and
+quote the reason. A declined or revoked one stays until the next network
+request. For `restricted`, choosing a level again lifts it and is on
+record next to the admin's action: only do that when the user, told the
+reason, asks for it.
+
 ## 7. Named viewers
 
 ```

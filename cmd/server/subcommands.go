@@ -410,6 +410,13 @@ func runMigrateStorage(args []string) error {
 		siteDir.Close()
 	}
 	log.Printf("migrate-storage: %d version(s), %d asset(s) %s, %d failed", versions, assets, map[bool]string{true: "found", false: "uploaded and verified"}[*dryRun], failed)
+	if !*dryRun {
+		if err := recordOperatorRun(ctx, database, "storage_migrate", map[string]any{
+			"sites": len(sites), "versions": versions, "assets": assets, "failed": failed,
+		}); err != nil {
+			return err
+		}
+	}
 	if failed > 0 {
 		return fmt.Errorf("%d item(s) failed; fix and re-run", failed)
 	}
@@ -489,11 +496,47 @@ func runReencrypt(args []string) error {
 		Logf: log.Printf,
 	})
 	log.Printf("reencrypt: done%s: %s", dryRunSuffix(*dryRun), stats)
+	if !*dryRun {
+		extra := map[string]any{
+			"scanned": stats.Scanned, "rewritten": stats.Rewritten, "current": stats.Current,
+			"skipped": stats.Skipped, "failed": stats.Failed, "completed": err == nil,
+		}
+		// Recorded even when the run stopped early (interrupted, or a bucket
+		// listing failed): whatever it rewrote is on record.
+		if auditErr := recordOperatorRun(context.WithoutCancel(ctx), database, "storage_reencrypt", extra); auditErr != nil {
+			return errors.Join(err, auditErr)
+		}
+	}
 	if err != nil {
 		return err
 	}
 	if stats.Failed > 0 {
 		return fmt.Errorf("%d object(s) could not be re-encrypted; they are unchanged and still need their old key (or BACKUP_ENVELOPE_PLAINTEXT_ALLOWED): fix and re-run", stats.Failed)
+	}
+	return nil
+}
+
+// recordOperatorRun writes one audit event for a run of an operator
+// command that changed stored data (migrate-storage, reencrypt), with its
+// counts, and streams it to stdout like every other event. An operator
+// command has no signed-in actor. A dry run changes nothing and is not
+// recorded. A failure to record is returned, so the command exits
+// non-zero: the work itself is done and safe to re-run.
+func recordOperatorRun(ctx context.Context, database *sql.DB, action string, extra map[string]any) error {
+	recorder := audit.NewDBRecorder(database)
+	stream := audit.NewStream(slog.New(slog.NewJSONHandler(os.Stdout, nil)), 0)
+	defer stream.Close(5 * time.Second)
+	recorder.SetStream(stream)
+	tx, err := database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("record audit: %w", err)
+	}
+	defer audit.Rollback(tx)
+	if err := recorder.RecordTx(ctx, tx, audit.Event{ActorKind: "system", Action: action, Extra: extra}); err != nil {
+		return fmt.Errorf("record audit: %w", err)
+	}
+	if err := audit.Commit(tx); err != nil {
+		return fmt.Errorf("record audit: %w", err)
 	}
 	return nil
 }

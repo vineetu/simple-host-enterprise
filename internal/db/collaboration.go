@@ -80,7 +80,10 @@ const resolveSiteAccessQuery = `
 		s.network_requested_at,
 		COALESCE(s.network_request_reason, ''),
 		(SELECT count(*) FROM network_access_approvals a
-		 WHERE a.site_id = s.id AND a.requested_at = s.network_requested_at)
+		 WHERE a.site_id = s.id AND a.requested_at = s.network_requested_at),
+		COALESCE(s.access_decision, ''),
+		s.access_decision_at,
+		COALESCE(s.access_decision_reason, '')
 	FROM sites s
 	INNER JOIN users owner ON owner.id = s.user_id
 	LEFT JOIN team_members tm
@@ -117,6 +120,9 @@ func ResolveSiteAccess(ctx context.Context, q Querier, actorID, ownerUsername, s
 		&access.Site.NetworkRequestedAt,
 		&access.Site.NetworkRequestReason,
 		&access.Site.NetworkApprovals,
+		&access.Site.AccessDecision,
+		&access.Site.AccessDecisionAt,
+		&access.Site.AccessDecisionReason,
 	)
 	if err != nil {
 		return SiteAccess{}, err
@@ -148,7 +154,10 @@ const listAccessibleSitesQuery = `
 		s.network_requested_at,
 		COALESCE(s.network_request_reason, ''),
 		(SELECT count(*) FROM network_access_approvals a
-		 WHERE a.site_id = s.id AND a.requested_at = s.network_requested_at)
+		 WHERE a.site_id = s.id AND a.requested_at = s.network_requested_at),
+		COALESCE(s.access_decision, ''),
+		s.access_decision_at,
+		COALESCE(s.access_decision_reason, '')
 	FROM sites s
 	INNER JOIN users owner ON owner.id = s.user_id
 	LEFT JOIN team_members tm
@@ -191,6 +200,9 @@ func ListAccessibleSites(ctx context.Context, q Querier, actorID string) ([]Acce
 			&accessible.Site.NetworkRequestedAt,
 			&accessible.Site.NetworkRequestReason,
 			&accessible.Site.NetworkApprovals,
+			&accessible.Site.AccessDecision,
+			&accessible.Site.AccessDecisionAt,
+			&accessible.Site.AccessDecisionReason,
 		); err != nil {
 			return nil, err
 		}

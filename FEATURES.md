@@ -40,16 +40,25 @@ Config names are documented in `docs/configuration.md`; schema in
   session row and expiry, so it never outlives it. Every sign-in (verified
   email, allowed domain) turns any pending viewer or team grants for that
   email (sections 8, 9) into real ones in the session's transaction, each
-  audited as `pending_grant_converted`.
+  audited as `pending_grant_converted`. Every sign-in also refreshes
+  the stored email from the verified claim (the account is found by
+  subject); an address another person already holds is not taken over
+  (`email_change` / `email_change_skipped` in the audit log). The sessions
+  page lists sessions with Revoke, the person's connected apps with
+  Disconnect (section 3), and "Sign out everywhere": every session, and by
+  default every API key and connected app, revoked in one transaction
+  (`sign_out_everywhere`), leaving the browser signed out.
 - **Status.** Built.
 - **Routes.** `GET /auth/login`, `GET /auth/callback`, `POST /auth/logout`,
   `GET /auth/sessions` (sessions page), `POST /auth/sessions/{id}/revoke`,
-  `GET /auth/handoff`, `GET /api/me`.
+  `POST /auth/sessions/revoke-all` (sign out everywhere; form field
+  `credentials` set = keys and apps too), `GET /auth/handoff`, `GET /api/me`.
   Host-gate: `GET /auth/session` (redeem, owner and site hosts).
 - **MCP.** `get_account` (→ `GET /api/me`).
 - **Skill.** `references/account-recovery.md` (Sign-in and API keys);
   `SKILL.md` §1–2.
-- **Pages.** `/auth/sessions`; sign-in prompt on `/dashboard`.
+- **Pages.** `/auth/sessions` (sessions, connected apps, sign out
+  everywhere); sign-in prompt on `/dashboard`.
 - **Go.** `internal/handler/auth.go`, `handoff.go`, `user.go`, `origin.go`;
   `internal/auth/` (`middleware.go`, `session_cookie.go`, `hostsession.go`);
   `internal/oidc/`; `internal/db/identity.go`, `sessions.go`, `handoff.go`.
@@ -74,7 +83,9 @@ Config names are documented in `docs/configuration.md`; schema in
   list, versions, archives, saved data and assets including the host-gate
   site API, `GET /api/me`, `/mcp`), `full` (every non-admin route), `offboard`
   (admins only; `POST /api/admin/users/disable` and nothing else). Refusal is
-  403 with a JSON `scope`. Existing keys became `full`.
+  403 with a JSON `scope`. Existing keys became `full`. A minted key and
+  its paste-back block stay on the dashboard until dismissed (the list
+  gains the row in place; nothing reloads).
 - **Status.** Built.
 - **Routes.** `GET /api/keys`, `POST /api/keys`, `DELETE /api/keys/{id}`.
 - **MCP.** None (by design).
@@ -100,7 +111,11 @@ Config names are documented in `docs/configuration.md`; schema in
   `Authorization: Bearer` only on `/mcp` and the in-process calls its tools
   make (`ProtectMCP` marks the request context; `auth.Middleware` refuses an
   unmarked Bearer with 401). An hourly
-  sweep deletes expired codes and tokens. `/plugin.zip` is an installable
+  sweep deletes expired codes and tokens. A person sees their connected
+  apps (name, connected, last used; only grants with a live token) and
+  disconnects one (the grant and its tokens deleted, audited
+  `connector_revoke`) on `/auth/sessions`, through two session-only routes.
+  `/plugin.zip` is an installable
   plugin (Claude plugin and Agent Plugins manifests plus the skills) already
   pointing at `<base>/mcp`.
 - **Status.** Built.
@@ -109,12 +124,14 @@ Config names are documented in `docs/configuration.md`; schema in
   `GET /.well-known/oauth-protected-resource/mcp`,
   `GET /.well-known/oauth-authorization-server`, `POST /oauth/register`,
   `GET /oauth/authorize`, `POST /oauth/authorize`, `POST /oauth/token`,
-  `POST /oauth/revoke`, `GET /plugin.zip`.
+  `POST /oauth/revoke`, `GET /plugin.zip`, `GET /api/me/connections`,
+  `DELETE /api/me/connections/{id}` (both browser session only).
 - **MCP.** Every tool below, sections 1–11; the full list is in
   `internal/mcp/tools.go` `toolList()`.
 - **Skill.** `SKILL.md` (Service); plugin manifests
   `simple-host-plugin/plugin.json`, `mcp.json`.
-- **Pages.** `/oauth/authorize` consent page (rendered by `connector.go`).
+- **Pages.** `/oauth/authorize` consent page (rendered by `connector.go`);
+  "Connected apps" on `/auth/sessions` (`auth.go`, routes in `keys.go`).
 - **Go.** `internal/mcp/` (`server.go`, `jsonrpc.go`, `tools.go`, `outputs.go`,
   `schemacheck.go`, `deploy.go`, `archive.go`); `internal/handler/connector.go`,
   `plugin_bundle.go`; `cmd/server/main.go` (mounts `/mcp`);
@@ -271,7 +288,10 @@ Config names are documented in `docs/configuration.md`; schema in
   object under the first `BACKUP_ENVELOPE_KEY` in the key-bound form, so old
   keys can be removed and a plaintext install can adopt the envelope;
   idempotent, verified read-back, rewrites a version only once a committed
-  row names it). A bucket fault does not fail `/readyz`
+  row names it). `restore`, `migrate-storage` and `reencrypt` each record
+  one `system` audit event per run (`site_restore`, `storage_migrate`,
+  `storage_reencrypt`, with counts; not for `-dry-run`); a failed audit
+  write makes the command exit non-zero. A bucket fault does not fail `/readyz`
   (`simplehost_bucket_ok` instead).
 - **Status.** Built.
 - **Routes.** None of its own. **MCP.** None.
@@ -305,22 +325,38 @@ Config names are documented in `docs/configuration.md`; schema in
   `network_request.approvals`/`approvals_required` for the owner), the second
   opens the site (`network_access_approved`) in the same locked transaction;
   a decline, a level change or a new request clears partial approvals.
+  The last admin decision is kept on the site for its owner
+  (`access_decision`: `declined` or `revoked`, with when and the admin's
+  optional note, until the next network request) and shown on the
+  dashboard and by `get_site`/`list_sites`. An admin can also restrict any
+  site to `only_me` with a required reason (a take-down: `restricted` in
+  `access_decision`, audited `site_restricted`); the owner lifts it by
+  choosing a level again or requesting network access, an admin by
+  unrestricting, which restores the earlier level (`company` for a site
+  that was on the network; `site_restriction_lifted`).
 - **Status.** Built.
 - **Routes.** `POST /api/sites/{sitename}/access`,
   `POST /api/collaboration/sites/{owner}/{sitename}/access`,
   `POST /api/admin/access-requests/{owner}/{sitename}/approve`,
   `POST /api/admin/access-requests/{owner}/{sitename}/decline`,
-  `POST /api/admin/access-requests/{owner}/{sitename}/revoke`.
-- **MCP.** `set_site_access`.
+  `POST /api/admin/access-requests/{owner}/{sitename}/revoke` (decline and
+  revoke take an optional `reason`),
+  `POST /api/admin/sites/{owner}/{sitename}/restrict`,
+  `POST /api/admin/sites/{owner}/{sitename}/unrestrict`.
+- **MCP.** `set_site_access`; `get_site` and `list_sites` report
+  `access_decision`.
 - **Skill.** `references/collaboration.md` §6 (Who can open the site);
   `references/packaging-and-validation.md` (Who can open it);
   `simple-host-builder` §4.
-- **Pages.** `/dashboard` access control per site; `/admin` "Access requests".
+- **Pages.** `/dashboard` access control per site, with the last admin
+  decision; `/admin` "Access requests" (decline and revoke ask for a note)
+  and Restrict / Lift on every site row.
 - **Go.** `internal/handler/access.go`, `host_gate.go`
   (`requireHostSessionOrNetwork`, `serveSiteAPI`), `collaboration.go`
   (`network_request`); `internal/db/site_access.go`.
 - **DB.** `sites.access`, `sites.network_requested_*` (0033);
-  `network_access_approvals` (0038); `sites.public` (0006).
+  `network_access_approvals` (0038); `sites.public` (0006);
+  `sites.access_decision*` (0047).
 - **Config.** `NETWORK_ACCESS_APPROVALS` (1 or 2, default 1).
 
 ## 8. Named viewers (restricted sites)
@@ -472,9 +508,12 @@ Config names are documented in `docs/configuration.md`; schema in
   from a browser session only: an admin's API key or connected app gets the
   same own-namespace view as anyone else);
   access-log detail follows `ACCESS_LOG_VISIBILITY`. Admins export either as
-  CSV (formula-safe) or NDJSON. `simple-host prune` (a CronJob) drops
-  partitions past retention, trims the chain's rows for them, and creates
-  future ones.
+  CSV (formula-safe) or NDJSON. `simple-host prune` (a daily CronJob) drops
+  partitions past retention (so a row lives its retention plus up to one
+  month), trims the chain's rows for them, and keeps partitions twelve
+  months ahead; rows that reached a default partition while it was not
+  running are moved into their months' partitions, unchanged and still
+  chained, instead of wedging every later run (0046).
 - **Status.** Built.
 - **Routes.** `GET /api/audit`, `GET /api/access`, `GET /api/admin/export`.
 - **MCP.** None.
@@ -489,7 +528,8 @@ Config names are documented in `docs/configuration.md`; schema in
   0028, 0030); `audit_chain`, `audit_chain_head`, `audit_event_canonical()`,
   `audit_chain_append()` and trigger `audit_events_chain` (0036, owner-only);
   `audit_chain_entry()` (0040, the app role's read of one event's seq and
-  hash for its SIEM line).
+  hash for its SIEM line); `audit_ensure_partitions()` rewritten and
+  `audit_ensure_month_partition()` (0046).
 - **Config.** `AUDIT_RETENTION_DAYS`, `ACCESS_LOG_RETENTION_DAYS`,
   `ACCESS_LOG_VISIBILITY`. The stream and the chain have no settings.
 
@@ -503,7 +543,8 @@ Config names are documented in `docs/configuration.md`; schema in
   deleted sites (Restore, section 5), rankings of users
   and sites (views, storage from a cached bucket measurement, updated; each
   site links to its current address), new
-  users, state-backend usage, visitors and activity, all sites.
+  users, state-backend usage, visitors and activity, all sites (each with
+  Restrict, or the restriction's reason and Lift: section 7).
 - **Status.** Built.
 - **Routes.** `GET /admin`, `POST /api/admin/users/{username}/disable`,
   `POST /api/admin/users/{username}/enable`,
@@ -515,7 +556,7 @@ Config names are documented in `docs/configuration.md`; schema in
   `POST /api/admin/users/{username}/delete-sites` (form or JSON `to`; only
   for a disabled person or a team with no active member, 409 otherwise;
   audited `site_transfer` / `site_delete` with `by_admin`); plus the admin
-  routes in sections 7, 9, 12.
+  routes in sections 7, 9, 12 (section 7 has restrict and unrestrict).
 - **MCP.** None.
 - **Pages.** `/admin`.
 - **Go.** `internal/handler/admin.go` (`leaverSiteActions`), `admin_move.go`,
@@ -528,8 +569,10 @@ Config names are documented in `docs/configuration.md`; schema in
 ## 14. Dashboard
 
 - **What.** `/dashboard` on the base host: sign-in prompt when signed out;
-  when signed in, API keys (mint/list/revoke), "Your sites" across the
-  person's and their teams' namespaces with access level, viewers, assets,
+  when signed in, API keys (mint/list/revoke; a new key stays on screen
+  until dismissed), "Your sites" across the
+  person's and their teams' namespaces with access level (and the last
+  admin decision: declined, revoked or restricted, with the note), viewers, assets,
   rename and hand over (section 5), visitor counts, each namespace's usage against its quota (sites, stored
   bytes; the same numbers `GET /api/me` returns as `usage`), "Recently
   deleted" (the person's and their teams' sites deleted in the last 30 days,

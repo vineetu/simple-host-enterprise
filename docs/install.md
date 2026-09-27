@@ -597,11 +597,17 @@ the dashboard's Origin check — deliberately: it is a side-effect-free
 origin can trigger the request but cannot read its response body back.
 See `docs/security-review.md`'s accepted limitations for the same note.
 
-Retention runs as a monthly `CronJob` (`simple-host-prune`, wired into
-`deploy/base/kustomization.yaml`), which advances the rolling monthly
-partitions and then drops any whose partition is fully past its retention
+Retention runs as a daily `CronJob` (`simple-host-prune`, wired into
+`deploy/base/kustomization.yaml`), which keeps the monthly partitions
+created twelve months ahead and then drops any whose partition is fully past its retention
 window — `AUDIT_RETENTION_DAYS` (default 400) and
 `ACCESS_LOG_RETENTION_DAYS` (default 90), both in `docs/configuration.md`.
+A row therefore lives for its setting plus up to one month. If the job
+stops for longer than the partitions ahead, rows land in a catch-all
+partition; the next run moves them into their months' partitions, unchanged
+and still hash-chained, and retention carries on. The request log on stdout
+carries every request's full client IP and user agent, so the retention of
+your log pipeline governs those lines.
 It also deletes sessions that ended (expired or signed out) more than
 `ACCESS_LOG_RETENTION_DAYS` ago, with the IP and user agent they recorded,
 and hand-off codes older than a day.

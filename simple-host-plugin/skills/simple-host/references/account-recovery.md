@@ -142,5 +142,12 @@ exactly as in "Get a key" above. There is no email-based reset path and
 nothing to poll: the next signal you'll see either way is the next `GET
 /api/me` call.
 
+Connected chat apps and browser sessions are listed on `{{BASE_URL}}/auth/sessions`.
+The person can disconnect one app there, or press **Sign out everywhere**,
+which ends every session and, unless they clear the box, revokes all their
+API keys and connected apps (the right move when a laptop is lost). After
+that, every key you hold stops working: ask for a new one as in "Get a key".
+The app itself must be connected again.
+
 Never hot-loop, expose a credential, or ask the user to disclose a password,
 an OAuth code, or an existing key that still works.

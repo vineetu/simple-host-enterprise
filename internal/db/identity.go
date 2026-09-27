@@ -10,7 +10,8 @@ import (
 
 // GetUserByOIDCSub finds the account already bound to a provider subject.
 // This is the fast, primary path on every sign-in after the first: once a
-// row carries oidc_sub, it is found here and email is never consulted again.
+// row carries oidc_sub, it is found here and email is never used to find it
+// again (RefreshUserEmail only keeps the stored address current).
 func GetUserByOIDCSub(ctx context.Context, db *sql.DB, sub string) (User, error) {
 	const query = `
 		SELECT id, username, is_admin, created_at, kind, COALESCE(email, '')
@@ -70,6 +71,65 @@ func RefreshAdminStatus(ctx context.Context, db *sql.DB, userID string, isAdmin 
 	const query = `UPDATE users SET is_admin = $2 WHERE id = $1`
 	_, err := db.ExecContext(ctx, query, userID, isAdmin)
 	return err
+}
+
+// EmailRefresh is the outcome of RefreshUserEmail.
+type EmailRefresh struct {
+	// Previous is the address the account had ("" for none); Changed
+	// reports that it now holds the new one.
+	Previous string
+	Changed  bool
+	// HeldBy is the username of another person account that already holds
+	// the new address, when that stopped the change.
+	HeldBy string
+}
+
+// RefreshUserEmail keeps a person's stored email in step with the address
+// their identity provider verified at this sign-in (the account itself is
+// found by subject, never by email), so offboarding by email matches the
+// directory's current address. Addresses are not unique by design
+// (migration 0017), but two people holding one address would make
+// offboarding by it disable both: when another person account already
+// holds the new address (compared case-insensitively) the change is
+// skipped and reported in HeldBy. A transaction-scoped advisory lock on
+// the address serializes two sign-ins claiming it at once.
+func RefreshUserEmail(ctx context.Context, database *sql.DB, userID, email string) (EmailRefresh, error) {
+	var out EmailRefresh
+	if email == "" {
+		return out, nil
+	}
+	tx, err := database.BeginTx(ctx, nil)
+	if err != nil {
+		return out, err
+	}
+	defer tx.Rollback()
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(email, '') FROM users WHERE id = $1 AND kind = 'person'`, userID).Scan(&out.Previous); err != nil {
+		return out, err
+	}
+	if out.Previous == email {
+		return out, nil
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('users.email:' || lower($1)))`, email); err != nil {
+		return out, err
+	}
+	err = tx.QueryRowContext(ctx, `
+		SELECT username FROM users
+		WHERE id <> $1 AND kind = 'person' AND email IS NOT NULL AND lower(email) = lower($2)
+		ORDER BY username LIMIT 1`, userID, email).Scan(&out.HeldBy)
+	if err == nil {
+		return out, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return out, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET email = $2, email_source = 'claimed' WHERE id = $1 AND kind = 'person'`, userID, email); err != nil {
+		return out, err
+	}
+	if err := tx.Commit(); err != nil {
+		return out, err
+	}
+	out.Changed = true
+	return out, nil
 }
 
 // ErrAccountDisabled is returned by sign-in resolution when the matched

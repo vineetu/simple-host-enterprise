@@ -72,6 +72,53 @@ Skills are at 0.13.2.
   `pending_grant_converted`. Emails outside `ALLOWED_EMAIL_DOMAINS` are
   refused when that is set.
 
+Schema 0044 (from 0042): 0043 rewrites `audit_ensure_partitions` and
+creates audit and access-log partitions twelve months ahead; 0044 adds
+nullable `sites.access_decision*` columns. Both are marked
+backward-compatible, so rolling back to v1.3.1 is safe. Skills are at
+0.13.2 (0.11.0 still works).
+
+### People
+- A newly created API key stays on the dashboard, with its paste-back
+  block, until you press Done; the page no longer reloads and hides it
+  before it can be copied. The new key joins the list in place.
+- `/auth/sessions` lists your connected chat apps (name, connected, last
+  used) with Disconnect, which ends that app's access at once
+  (`GET /api/me/connections`, `DELETE /api/me/connections/{id}`, browser
+  session only; audited as `connector_revoke`).
+- "Sign out everywhere" on `/auth/sessions` ends every session of yours
+  and, unless you clear the box, revokes your API keys and connected apps,
+  in one audited transaction (`sign_out_everywhere`).
+- Your dashboard (and `get_site`/`list_sites` as `access_decision`) shows
+  the last admin decision about who can open a site: a network request
+  declined or network access revoked, with the admin's note, until your
+  next request; or a restriction, with its reason.
+
+### Admins
+- Restrict any site to only its owner (or team) from `/admin` with a
+  one-line reason: a reversible take-down, audited as `site_restricted`.
+  The owner sees the reason and lifts it by choosing a level again; Lift on
+  `/admin` restores the earlier level (`company` for a site that was on the
+  network).
+- Declining a network request or taking a site off the network asks for
+  an optional note for the owner, recorded in the audit event.
+- Each sign-in refreshes a person's stored email from the address the IdP
+  verified, so offboarding by email follows directory changes. An address
+  another person already holds is not taken over (`email_change_skipped`).
+
+### Operations
+- `simple-host migrate-storage` and `simple-host reencrypt` record one
+  audit event per run with their counts (`storage_migrate`,
+  `storage_reencrypt`), like `restore`; dry runs are not recorded.
+- Retention no longer wedges after a long gap: rows that reached the
+  default partition while `prune` was not running are moved into their
+  months' partitions, unchanged and still hash-chained, instead of every
+  later run failing. The prune CronJob now runs daily (was monthly) and
+  keeps partitions twelve months ahead (was two). A row lives for its
+  retention setting plus up to one month.
+- Docs state that the stdout request log carries full client IPs and user
+  agents, so the log pipeline's retention governs those lines.
+
 ## v1.3.1 — 2026-09-26
 
 No schema change (still 0042); rolling back to v1.3.0 is safe. Skills are at

@@ -208,11 +208,19 @@ Loaded by `config.LoadAuditRetention()`, the same narrow-loader shape
 only these three values plus `config.LoadDatabase`'s own DSN, and
 `config.Load()` calls it too, so the full server sees the same values
 through `cfg.Audit`. `prune` runs from `deploy/base/cronjob-prune.yaml`, a
-monthly `CronJob` wired into `deploy/base/kustomization.yaml`'s
+daily `CronJob` wired into `deploy/base/kustomization.yaml`'s
 `resources:` list, under the database's owning role — the least-privilege
 `simplehost_app` role has no `DELETE`/`DROP` on `audit_events`/
 `access_log` at all, so retention can only ever run as the
 owning role, never from the server's own connection pool.
+
+Retention drops whole monthly partitions, so a row lives for its setting
+plus up to one month (the rest of the month it was written in): about 90
+to 122 days for the access log at the default, 400 to 432 for the audit log.
+The request log each pod writes to stdout carries every request's full
+client IP and user agent (and the audit stream is on stdout too), so for
+those lines the retention of the cluster's log pipeline or SIEM is what
+applies, not these settings.
 
 | Variable | Required | Default | Refusal it triggers when set wrong |
 |---|---|---|---|

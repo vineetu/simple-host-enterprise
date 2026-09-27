@@ -2,9 +2,11 @@ package handler
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -349,6 +351,43 @@ func (h *AdminHandler) registerAccessRequestRoutes(mux *http.ServeMux, adminAPI,
 	mux.Handle("POST /api/admin/access-requests/{owner}/{sitename}/approve", dashboardCheck(adminAPI(http.HandlerFunc(h.approveAccessRequest))))
 	mux.Handle("POST /api/admin/access-requests/{owner}/{sitename}/decline", dashboardCheck(adminAPI(http.HandlerFunc(h.declineAccessRequest))))
 	mux.Handle("POST /api/admin/access-requests/{owner}/{sitename}/revoke", dashboardCheck(adminAPI(http.HandlerFunc(h.revokeNetworkAccess))))
+	mux.Handle("POST /api/admin/sites/{owner}/{sitename}/restrict", dashboardCheck(adminAPI(http.HandlerFunc(h.restrictSite))))
+	mux.Handle("POST /api/admin/sites/{owner}/{sitename}/unrestrict", dashboardCheck(adminAPI(http.HandlerFunc(h.unrestrictSite))))
+}
+
+// adminNote reads an admin's one-line note ("reason") from a dashboard
+// form or a JSON body, whitespace collapsed to one line, at most 500
+// characters. required refuses an empty one. On false the response has
+// been written.
+func (h *AdminHandler) adminNote(w http.ResponseWriter, r *http.Request, required bool) (string, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, smallJSONBodyBytes)
+	var note string
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		var body struct {
+			Reason string `json:"reason"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+			h.respondAdmin(w, r, http.StatusBadRequest, "invalid request body")
+			return "", false
+		}
+		note = body.Reason
+	} else {
+		if err := r.ParseForm(); err != nil {
+			h.respondAdmin(w, r, http.StatusBadRequest, "invalid request body")
+			return "", false
+		}
+		note = r.PostForm.Get("reason")
+	}
+	note = strings.Join(strings.Fields(note), " ")
+	if required && note == "" {
+		h.respondAdmin(w, r, http.StatusBadRequest, "a reason is required")
+		return "", false
+	}
+	if utf8.RuneCountInString(note) > maxNetworkReasonRunes {
+		h.respondAdmin(w, r, http.StatusBadRequest, "reason is too long (at most 500 characters)")
+		return "", false
+	}
+	return note, true
 }
 
 func (h *AdminHandler) approveAccessRequest(w http.ResponseWriter, r *http.Request) {
@@ -376,6 +415,13 @@ func (h *AdminHandler) decideNetworkAccess(w http.ResponseWriter, r *http.Reques
 	ownerUsername, siteName, ok := validatedCollaborationPath(w, r)
 	if !ok {
 		return
+	}
+	// Declining and revoking take an optional note the owner is shown.
+	var note string
+	if action != "network_access_approved" {
+		if note, ok = h.adminNote(w, r, false); !ok {
+			return
+		}
 	}
 	owner, err := db.GetUserByUsername(r.Context(), h.database, ownerUsername)
 	if err != nil {
@@ -424,7 +470,7 @@ func (h *AdminHandler) decideNetworkAccess(w http.ResponseWriter, r *http.Reques
 			}
 		}
 	case "network_access_declined":
-		err = db.DeclineNetworkAccess(r.Context(), tx, site.ID)
+		err = db.DeclineNetworkAccess(r.Context(), tx, site.ID, note)
 	case "network_access_reverted":
 		var open bool
 		open, err = db.NetworkOpen(r.Context(), tx, site.ID)
@@ -436,6 +482,12 @@ func (h *AdminHandler) decideNetworkAccess(w http.ResponseWriter, r *http.Reques
 			_, err = db.SetSiteAccess(r.Context(), tx, site.ID, db.AccessCompany)
 			extra["to"] = db.AccessCompany
 		}
+		if err == nil {
+			err = db.RecordNetworkRevoked(r.Context(), tx, site.ID, note)
+		}
+	}
+	if note != "" {
+		extra["reason"] = note
 	}
 	if err != nil {
 		if errors.Is(err, db.ErrNoPendingRequest) {
@@ -471,6 +523,102 @@ func (h *AdminHandler) decideNetworkAccess(w http.ResponseWriter, r *http.Reques
 	h.respondAdmin(w, r, http.StatusOK, fmt.Sprintf("%s: %s/%s", status, ownerUsername, siteName))
 }
 
+func (h *AdminHandler) restrictSite(w http.ResponseWriter, r *http.Request) {
+	h.setSiteRestriction(w, r, true)
+}
+
+func (h *AdminHandler) unrestrictSite(w http.ResponseWriter, r *http.Request) {
+	h.setSiteRestriction(w, r, false)
+}
+
+// setSiteRestriction is an admin's take-down of any site, and its undo.
+// Restricting sets the site to only_me (the owner, or the owning team's
+// members) with a required one-line reason the owner sees on their
+// dashboard; the owner lifts it by choosing a level again (or asking for
+// network access), an admin by unrestricting, which restores the level the
+// site had (company for a site that was open to the network). Each is
+// audited in the same transaction: site_restricted, site_restriction_lifted.
+func (h *AdminHandler) setSiteRestriction(w http.ResponseWriter, r *http.Request, restrict bool) {
+	actor := auth.GetUser(r.Context())
+	ownerUsername, siteName, ok := validatedCollaborationPath(w, r)
+	if !ok {
+		return
+	}
+	var reason string
+	if restrict {
+		if reason, ok = h.adminNote(w, r, true); !ok {
+			return
+		}
+	}
+	owner, err := db.GetUserByUsername(r.Context(), h.database, ownerUsername)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			h.respondAdmin(w, r, http.StatusNotFound, "site not found")
+			return
+		}
+		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	tx, err := h.database.BeginTx(r.Context(), nil)
+	if err != nil {
+		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	defer audit.Rollback(tx)
+	if err := db.LockSiteCollaboration(r.Context(), tx, owner.ID, siteName); err != nil {
+		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	site, err := db.GetSite(r.Context(), tx, owner.ID, siteName)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			h.respondAdmin(w, r, http.StatusNotFound, "site not found")
+			return
+		}
+		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	action, extra := "site_restricted", map[string]any{}
+	if restrict {
+		var previous string
+		previous, err = db.RestrictSite(r.Context(), tx, site.ID, reason)
+		extra["from"], extra["reason"] = previous, reason
+	} else {
+		action = "site_restriction_lifted"
+		var level string
+		level, err = db.LiftSiteRestriction(r.Context(), tx, site.ID)
+		extra["to"] = level
+	}
+	if err != nil {
+		if errors.Is(err, db.ErrNotRestricted) {
+			h.respondAdmin(w, r, http.StatusConflict, "the site is not restricted by an admin")
+			return
+		}
+		log.Printf("admin: %s %s/%s: %v", action, ownerUsername, siteName, err)
+		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	actorKind, keyID := auditActorKind(r.Context())
+	if err := h.audit.RecordTx(r.Context(), tx, audit.Event{
+		ActorID: actor.ID, ActorKind: actorKind, KeyID: keyID,
+		Action: action, OwnerID: owner.ID, SiteID: site.ID,
+		RequestID: auditRequestID(r.Context()), Extra: extra,
+	}); err != nil {
+		log.Printf("admin: record audit for %s %s/%s: %v", action, ownerUsername, siteName, err)
+		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if err := audit.Commit(tx); err != nil {
+		h.respondAdmin(w, r, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	status := "restricted"
+	if !restrict {
+		status = "restriction lifted"
+	}
+	h.respondAdmin(w, r, http.StatusOK, fmt.Sprintf("%s: %s/%s", status, ownerUsername, siteName))
+}
+
 // accessLevelLabel is a level's short name on the admin page.
 func accessLevelLabel(level string) string {
 	switch level {
@@ -486,6 +634,13 @@ func accessLevelLabel(level string) string {
 		return "network"
 	}
 	return level
+}
+
+// adminNotePrompt is a form's onsubmit: ask for a note (Cancel aborts, an
+// empty note is allowed) and put it in the form's hidden reason field.
+func adminNotePrompt(question string) string {
+	quoted, _ := json.Marshal(question)
+	return "var n = prompt(" + string(quoted) + ", ''); if (n === null) return false; this.reason.value = n; return true;"
 }
 
 // renderAccessRequests is the admin page's "Access requests" section: every
@@ -533,11 +688,12 @@ func (h *AdminHandler) renderAccessRequests(r *http.Request, b *strings.Builder,
 			case approvedByViewer:
 				approve = `<span class="rank-sub">you approved</span>`
 			}
-			actions = approve + fmt.Sprintf(`<form method="POST" action="%s/decline"><button type="submit" class="btn-reject">Decline</button></form>`, html.EscapeString(base))
+			actions = approve + fmt.Sprintf(`<form method="POST" action="%s/decline" onsubmit="%s"><input type="hidden" name="reason"><button type="submit" class="btn-reject">Decline</button></form>`,
+				html.EscapeString(base), html.EscapeString(adminNotePrompt("Decline this request? Add a note for the owner (optional):")))
 		} else {
 			detail = "open to the network"
-			actions = fmt.Sprintf(`<form method="POST" action="%s/revoke" onsubmit="return confirm('Take this site off the network? Signed-in people keep access.');"><button type="submit" class="btn-reject">Revoke</button></form>`,
-				html.EscapeString(base))
+			actions = fmt.Sprintf(`<form method="POST" action="%s/revoke" onsubmit="%s"><input type="hidden" name="reason"><button type="submit" class="btn-reject">Revoke</button></form>`,
+				html.EscapeString(base), html.EscapeString(adminNotePrompt("Take this site off the network? Signed-in people keep access. Add a note for the owner (optional):")))
 		}
 		fmt.Fprintf(b, `<div class="rank-row"><span class="rank-name"><a href="%s" target="_blank" rel="noopener">%s/%s</a> <span class="rank-sub">%s</span>`,
 			html.EscapeString(link), html.EscapeString(e.Owner), html.EscapeString(e.SiteName), detail)

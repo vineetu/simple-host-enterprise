@@ -182,6 +182,7 @@ func (h *AuthHandler) Register(mux *http.ServeMux, authMiddleware func(http.Hand
 	mux.Handle("POST /auth/logout", originCheck(authMiddleware(requireSessionAuth(http.HandlerFunc(h.logout)))))
 	mux.Handle("GET /auth/sessions", authMiddleware(http.HandlerFunc(h.listSessions)))
 	mux.Handle("POST /auth/sessions/{id}/revoke", originCheck(authMiddleware(requireSessionAuth(http.HandlerFunc(h.revokeSession)))))
+	mux.Handle("POST /auth/sessions/revoke-all", originCheck(authMiddleware(requireSessionAuth(http.HandlerFunc(h.signOutEverywhere)))))
 }
 
 // requireSessionAuth rejects a request authenticated with an API key rather
@@ -425,7 +426,7 @@ func (h *AuthHandler) signInFailed(r *http.Request, reason, email string) {
 func (h *AuthHandler) resolveUser(ctx context.Context, sub, email, usernameHint string, isAdmin bool) (db.User, string, error) {
 	user, err := db.GetUserByOIDCSub(ctx, h.database, sub)
 	if err == nil {
-		return h.finishResolve(ctx, user, isAdmin)
+		return h.finishResolve(ctx, user, email, isAdmin)
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return db.User{}, "", err
@@ -440,7 +441,7 @@ func (h *AuthHandler) resolveUser(ctx context.Context, sub, email, usernameHint 
 		existing, emailErr := db.GetUserByEmail(ctx, h.database, email)
 		if emailErr == nil && !existing.IsTeam() {
 			if bindErr := db.BindOIDCSub(ctx, h.database, existing.ID, sub); bindErr == nil {
-				return h.finishResolve(ctx, existing, isAdmin)
+				return h.finishResolve(ctx, existing, email, isAdmin)
 			} else if !errors.Is(bindErr, sql.ErrNoRows) {
 				return db.User{}, "", bindErr
 			}
@@ -448,7 +449,7 @@ func (h *AuthHandler) resolveUser(ctx context.Context, sub, email, usernameHint 
 			// bound to a different sub already). Re-read by sub, which the
 			// winner of that race just satisfied.
 			if bySub, subErr := db.GetUserByOIDCSub(ctx, h.database, sub); subErr == nil {
-				return h.finishResolve(ctx, bySub, isAdmin)
+				return h.finishResolve(ctx, bySub, email, isAdmin)
 			}
 		} else if emailErr != nil && !errors.Is(emailErr, sql.ErrNoRows) {
 			return db.User{}, "", emailErr
@@ -458,7 +459,11 @@ func (h *AuthHandler) resolveUser(ctx context.Context, sub, email, usernameHint 
 	return h.createUser(ctx, sub, email, usernameHint, isAdmin)
 }
 
-func (h *AuthHandler) finishResolve(ctx context.Context, user db.User, isAdmin bool) (db.User, string, error) {
+// finishResolve refuses a disabled account, then refreshes what the
+// provider vouches for at every sign-in: admin status, and the verified
+// email (email_change when it moves; email_change_skipped, and the old
+// address kept, when another person already holds the new one).
+func (h *AuthHandler) finishResolve(ctx context.Context, user db.User, email string, isAdmin bool) (db.User, string, error) {
 	disabled, err := db.IsUserDisabled(ctx, h.database, user.ID)
 	if err != nil {
 		return db.User{}, "", err
@@ -470,6 +475,18 @@ func (h *AuthHandler) finishResolve(ctx context.Context, user db.User, isAdmin b
 		return db.User{}, "", err
 	}
 	user.IsAdmin = isAdmin
+	refresh, err := db.RefreshUserEmail(ctx, h.database, user.ID, email)
+	if err != nil {
+		return db.User{}, "", err
+	}
+	switch {
+	case refresh.Changed:
+		user.Email = email
+		h.audit.Record(ctx, audit.Event{ActorID: user.ID, Action: "email_change", Extra: map[string]any{"from": refresh.Previous, "to": email}})
+	case refresh.HeldBy != "":
+		log.Printf("auth: %s signed in as %s, which %s already holds; kept %q", user.Username, email, refresh.HeldBy, refresh.Previous)
+		h.audit.Record(ctx, audit.Event{ActorID: user.ID, Action: "email_change_skipped", Extra: map[string]any{"from": refresh.Previous, "to": email, "held_by": refresh.HeldBy}})
+	}
 	return user, "", nil
 }
 
@@ -579,6 +596,54 @@ func (h *AuthHandler) revokeSession(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/auth/sessions", http.StatusSeeOther)
 }
 
+// signOutEverywhere revokes every session the person has, this one
+// included, and, unless the form's "credentials" box was cleared, every API
+// key and connected app too: the self-service half of an admin's Disable,
+// in one transaction with its audit row. The browser lands signed out.
+func (h *AuthHandler) signOutEverywhere(w http.ResponseWriter, r *http.Request) {
+	user := auth.GetUser(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, smallJSONBodyBytes)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	credentials := r.PostForm.Get("credentials") != ""
+	tx, err := h.database.BeginTx(r.Context(), nil)
+	if err != nil {
+		log.Printf("auth: begin sign out everywhere for %s: %v", user.Username, err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	defer audit.Rollback(tx)
+	err = db.RevokeAllSessionsForUser(r.Context(), tx, user.ID)
+	if err == nil && credentials {
+		err = db.RevokeAllAPIKeysForUser(r.Context(), tx, user.ID)
+		if err == nil {
+			err = db.DeleteOAuthGrantsForUser(r.Context(), tx, user.ID)
+		}
+	}
+	if err == nil {
+		err = h.audit.RecordTx(r.Context(), tx, audit.Event{ActorID: user.ID, Action: "sign_out_everywhere", Extra: map[string]any{"keys_and_apps": credentials}, RequestID: auditRequestID(r.Context())})
+	}
+	if err == nil {
+		err = audit.Commit(tx)
+	}
+	if err != nil {
+		log.Printf("auth: sign out everywhere for %s: %v", user.Username, err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name: auth.SessionCookieName, Value: "", Path: "/", HttpOnly: true, Secure: true,
+		SameSite: http.SameSiteLaxMode, MaxAge: -1,
+	})
+	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
+}
+
 func (h *AuthHandler) listSessions(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r.Context())
 	if user == nil {
@@ -631,12 +696,77 @@ func (h *AuthHandler) listSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	b.WriteString(`</div>
 <form method="POST" action="/auth/logout" style="margin-top:24px"><button type="submit" class="btn-logout">Sign out of this session</button></form>
+`)
+	h.writeConnectedApps(r, &b, user)
+	b.WriteString(`<section>
+  <h2 class="section-title">Sign out everywhere</h2>
+  <p class="login-copy">Ends every session of yours on every browser, this one included. Use it when a laptop is lost or a sign-in looks wrong.</p>
+  <form method="POST" action="/auth/sessions/revoke-all" onsubmit="return confirm('Sign out everywhere? You will need to sign in again here too.');">
+    <p><label><input type="checkbox" name="credentials" value="1" checked> Also revoke my API keys and disconnect my connected apps (anything using them stops working and needs a new key or a new connection)</label></p>
+    <button type="submit" class="btn-reject">Sign out everywhere</button>
+  </form>
+</section>
 </main>`)
+	b.WriteString(connectedAppsScript)
 	b.WriteString(`</body></html>`)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(b.String()))
 }
+
+// writeConnectedApps is the sessions page's "Connected apps" section: the
+// chat apps signed in as this person through /mcp, which revoking a
+// session does not reach, each with Disconnect. Best effort: a failed
+// lookup says so rather than failing the page.
+func (h *AuthHandler) writeConnectedApps(r *http.Request, b *strings.Builder, user *db.User) {
+	b.WriteString(`<section>
+  <h2 class="section-title">Connected apps</h2>
+  <p class="login-copy">Chat apps you allowed to publish and manage sites as you. Revoking a session does not disconnect them; Disconnect does, at once. The app asks you to sign in again the next time it is used.</p>
+  <div id="connection-list" class="rank-list" role="region" aria-label="Connected apps">`)
+	connections, err := db.ListOAuthConnectionsForUser(r.Context(), h.database, user.ID)
+	if err != nil {
+		log.Printf("auth: list connections for %s: %v", user.Username, err)
+		b.WriteString(`<div class="rank-empty">Could not load connected apps.</div></div></section>`)
+		return
+	}
+	for _, c := range connections {
+		fmt.Fprintf(b, `<div class="rank-row">
+  <span class="rank-name">%s <span class="rank-sub">connected %s · last used %s</span></span>
+  <button type="button" class="btn-reject disconnect-app" data-id="%s">Disconnect</button></div>`,
+			html.EscapeString(c.ClientName),
+			localTimeHTML(c.CreatedAt, "datetime"),
+			localTimeHTML(c.LastUsedAt, "datetime"),
+			html.EscapeString(c.ID),
+		)
+	}
+	if len(connections) == 0 {
+		b.WriteString(`<div class="rank-empty">No connected apps.</div>`)
+	}
+	b.WriteString(`</div>
+</section>
+`)
+}
+
+// connectedAppsScript disconnects an app via DELETE /api/me/connections/{id},
+// same-origin so the session cookie and Origin header go with it.
+const connectedAppsScript = `<script>
+(function(){
+  var list = document.getElementById('connection-list');
+  if (!list) return;
+  list.addEventListener('click', function(ev){
+    var button = ev.target.closest('.disconnect-app');
+    if (!button) return;
+    if (!confirm('Disconnect this app? It stops working as you at once.')) return;
+    button.disabled = true;
+    fetch('/api/me/connections/' + encodeURIComponent(button.getAttribute('data-id')), {method: 'DELETE', credentials: 'same-origin'})
+      .then(function(r){
+        if (!r.ok) { button.disabled = false; alert('Could not disconnect the app.'); return; }
+        location.reload();
+      })
+      .catch(function(){ button.disabled = false; alert('Network error disconnecting the app.'); });
+  });
+})();
+</script>`
 
 func writeAuthError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

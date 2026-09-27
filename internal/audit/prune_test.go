@@ -161,8 +161,7 @@ func TestPruneDropsExpiredPartitionsAndKeepsCurrentOnes(t *testing.T) {
 	}
 
 	// Prune's own audit_ensure_partitions bootstrap must have kept the
-	// current month and the next two rolling forward, matching migration
-	// 0027's own bootstrap call.
+	// current month and the months after it rolling forward.
 	for _, name := range []string{"audit_events_p2026_09", "audit_events_p2026_10", "audit_events_p2026_11"} {
 		if !partitionExists(t, db, name) {
 			t.Errorf("expected rolling partition %s to exist after Prune", name)
@@ -186,5 +185,81 @@ func TestPruneRequiresPositiveRetention(t *testing.T) {
 func TestPruneRequiresDatabase(t *testing.T) {
 	if _, err := Prune(context.Background(), nil, PruneOptions{AuditRetentionDays: 400, AccessRetentionDays: 90}); err == nil {
 		t.Fatal("Prune(nil db) did not error")
+	}
+}
+
+// TestPruneRecoversRowsStrandedInTheDefaultPartition: when prune has not run
+// for long enough that rows landed in the default partitions (this month's
+// partitions missing, and a past month that never had one), the next prune
+// moves them into their months' partitions unchanged instead of failing
+// forever, the audit chain still verifies, and those months then age out
+// on schedule.
+func TestPruneRecoversRowsStrandedInTheDefaultPartition(t *testing.T) {
+	db := openPruneTestDB(t)
+	ctx := context.Background()
+	month := time.Now().UTC().Format("2006_01")
+	mustExec(t, db, `DROP TABLE audit_events_p`+month)
+	mustExec(t, db, `DROP TABLE access_log_p`+month)
+
+	mustExec(t, db, `ALTER TABLE audit_events DISABLE TRIGGER audit_events_server_time`)
+	mustExec(t, db, `INSERT INTO audit_events (at, actor_kind, action) VALUES ('2021-03-15 12:00:00+00', 'system', 'old')`)
+	mustExec(t, db, `ALTER TABLE audit_events ENABLE TRIGGER audit_events_server_time`)
+	r := newChainRecorder(db)
+	r.Record(ctx, Event{ActorID: chainActor, Action: "key_mint"})
+	r.Record(ctx, Event{ActorID: chainActor, Action: "key_revoke"})
+	for _, at := range []string{"'2021-03-10 08:00:00+00'", "now()"} {
+		mustExec(t, db, `INSERT INTO access_log (at, owner_label, site_name, path, method, status) VALUES (`+at+`, 'alice', 'demo', '/', 'GET', 200)`)
+	}
+	count := func(table string) int {
+		t.Helper()
+		var n int
+		if err := db.QueryRow(`SELECT count(*) FROM ` + table).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if count("audit_events_default") != 3 || count("access_log_default") != 2 {
+		t.Fatalf("setup: default partitions hold %d audit and %d access rows, want 3 and 2", count("audit_events_default"), count("access_log_default"))
+	}
+
+	keepAll := PruneOptions{AuditRetentionDays: 100000, AccessRetentionDays: 100000}
+	for run := 0; run < 2; run++ {
+		if _, err := Prune(ctx, db, keepAll); err != nil {
+			t.Fatalf("prune run %d with rows in the default partitions: %v", run+1, err)
+		}
+	}
+	if count("audit_events_default") != 0 || count("access_log_default") != 0 {
+		t.Fatalf("default partitions still hold %d audit and %d access rows", count("audit_events_default"), count("access_log_default"))
+	}
+	if count("audit_events_p"+month) != 2 || count("audit_events_p2021_03") != 1 || count("access_log_p"+month) != 1 || count("access_log_p2021_03") != 1 {
+		t.Fatal("stranded rows did not land in their months' partitions")
+	}
+	var at time.Time
+	if err := db.QueryRow(`SELECT at FROM audit_events WHERE action = 'old'`).Scan(&at); err != nil || !at.Equal(time.Date(2021, 3, 15, 12, 0, 0, 0, time.UTC)) {
+		t.Fatalf("moved row's at = %v, %v; want it unchanged", at, err)
+	}
+	ahead := time.Now().UTC().AddDate(0, partitionMonthsAhead, 0).Format("2006_01")
+	if !partitionExists(t, db, "audit_events_p"+ahead) || !partitionExists(t, db, "access_log_p"+ahead) {
+		t.Errorf("partitions %d months ahead (%s) were not created", partitionMonthsAhead, ahead)
+	}
+	if report := mustVerify(t, db); report.Break != nil || report.Rows != 3 {
+		t.Fatalf("chain after the move: %+v (break %v), want 3 clean rows", report, report.Break)
+	}
+	// New rows still route to the moved month's partition.
+	r.Record(ctx, Event{ActorID: chainActor, Action: "key_mint"})
+	if count("audit_events_p"+month) != 3 || count("audit_events_default") != 0 {
+		t.Fatal("a new event did not land in this month's partition")
+	}
+
+	// The recovered past month now ages out like any other.
+	result, err := Prune(ctx, db, PruneOptions{AuditRetentionDays: 400, AccessRetentionDays: 90})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsPartition(result.Dropped, "audit_events", "audit_events_p2021_03") || !containsPartition(result.Dropped, "access_log", "access_log_p2021_03") || result.ChainTrimmed != 1 {
+		t.Fatalf("prune after recovery = %+v, want both 2021-03 partitions dropped and 1 chain row trimmed", result)
+	}
+	if report := mustVerify(t, db); report.Break != nil || report.Rows != 3 {
+		t.Fatalf("chain after pruning the recovered month: %+v (break %v)", report, report.Break)
 	}
 }

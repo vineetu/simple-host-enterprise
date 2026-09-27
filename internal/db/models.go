@@ -60,6 +60,12 @@ type Site struct {
 	NetworkRequestedAt   *time.Time
 	NetworkRequestReason string
 	NetworkApprovals     int
+	// AccessDecision is the last admin decision the owner is shown
+	// (AccessDecision*, or ""), with when and the admin's note; filled by
+	// the same queries and by the site-list queries (ListAllSites).
+	AccessDecision       string
+	AccessDecisionAt     *time.Time
+	AccessDecisionReason string
 }
 
 type Version struct {

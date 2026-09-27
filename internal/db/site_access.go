@@ -66,16 +66,30 @@ func clearNetworkApprovals(ctx context.Context, q Querier, siteID string) error 
 // admin's approval sets. Moving a site anywhere withdraws a pending
 // network-access request, and moving a network site anywhere revokes its
 // approval: going back up needs a new request.
+//
+// Choosing a level lifts an admin's restriction (the owner has seen it and
+// decided again); a declined or revoked network decision stays until the
+// next network-access request.
 func SetSiteAccess(ctx context.Context, tx *sql.Tx, siteID, level string) (previous string, err error) {
 	if !ValidAccessLevel(level) || level == AccessNetwork {
 		return "", errors.New("db: SetSiteAccess: invalid level " + level)
 	}
-	return setSiteAccess(ctx, tx, siteID, level)
+	previous, err = setSiteAccess(ctx, tx, siteID, level)
+	if err != nil {
+		return "", err
+	}
+	_, err = tx.ExecContext(ctx, `
+		UPDATE sites
+		SET access_decision = NULL, access_decision_at = NULL, access_decision_reason = NULL, access_decision_previous = NULL
+		WHERE id = $1::uuid AND access_decision = 'restricted'`, siteID)
+	return previous, err
 }
 
 // RequestNetworkAccess records a pending request to open a site to the
 // network. The site keeps its current level until an admin approves. A
-// second request replaces the first.
+// second request replaces the first. A request clears the last admin
+// decision (declined, revoked or restricted): asking again is the owner's
+// answer to it.
 func RequestNetworkAccess(ctx context.Context, tx *sql.Tx, siteID, requestedBy, reason string) error {
 	var access string
 	if err := tx.QueryRowContext(ctx, `SELECT access FROM sites WHERE id = $1::uuid FOR UPDATE`, siteID).Scan(&access); err != nil {
@@ -86,7 +100,8 @@ func RequestNetworkAccess(ctx context.Context, tx *sql.Tx, siteID, requestedBy, 
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE sites
-		SET network_requested_at = now(), network_requested_by = $2::uuid, network_request_reason = $3
+		SET network_requested_at = now(), network_requested_by = $2::uuid, network_request_reason = $3,
+		    access_decision = NULL, access_decision_at = NULL, access_decision_reason = NULL, access_decision_previous = NULL
 		WHERE id = $1::uuid`, siteID, requestedBy, reason); err != nil {
 		return err
 	}
@@ -162,13 +177,16 @@ func ApproveNetworkAccess(ctx context.Context, tx *sql.Tx, siteID, adminID strin
 	return out, nil
 }
 
-// DeclineNetworkAccess clears a pending request; the site's level is
+// DeclineNetworkAccess clears a pending request and records the decline,
+// with the admin's optional note, for the owner to see; the site's level is
 // unchanged.
-func DeclineNetworkAccess(ctx context.Context, tx *sql.Tx, siteID string) error {
+func DeclineNetworkAccess(ctx context.Context, tx *sql.Tx, siteID, reason string) error {
 	result, err := tx.ExecContext(ctx, `
 		UPDATE sites
-		SET network_requested_at = NULL, network_requested_by = NULL, network_request_reason = NULL
-		WHERE id = $1::uuid AND network_requested_at IS NOT NULL`, siteID)
+		SET network_requested_at = NULL, network_requested_by = NULL, network_request_reason = NULL,
+		    access_decision = 'declined', access_decision_at = now(), access_decision_reason = NULLIF($2, ''),
+		    access_decision_previous = NULL
+		WHERE id = $1::uuid AND network_requested_at IS NOT NULL`, siteID, reason)
 	if err != nil {
 		return err
 	}
@@ -178,6 +196,82 @@ func DeclineNetworkAccess(ctx context.Context, tx *sql.Tx, siteID string) error 
 		return ErrNoPendingRequest
 	}
 	return clearNetworkApprovals(ctx, tx, siteID)
+}
+
+// Admin decisions about who can open a site (sites.access_decision,
+// migration 0047), kept so the owner can see the last one.
+const (
+	AccessDecisionDeclined   = "declined"   // a network-access request was declined
+	AccessDecisionRevoked    = "revoked"    // network access was taken back
+	AccessDecisionRestricted = "restricted" // an admin set the site to only_me
+)
+
+// ErrNotRestricted is lifting a restriction on a site that has none.
+var ErrNotRestricted = errors.New("the site is not restricted by an admin")
+
+// RecordNetworkRevoked records that an admin took a site off the network,
+// with their optional note, after SetSiteAccess moved it.
+func RecordNetworkRevoked(ctx context.Context, tx *sql.Tx, siteID, reason string) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE sites
+		SET access_decision = 'revoked', access_decision_at = now(), access_decision_reason = NULLIF($2, ''),
+		    access_decision_previous = NULL
+		WHERE id = $1::uuid`, siteID, reason)
+	return err
+}
+
+// RestrictSite is an admin's take-down: the site moves to only_me (which
+// also withdraws a pending network request and any network approval) and
+// the reason is recorded for the owner. It returns the level the site had,
+// which LiftSiteRestriction restores. Restricting an already restricted
+// site keeps the level it had before the first restriction.
+func RestrictSite(ctx context.Context, tx *sql.Tx, siteID, reason string) (string, error) {
+	var priorDecision, priorPrevious sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT access_decision, access_decision_previous FROM sites WHERE id = $1::uuid FOR UPDATE`, siteID).Scan(&priorDecision, &priorPrevious); err != nil {
+		return "", err
+	}
+	previous, err := setSiteAccess(ctx, tx, siteID, AccessOnlyMe)
+	if err != nil {
+		return "", err
+	}
+	if priorDecision.String == AccessDecisionRestricted && priorPrevious.Valid {
+		previous = priorPrevious.String
+	}
+	_, err = tx.ExecContext(ctx, `
+		UPDATE sites
+		SET access_decision = 'restricted', access_decision_at = now(), access_decision_reason = $2,
+		    access_decision_previous = $3
+		WHERE id = $1::uuid`, siteID, reason, previous)
+	return previous, err
+}
+
+// LiftSiteRestriction undoes RestrictSite: the site goes back to the level
+// it had, except that a site that was open to the network goes back to
+// company, since reopening it to the network needs a new request and its
+// approvals. It returns the level set.
+func LiftSiteRestriction(ctx context.Context, tx *sql.Tx, siteID string) (string, error) {
+	var decision, previous sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT access_decision, access_decision_previous FROM sites WHERE id = $1::uuid FOR UPDATE`, siteID).Scan(&decision, &previous); err != nil {
+		return "", err
+	}
+	if decision.String != AccessDecisionRestricted {
+		return "", ErrNotRestricted
+	}
+	level := previous.String
+	switch {
+	case level == AccessNetwork:
+		level = AccessCompany
+	case !ValidAccessLevel(level):
+		level = AccessOnlyMe
+	}
+	if _, err := setSiteAccess(ctx, tx, siteID, level); err != nil {
+		return "", err
+	}
+	_, err := tx.ExecContext(ctx, `
+		UPDATE sites
+		SET access_decision = NULL, access_decision_at = NULL, access_decision_reason = NULL, access_decision_previous = NULL
+		WHERE id = $1::uuid`, siteID)
+	return level, err
 }
 
 // NetworkOpen reports whether a site is open to anonymous visitors. A site

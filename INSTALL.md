@@ -270,6 +270,17 @@ curl -fsS -X POST "$SIMPLE_HOST_URL/api/admin/users/disable" -H "X-API-Key: $SIM
 
 It answers 200 (`disabled`, or `already disabled` on a repeat), 404 for an
 address no account has, and is recorded in the audit log against the key.
+Each sign-in refreshes a person's stored email from the address the IdP
+verified, so offboarding by email matches the directory's current address
+(unless another account already holds that address; the audit log then
+shows `email_change_skipped`). Disabling someone leaves their sites
+serving; to take one site down, press Restrict on it in `/admin` with a
+reason (the site drops to only its owner or team, the owner sees the
+reason, and Lift puts it back).
+
+People can cut off their own access too: `/auth/sessions` lists their
+connected apps with Disconnect, and "Sign out everywhere" ends every
+session and, by default, revokes their API keys and connected apps.
 
 A disabled person's sites keep serving. On `/admin`, their row offers
 "Move to team…" (every site goes to a team, or to a person who can still

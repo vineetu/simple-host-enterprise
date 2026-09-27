@@ -56,6 +56,76 @@ func (h *KeysHandler) Register(mux *http.ServeMux, authMiddleware func(http.Hand
 	mux.Handle("GET /api/keys", authMiddleware(requireSessionAuth(http.HandlerFunc(h.list))))
 	mux.Handle("POST /api/keys", protected(http.HandlerFunc(h.mint)))
 	mux.Handle("DELETE /api/keys/{id}", protected(http.HandlerFunc(h.revoke)))
+	// Connected apps (the chat apps signed in through /mcp): the other
+	// credential a person holds, managed the same way.
+	mux.Handle("GET /api/me/connections", authMiddleware(requireSessionAuth(http.HandlerFunc(h.listConnections))))
+	mux.Handle("DELETE /api/me/connections/{id}", protected(http.HandlerFunc(h.disconnect)))
+}
+
+type connectionResponse struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	ConnectedAt string `json:"connected_at"`
+	LastUsedAt  string `json:"last_used_at"`
+}
+
+func (h *KeysHandler) listConnections(w http.ResponseWriter, r *http.Request) {
+	user := auth.GetUser(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
+		return
+	}
+	connections, err := db.ListOAuthConnectionsForUser(r.Context(), h.database, user.ID)
+	if err != nil {
+		log.Printf("keys: list connections for %s: %v", user.Username, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	out := make([]connectionResponse, 0, len(connections))
+	for _, c := range connections {
+		out = append(out, connectionResponse{ID: c.ID, Name: c.ClientName, ConnectedAt: c.CreatedAt.Format(time.RFC3339), LastUsedAt: c.LastUsedAt.Format(time.RFC3339)})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// disconnect deletes one of the person's connected apps: its grant and, by
+// cascade, every token in it, so the app's next call is refused and it
+// must be connected again. Audited as connector_revoke in the same
+// transaction.
+func (h *KeysHandler) disconnect(w http.ResponseWriter, r *http.Request) {
+	user := auth.GetUser(r.Context())
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
+		return
+	}
+	id := r.PathValue("id")
+	tx, err := h.database.BeginTx(r.Context(), nil)
+	if err != nil {
+		log.Printf("keys: begin disconnect %s for %s: %v", id, user.Username, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	defer audit.Rollback(tx)
+	name, err := db.DeleteOAuthGrantForUser(r.Context(), tx, user.ID, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "connected app not found"})
+			return
+		}
+		log.Printf("keys: disconnect %s for %s: %v", id, user.Username, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	err = h.audit.RecordTx(r.Context(), tx, audit.Event{ActorID: user.ID, Action: "connector_revoke", Detail: id, Extra: map[string]any{"app": name}, RequestID: auditRequestID(r.Context())})
+	if err == nil {
+		err = audit.Commit(tx)
+	}
+	if err != nil {
+		log.Printf("keys: record/commit disconnect %s for %s: %v", id, user.Username, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
 }
 
 type mintKeyRequest struct {

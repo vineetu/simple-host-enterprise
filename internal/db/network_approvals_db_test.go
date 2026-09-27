@@ -133,7 +133,7 @@ func TestNetworkApprovalClearedByDeclineWithdrawAndNewRequest(t *testing.T) {
 
 	cases := map[string]func(){
 		"decline": func() {
-			if err := inTx(t, database, func(tx *sql.Tx) error { return DeclineNetworkAccess(ctx, tx, siteID) }); err != nil {
+			if err := inTx(t, database, func(tx *sql.Tx) error { return DeclineNetworkAccess(ctx, tx, siteID, "") }); err != nil {
 				t.Fatal(err)
 			}
 		},
