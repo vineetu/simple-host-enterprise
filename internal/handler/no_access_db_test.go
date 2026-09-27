@@ -40,6 +40,13 @@ func TestNoAccessPageIsTheSameForMissingAndUnshared(t *testing.T) {
 			t.Errorf("no-access page lacks %q:\n%s", want, body)
 		}
 	}
+	// Sandboxed: an opaque origin, so on the owner-path fallback another of
+	// the owner's sites cannot read who is signed in from it.
+	for _, rec := range []*httptest.ResponseRecorder{unshared, missing} {
+		if csp := rec.Header().Get("Content-Security-Policy"); !strings.HasPrefix(csp, "sandbox;") || !strings.Contains(csp, "frame-ancestors 'none'") {
+			t.Errorf("no-access page CSP = %q", csp)
+		}
+	}
 	if missing.Body.String() != body {
 		t.Errorf("missing and unshared pages differ:\n%s\n---\n%s", missing.Body, body)
 	}

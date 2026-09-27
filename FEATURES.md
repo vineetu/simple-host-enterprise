@@ -57,6 +57,9 @@ Config names are documented in `docs/configuration.md`; schema in
   with you", and Switch account. A signed-out browser is sent to sign in
   first in both cases, so the page confirms nothing; scripts and agents get
   the plain 404 (only a refused existing site is audited `access_denied`).
+  The page is served with `Content-Security-Policy: sandbox` (an opaque
+  origin, no script, `frame-ancestors 'none'`), so on the owner-path
+  fallback another of the owner's sites cannot read who is signed in.
   Switch account (`GET /auth/switch` on the site or owner host, reserved
   like `/auth/session`) clears that host's cookie and goes to
   `/dashboard?switch=<site address>`, which offers "Sign out and switch";

@@ -22,6 +22,10 @@ import (
 // else. Reserved like /auth/session.
 const switchAccountPath = "/auth/switch"
 
+// noAccessCSP is the no-access page's policy: sandboxed (an opaque origin),
+// inline styles only, never framed.
+const noAccessCSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'"
+
 func newUserLabel(database db.Querier) func(ctx context.Context, userID string) string {
 	return func(ctx context.Context, userID string) string {
 		username, email, err := db.UserLabel(ctx, database, userID)
@@ -51,6 +55,11 @@ func (g *hostGate) noAccess(w http.ResponseWriter, r *http.Request, userID strin
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
+	// The page names the signed-in person. Sandboxed, it has an opaque
+	// origin: on the owner-path fallback, where every site of the owner
+	// shares one origin, another site's script that opened it cannot read
+	// it. It runs no script and cannot be framed.
+	w.Header().Set("Content-Security-Policy", noAccessCSP)
 	w.WriteHeader(http.StatusNotFound)
 	if r.Method != http.MethodHead {
 		_, _ = w.Write([]byte(body))
