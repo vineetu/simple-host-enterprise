@@ -33,6 +33,53 @@ No schema change. Skills are at 0.14.2 (0.11.0 still works).
 - `GET /api/audit` events carry `actor`, the actor's username.
   `GET /api/access?summary=counts` returns the counts shape under
   `ACCESS_LOG_VISIBILITY=owner` too.
+Schema 0051 (from 0049; both backward-compatible: nullable `api_keys.last4`
+in 0050; `sites.idle_since` and `sites.idle_keep` in 0051). Skills are at
+0.14.2 (0.11.0 still works).
+
+### API keys
+- A new key keeps its own last four characters; the dashboard shows
+  "ends …abcd" (older keys: "earlier key"), when it was last used, and
+  "expires soon" in its last 14 days.
+- A refused key says why: `key_expired` (with the date), `key_revoked`,
+  `key_owner_disabled` or `key_not_recognised`. A key with 14 days or less
+  left gets `X-Key-Expires` and `X-Simple-Host-Notice` on every response.
+- Admins revoke a leaked key by pasting it on /admin ("Revoke a leaked
+  key", `POST /api/admin/keys/revoke`): only that key stops working, and the
+  audit row (`admin_key_revoke`) names its owner.
+
+### Admin page
+- "This instance" on /admin: release, commit and schema, migrations waiting,
+  this replica's latest bucket check, owner certificates ready and waiting
+  (each waiting owner with how long), and the limits in force.
+- New metric `simplehost_owner_hosts_not_ready`.
+
+### Recovery
+- `simple-host verify-storage` lists every live version and uploaded file
+  the database depends on that is missing from the bucket (by key) and exits
+  non-zero: run it after a database point-in-time restore.
+- The restore drill is documented (`docs/install.md`, "Restore drill": a
+  site with `restore`, and the database by PITR to a new instance), tested
+  end to end against a real database, and run by `make smoke`.
+
+### Idle sites (opt-in)
+- `IDLE_CLEANUP_DAYS` (off by default): a site nobody has visited, deployed
+  or written for that many days is marked; its owner or team sees "Not used
+  lately" on the dashboard with the date, Keep and Download, admins see the
+  list on /admin, and with `SMTP_URL`/`SMTP_FROM` the owner (or each team
+  member) is emailed. 30 days later, still unused and not kept, it moves to
+  Recently deleted. Any use unmarks it; Keep (`POST .../keep`, MCP
+  `keep_site`) takes it out for good. Every step is audited.
+
+### Audit log
+- /admin's Activity card searches by owner, site, person, action and date,
+  shows names instead of ids, loads more, and its export links carry the
+  same filters (`GET /api/admin/export` now takes `owner`, `site`, `actor`,
+  `action`; CSV gains `actor_name`, `owner_name`, `site_name` at the end).
+- `GET /api/audit` events carry `owner_name`, `site_name` and `actor_name`,
+  and `from`/`to` also take a `YYYY-MM-DD` date. A site's Activity on the
+  dashboard shows who made each change: owners and team members see the
+  names of themselves and fellow members, never a visitor's.
 
 ## v1.4.0 — 2026-09-27
 

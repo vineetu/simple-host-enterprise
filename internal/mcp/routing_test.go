@@ -99,6 +99,10 @@ var fixtures = []fixture{
 		{"site": "demo", "name": "demo-two"},
 		{"site": "demo", "owner": "alice", "name": "demo-two"},
 	}},
+	{"keep_site", []map[string]any{
+		{"site": "demo"},
+		{"site": "demo", "owner": "alice", "keep": false},
+	}},
 	{"create_team", []map[string]any{{"name": "acme-team"}}},
 	{"list_teams", []map[string]any{{}}},
 	{"list_team_members", []map[string]any{{"team": "acme-team"}}},

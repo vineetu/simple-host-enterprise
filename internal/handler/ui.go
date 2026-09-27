@@ -28,9 +28,8 @@ const (
 	skillBundleName      = "simple-host-skills"
 	skillBundleURL       = "/skills.zip"
 	// skillReleaseType is hand-set, so it has to move with the version above
-	// it. 0.14.2 documents holding a version back to preview it
-	// (publish=false, preview_version), site_activity and managing uploaded
-	// files (list_site_assets, delete_site_asset); 0.14.1 corrects the hand-over text (only into a team the caller
+	// it. 0.14.2 documents why a key was refused (the 401 code), the
+	// X-Key-Expires warning, and keep_site for the idle cleanup; 0.14.1 corrects the hand-over text (only into a team the caller
 	// is in; a restricted site cannot be renamed or moved); 0.14.0 documents handing a site over and renaming it
 	// (transfer_site, rename_site), restoring a deleted site (list_deleted_sites,
 	// restore_site), and viewers and team members named by email before they

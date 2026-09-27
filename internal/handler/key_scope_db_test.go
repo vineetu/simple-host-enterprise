@@ -20,7 +20,7 @@ import (
 func (w *accessWorld) addKey(name, user, scope string) string {
 	w.t.Helper()
 	key := "key-" + name + "-" + strings.Repeat("1", 40)
-	created, err := db.CreateAPIKey(context.Background(), w.database, w.users[user], name, db.HashAPIKey(key), key[:8], time.Now().Add(time.Hour), scope)
+	created, err := db.CreateAPIKey(context.Background(), w.database, w.users[user], name, db.HashAPIKey(key), key[:8], "", time.Now().Add(time.Hour), scope)
 	if err != nil {
 		w.t.Fatal(err)
 	}

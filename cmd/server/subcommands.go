@@ -45,11 +45,13 @@ func runSubcommand(name string, args []string) error {
 		return runAuditVerify(args)
 	case "owner-hosts":
 		return runOwnerHosts(args)
+	case "verify-storage":
+		return runVerifyStorage(args)
 	case "version":
 		fmt.Println(versionString())
 		return nil
 	default:
-		return fmt.Errorf("unknown subcommand %q (expected: migrate, restore, migrate-storage, reencrypt, prune, audit-verify, owner-hosts, version)", name)
+		return fmt.Errorf("unknown subcommand %q (expected: migrate, restore, migrate-storage, reencrypt, prune, audit-verify, owner-hosts, verify-storage, version)", name)
 	}
 }
 
@@ -189,8 +191,25 @@ func runRestore(args []string) error {
 		return err
 	}
 	defer database.Close()
+	return restoreVersion(context.Background(), database, objects, cfg.PublicBaseURL, restoreRequest{
+		fromSiteID: *fromSiteID, version: *version, owner: *owner, site: *site, setCurrent: *setCurrent,
+	})
+}
 
-	ctx := context.Background()
+// restoreRequest is one `simple-host restore` run's flags.
+type restoreRequest struct {
+	fromSiteID string
+	version    int
+	owner      string
+	site       string
+	setCurrent bool
+}
+
+// restoreVersion is the restore itself, apart from reading the
+// configuration, so the drill test runs it against a real database and an
+// in-memory bucket.
+func restoreVersion(ctx context.Context, database *sql.DB, objects storage.Objects, publicBaseURL string, req restoreRequest) error {
+	fromSiteID, version, owner, site, setCurrent := &req.fromSiteID, &req.version, &req.owner, &req.site, &req.setCurrent
 	tx, err := database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -224,7 +243,7 @@ func runRestore(args []string) error {
 	if errors.Is(err, sql.ErrNoRows) {
 		// A new site gets the same name rules as a create through the API,
 		// so a restore never makes a site that has no address.
-		if err := checkRestoreSiteName(ctx, tx, cfg.PublicBaseURL, *owner, *site); err != nil {
+		if err := checkRestoreSiteName(ctx, tx, publicBaseURL, *owner, *site); err != nil {
 			return fmt.Errorf("-site: %w", err)
 		}
 		target, err = db.CreateSite(ctx, tx, user.ID, *site)

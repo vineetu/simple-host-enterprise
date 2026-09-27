@@ -41,6 +41,8 @@ type AdminHandler struct {
 	quota UploadQuota
 	// oidcIssuer is OIDC_ISSUER, which erased identities are hashed with.
 	oidcIssuer string
+	// status is the "This instance" card (admin_status.go). Optional.
+	status *InstanceStatus
 }
 
 // WithAuditReader attaches the reader GET /api/admin/export streams from.
@@ -177,6 +179,7 @@ func (h *AdminHandler) Register(mux *http.ServeMux, authMiddleware, skillVersion
 	h.registerAccessRequestRoutes(mux, adminAPI, dashboardCheck)
 	h.registerMoveRoutes(mux, adminAPI, dashboardCheck)
 	h.registerEraseRoutes(mux, adminAPI, dashboardCheck)
+	h.registerKeyRoutes(mux, adminAPI)
 }
 
 // requireAdmin is auth.RequireAdmin plus an access_denied audit row when a
@@ -394,9 +397,12 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 		"sites": string(sitesMetric),
 	})
 
+	h.renderInstanceStatus(r, &b)
 	h.renderAccessRequests(r, &b, user)
 	h.renderDeletedSites(r, &b)
+	h.renderIdleSites(r, &b)
 	h.renderErasedIdentities(r, &b)
+	b.WriteString(leakedKeyCardHTML)
 
 	if len(users) == 0 {
 		b.WriteString(`<div class="empty">No users yet.</div>`)
@@ -445,10 +451,22 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 		// (no owner filter, so this sees every namespace) rather than
 		// server-rendered, so it stays cheap on a dashboard load that
 		// already assembles a lot of HTML above.
-		fmt.Fprintf(&b, `<section id="admin-activity" class="overview">
+		b.WriteString(`<section id="admin-activity" class="overview">
   <div class="overview-card"><h2 class="section-title">Activity <span class="card-count" id="admin-activity-count"></span></h2>
-    <p class="login-copy">Every audited action, across every owner. <a href="/api/admin/export?kind=audit&amp;format=csv" download>Export CSV</a> · <a href="/api/admin/export?kind=audit&amp;format=jsonl" download>Export JSONL</a></p>
+    <p class="login-copy">Every audited action, across every owner, newest first. Narrow it by owner, site, person, action or date; the export takes the same filters. <a id="admin-activity-csv" href="/api/admin/export?kind=audit&amp;format=csv" download>Export CSV</a> · <a id="admin-activity-jsonl" href="/api/admin/export?kind=audit&amp;format=jsonl" download>Export JSONL</a></p>
+    <form id="admin-activity-filter" class="activity-filter" onsubmit="return false">
+      <input type="text" name="owner" placeholder="Owner or team" aria-label="Owner or team" autocomplete="off">
+      <input type="text" name="site" placeholder="Site (with owner)" aria-label="Site" autocomplete="off">
+      <input type="text" name="actor" placeholder="Person who did it" aria-label="Person who did it" autocomplete="off">
+      <input type="text" name="action" placeholder="Action, e.g. site_delete" aria-label="Action" autocomplete="off" list="admin-activity-actions">
+      <label>From <input type="date" name="from"></label>
+      <label>To <input type="date" name="to"></label>
+      <button type="submit" class="btn-login">Search</button>
+      <button type="reset" class="btn-reject">Clear</button>
+    </form>
+    <datalist id="admin-activity-actions">` + auditActionOptions() + `</datalist>
     <div id="admin-activity-list" class="rank-list" role="region" aria-label="Audit log"></div>
+    <button type="button" id="admin-activity-more" class="btn-reject" hidden>Load more</button>
   </div>
   <div class="overview-card"><h2 class="section-title">Visitors <span class="card-count" id="admin-visitor-count"></span></h2>
     <p class="login-copy">Every recorded view, across every owner. <a href="/api/admin/export?kind=access&amp;format=csv" download>Export CSV</a> · <a href="/api/admin/export?kind=access&amp;format=jsonl" download>Export JSONL</a></p>
@@ -518,6 +536,7 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 	b.WriteString(adminListScript)
 	b.WriteString(adminActivityScript)
 	b.WriteString(adminFormScript)
+	b.WriteString(adminLeakedKeyScript)
 	b.WriteString(`</body></html>`)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -1332,6 +1351,10 @@ const adminHeadHTML = `<!doctype html>
   .login-hint{font-family:var(--font-mono);font-size:12px;letter-spacing:0.08em;text-transform:uppercase}
   .login-error{color:#a84300}
   .login-form{display:flex;gap:8px;margin-top:16px}
+  .status-bad{color:#a84300;font-weight:600}
+  .activity-filter{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px;align-items:center}
+  .activity-filter input{padding:6px 10px;border-radius:8px;border:1px solid var(--surface-line);background:var(--canvas);font-family:var(--font-sans);font-size:14px;color:var(--ink);min-width:0;flex:1 1 140px}
+  .activity-filter label{font-family:var(--font-sans);font-size:13px;color:var(--ink-soft);display:flex;gap:6px;align-items:center}
   .login-form input{
     flex:1;padding:10px 14px;border-radius:8px;
     border:1px solid var(--surface-line);background:var(--canvas);
@@ -1438,10 +1461,10 @@ const adminListScript = `<script>
 
 // adminActivityScript fills the "admin-activity"/"admin-visitor" cards
 // added to the admin dashboard for the admin-wide read of audit_events
-// and access_log: no owner filter is passed, so a caller
-// admin.go has already confirmed is an admin (IsAdmin) sees every
-// namespace's rows, one page (100 rows) of each, newest first — the export
-// links next to each list are how an admin gets more than that.
+// and access_log, newest first. Activity is searchable: its filter form
+// drives /api/audit's owner, site, actor, action, from and to (by name),
+// "Load more" follows the cursor, and the export links carry the same
+// filters. Visitors shows one page (100 rows); its export gets the rest.
 const adminActivityScript = `<script>
 (function(){
   var activityList = document.getElementById('admin-activity-list');
@@ -1471,14 +1494,62 @@ const adminActivityScript = `<script>
   }
 
   if (activityList) {
-    load(activityList, activityCount, '/api/audit', {
-      rows: function(body){ return (body && body.events) || []; },
-      row: function(e){
-        return '<span class="rank-name">' + esc(e.action) +
-          ' <span class="rank-sub">' + esc(e.owner_id || '') + (e.site_id ? ' · ' + esc(e.site_id) : '') +
-          ' · ' + esc(new Date(e.at).toLocaleString()) + '</span></span>';
-      },
-    });
+    var form = document.getElementById('admin-activity-filter');
+    var more = document.getElementById('admin-activity-more');
+    var csv = document.getElementById('admin-activity-csv');
+    var jsonl = document.getElementById('admin-activity-jsonl');
+    var shown = 0, cursor = '';
+    function filters() {
+      var p = new URLSearchParams();
+      ['owner', 'site', 'actor', 'action', 'from', 'to'].forEach(function(n){
+        var v = (form.elements[n].value || '').trim();
+        if (v) p.set(n, v);
+      });
+      return p;
+    }
+    function who(e) {
+      if (e.actor_name) return e.actor_name;
+      return e.actor_kind === 'system' ? 'system' : (e.actor_id || 'someone');
+    }
+    function where(e) {
+      var owner = e.owner_name || e.owner_id || '';
+      var site = e.site_name || e.site_id || '';
+      return owner && site ? owner + '/' + site : owner || site;
+    }
+    function page(reset) {
+      var p = filters();
+      var q = p.toString();
+      csv.href = '/api/admin/export?kind=audit&format=csv' + (q ? '&' + q : '');
+      jsonl.href = '/api/admin/export?kind=audit&format=jsonl' + (q ? '&' + q : '');
+      if (reset) { shown = 0; cursor = ''; activityList.innerHTML = ''; }
+      if (cursor) p.set('cursor', cursor);
+      more.hidden = true;
+      fetch('/api/audit?' + p.toString(), {credentials: 'same-origin'})
+        .then(function(r){ return r.json().then(function(b){ return {ok: r.ok, body: b}; }); })
+        .then(function(res){
+          if (!res.ok) { activityList.innerHTML = '<div class="rank-empty">' + esc((res.body && res.body.error) || 'Could not load.') + '</div>'; activityCount.textContent = ''; return; }
+          var events = (res.body && res.body.events) || [];
+          events.forEach(function(e){
+            var el = document.createElement('div');
+            el.className = 'rank-row';
+            var place = where(e);
+            el.innerHTML = '<span class="rank-name">' + esc(e.action) +
+              ' <span class="rank-sub">' + esc(who(e)) + (place ? ' · ' + esc(place) : '') +
+              ' · ' + esc(new Date(e.at).toLocaleString()) + '</span></span>';
+            activityList.appendChild(el);
+          });
+          shown += events.length;
+          cursor = (res.body && res.body.next_cursor) || '';
+          more.hidden = !cursor;
+          activityCount.textContent = shown ? '(' + shown + (cursor ? '+' : '') + ')' : '';
+          if (!shown) activityList.innerHTML = '<div class="rank-empty">Nothing recorded matches.</div>';
+        })
+        .catch(function(){ activityList.innerHTML = '<div class="rank-empty">Could not load.</div>'; });
+    }
+    form.addEventListener('submit', function(){ page(true); });
+    form.addEventListener('reset', function(){ setTimeout(function(){ page(true); }, 0); });
+    more.addEventListener('click', function(){ page(false); });
+    page(true);
   }
   if (visitorList) {
     load(visitorList, visitorCount, '/api/access', {
@@ -1492,3 +1563,24 @@ const adminActivityScript = `<script>
   }
 })();
 </script>`
+
+// auditActions is every action the audit log records, offered as
+// suggestions in the Activity search.
+var auditActions = []string{
+	"access_denied", "admin_disable_user", "admin_enable_user", "admin_export", "admin_key_revoke",
+	"asset_delete", "connector_revoke", "connector_sign_in", "email_change", "hand_off",
+	"key_mint", "key_revoke", "member_add", "member_remove", "network_access_approved",
+	"network_access_declined", "network_access_requested", "network_access_reverted", "network_access_revoked",
+	"session_revoke", "sign_in", "sign_in_failed", "sign_out", "sign_out_everywhere",
+	"site_create", "site_delete", "site_idle_keep", "site_idle_marked", "site_restore",
+	"site_rollback", "site_transfer", "site_update", "state_restore", "state_write",
+	"team_create", "team_delete", "user_erased",
+}
+
+func auditActionOptions() string {
+	var b strings.Builder
+	for _, a := range auditActions {
+		fmt.Fprintf(&b, `<option value="%s">`, html.EscapeString(a))
+	}
+	return b.String()
+}

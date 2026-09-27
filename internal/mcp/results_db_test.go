@@ -133,7 +133,7 @@ func createPerson(t *testing.T, database *sql.DB, username string) string {
 		t.Fatalf("create %s: %v", username, err)
 	}
 	key := "key-" + username + "-" + strings.Repeat("0", 40)
-	if _, err := db.CreateAPIKey(ctx, database, user.ID, "test", db.HashAPIKey(key), key[:8], time.Now().Add(24*time.Hour), db.APIKeyScopeFull); err != nil {
+	if _, err := db.CreateAPIKey(ctx, database, user.ID, "test", db.HashAPIKey(key), key[:8], "", time.Now().Add(24*time.Hour), db.APIKeyScopeFull); err != nil {
 		t.Fatalf("create key for %s: %v", username, err)
 	}
 	return key
@@ -287,6 +287,9 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	call("revoke_site_viewer", map[string]any{"site": "demo", "owner": "alice", "username": "guest@example.com"})
 
 	call("list_sites", map[string]any{})
+	if got := call("keep_site", map[string]any{"site": "other"}); got["keep"] != true || got["site"] != "other" {
+		t.Errorf("keep_site = %v", got)
+	}
 	if got := call("rename_site", map[string]any{"site": "other", "name": "other-two"}); got["name"] != "other-two" || got["previous_url_status"] != "redirects" {
 		t.Errorf("rename_site = %v", got)
 	}
@@ -354,7 +357,7 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 		t.Errorf("site_activity versions = %v", activity)
 	}
 	changes, _ := activity["changes"].([]any)
-	if len(changes) == 0 || changes[0].(map[string]any)["action"] != "asset_delete" || changes[0].(map[string]any)["actor"] != "carol" {
+	if len(changes) == 0 || changes[0].(map[string]any)["action"] != "asset_delete" || changes[0].(map[string]any)["actor_name"] != "carol" {
 		t.Errorf("site_activity changes = %v, want the asset delete first, by carol", changes)
 	}
 	if visits, _ := activity["visits"].(map[string]any); visits == nil || visits["unique_viewers"] != float64(1) {
@@ -363,7 +366,7 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	// A publish-scope key reads the versions but not the logs: both parts
 	// say why instead of failing the call.
 	publishKey := "key-carol-publish-" + strings.Repeat("1", 32)
-	if _, err := db.CreateAPIKey(context.Background(), database, carolID, "ci", db.HashAPIKey(publishKey), publishKey[:8], time.Now().Add(time.Hour), db.APIKeyScopePublish); err != nil {
+	if _, err := db.CreateAPIKey(context.Background(), database, carolID, "ci", db.HashAPIKey(publishKey), publishKey[:8], "", time.Now().Add(time.Hour), db.APIKeyScopePublish); err != nil {
 		t.Fatal(err)
 	}
 	limited := callFrom(publishKey, carolAddr, "site_activity", map[string]any{"site": "draft", "owner": "carol"})

@@ -41,7 +41,7 @@ type activityVersion struct {
 type activityChange struct {
 	At        string         `json:"at"`
 	Action    string         `json:"action"`
-	Actor     string         `json:"actor,omitempty"`
+	ActorName string         `json:"actor_name,omitempty"`
 	ActorKind string         `json:"actor_kind"`
 	Detail    map[string]any `json:"detail,omitempty"`
 }

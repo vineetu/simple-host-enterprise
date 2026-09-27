@@ -230,6 +230,17 @@ func run() (runErr error) {
 	// The route closures capture this pointer, so attaching later is enough.
 	auditReader := audit.NewReader(database)
 	adminHandler := handler.NewAdminHandler(database, cfg.PublicBaseURL, hosts, cookiePolicy, signingKeys, cfg.Session.Idle, auditRecorder, abuseLimits).WithStore(siteStore).WithAuditReader(auditReader).WithNetworkAccessApprovals(cfg.NetworkAccessApprovals).WithQuota(quota).WithOIDCIssuer(cfg.OIDC.Issuer)
+	statusSchema := "unknown"
+	if latest, err := migrate.Latest(); err == nil {
+		statusSchema = fmt.Sprintf("%04d", latest)
+	}
+	adminHandler.WithInstanceStatus(instanceStatus(cfg, database, requestMetrics, statusSchema))
+	if cfg.OwnerCerts == "auto" {
+		requestMetrics.SetOwnerHostsNotReady(func(ctx context.Context) (int, error) {
+			_, waiting, err := dbstore.OwnerHostReadiness(ctx, database)
+			return len(waiting), err
+		})
+	}
 	adminHandler.Register(mux, authMW, skillVersionMW)
 	handler.NewAuditHandler(database, auditReader, cfg.Audit.AccessLogVisibility, abuseLimits).Register(mux, authMW, skillVersionMW)
 	handler.NewShowcaseHandler(database, hosts, signingKeys, cfg.Session.Idle).Register(mux)
@@ -334,6 +345,23 @@ func run() (runErr error) {
 	resources.workers = append(resources.workers, startLoop(ctx, func(ctx context.Context) {
 		siteStore.RunSweeper(ctx, database)
 	}))
+	if days := cfg.IdleCleanup.Days; days > 0 {
+		var mailer handler.Mailer
+		if cfg.IdleCleanup.SMTPURL != "" {
+			smtpMailer, err := handler.NewSMTPMailer(cfg.IdleCleanup.SMTPURL, cfg.IdleCleanup.SMTPFrom)
+			if err != nil {
+				return fmt.Errorf("SMTP_URL: %w", err)
+			}
+			mailer = smtpMailer
+		}
+		notice := "dashboard"
+		if mailer != nil {
+			notice = "dashboard and email"
+		}
+		log.Printf("idle cleanup: sites unused for %d days are marked, and move to Recently deleted 30 days later (notice: %s)", days, notice)
+		cleanup := handler.NewIdleCleanup(database, auditRecorder, days, mailer, cfg.PublicBaseURL)
+		resources.workers = append(resources.workers, startLoop(ctx, cleanup.Run))
+	}
 
 	for _, server := range servers {
 		log.Printf("%s listening on %s", server.name, server.server.Addr)

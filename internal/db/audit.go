@@ -20,13 +20,10 @@ import (
 // insert path below turns "" back into NULL with NULLIF, the same
 // convention CreateSession already uses for its own optional ip column.
 type AuditEvent struct {
-	ID        int64
-	At        time.Time
-	RequestID string
-	ActorID   string
-	// ActorUsername is read back only (ListAuditEvents): the actor's current
-	// username, so a reader sees who rather than an id. Empty for no actor.
-	ActorUsername   string
+	ID              int64
+	At              time.Time
+	RequestID       string
+	ActorID         string
 	ActorKind       string
 	KeyID           string
 	Action          string
@@ -234,9 +231,7 @@ type AuditEventPage struct {
 // string (rather than built fresh per call) so a test can assert on its
 // shape the way queries_test.go already does for other list queries.
 const listAuditEventsQuery = `
-	SELECT id, at, COALESCE(request_id, ''), COALESCE(actor_id::text, ''),
-	       COALESCE((SELECT u.username FROM users u WHERE u.id = audit_events.actor_id), ''),
-	       actor_kind, COALESCE(key_id::text, ''),
+	SELECT id, at, COALESCE(request_id, ''), COALESCE(actor_id::text, ''), actor_kind, COALESCE(key_id::text, ''),
 	       action, COALESCE(owner_id::text, ''), COALESCE(site_id::text, ''), COALESCE(team_id::text, ''),
 	       COALESCE(via_site_label, ''), COALESCE(via_site_name, ''), via_site_observed,
 	       COALESCE(host(ip), ''), COALESCE(user_agent, ''), detail
@@ -294,7 +289,7 @@ func ListAuditEvents(ctx context.Context, database *sql.DB, filter AuditEventFil
 		var e AuditEvent
 		var detail []byte
 		if err := rows.Scan(
-			&e.ID, &e.At, &e.RequestID, &e.ActorID, &e.ActorUsername, &e.ActorKind, &e.KeyID,
+			&e.ID, &e.At, &e.RequestID, &e.ActorID, &e.ActorKind, &e.KeyID,
 			&e.Action, &e.OwnerID, &e.SiteID, &e.TeamID,
 			&e.ViaSiteLabel, &e.ViaSiteName, &e.ViaSiteObserved,
 			&e.IP, &e.UserAgent, &detail,

@@ -129,7 +129,7 @@ func TestSignOutEverywhere(t *testing.T) {
 	}
 	for i, u := range []db.User{alice, bob} {
 		key := "shk_" + strings.Repeat(string(rune('a'+i)), 40)
-		if _, err := db.CreateAPIKey(ctx, database, u.ID, "ci", db.HashAPIKey(key), key[:8], time.Now().Add(time.Hour), db.APIKeyScopePublish); err != nil {
+		if _, err := db.CreateAPIKey(ctx, database, u.ID, "ci", db.HashAPIKey(key), key[:8], "", time.Now().Add(time.Hour), db.APIKeyScopePublish); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -16,6 +16,7 @@ var auditEventCSVHeader = []string{
 	"id", "at", "request_id", "actor_id", "actor_kind", "key_id", "action",
 	"owner_id", "site_id", "team_id", "via_site_label", "via_site_name",
 	"via_site_observed", "ip", "user_agent", "detail",
+	"actor_name", "owner_name", "site_name",
 }
 
 var accessLogCSVHeader = []string{
@@ -52,6 +53,29 @@ func (h *AdminHandler) exportAuditOrAccess(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	// The same filters as /api/audit and the Activity card: owner, site,
+	// person (actor) and action by name, for kind=audit; owner and site
+	// for kind=access.
+	auditQuery := audit.AuditQuery{Admin: true}
+	matchNothing := false
+	if kind == "audit" {
+		nothing, bad, err := resolveAuditFilters(r, h.database, &auditQuery)
+		if err != nil {
+			log.Printf("admin export: resolve filters: %v", err)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+			return
+		}
+		if bad != "" {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: bad})
+			return
+		}
+		matchNothing = nothing
+	}
+	accessOwner := r.URL.Query().Get("owner")
+	if accessOwner != "" {
+		accessOwner = ownerLabel(accessOwner)
+	}
+	accessSite := r.URL.Query().Get("site")
 
 	actor := auth.GetUser(r.Context())
 	actorID := ""
@@ -63,7 +87,7 @@ func (h *AdminHandler) exportAuditOrAccess(w http.ResponseWriter, r *http.Reques
 		ActorID: actorID, ActorKind: actorKind, KeyID: keyID,
 		Action:    "admin_export",
 		RequestID: auditRequestID(r.Context()),
-		Extra:     map[string]any{"kind": kind, "format": format},
+		Extra:     exportAuditExtra(r, kind, format),
 	})
 
 	filename := "simple-host-" + kind + "-export." + format
@@ -90,19 +114,30 @@ func (h *AdminHandler) exportAuditOrAccess(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	if matchNothing {
+		// A name that resolves to nobody: the header and no rows.
+		if csvWriter != nil {
+			csvWriter.Flush()
+		}
+		return
+	}
 	cursor := ""
 	for {
 		var nextCursor string
 		if kind == "audit" {
-			page, err := h.auditReader.ListAuditEvents(r.Context(), audit.AuditQuery{
-				Admin: true, From: from, To: to, Cursor: cursor,
-			})
+			q := auditQuery
+			q.Cursor = cursor
+			page, err := h.auditReader.ListAuditEvents(r.Context(), q)
 			if err != nil {
 				log.Printf("admin export: list audit events: %v", err)
 				return
 			}
-			for _, e := range page.Events {
-				row := toAuditEventResponse(e)
+			rows, err := namedAuditEvents(r, h.database, page.Events, actor, true)
+			if err != nil {
+				log.Printf("admin export: name audit events: %v", err)
+				return
+			}
+			for _, row := range rows {
 				if format == "csv" {
 					if err := writeAuditEventCSVRow(csvWriter, row); err != nil {
 						log.Printf("admin export: write audit CSV row: %v", err)
@@ -116,7 +151,7 @@ func (h *AdminHandler) exportAuditOrAccess(w http.ResponseWriter, r *http.Reques
 			nextCursor = page.NextCursor
 		} else {
 			page, err := h.auditReader.ListAccess(r.Context(), audit.AccessQuery{
-				Admin: true, From: from, To: to, Cursor: cursor,
+				Admin: true, Owner: accessOwner, Site: accessSite, From: from, To: to, Cursor: cursor,
 			})
 			if err != nil {
 				log.Printf("admin export: list access log: %v", err)
@@ -160,6 +195,7 @@ func writeAuditEventCSVRow(w *csv.Writer, e auditEventResponse) error {
 		strconv.FormatInt(e.ID, 10), e.At.Format("2006-01-02T15:04:05.000Z07:00"), e.RequestID, e.ActorID,
 		e.ActorKind, e.KeyID, e.Action, e.OwnerID, e.SiteID, e.TeamID, e.ViaSiteLabel, e.ViaSiteName,
 		strconv.FormatBool(e.ViaSiteObserved), e.IP, e.UserAgent, detail,
+		e.ActorName, e.OwnerName, e.SiteName,
 	})
 }
 
@@ -191,4 +227,16 @@ func writeJSONLine(w http.ResponseWriter, v any) error {
 	b = append(b, '\n')
 	_, err = w.Write(b)
 	return err
+}
+
+// exportAuditExtra is the admin_export audit row's detail: what was
+// exported, with whichever filters narrowed it.
+func exportAuditExtra(r *http.Request, kind, format string) map[string]any {
+	extra := map[string]any{"kind": kind, "format": format}
+	for _, name := range []string{"owner", "site", "actor", "action", "from", "to"} {
+		if v := r.URL.Query().Get(name); v != "" {
+			extra[name] = v
+		}
+	}
+	return extra
 }

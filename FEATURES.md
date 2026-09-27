@@ -87,7 +87,15 @@ Config names are documented in `docs/configuration.md`; schema in
   (admins only; `POST /api/admin/users/disable` and nothing else). Refusal is
   403 with a JSON `scope`. Existing keys became `full`. A minted key and
   its paste-back block stay on the dashboard until dismissed (the list
-  gains the row in place; nothing reloads).
+  gains the row in place; nothing reloads). Each key keeps its own last four
+  characters (`last4`, shown as "ends …abcd"; keys minted before 0050 show
+  "earlier key"), and the dashboard row shows last used and "expires soon"
+  inside 14 days. A refused key says why in a 401 `code`: `key_expired`
+  (with the date and "mint a new one on the dashboard"), `key_revoked`,
+  `key_owner_disabled` or `key_not_recognised`. While a key has 14 days or
+  less left, every response to it carries `X-Key-Expires` (RFC 3339) and an
+  `X-Simple-Host-Notice` line. An admin revokes a leaked key by pasting it on
+  /admin (`POST /api/admin/keys/revoke`, section 13).
 - **Status.** Built.
 - **Routes.** `GET /api/keys`, `POST /api/keys`, `DELETE /api/keys/{id}`.
 - **MCP.** None (by design).
@@ -96,8 +104,8 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Pages.** `/dashboard` "API keys" panel.
 - **Go.** `internal/handler/keys.go`, `dashboard.go`; `internal/db/api_keys.go`;
   `internal/auth/middleware.go`, `scope.go`.
-- **DB.** `api_keys` (0022, 0029 expiry, 0035 scope); `users.api_key`
-  dropped (0025).
+- **DB.** `api_keys` (0022, 0029 expiry, 0035 scope, 0050 `last4`);
+  `users.api_key` dropped (0025).
 - **Config.** `API_KEY_MAX_DAYS`.
 
 ## 3. MCP server, OAuth connector, plugin.zip
@@ -185,7 +193,19 @@ Config names are documented in `docs/configuration.md`; schema in
   holds its name or address). A recently deleted site keeps counting toward
   its owner's site and storage quota until its window ends, so the
   restore's quota re-check only refuses an owner already over; past the
-  window a restore is 404 even before the sweeper runs; an admin restores any from `/admin`, and an
+  window a restore is 404 even before the sweeper runs. Idle-site cleanup
+  (opt-in, `IDLE_CLEANUP_DAYS`, off by default; `internal/handler/idle_cleanup.go`,
+  hourly on every replica, atomic per site): a site with no human visits,
+  deploys or saved-data writes for that many days is marked
+  (`sites.idle_since`; audited `site_idle_marked` as `system`), its owner or
+  every team member sees "Not used lately" on the dashboard (the date it
+  moves, Keep, Download of the live version) and, with `SMTP_URL`, gets an
+  email; admins see the list on /admin. A visit, deploy, write or restore
+  unmarks it (`site_idle_cleared`); Keep (`POST .../keep`, `{"keep": false}`
+  undoes it; `sites.idle_keep`; `site_idle_keep`) takes it out for good.
+  30 days after marking (`db.IdleGrace`), still unused and not kept, it
+  moves to Recently deleted like an owner's delete (`site_delete`, `system`,
+  `reason` `idle`). An admin restores any from `/admin`, and an
   admin's "Delete sites" for a leaver lands there too. After the window the
   sweeper purges the row and retires the objects (section 6). A team's
   deletion still removes its sites for good. Every site, at
@@ -287,7 +307,9 @@ Config names are documented in `docs/configuration.md`; schema in
   `POST /api/sites/{sitename}/transfer`,
   `POST /api/collaboration/sites/{owner}/{sitename}/transfer`,
   `POST /api/sites/{sitename}/rename`,
-  `POST /api/collaboration/sites/{owner}/{sitename}/rename`.
+  `POST /api/collaboration/sites/{owner}/{sitename}/rename`,
+  `POST /api/sites/{sitename}/keep`,
+  `POST /api/collaboration/sites/{owner}/{sitename}/keep`.
   Host-gate: every path on the site host `<site>.<owner>.<base>` (hosted
   content, root-served); `/{site}/...` on the owner host (served before the
   owner is ready, redirected after); every path on a v1.2
@@ -297,23 +319,27 @@ Config names are documented in `docs/configuration.md`; schema in
   `preview_version`,
   `rollback_site`, `delete_site`, `list_deleted_sites`, `restore_site`,
   `list_site_files`, `read_site_file` (the last
-  two read a version archive), `transfer_site`, `rename_site`.
+  two read a version archive), `transfer_site`, `rename_site`, `keep_site`.
 - **Skill.** `SKILL.md` §3, Canonical deployment workflow, Core collaboration
   and conflict rules; `references/packaging-and-validation.md`,
   `references/collaboration.md` §1–5 and §8, `references/frameworks.md`;
   `skills/fix-paths-for-subpath-hosting/`, `skills/simple-host-builder/`.
 - **Pages.** `/dashboard` "Your sites" (Manage: Versions with Preview and Make live; Rename, Move to a team, both off while an admin's restriction stands) and
-  "Recently deleted"; `/admin` "Recently deleted".
+  "Recently deleted", "Not used lately" (idle cleanup); `/admin` "Recently
+  deleted", "Not used lately".
 - **Go.** `internal/handler/site.go`, `site_restore.go`, `collaboration.go`, `site_mutation.go`, `preview.go`, `dashboard_versions.go`,
-  `site_move.go`, `admin_move.go`,
+  `site_move.go`, `admin_move.go`, `idle_cleanup.go`, `smtp_mailer.go`,
   `upload_limits.go`, `serve.go`, `serve_self_traffic.go`, `host_gate.go`, `host.go`, `names.go`,
   `security.go`; `internal/tarball/`; `internal/scan/clamd.go`;
-  `internal/db/queries.go`, `collaboration.go`, `quota.go`, `site_move.go`, `deleted_sites.go`.
+  `internal/db/queries.go`, `collaboration.go`, `quota.go`, `site_move.go`, `deleted_sites.go`,
+  `idle.go`; `internal/config/idle.go`.
 - **DB.** `sites`, `versions` (0001; 0012 `versions.uploaded_by`; 0037
   `versions.size_bytes`), 0018 owner label uniqueness, `site_redirects`
-  (0043, backward-compatible), 0044 `sites.deleted_at`/`deleted_by`.
+  (0043, backward-compatible), 0044 `sites.deleted_at`/`deleted_by`,
+  0051 `sites.idle_since`/`idle_keep` (backward-compatible).
 - **Config.** `PUBLIC_BASE_URL`, `RESERVED_LABELS`, `QUOTA_MAX_SITES`,
-  `QUOTA_MAX_BYTES`, `QUOTA_MAX_VERSIONS`, `CLAMD_ADDR`, `CLAMD_TIMEOUT`.
+  `QUOTA_MAX_BYTES`, `QUOTA_MAX_VERSIONS`, `CLAMD_ADDR`, `CLAMD_TIMEOUT`,
+  `IDLE_CLEANUP_DAYS`, `SMTP_URL`, `SMTP_FROM`.
 
 ## 6. Bucket storage, cache, retire sweep, migrate-storage, restore and reencrypt
 
@@ -337,15 +363,23 @@ Config names are documented in `docs/configuration.md`; schema in
   row names it). `restore`, `migrate-storage` and `reencrypt` each record
   one `system` audit event per run (`site_restore`, `storage_migrate`,
   `storage_reencrypt`, with counts; not for `-dry-run`); a failed audit
-  write makes the command exit non-zero. A bucket fault does not fail `/readyz`
-  (`simplehost_bucket_ok` instead).
+  write makes the command exit non-zero. `simple-host verify-storage`
+  (read-only) lists every live version and live uploaded file of sites in
+  use and in Recently deleted that is missing from the bucket, by object
+  key, and exits non-zero when any is: the check after a database
+  point-in-time restore. The restore drill (`docs/install.md`, "Restore
+  drill") is tested end to end (`cmd/server/restore_drill_db_test.go`:
+  publish, delete, `restore`, serves; purge, `restore`, serves;
+  `verify-storage` names a lost object) and run by `make smoke`. A bucket
+  fault does not fail `/readyz` (`simplehost_bucket_ok` instead).
 - **Status.** Built.
 - **Routes.** None of its own. **MCP.** None.
 - **Skill.** None.
 - **Go.** `internal/storage/` (`store.go`, `cache.go`, `sweep.go`,
   `objects.go`, `objects_s3.go`, `envelope.go`, `archive.go`, `keys.go`,
   `migrate.go`, `reencrypt.go`, `sizes.go`); `internal/db/storage.go`,
-  `quota.go`, `db.VersionExists`; `cmd/server/subcommands.go`.
+  `quota.go`, `storage_check.go`, `db.VersionExists`;
+  `cmd/server/subcommands.go`, `verify_storage.go`.
 - **DB.** `storage_retired` (0032), `versions.size_bytes` (0037).
 - **Config.** `BACKUP_STORAGE_ENDPOINT`, `BACKUP_STORAGE_BUCKET`,
   `BACKUP_STORAGE_PREFIX`, `BACKUP_STORAGE_REGION`,
@@ -557,13 +591,21 @@ Config names are documented in `docs/configuration.md`; schema in
   `GET /api/access` are scoped to the caller's namespaces (admins see all,
   from a browser session only: an admin's API key or connected app gets the
   same own-namespace view as anyone else);
-  access-log detail follows `ACCESS_LOG_VISIBILITY`; `summary=counts` asks
-  for the counts shape under `owner` too. Each audit event carries `actor`,
-  the actor's current username. MCP `site_activity` reads one site's
-  versions, its audit events and its visit counts in one call; a part the
+  access-log detail follows `ACCESS_LOG_VISIBILITY`. `/api/audit` filters by
+  `owner`, `site` (under the owner; a site in Recently deleted still
+  matches), `actor`, `action`, `from` and `to` (RFC 3339 or `YYYY-MM-DD`,
+  inclusive) and pages by `cursor`, and each event carries `owner_name`,
+  `site_name` and `actor_name`. An owner or team member is given
+  `actor_name` only for changes made by themselves or a member of the
+  owning team, never for a visitor's write or a refused visit; an admin
+  always. MCP `site_activity` reads one site's versions, its audit events
+  (with `actor_name`) and its visit counts in one call; a part the
   credential cannot read (a publish key; `ACCESS_LOG_VISIBILITY=admin`)
-  becomes a note, not a failure. Admins export either as
-  CSV (formula-safe) or NDJSON. `simple-host prune` (a daily CronJob) drops
+  becomes a note, not a failure. `summary=counts` on `/api/access` asks
+  for the counts shape under `owner` too. /admin's Activity card searches with those filters, loads more by
+  cursor, and its export links carry them. Admins export either as
+  CSV (formula-safe, with the three name columns last) or NDJSON; the export
+  takes the same filters (`owner` and `site` for the access log). `simple-host prune` (a daily CronJob) drops
   partitions past retention (so a row lives its retention plus up to one
   month), trims the chain's rows for them, and keeps partitions twelve
   months ahead; rows that reached a default partition while it was not
@@ -573,10 +615,11 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Routes.** `GET /api/audit`, `GET /api/access`, `GET /api/admin/export`.
 - **MCP.** `site_activity`.
 - **Skill.** None.
-- **Pages.** `/dashboard` and `/admin` activity/visitor panels.
+- **Pages.** `/dashboard` and `/admin` activity/visitor panels (a site's
+  Activity names who made each change).
 - **Go.** `internal/audit/` (`stream.go`, `audit.go`, `db_recorder.go`, `access_writer.go`,
   `reader.go`, `prune.go`, `chain.go`, `canonical.go`, `commit.go`); `internal/handler/audit_access.go`,
-  `audit_helpers.go`, `admin_export.go`; `internal/db/audit.go`;
+  `audit_helpers.go`, `admin_export.go`; `internal/db/audit.go`, `audit_names.go`;
   `cmd/server/subcommands.go` (`prune`, `audit-verify`); `cmd/server/main.go`
   (the shared stdout JSON logger).
 - **DB.** `audit_events`, `access_log` and their `_default` partitions (0027,
@@ -607,7 +650,17 @@ Config names are documented in `docs/configuration.md`; schema in
   and sites (views, storage from a cached bucket measurement, updated; each
   site links to its current address), new
   users, state-backend usage, visitors and activity, all sites (each with
-  Restrict, or the restriction's reason and Lift: section 7).
+  Restrict, or the restriction's reason and Lift: section 7). "Revoke a
+  leaked key": paste any person's key (a password field; never echoed, logged
+  or stored), that key alone is revoked and the answer names its owner, key
+  name and last four; audited `admin_key_revoke` with the owner's name.
+  "This instance" (top of the page): release, commit and schema; migrations
+  waiting (`migrate.Pending`); this replica's latest bucket check and its
+  time; owner certificates ready and waiting, each waiting owner with how
+  long (`OWNER_CERTS=auto`; `manual` says the operator provides them); and
+  the effective limits (quotas, versions kept, uploaded files, session and
+  connected-app lifetimes, API key maximum, scanner, envelope, network
+  approvals, audit/access-log/Recently-deleted retention).
 - **Status.** Built.
 - **Routes.** `GET /admin`, `POST /api/admin/users/{username}/disable`,
   `POST /api/admin/users/{username}/enable`,
@@ -626,13 +679,16 @@ Config names are documented in `docs/configuration.md`; schema in
   plus `site_delete` with `erasure` per site);
   `GET /api/admin/erased-identities`,
   `POST /api/admin/erased-identities/{id}/allow` (audited
-  `erased_identity_allowed`); plus the admin
+  `erased_identity_allowed`); `POST /api/admin/keys/revoke` (JSON `key`;
+  200 `revoked` or `already revoked` with owner, name, label; 404 when no
+  key matches); plus the admin
   routes in sections 7, 9, 12 (section 7 has restrict and unrestrict).
 - **MCP.** None.
 - **Pages.** `/admin`.
 - **Go.** `internal/handler/admin.go` (`leaverSiteActions`,
   `personDataActions`), `admin_move.go`, `admin_erase.go`, `internal/db/erase.go`,
-  `admin_rankings.go`, `admin_disk_usage.go`, `access.go`
+  `admin_rankings.go`, `admin_disk_usage.go`, `admin_keys.go`,
+  `admin_status.go` (filled by `cmd/server/status.go`), `access.go`
   (`renderAccessRequests`), `site_restore.go` (`renderDeletedSites`).
 - **DB.** `users.disabled_at` (0023), `site_daily_analytics` (0003, 0013),
   `erased_owner_labels`, `erased_identities`, the
@@ -652,7 +708,11 @@ Config names are documented in `docs/configuration.md`; schema in
   rename and hand over (section 5), visitor counts, each namespace's usage against its quota (sites, stored
   bytes; the same numbers `GET /api/me` returns as `usage`), "Recently
   deleted" (the person's and their teams' sites deleted in the last 30 days,
-  each with Restore; hidden when empty), and a link to sessions. Calls the JSON routes of sections
+  each with Restore; hidden when empty), "Not used lately" (sites the idle
+  cleanup marked, with the date each moves, Keep and Download; section 5;
+  hidden when none), and a link to sessions. Key rows show the key's last
+  four ("earlier key" before 0050), last used, and "expires soon"; a
+  site's Activity names who made each change (section 12). Calls the JSON routes of sections
   2, 5, 7, 8, 11 and 12 with the session cookie.
 - **Status.** Built.
 - **Routes.** `GET /dashboard`.
@@ -694,7 +754,8 @@ Config names are documented in `docs/configuration.md`; schema in
 - **What.** `/healthz` (liveness) and `/readyz` (database and schema; bucket is
   reported, not gating) on every host. `/metrics` on its own port, never on
   the Service or Ingress: request counts and latency, `simplehost_bucket_ok`,
-  `simplehost_config_warning` (startup checks, section 18), DB pool, build info. Structured request log. Rate limits and concurrency
+  `simplehost_config_warning` (startup checks, section 18),
+  `simplehost_owner_hosts_not_ready` (section 19), DB pool, build info. Structured request log. Rate limits and concurrency
   slots: sign-in, session hand-off, API key mint and the connector's token
   and registration limits are counted in Postgres and shared by every
   replica; every other limit is per pod in memory (`docs/install.md`,
@@ -781,7 +842,10 @@ Config names are documented in `docs/configuration.md`; schema in
   credential; the reconciler's ServiceAccount is the one token in the
   install (namespaced Role: ingresses get/list/create/patch/delete,
   `certificates.cert-manager.io` get; no Secrets). It connects to Postgres
-  as the application role.
+  as the application role. Readiness is visible without kubectl: /admin's
+  "This instance" card counts ready and waiting owners and lists each
+  waiting one with how long (`db.OwnerHostReadiness`), and
+  `simplehost_owner_hosts_not_ready` counts them.
 - **Status.** Built.
 - **Routes.** None. **MCP.** None. **Skill.** None.
 - **Go.** `internal/ownerhosts/ownerhosts.go`; `internal/handler/owner_hosts.go`

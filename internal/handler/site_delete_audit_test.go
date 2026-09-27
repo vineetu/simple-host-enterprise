@@ -47,11 +47,11 @@ func (s *siteDeleteAuditState) query(query string, args []driver.NamedValue) (dr
 	case strings.Contains(normalized, "FROM api_keys k") && strings.Contains(normalized, "WHERE k.key_hash = $1"):
 		hash := namedBytes(args, 0)
 		if !bytesEqual(hash, db.HashAPIKey("owner-key")) {
-			return &siteDeleteAuditRows{columns: numberedColumns(9)}, nil
+			return &siteDeleteAuditRows{columns: numberedColumns(10)}, nil
 		}
 		return &siteDeleteAuditRows{
-			columns: numberedColumns(9),
-			values:  [][]driver.Value{{siteDeleteTestOwnerID, "owner", false, createdAt, "person", "owner@example.test", nil, "owner-key-id", "full"}},
+			columns: numberedColumns(10),
+			values:  [][]driver.Value{{siteDeleteTestOwnerID, "owner", false, createdAt, "person", "owner@example.test", nil, "owner-key-id", "full", time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)}},
 		}, nil
 
 	case strings.Contains(normalized, "FROM sites") && strings.Contains(normalized, "WHERE user_id = $1 AND name = $2"):

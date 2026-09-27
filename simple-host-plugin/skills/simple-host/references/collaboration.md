@@ -246,7 +246,7 @@ Handle `412` and `428` exactly like deployment.
 have one answer in `site_activity`: the kept versions with who deployed each
 and which is live, the site's recent recorded changes (`site_update`,
 `site_rollback`, `site_access`, `viewer_grant`, `state_write`, `asset_delete`,
-... with the `actor` who made each), and its visits per day over the last 30
+... with the `actor_name` who made each), and its visits per day over the last 30
 days (counts, never who). Without the tool, the same comes from
 `GET /api/audit?owner=<owner>&site=<site>` and
 `GET /api/access?owner=<owner label>&site=<site>&summary=counts` (full-scope
@@ -355,6 +355,12 @@ POST /api/collaboration/sites/<owner>/<site>/restore
 or `list_deleted_sites` then `restore_site`. A restore counts toward the
 namespace's limits again (`site_limit`, `storage_quota`). After 30 days the
 site is gone for good.
+
+If the admins have turned on the idle cleanup, a site nobody has visited,
+deployed or written for a long time shows under "Not used lately" on its
+owner's dashboard and moves to Recently deleted 30 days later. When the user
+wants such a site kept, call `POST .../keep` (or `keep_site`); using the site
+also unmarks it. Only do this when the user asks.
 
 Deleting a site does not delete the team that owned it. Deleting a team, or its
 last active member leaving, deletes every site it owns for good (no 30-day

@@ -673,6 +673,47 @@ preflight` refuses it in any overlay other than `deploy/overlays/local`
 (override with `ALLOW_INCLUSTER_POSTGRES=1`), and the server logs a warning
 at every start while it runs against it.
 
+### Restore drill
+
+Run this once before go-live and after any change to the database or bucket
+setup, so "have you tested restoring this?" has an answer. `make smoke`
+runs the site half against the local overlay.
+
+**A site** (minutes, no downtime):
+
+1. Publish a throwaway site, note its id
+   (`GET /api/collaboration/sites/<owner>/<site>` or the `site_create` audit
+   event), and delete it from the dashboard.
+2. `kubectl -n simple-host exec deploy/simple-host -- /simple-host restore -from-site-id <id> -version 1 -owner <owner> -site <site>`
+3. Open the site: it serves again. Delete it for good when you are done.
+
+**The database** (point-in-time recovery to a new instance; the live one
+is never touched):
+
+1. In your cloud's console, restore the managed Postgres to a time a few
+   minutes ago **as a new instance** (`docs/cloud/<your cloud>.md`, section
+   3, names the setting).
+2. Copy your overlay (for example `deploy/overlays/drill`), point its
+   `DB_DSN` Secret at the new instance, give it its own namespace and base
+   hostname, and scale it to one replica. It reads the same bucket; it does
+   not write to it unless someone publishes, so leave it unannounced.
+3. `kubectl -n simple-host-drill exec deploy/simple-host -- /simple-host migrate -status`
+   says the schema is current, and `/readyz` answers 200.
+4. `kubectl -n simple-host-drill exec deploy/simple-host -- /simple-host verify-storage`
+   checks every live version and uploaded file the restored database
+   depends on is in the bucket. It prints `storage OK` or one
+   `missing <key>` line per object (keys are relative to `BACKUP_STORAGE_PREFIX`)
+   and exits non-zero. After a real point-in-time restore, a missing key is
+   one the sweeper retired after the restore time: bring it back from the
+   bucket's noncurrent versions (`docs/storage.md`, "Bucket requirements"),
+   then run `verify-storage` again.
+5. Sign in to the drill's hostname and open a few sites; then delete the
+   namespace and the new database instance.
+
+For a real recovery, step 2 is instead: point the production overlay's
+`DB_DSN` at the restored instance and apply, then run `verify-storage`
+before announcing the service is back.
+
 ## 10. Upgrade
 
 A deploy is: pick the release (`CHANGELOG.md` lists them), resolve and
@@ -852,6 +893,7 @@ PodMonitor, pod annotations, or any in-cluster scraper.
 | `simplehost_build_info{version,commit,schema}` | The running release |
 | `simplehost_bucket_ok` | 1 when the last bucket check (made by `/readyz`) succeeded, 0 when it failed |
 | `simplehost_config_warning{check}` | 1 while a startup warning stands, 0 once its check passed: `no_admin` (neither `ADMIN_EMAILS` nor `OIDC_ADMIN_CLAIM` is set) and `bucket_versioning` (the bucket reports versioning is not enabled; a provider that cannot report it is logged and not flagged) |
+| `simplehost_owner_hosts_not_ready` | Owners with sites whose `*.<owner>.<base>` certificate is not ready yet (their sites are served at `<owner>.<base>/<site>/` meanwhile); `OWNER_CERTS=auto` only. /admin's "This instance" card lists them with how long each has waited |
 | `simplehost_audit_stream_dropped_total` | Audit lines not written to stdout because the writer fell behind (the database rows are intact); should stay 0 |
 
 Probes: `/healthz` is liveness and checks nothing else. `/readyz` checks
@@ -864,12 +906,23 @@ readiness would take them all out and stop even the cached pages. The
 failure is logged as `readyz: bucket: ...` and sets `simplehost_bucket_ok`
 to 0.
 
+Admins see the same things without cluster access on /admin's "This
+instance" card: release, commit and schema; migrations waiting to be
+applied; this replica's latest bucket check and when it ran; owner
+certificates ready and waiting (each waiting owner with how long); and the
+effective limits (quotas, versions kept, uploaded files, session and
+connected-app lifetimes, API key maximum, upload scanning, envelope
+encryption, network approvals, and how long the audit log, access log and
+Recently deleted keep things).
+
 No alerting stack ships with the package. What to watch:
 
 - Pods not Ready, restarts, `CrashLoopBackOff`.
 - `simplehost_bucket_ok` at 0, or `readyz: bucket:` in the logs. Pods stay
   Ready and cached pages keep serving, but uncached pages answer 503 and
   publishing fails until the bucket is fixed.
+- `simplehost_owner_hosts_not_ready` above 0 for more than a few minutes:
+  cert-manager is not issuing (see "Owner certificates").
 - `simplehost_config_warning` at 1, or `WARNING:` lines at startup: no admin
   configured, or bucket versioning off (a swept object then cannot be
   brought back).

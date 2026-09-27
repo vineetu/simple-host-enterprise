@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -64,5 +65,22 @@ func TestConfigWarningMetric(t *testing.T) {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Errorf("missing %q in:\n%s", want, rec.Body)
 		}
+	}
+}
+
+func TestBucketStatusAndOwnerHostsGauge(t *testing.T) {
+	r := New()
+	if _, known, _ := r.BucketStatus(); known {
+		t.Fatal("bucket status known before any check")
+	}
+	r.SetBucketOK(true)
+	if ok, known, at := r.BucketStatus(); !ok || !known || at.IsZero() {
+		t.Fatalf("after a good check = %v %v %v", ok, known, at)
+	}
+	r.SetOwnerHostsNotReady(func(context.Context) (int, error) { return 3, nil })
+	rec := httptest.NewRecorder()
+	r.Handler(nil, Build{}).ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	if !strings.Contains(rec.Body.String(), "simplehost_owner_hosts_not_ready 3") {
+		t.Fatalf("metrics lack the not-ready gauge:\n%s", rec.Body)
 	}
 }

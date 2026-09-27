@@ -1447,6 +1447,45 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/collaboration/sites/{owner}/{sitename}/keep:
+    post:
+      summary: Keep a site from the idle cleanup
+      description: 'With `IDLE_CLEANUP_DAYS` set, a site nobody has visited, deployed or written for that many days is marked ("Not used lately" on the dashboard) and moves to Recently deleted 30 days later. `{"keep": true}` (the default, also with no body) unmarks the site and keeps the cleanup away from it for good; `{"keep": false}` lets the cleanup consider it again. `POST /api/sites/{sitename}/keep` does the same for the caller''s own site. Owner or team member; full-scope key or session. Audited as `site_idle_keep`.'
+      tags: [Sites]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                keep:
+                  type: boolean
+      responses:
+        '200':
+          description: Recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  owner: {type: string}
+                  site: {type: string}
+                  keep: {type: boolean}
+        '400':
+          $ref: '#/components/responses/ManagementBadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/collaboration/sites/{owner}/{sitename}/rename:
     post:
       summary: Rename a site
@@ -1490,16 +1529,101 @@ paths:
 
   /api/audit:
     get:
-      summary: Read the action log
+      summary: Search the audit log
       description: |
-        Recorded actions, newest first, 100 a page. A non-admin (and any API
-        key or connected app, an admin's included) sees their own namespace
-        and their teams'; `site` needs `owner`. Each event carries `actor`,
-        the actor's username. A full-scope key or a browser session.
+        Newest first, 100 per page. A non-admin (and any API key or connected
+        app) sees only their own namespace and their teams'; an admin in a
+        browser session sees every owner. Filters are names, not ids; a name
+        that matches nobody returns an empty page. Each event carries
+        `owner_name`, `site_name` and `actor_name`; a non-admin gets
+        `actor_name` only for changes made by themselves or a member of the
+        team that owns the event, never for a visitor's write or a refused
+        visit.
       tags: [Audit]
       security:
         - apiKey: []
       parameters:
+        - name: owner
+          in: query
+          description: Username or team name
+          schema:
+            type: string
+        - name: site
+          in: query
+          description: 'Site name under `owner` (required with it); a site in Recently deleted still matches'
+          schema:
+            type: string
+        - name: actor
+          in: query
+          description: Username of the person who acted
+          schema:
+            type: string
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          description: 'RFC 3339 timestamp or `YYYY-MM-DD` (inclusive)'
+          schema:
+            type: string
+        - name: to
+          in: query
+          description: 'RFC 3339 timestamp or `YYYY-MM-DD` (inclusive, the whole day)'
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A page of events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: integer}
+                        at: {type: string, format: date-time}
+                        action: {type: string}
+                        actor_id: {type: string}
+                        actor_kind: {type: string}
+                        actor_name: {type: string}
+                        owner_id: {type: string}
+                        owner_name: {type: string}
+                        site_id: {type: string}
+                        site_name: {type: string}
+                        detail: {type: object}
+                  next_cursor: {type: string}
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/admin/export:
+    get:
+      summary: Export the audit or access log
+      description: Admin only, browser session only. Streams every matching row as CSV (formula-safe) or NDJSON; audited as `admin_export` with the filters used. For `kind=audit` it takes the same filters as `/api/audit` (CSV ends with `actor_name`, `owner_name`, `site_name`); for `kind=access`, `owner` and `site`.
+      tags: [Admin]
+      parameters:
+        - name: kind
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [audit, access]
+        - name: format
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [csv, jsonl]
         - name: owner
           in: query
           schema:
@@ -1520,50 +1644,19 @@ paths:
           in: query
           schema:
             type: string
-            format: date-time
         - name: to
-          in: query
-          schema:
-            type: string
-            format: date-time
-        - name: cursor
           in: query
           schema:
             type: string
       responses:
         '200':
-          description: A page of events
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  events:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        id:
-                          type: integer
-                        at:
-                          type: string
-                          format: date-time
-                        actor:
-                          type: string
-                          description: The actor's username
-                        actor_kind:
-                          type: string
-                          enum: [person, key, system]
-                        action:
-                          type: string
-                        detail:
-                          type: object
-                  next_cursor:
-                    type: string
+          description: The export, as an attachment
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/access:
     get:
@@ -1651,6 +1744,41 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /api/admin/keys/revoke:
+    post:
+      summary: Revoke a leaked API key
+      description: Admin only, browser session only (the "Revoke a leaked key" card on /admin). The pasted key is hashed and looked up, never stored or echoed; whichever person's key it is is revoked on its own, audited as `admin_key_revoke` with the owner's name.
+      tags: [Admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key]
+              properties:
+                key: {type: string}
+      responses:
+        '200':
+          description: '`revoked`, or `already revoked` with when'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string, enum: [revoked, already revoked]}
+                  owner: {type: string}
+                  name: {type: string}
+                  key_id: {type: string}
+                  label: {type: string, description: '"ends …abcd", or "earlier key" for a key minted before its last four were kept'}
+                  revoked_at: {type: string, format: date-time}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/admin/deleted-sites/{owner}/{sitename}/restore:
     post:
@@ -3347,7 +3475,7 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     Unauthorized:
-      description: Missing or invalid API key
+      description: 'Missing or invalid credentials. For an `X-API-Key` that did not authenticate, `code` says why: `key_expired` (the body names the date; `expired_at` carries it), `key_revoked`, `key_owner_disabled` or `key_not_recognised`. A key with 14 days or less left gets `X-Key-Expires` (RFC 3339) and `X-Simple-Host-Notice` on every response.'
       content:
         application/json:
           schema:

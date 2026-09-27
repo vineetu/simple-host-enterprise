@@ -51,7 +51,7 @@ func TestPreviewBeforeLive(t *testing.T) {
 	}
 	_ = json.Unmarshal(w.api("alice", http.MethodGet, "/api/audit?owner=alice&site=demo&action=site_update", nil).Body.Bytes(), &page)
 	events = page.Events
-	if len(events) != 1 || events[0]["actor"] != "alice" || events[0]["detail"].(map[string]any)["published"] != false {
+	if len(events) != 1 || events[0]["actor_name"] != "alice" || events[0]["detail"].(map[string]any)["published"] != false {
 		t.Fatalf("audit of the held deploy = %v, want one site_update by alice with published false", events)
 	}
 

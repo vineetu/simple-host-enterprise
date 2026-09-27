@@ -40,7 +40,7 @@ func TestCredentialsThroughMCP(t *testing.T) {
 		t.Fatalf("insert token: %v", err)
 	}
 	publishKey := "key-alice-publish-" + strings.Repeat("2", 30)
-	if _, err := db.CreateAPIKey(ctx, database, aliceID, "ci", db.HashAPIKey(publishKey), publishKey[:8], time.Now().Add(time.Hour), db.APIKeyScopePublish); err != nil {
+	if _, err := db.CreateAPIKey(ctx, database, aliceID, "ci", db.HashAPIKey(publishKey), publishKey[:8], "", time.Now().Add(time.Hour), db.APIKeyScopePublish); err != nil {
 		t.Fatal(err)
 	}
 
@@ -86,7 +86,7 @@ func TestCredentialsThroughMCP(t *testing.T) {
 		t.Fatalf("get_account by publish key failed: %s", text)
 	}
 	offboardKey := "key-alice-offboard-" + strings.Repeat("3", 30)
-	if _, err := db.CreateAPIKey(ctx, database, aliceID, "hr", db.HashAPIKey(offboardKey), offboardKey[:8], time.Now().Add(time.Hour), db.APIKeyScopeOffboard); err != nil {
+	if _, err := db.CreateAPIKey(ctx, database, aliceID, "hr", db.HashAPIKey(offboardKey), offboardKey[:8], "", time.Now().Add(time.Hour), db.APIKeyScopeOffboard); err != nil {
 		t.Fatal(err)
 	}
 	offReq := httptest.NewRequest(http.MethodGet, "https://hosting.corp.test/api/me", nil)

@@ -66,16 +66,18 @@ func Middleware(database *sql.DB, signingKeys []SigningKey, sessionIdle time.Dur
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			apiKey := r.Header.Get("X-API-Key")
 			if apiKey != "" {
-				user, keyID, scope, err := db.GetUserByAPIKeyHash(r.Context(), database, db.HashAPIKey(apiKey))
+				user, key, err := db.GetUserByAPIKeyHash(r.Context(), database, db.HashAPIKey(apiKey))
 				if err != nil {
 					if errors.Is(err, sql.ErrNoRows) {
-						writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
+						writeJSON(w, http.StatusUnauthorized, refusedKey(r.Context(), database, apiKey))
 						return
 					}
 					writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 					return
 				}
+				keyID, scope := key.ID, key.Scope
 				touchAPIKey(r.Context(), database, keyID)
+				warnKeyExpiry(w.Header(), key.ExpiresAt, time.Now())
 				reqlog.SetUser(r.Context(), user.ID)
 				if !KeyScopeAllows(scope, requestPattern(r)) {
 					writeJSON(w, http.StatusForbidden, map[string]string{
@@ -147,6 +149,56 @@ func Middleware(database *sql.DB, signingKeys []SigningKey, sessionIdle time.Dur
 
 			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
 		})
+	}
+}
+
+// KeyExpiryWarning is how long before its expiry a key's successful
+// requests start carrying X-Key-Expires and the notice header.
+const KeyExpiryWarning = 14 * 24 * time.Hour
+
+// warnKeyExpiry tells the holder of a key that expires within
+// KeyExpiryWarning, on every request it still makes: X-Key-Expires carries
+// the time, X-Simple-Host-Notice says what to do. Headers rather than a body
+// field, because no management response body is rewritten.
+func warnKeyExpiry(h http.Header, expiresAt, now time.Time) {
+	if expiresAt.Sub(now) > KeyExpiryWarning {
+		return
+	}
+	h.Set("X-Key-Expires", expiresAt.UTC().Format(time.RFC3339))
+	h.Set("X-Simple-Host-Notice", "this API key expires on "+expiresAt.UTC().Format("2006-01-02")+"; mint a new one on the dashboard before then")
+}
+
+// keyRefusal is the 401 body for an X-API-Key that did not authenticate:
+// which of expired, revoked, owner disabled or not recognised applies, so a
+// failing job's log says why. Only the key's own holder can learn this, and
+// only for the key they hold.
+type keyRefusal struct {
+	Error     string `json:"error"`
+	Code      string `json:"code"`
+	ExpiredAt string `json:"expired_at,omitempty"`
+}
+
+// refusedKey looks the refused key up again without the live-key filters
+// to say why it failed. Not on the hot path: only a refused key reaches it.
+func refusedKey(ctx context.Context, database *sql.DB, apiKey string) keyRefusal {
+	rec, err := db.GetAPIKeyByHash(ctx, database, db.HashAPIKey(apiKey))
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			log.Printf("auth: explain refused api key: %v", err)
+		}
+		return keyRefusal{Error: "this API key is not recognised; mint a new one on the dashboard", Code: "key_not_recognised"}
+	}
+	switch {
+	case rec.OwnerDisabled:
+		return keyRefusal{Error: "the person this API key belongs to has been disabled, so their keys no longer work", Code: "key_owner_disabled"}
+	case rec.RevokedAt != nil:
+		return keyRefusal{Error: "this API key was revoked on " + rec.RevokedAt.UTC().Format("2006-01-02") + "; mint a new one on the dashboard", Code: "key_revoked"}
+	default:
+		return keyRefusal{
+			Error:     "this API key expired on " + rec.ExpiresAt.UTC().Format("2006-01-02") + "; mint a new one on the dashboard",
+			Code:      "key_expired",
+			ExpiredAt: rec.ExpiresAt.UTC().Format(time.RFC3339),
+		}
 	}
 }
 

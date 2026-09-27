@@ -766,7 +766,14 @@ of `docs/configuration.md`.
   in the bucket and are recovered through its versioning. Nothing in this
   package backs up Postgres, which holds the per-site state, accounts and
   audit trail; the managed database's PITR is its whole backup. Confirm PITR
-  retention with the human.
+  retention with the human, and run the restore drill once
+  (`docs/install.md`, "Restore drill"; `simple-host verify-storage` checks
+  the bucket against the database).
+- **Idle sites** (optional, off by default): `IDLE_CLEANUP_DAYS` in
+  `config.env` marks sites nobody has used for that many days and moves them
+  to Recently deleted 30 days later unless kept; `SMTP_URL` (in
+  `secrets.env`, it carries a password) and `SMTP_FROM` add an email to the
+  dashboard notice (`docs/configuration.md`). Ask the human before turning it on.
 - **Monitoring**: `docs/install.md` section 12. Metrics are on pod port 9090
   (`/metrics`), not on the Service or Ingress; it lists what to watch.
 - **Config changes**: edit `config.env` or `secrets.env`, re-apply, then
