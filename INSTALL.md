@@ -363,8 +363,9 @@ edits to them.
 1. `kustomization.yaml`, `images:` entry (name `ghcr.io/vineetu/simple-host-enterprise`): set `newName` to
    `ghcr.io/vineetu/simple-host-enterprise` (or your mirror) and `digest`
    to the verified digest from section 3 (for v1.8.0, `sha256:99470c54a8dbdb838e1ae840a8a7ae2081aba94b352a2fe00e5fca2118145c32`).
-   The base names the image with the placeholder digest
-   `sha256:REPLACE_WITH_THE_RELEASE_DIGEST`, which `make preflight` refuses.
+   The overlay ships `sha256:REPLACE_WITH_THE_SCANNED_IMAGE_DIGEST` and the
+   base `sha256:REPLACE_WITH_THE_RELEASE_DIGEST`; `make preflight` refuses
+   either. Paste the digest you verified, not the one in the comment.
 2. `ingress-patch.yaml`: replace every `simple-host.example.com` with
    `<base>` (both the TLS hosts and the two rules, including the
    `*.` wildcard). Set `cert-manager.io/cluster-issuer` to the DNS-01
@@ -687,7 +688,10 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://install-check.<base>/healthz
 **HUMAN STEP D.** Ask an admin to:
 
 1. Sign in at `https://<base>/auth/login`, then open `https://<base>/api/me`
-   in the same browser and confirm it shows `"is_admin": true`.
+   in the same browser and confirm it shows `"is_admin": true`. The
+   `username` there may carry a suffix (`admin-2`): a reserved name
+   (`admin`, and the labels in `RESERVED_LABELS`) or one held by a renamed
+   or erased person is never given out again, so the next free form is used.
 2. On `/dashboard`, mint an API key named `install-check` with scope
    **Full** (the dashboard defaults to Publish; `make smoke` deletes the
    site it creates, which a publish key cannot do, so it stops before

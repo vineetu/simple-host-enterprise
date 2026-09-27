@@ -59,7 +59,10 @@ Fills the sections in [README.md](README.md).
 The wildcard needs DNS-01 with your DNS provider: a cert-manager solver or webhook for
 that provider, or a certificate issued out of band (for example certbot with the
 provider's DNS hooks) into the `simple-host-tls` Secret, with the cert-manager
-annotation removed from the Ingress.
+annotation removed from the Ingress. An out-of-band certificate is yours to renew:
+Let's Encrypt certificates expire after 90 days, so schedule the renewal and the Secret
+update (certbot's own timer plus a deploy hook that runs
+`kubectl --context "$CTX" -n simple-host create secret tls simple-host-tls --cert=<fullchain> --key=<key> --dry-run=client -o yaml | kubectl --context "$CTX" -n simple-host apply -f -`).
 
 Owner certificates (`*.<owner>.<base>`, v1.3.0, not part of the verified run above)
 work with ingress-nginx as written: the

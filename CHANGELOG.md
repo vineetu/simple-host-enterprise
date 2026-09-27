@@ -53,6 +53,10 @@ release, commit and schema.
 - The settings registry marks `DB_INCLUSTER_EVALUATION` as security and
   data-safety sensitive (it marks the database as throwaway), so
   `simple-host settings --json` and the setup check flag it.
+- INSTALL.md says an admin's username may carry a suffix (`admin-2`) when
+  the name is reserved or held, and names both image-digest placeholders;
+  `docs/cloud/upcloud.md` says an out-of-band base certificate is the
+  operator's to renew every 90 days, with the Secret update command.
 - `make smoke` against a real install checks the key's scope first and
   stops before publishing when it is not Full, instead of failing four
   checks and leaving its throwaway site behind; if the site cannot be
