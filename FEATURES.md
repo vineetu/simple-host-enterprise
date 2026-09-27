@@ -650,9 +650,16 @@ Config names are documented in `docs/configuration.md`; schema in
   matches), `actor`, `action`, `from` and `to` (RFC 3339 or `YYYY-MM-DD`,
   inclusive) and pages by `cursor`, and each event carries `owner_name`,
   `site_name` and `actor_name`. An owner or team member is given
-  `actor_name` only for changes made by themselves or a member of the
-  owning team, never for a visitor's write or a refused visit; an admin
-  always. MCP `site_activity` reads one site's versions, its audit events
+  `actor_name` for changes to the site: by themselves, a member of the
+  owning team, or anyone who saved its data (`state_write`; the same person
+  the dashboard shows as "written by" on each saved-data version). Someone
+  who only opened the site, or was refused (`access_denied`), is never
+  named, and for those rows `actor_id`, `key_id`, `ip` and `user_agent` are
+  left out too; an admin always sees all of it. A non-admin's `actor` filter
+  matches only themselves or a member of one of their teams (anyone else
+  gives an empty page). `site_name` is the site's current name, given only while
+  the site is still in the event's namespace (a site handed to a team is not
+  named in its old owner's history). MCP `site_activity` reads one site's versions, its audit events
   (with `actor_name`) and its visit counts in one call; a part the
   credential cannot read (a publish key; `ACCESS_LOG_VISIBILITY=admin`)
   becomes a note, not a failure. `summary=counts` on `/api/access` asks

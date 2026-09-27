@@ -130,9 +130,10 @@ type auditEventResponse struct {
 	Detail          map[string]any `json:"detail,omitempty"`
 	// ActorName, OwnerName and SiteName are the names behind the ids, so a
 	// reader sees people and sites rather than uuids. ActorName is given to
-	// an owner or team member only for changes made by themselves or a
-	// member of the team (never who viewed or wrote as a visitor), and to an
-	// admin always.
+	// an owner or team member for changes to the site: made by themselves,
+	// a member of the team, or anyone who saved its data (never who opened
+	// it, or was refused); for the rest, ActorID, KeyID, IP and UserAgent
+	// are left out too. An admin always sees everything.
 	ActorName string `json:"actor_name,omitempty"`
 	OwnerName string `json:"owner_name,omitempty"`
 	SiteName  string `json:"site_name,omitempty"`
@@ -189,6 +190,23 @@ func (h *AuditHandler) listAudit(w http.ResponseWriter, r *http.Request) {
 	if bad != "" {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: bad})
 		return
+	}
+	if !nothing && !admin && query.Actor != "" && query.Actor != user.ID {
+		// Someone who is not an admin filters by a person only for
+		// themselves or a fellow member of one of their teams: never "did
+		// this colleague open (or try to open) my site".
+		members, err := db.TeamMemberIDs(r.Context(), h.database, query.OwnerScope)
+		if err != nil {
+			log.Printf("audit: team members for %s: %v", user.Username, err)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+			return
+		}
+		nothing = true
+		for _, team := range members {
+			if team[query.Actor] {
+				nothing = false
+			}
+		}
 	}
 	if nothing {
 		writeJSON(w, http.StatusOK, auditListResponse{})
@@ -307,9 +325,16 @@ func namedAuditEvents(r *http.Request, database *sql.DB, events []db.AuditEvent,
 	out := make([]auditEventResponse, 0, len(events))
 	for _, e := range events {
 		row := toAuditEventResponse(e)
-		row.OwnerName, row.SiteName = users[e.OwnerID], sites[e.SiteID]
+		row.OwnerName = users[e.OwnerID]
+		if site, ok := sites[e.SiteID]; ok && site.OwnerID == e.OwnerID {
+			row.SiteName = site.Name
+		}
 		if admin || actorNamedToOwner(e, caller.ID, members) {
 			row.ActorName = users[e.ActorID]
+		} else {
+			// Nor anything that would tell the same visitor apart across
+			// rows.
+			row.ActorID, row.KeyID, row.IP, row.UserAgent = "", "", "", ""
 		}
 		out = append(out, row)
 	}
@@ -317,13 +342,16 @@ func namedAuditEvents(r *http.Request, database *sql.DB, events []db.AuditEvent,
 }
 
 // actorNamedToOwner reports whether an owner or team member may see who
-// made this change: themselves, or a member of the team that owns it. A
-// refused visit (access_denied) is a view, never a change.
+// made this change: themselves, a member of the team that owns it, or
+// anyone who saved the site's data (state_write). The authors of changes to
+// your own site are visible, the same as "written by" on each saved-data
+// version; mere visitors are not: a refused visit (access_denied) is a
+// view, never a change.
 func actorNamedToOwner(e db.AuditEvent, callerID string, members map[string]map[string]bool) bool {
 	if e.ActorID == "" || e.Action == "access_denied" {
 		return false
 	}
-	return e.ActorID == callerID || members[e.OwnerID][e.ActorID]
+	return e.ActorID == callerID || members[e.OwnerID][e.ActorID] || e.Action == "state_write"
 }
 
 // accessLogEntryResponse is one row of GET /api/access's JSON body.

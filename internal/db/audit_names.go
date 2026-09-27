@@ -6,13 +6,22 @@ import (
 	"github.com/lib/pq"
 )
 
+// AuditSite is a site's current name and owner, for naming audit events.
+type AuditSite struct {
+	Name    string
+	OwnerID string
+}
+
 // AuditNames resolves the ids on a page of audit events to names: every
-// user or team id to its username, every site id to its name. Deleted sites
-// in their recovery window still resolve; an id that no longer exists (a
-// purged site, an erased person) is simply absent, and the reader shows the
-// id instead.
-func AuditNames(ctx context.Context, q Querier, userIDs, siteIDs []string) (users, sites map[string]string, err error) {
-	users, sites = map[string]string{}, map[string]string{}
+// user or team id to its username, every site id to its current name and
+// owner (a caller names an event's site only when that owner is still the
+// event's: a site since handed to another namespace, and perhaps renamed
+// there, is not named in its old owner's history). Deleted sites in their
+// recovery window still resolve; an id that no longer exists (a purged
+// site, an erased person) is simply absent, and the reader shows the id
+// instead.
+func AuditNames(ctx context.Context, q Querier, userIDs, siteIDs []string) (users map[string]string, sites map[string]AuditSite, err error) {
+	users, sites = map[string]string{}, map[string]AuditSite{}
 	if len(userIDs) > 0 {
 		rows, err := q.QueryContext(ctx, `SELECT id::text, username FROM users WHERE id::text = ANY($1)`, pq.Array(userIDs))
 		if err != nil {
@@ -23,11 +32,20 @@ func AuditNames(ctx context.Context, q Querier, userIDs, siteIDs []string) (user
 		}
 	}
 	if len(siteIDs) > 0 {
-		rows, err := q.QueryContext(ctx, `SELECT id::text, name FROM sites WHERE id::text = ANY($1)`, pq.Array(siteIDs))
+		rows, err := q.QueryContext(ctx, `SELECT id::text, name, user_id::text FROM sites WHERE id::text = ANY($1)`, pq.Array(siteIDs))
 		if err != nil {
 			return nil, nil, err
 		}
-		if err := scanPairs(rows, sites); err != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			var site AuditSite
+			if err := rows.Scan(&id, &site.Name, &site.OwnerID); err != nil {
+				return nil, nil, err
+			}
+			sites[id] = site
+		}
+		if err := rows.Err(); err != nil {
 			return nil, nil, err
 		}
 	}

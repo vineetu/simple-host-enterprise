@@ -1545,10 +1545,14 @@ paths:
         app) sees only their own namespace and their teams'; an admin in a
         browser session sees every owner. Filters are names, not ids; a name
         that matches nobody returns an empty page. Each event carries
-        `owner_name`, `site_name` and `actor_name`; a non-admin gets
-        `actor_name` only for changes made by themselves or a member of the
-        team that owns the event, never for a visitor's write or a refused
-        visit.
+        `owner_name`, `site_name` and `actor_name`. A non-admin gets
+        `actor_name` for changes to the site: by themselves, a member of the
+        team that owns the event, or anyone who saved its data
+        (`state_write`, as "written by" on saved-data versions). Someone who
+        only opened the site or was refused (`access_denied`) is never named,
+        and those rows also leave out `actor_id`, `key_id`, `ip` and
+        `user_agent`. A non-admin's `actor` filter matches only themselves or
+        a member of one of their teams; anyone else gives an empty page.
       tags: [Audit]
       security:
         - apiKey: []
@@ -1565,7 +1569,7 @@ paths:
             type: string
         - name: actor
           in: query
-          description: Username of the person who acted
+          description: Username of the person who acted. For a non-admin, only themselves or a member of one of their teams; anyone else gives an empty page.
           schema:
             type: string
         - name: action
@@ -3122,7 +3126,7 @@ components:
           description: The state version this entry was saved as.
         written_by:
           type: string
-          description: Username of the writer, when known.
+          description: Username of the writer, when known. Shown to the site's owner and team members whoever wrote it, visitors included; the authors of changes to your own site are visible (audit `actor_name` follows the same rule), while people who only open it are not.
         created_at:
           type: string
           format: date-time
