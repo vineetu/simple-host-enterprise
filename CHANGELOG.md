@@ -30,7 +30,10 @@ deploying. Skills are at 0.15.5 (0.11.0 still works).
   database or a backup could match against the company directory. Rows and
   manifests written before still match. Keep retired signing keys in your
   secret store: an erased person recorded under a key you remove is no
-  longer recognised at sign-in.
+  longer recognised at sign-in. Rolling back to v1.7 stays possible, but
+  v1.7 does not recognise people erased after the upgrade (under it they
+  could sign in again) and its `rebuild-index` refuses manifests written
+  after it.
 - Site manifests are signed. `simple-host rebuild-index` refuses one that
   was changed in the bucket, one signed under a key no longer configured
   (add it back as the second `SESSION_SIGNING_KEY` entry for the rebuild),
