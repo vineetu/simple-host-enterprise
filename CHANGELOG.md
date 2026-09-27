@@ -71,6 +71,18 @@ before deploying. Skills are at 0.15.3.
   is pressed; never the raw browser header or an IP address. Connections
   made before this show no hint. Schema 0055 (backward-compatible).
 
+### Configuration
+- `simple-host settings --json` prints every setting with its area, a plain
+  description, type, default, range, and whether it is security-sensitive
+  or required; `docs/advanced/settings.json` is that output, checked in CI.
+- `docs/advanced/`: every setting by area (server and addresses, accounts
+  and sign-in, access and teams, sites, saved data, cleanup and retention,
+  email, storage and backups, observability, rate limits), explained in
+  product terms with recipes. The tables are generated, so they cannot drift.
+- The setup helper at https://simple-host.app/setup (choose Enterprise)
+  writes `config.env`, a `secrets.env` template naming every secret and the
+  apply commands, in the browser, sending nothing anywhere.
+
 ## v1.6.0 — 2026-09-27
 
 Schema 0054 (backward-compatible: nullable `sites.purge_at` and

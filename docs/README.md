@@ -2,7 +2,12 @@
 
 - `install.md` — installing on a local cluster, then on a real one.
 - `cloud/` — per-cloud notes for managed Kubernetes, Postgres and buckets.
-- `configuration.md` — every environment variable the server reads.
+- `advanced/` — every setting by area, in product terms, with recipes; the
+  tables are generated from `advanced/settings.json` (`simple-host settings
+  --json`). The setup helper at https://simple-host.app/setup (choose
+  Enterprise) builds `config.env` and a `secrets.env` template from it.
+- `configuration.md` — every environment variable the server reads, with every
+  refusal.
 - `ci.md` — deploying a site from a build pipeline with one call and a
   publish-scoped API key.
 - `uninstall.md` — removing a real install: what to export first, DNS

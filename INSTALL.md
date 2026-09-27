@@ -216,6 +216,10 @@ d=deploy/overlays/byo; for f in config.env secrets.env; do [ -e "$d/$f" ] || cp 
 **config.env** holds no secrets; edit it directly. Every variable is
 documented in `docs/configuration.md`. Values are unquoted `KEY=value`
 lines (kustomize reads them as env files).
+A person who would rather answer questions can use the setup helper at
+https://simple-host.app/setup (choose Enterprise): it writes both files, with
+the secrets left blank, in their browser. `docs/advanced/` explains every
+setting by area.
 
 | Variable | Value |
 |---|---|
