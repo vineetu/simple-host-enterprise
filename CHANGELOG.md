@@ -10,7 +10,7 @@ Schema 0053 (from 0049), all four backward-compatible: nullable
 `api_keys.last4` (0050), `sites.idle_since` and `sites.idle_keep` (0051), an
 index on `site_viewers (principal_id)` (0052), `sites.last_used_at` and the
 `site_export_links_used` table (0053). Run `simple-host migrate`
-before the new image. Skills are at 0.15.0 (0.11.0 still works).
+before the new image. Skills are at 0.15.1 (0.11.0 still works).
 
 ### Sites
 - Preview before live. An update sent with `?publish=false` (MCP
