@@ -140,6 +140,7 @@ const enqueueMissingSiteSearchQuery = `
 	LEFT JOIN site_search_queue AS queued
 		ON queued.site_id = s.id
 	WHERE queued.site_id IS NULL
+		AND s.deleted_at IS NULL
 		AND (
 			status.site_id IS NULL
 			OR status.version_number <> s.active_version
@@ -247,7 +248,7 @@ const loadSiteSearchSnapshotQuery = `
 	SELECT s.id::text, owner.username, s.name, s.active_version
 	FROM sites AS s
 	JOIN users AS owner ON owner.id = s.user_id
-	WHERE s.id = $1
+	WHERE s.id = $1 AND s.deleted_at IS NULL
 `
 
 func LoadSiteSearchSnapshot(ctx context.Context, q Querier, siteID string) (SiteSearchSnapshot, SiteSearchSnapshotOutcome, error) {
@@ -281,7 +282,7 @@ const lockSiteSearchSiteQuery = `
 	SELECT owner.username, s.name, s.active_version
 	FROM sites AS s
 	JOIN users AS owner ON owner.id = s.user_id
-	WHERE s.id = $1
+	WHERE s.id = $1 AND s.deleted_at IS NULL
 	FOR UPDATE OF s
 `
 

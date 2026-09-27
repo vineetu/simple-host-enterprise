@@ -33,6 +33,45 @@ still works).
   no active member offers "Move to team…" beside "Delete team". Nobody
   else's sites can be moved or deleted by an admin.
 
+Schema 0044. 0043 (`sites.deleted_at`, `sites.deleted_by`) is not marked
+backward-compatible: an older binary would serve sites in their recovery
+window again, so it refuses to start on this schema. 0044 is
+backward-compatible (adds `pending_site_viewers` and `pending_team_members`).
+Skills are at 0.13.2.
+
+### Sites
+- Deleting a site can be undone for 30 days. It stops serving and leaves
+  every list at once, but keeps its versions, saved data and history, access
+  level, viewers and uploaded files, and its name (a new site of that name
+  is refused with `409 name_held`). The owner or a team member restores it
+  from "Recently deleted" on the dashboard, `GET /api/deleted-sites` and
+  `POST /api/sites/{site}/restore` (or the owner-qualified
+  `/api/collaboration/sites/{owner}/{site}/restore`), or the new MCP tools
+  `list_deleted_sites` and `restore_site`; an admin restores any from the
+  "Recently deleted" card on `/admin`. A restore counts toward the quota
+  again and is audited as `site_restore`. After 30 days the sweeper removes
+  the site for good. Deleting a team still removes its sites at once.
+- `simple-host restore` into a name a recently deleted site holds undeletes
+  that site rather than creating an empty one.
+
+### Operations
+- Startup warns when no admin is configured (neither `ADMIN_EMAILS` nor
+  `OIDC_ADMIN_CLAIM`) and when the bucket's versioning is not enabled (a
+  provider that cannot report it is logged, not flagged). Both are also
+  exported as `simplehost_config_warning{check="no_admin"|"bucket_versioning"}`.
+  The bucket credentials need `s3:GetBucketVersioning` for the check; without
+  it the status is logged as unknown.
+
+### Sharing
+- Site viewers and team members can be named by company email, including
+  someone who has not signed in yet. The email adds the account that carries
+  it; with no such account, it is kept as a pending grant, listed with
+  `pending: true` ("hasn't signed in yet" on the dashboard), counted toward
+  the 50 limit, and removable by that email. At the person's first sign-in
+  with that verified email it becomes the real grant, audited as
+  `pending_grant_converted`. Emails outside `ALLOWED_EMAIL_DOMAINS` are
+  refused when that is set.
+
 ## v1.3.1 — 2026-09-26
 
 No schema change (still 0042); rolling back to v1.3.0 is safe. Skills are at

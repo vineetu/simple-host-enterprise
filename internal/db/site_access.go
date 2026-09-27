@@ -125,7 +125,7 @@ func ApproveNetworkAccess(ctx context.Context, tx *sql.Tx, siteID, adminID strin
 	var requestedBy sql.NullString
 	if err := tx.QueryRowContext(ctx, `
 		SELECT access, network_requested_at IS NOT NULL, network_requested_by::text
-		FROM sites WHERE id = $1::uuid FOR UPDATE`, siteID).Scan(&out.Previous, &pending, &requestedBy); err != nil {
+		FROM sites WHERE id = $1::uuid AND deleted_at IS NULL FOR UPDATE`, siteID).Scan(&out.Previous, &pending, &requestedBy); err != nil {
 		return NetworkApproval{}, err
 	}
 	if !pending {
@@ -184,7 +184,7 @@ func DeclineNetworkAccess(ctx context.Context, tx *sql.Tx, siteID string) error 
 // that no longer exists is not.
 func NetworkOpen(ctx context.Context, q Querier, siteID string) (bool, error) {
 	var open bool
-	err := q.QueryRowContext(ctx, `SELECT access = 'network' FROM sites WHERE id = $1::uuid`, siteID).Scan(&open)
+	err := q.QueryRowContext(ctx, `SELECT access = 'network' FROM sites WHERE id = $1::uuid AND deleted_at IS NULL`, siteID).Scan(&open)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -224,7 +224,7 @@ func ListNetworkAccess(ctx context.Context, q Querier) ([]NetworkAccessEntry, er
 		FROM sites s
 		JOIN users owner ON owner.id = s.user_id
 		LEFT JOIN users requester ON requester.id = s.network_requested_by
-		WHERE s.network_requested_at IS NOT NULL OR s.access = 'network'
+		WHERE (s.network_requested_at IS NOT NULL OR s.access = 'network') AND s.deleted_at IS NULL
 		ORDER BY s.network_requested_at ASC NULLS LAST, owner.username, s.name`)
 	if err != nil {
 		return nil, err

@@ -37,7 +37,10 @@ Config names are documented in `docs/configuration.md`; schema in
   host redeems, nonce-bound against login CSRF); the first visit to each site
   host hands off transparently, one redirect round trip, no prompt. Every session cookie is bound
   to the host it was minted for; a hand-off cookie shares the sign-in's
-  session row and expiry, so it never outlives it.
+  session row and expiry, so it never outlives it. Every sign-in (verified
+  email, allowed domain) turns any pending viewer or team grants for that
+  email (sections 8, 9) into real ones in the session's transaction, each
+  audited as `pending_grant_converted`.
 - **Status.** Built.
 - **Routes.** `GET /auth/login`, `GET /auth/callback`, `POST /auth/logout`,
   `GET /auth/sessions` (sessions page), `POST /auth/sessions/{id}/revoke`,
@@ -51,7 +54,8 @@ Config names are documented in `docs/configuration.md`; schema in
   `internal/auth/` (`middleware.go`, `session_cookie.go`, `hostsession.go`);
   `internal/oidc/`; `internal/db/identity.go`, `sessions.go`, `handoff.go`.
 - **DB.** `users` (0001, 0017 email, 0023 OIDC identity), `sessions` (0021),
-  `handoff_codes` (0024).
+  `handoff_codes` (0024); converts `pending_site_viewers`,
+  `pending_team_members` (0045).
 - **Config.** `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`,
   `OIDC_SCOPES`, `OIDC_USERNAME_CLAIM`, `OIDC_EMAIL_CLAIM`, `OIDC_HINT_DOMAIN`,
   `OIDC_ADMIN_CLAIM`, `OIDC_ADMIN_VALUE`, `ADMIN_EMAILS`,
@@ -152,7 +156,16 @@ Config names are documented in `docs/configuration.md`; schema in
   per-owner lock (409 `site_limit`, 413 `storage_quota`), and, with
   `CLAMD_ADDR` set, every file is scanned before anything is stored (422
   `malware_found`, 503 `scanner_unavailable`, fail closed). Rollback
-  makes an earlier version live. Delete retires the whole site. Every site, at
+  makes an earlier version live. Delete is recoverable for 30 days
+  (`db.DeletedSiteRetention`): the row is marked `deleted_at` and stops
+  serving and listing at once, while its versions, objects, saved data and
+  history, access level, viewers and asset records stay; its name stays
+  held (409 `name_held`). The owner or a team member lists them
+  (`GET /api/deleted-sites`, dashboard "Recently deleted") and restores one
+  whole (`site_restore`, quota-checked again: 409 `site_limit`, 413
+  `storage_quota`); an admin restores any from `/admin`. After the window the
+  sweeper purges the row and retires the objects (section 6). A team's
+  deletion still removes its sites for good. Every site, at
   every access level, is served at the root of its own host
   `<site>.<owner>.<base>/` (e.g. `todo.alice.<base>/`) once the owner's
   `*.<owner>.<base>` certificate is ready (section 19); until then it is
@@ -197,6 +210,10 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Status.** Built.
 - **Routes.** `POST /api/sites/{sitename}`, `PUT /api/sites/{sitename}`,
   `DELETE /api/sites/{sitename}`, `POST /api/sites/{sitename}/rollback`,
+  `GET /api/deleted-sites`, `POST /api/sites/{sitename}/restore`,
+  `POST /api/collaboration/sites/{owner}/{sitename}/restore`,
+  `GET /api/admin/deleted-sites`,
+  `POST /api/admin/deleted-sites/{owner}/{sitename}/restore`,
   `GET /api/sites/{sitename}/versions`, `GET /api/sites`,
   `GET /api/collaboration/sites`,
   `GET /api/collaboration/sites/{owner}/{sitename}`,
@@ -215,21 +232,23 @@ Config names are documented in `docs/configuration.md`; schema in
   owner is ready, redirected after); every path on a v1.2
   `<owner>--<site>.<base>` host (redirect).
 - **MCP.** `list_sites`, `get_site`, `deploy_site`, `list_site_versions`,
-  `rollback_site`, `delete_site`, `list_site_files`, `read_site_file` (the last
+  `rollback_site`, `delete_site`, `list_deleted_sites`, `restore_site`,
+  `list_site_files`, `read_site_file` (the last
   two read a version archive), `transfer_site`, `rename_site`.
 - **Skill.** `SKILL.md` §3, Canonical deployment workflow, Core collaboration
   and conflict rules; `references/packaging-and-validation.md`,
   `references/collaboration.md` §1–5 and §8, `references/frameworks.md`;
   `skills/fix-paths-for-subpath-hosting/`, `skills/simple-host-builder/`.
-- **Pages.** `/dashboard` "Your sites" (Manage: Rename, Hand it over).
-- **Go.** `internal/handler/site.go`, `collaboration.go`, `site_mutation.go`,
+- **Pages.** `/dashboard` "Your sites" (Manage: Rename, Hand it over) and
+  "Recently deleted"; `/admin` "Recently deleted".
+- **Go.** `internal/handler/site.go`, `site_restore.go`, `collaboration.go`, `site_mutation.go`,
   `site_move.go`, `admin_move.go`,
   `upload_limits.go`, `serve.go`, `serve_self_traffic.go`, `host_gate.go`, `host.go`, `names.go`,
   `security.go`; `internal/tarball/`; `internal/scan/clamd.go`;
-  `internal/db/queries.go`, `collaboration.go`, `quota.go`, `site_move.go`.
+  `internal/db/queries.go`, `collaboration.go`, `quota.go`, `site_move.go`, `deleted_sites.go`.
 - **DB.** `sites`, `versions` (0001; 0012 `versions.uploaded_by`; 0037
   `versions.size_bytes`), 0018 owner label uniqueness, `site_redirects`
-  (0043, backward-compatible).
+  (0043, backward-compatible), 0044 `sites.deleted_at`/`deleted_by`.
 - **Config.** `PUBLIC_BASE_URL`, `RESERVED_LABELS`, `QUOTA_MAX_SITES`,
   `QUOTA_MAX_BYTES`, `QUOTA_MAX_VERSIONS`, `CLAMD_ADDR`, `CLAMD_TIMEOUT`.
 
@@ -243,9 +262,12 @@ Config names are documented in `docs/configuration.md`; schema in
   transaction and deleted by a sweeper after a one-hour grace (every 5 min,
   `SKIP LOCKED`, safe on every replica). The same loop records the stored
   size of any version that has none (`versions.size_bytes`, 0037) from the
-  bucket, for the owner quota. Operator subcommands:
+  bucket, for the owner quota, and first purges every deleted site past its
+  30-day recovery window (row removed, `sites/<id>/` queued for retirement).
+  Operator subcommands:
   `simple-host migrate-storage` (one-time move off the old volume),
-  `simple-host restore`, and `simple-host reencrypt` (rewrites every stored
+  `simple-host restore` (into a name a recently deleted site holds, it
+  undeletes that row, bringing its saved data, viewers and assets back), and `simple-host reencrypt` (rewrites every stored
   object under the first `BACKUP_ENVELOPE_KEY` in the key-bound form, so old
   keys can be removed and a plaintext install can adopt the envelope;
   idempotent, verified read-back, rewrites a version only once a committed
@@ -307,7 +329,12 @@ Config names are documented in `docs/configuration.md`; schema in
   it is served on its own host like every site, and only
   listed viewers (and the owner or team) can open it. Viewers
   read, never write. Removing the last viewer keeps the level at `specific`,
-  narrowing the site to its owner.
+  narrowing the site to its owner. A viewer may be named by company email
+  (refused outside `ALLOWED_EMAIL_DOMAINS` when set): the account carrying
+  it, or, if nobody has signed in with it yet, a pending viewer, listed with
+  `pending: true` and the email as `username` ("hasn't signed in yet" on the
+  dashboard), counted toward the 50, removed by that email, and converted at
+  their first sign-in (section 1).
 - **Status.** Built.
 - **Routes.** `GET /api/collaboration/sites/{owner}/{sitename}/viewers`,
   `POST /api/collaboration/sites/{owner}/{sitename}/viewers`,
@@ -323,8 +350,9 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Go.** `internal/handler/viewers.go`, `host_gate.go`
   (`serveSiteHost`, `serveOwnerPath`, `serveLegacySiteHost`), `host.go`
   (`SplitSiteLabel`);
-  `internal/db/site_viewers.go`.
-- **DB.** `site_viewers` (0024).
+  `grant_emails.go` (email check); `internal/db/site_viewers.go`,
+  `pending_grants.go`.
+- **DB.** `site_viewers` (0024), `pending_site_viewers` (0045).
 - **Config.** None. See `docs/site-isolation.md`.
 
 ## 9. Teams
@@ -347,7 +375,11 @@ Config names are documented in `docs/configuration.md`; schema in
   another team the person is in, or to a person), then leave. A team whose
   members are all disabled is deleted by an admin, who can first move its
   sites to another team or a person (section 13). A team has no key and no
-  sign-in.
+  sign-in. A member may be named by company email (refused `invalid_email`
+  outside `ALLOWED_EMAIL_DOMAINS` when set): the account carrying it, or a
+  pending member (listed with `pending: true`, the email as `username`,
+  counted toward the 50, removed by that email) who joins at their first
+  sign-in (section 1).
 - **Status.** Built.
 - **Routes.** `POST /api/teams`, `GET /api/teams`,
   `GET /api/teams/{team}/members`, `GET /api/teams/{team}/member-candidates`,
@@ -363,10 +395,11 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Pages.** `/admin` orphan-team delete.
 - **Go.** `internal/handler/team.go` (`teamName`), `admin.go`
   (`deleteOrphanTeam`), `auth.go` (handle prefix), `owner_index.go`,
-  `host_gate.go` (`currentOwnerLabel`); `internal/db/teams.go`
-  (`TeamPrefix`, `LegacyTeamName`).
+  `host_gate.go` (`currentOwnerLabel`), `grant_emails.go`;
+  `internal/db/teams.go` (`TeamPrefix`, `LegacyTeamName`), `pending_grants.go`.
 - **DB.** `team_members`, `team_audit`, `users.kind` = `team` (0019); 0041
-  renames teams to `team-<name>` (rows only, marked backward-compatible).
+  renames teams to `team-<name>` (rows only, marked backward-compatible);
+  `pending_team_members` (0045).
 - **Config.** None.
 
 ## 10. Saved state and its history
@@ -466,7 +499,8 @@ Config names are documented in `docs/configuration.md`; schema in
   disabling revokes sessions, API keys and connected apps in the same
   transaction as its audit row), orphan teams, a disabled person's or orphan
   team's sites ("Move to team…" moves them all to a team or person, all or
-  none; "Delete sites" for a disabled person), access requests, rankings of users
+  none; "Delete sites" for a disabled person), access requests, recently
+  deleted sites (Restore, section 5), rankings of users
   and sites (views, storage from a cached bucket measurement, updated; each
   site links to its current address), new
   users, state-backend usage, visitors and activity, all sites.
@@ -486,7 +520,7 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Pages.** `/admin`.
 - **Go.** `internal/handler/admin.go` (`leaverSiteActions`), `admin_move.go`,
   `admin_rankings.go`, `admin_disk_usage.go`, `access.go`
-  (`renderAccessRequests`).
+  (`renderAccessRequests`), `site_restore.go` (`renderDeletedSites`).
 - **DB.** `users.disabled_at` (0023), `site_daily_analytics` (0003, 0013).
 - **Config.** `ADMIN_EMAILS`, `OIDC_ADMIN_CLAIM`, `OIDC_ADMIN_VALUE`. See
   INSTALL.md "Sessions and leavers".
@@ -497,8 +531,9 @@ Config names are documented in `docs/configuration.md`; schema in
   when signed in, API keys (mint/list/revoke), "Your sites" across the
   person's and their teams' namespaces with access level, viewers, assets,
   rename and hand over (section 5), visitor counts, each namespace's usage against its quota (sites, stored
-  bytes; the same numbers `GET /api/me` returns as `usage`), and a link to
-  sessions. Calls the JSON routes of sections
+  bytes; the same numbers `GET /api/me` returns as `usage`), "Recently
+  deleted" (the person's and their teams' sites deleted in the last 30 days,
+  each with Restore; hidden when empty), and a link to sessions. Calls the JSON routes of sections
   2, 5, 7, 8, 11 and 12 with the session cookie.
 - **Status.** Built.
 - **Routes.** `GET /dashboard`.
@@ -540,7 +575,7 @@ Config names are documented in `docs/configuration.md`; schema in
 - **What.** `/healthz` (liveness) and `/readyz` (database and schema; bucket is
   reported, not gating) on every host. `/metrics` on its own port, never on
   the Service or Ingress: request counts and latency, `simplehost_bucket_ok`,
-  DB pool, build info. Structured request log. Rate limits and concurrency
+  `simplehost_config_warning` (startup checks, section 18), DB pool, build info. Structured request log. Rate limits and concurrency
   slots: sign-in, session hand-off, API key mint and the connector's token
   and registration limits are counted in Postgres and shared by every
   replica; every other limit is per pod in memory (`docs/install.md`,
@@ -582,6 +617,10 @@ Config names are documented in `docs/configuration.md`; schema in
   `OAUTH_REFRESH_TTL`, `OAUTH_REFRESH_TTL` over 90 days; clashing ports; `DB_APP_PASSWORD` equal to
   `DB_PASSWORD`; `DB_APP_USER` combined with `DB_DSN`; a schema newer than the
   binary unless every newer migration is marked backward-compatible.
+  Startup also warns (log line and `simplehost_config_warning{check}`),
+  without refusing, when no admin is configured (neither `ADMIN_EMAILS` nor
+  `OIDC_ADMIN_CLAIM`) and when the bucket reports versioning not enabled; a
+  provider that cannot report versioning is logged as unknown, not flagged.
   `simple-host migrate` applies the schema and sets the least-privilege
   `simplehost_app` role's password; the server connects as that role.
 - **Subcommands.** No argument runs the server. Others: `migrate`, `restore`, `migrate-storage`,

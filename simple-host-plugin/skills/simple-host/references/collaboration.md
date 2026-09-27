@@ -254,7 +254,13 @@ DELETE /api/collaboration/sites/<owner>/<site>/viewers/<username>
 ```
 
 Granting a viewer (a person or a team) sets the level to `specific`. The
-site's address does not change.
+site's address does not change. A company email works wherever a username
+does: it adds the person whose account carries it, or, if they have not
+signed in yet, adds them as pending. A pending viewer is listed with
+`"pending": true` and the email as `username`, counts toward the 50-viewer
+limit, is removed by that email, and can open the site after their first
+sign-in. Tell the user that is when access starts. An email outside the
+company's sign-in domains is refused with `400`.
 Removing the last viewer leaves the site at `specific`, open only to the owner
 or team, until the level is changed. Connector tools: `find_users`,
 `list_site_viewers`, `grant_site_viewer`, `revoke_site_viewer`.
@@ -279,8 +285,24 @@ instead of deleting and republishing: `POST .../rename {"name": "<new>"}`
 (`transfer_site`). Saved data, history, uploads, access and viewers stay with
 the site, and the old address redirects. See [`teams.md`](teams.md).
 
+A deleted site stops serving at once but can be restored for 30 days, whole:
+its versions, saved data and history, who can open it, viewers and uploaded
+files. Its name stays taken until then (a create answers `409` `name_held`:
+ask the user whether to restore it or pick another name). To bring one back,
+list them and restore the one the user names:
+
+```
+GET /api/deleted-sites
+POST /api/collaboration/sites/<owner>/<site>/restore
+```
+
+or `list_deleted_sites` then `restore_site`. A restore counts toward the
+namespace's limits again (`site_limit`, `storage_quota`). After 30 days the
+site is gone for good.
+
 Deleting a site does not delete the team that owned it. Deleting a team, or its
-last active member leaving, deletes every site it owns; see [`teams.md`](teams.md).
+last active member leaving, deletes every site it owns for good (no 30-day
+restore); see [`teams.md`](teams.md).
 
 ## Trust and state boundaries
 

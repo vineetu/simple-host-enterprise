@@ -439,6 +439,10 @@ Named viewers are managed under a site's "Viewers" section or through the
 API (`GET`/`POST /api/collaboration/sites/{owner}/{sitename}/viewers`,
 `DELETE .../viewers/{username}`). Adding one sets the site to `specific`;
 removing the last one leaves it there, open only to the owner or team.
+Viewers and team members can be named by company email (within
+`ALLOWED_EMAIL_DOMAINS` when set) before that person has ever signed in:
+they are listed as "hasn't signed in yet" and get access at their first
+sign-in with that verified email.
 Anyone a site is not shared with gets `404`, not `403`, so the site's
 existence is never confirmed to someone it isn't shown to.
 
@@ -521,12 +525,13 @@ Every mutation writes an `audit_events` row.
 These actions write it inside the same database transaction as the
 change it records (`internal/audit`'s `RecordTx`), so a mutation in this
 group without its audit row cannot commit: `site_create`, `site_update`,
-`site_delete`, `site_rollback`, `site_access`, `network_access_requested`,
+`site_delete`, `site_restore`, `site_rollback`, `site_access`, `network_access_requested`,
 `network_access_approval_added`, `network_access_approved`,
 `network_access_declined`,
 `network_access_reverted`, `state_restore`, `viewer_grant`,
 `viewer_revoke`, `team_create`,
-`team_delete`, `member_add`, `member_remove`, `sign_in`, `session_revoke`,
+`team_delete`, `member_add`, `member_remove`, `sign_in`,
+`pending_grant_converted`, `session_revoke`,
 `key_mint`, `key_revoke`, `connector_sign_in`, `connector_revoke`,
 `admin_disable_user`, `admin_enable_user`, `state_write`,
 `asset_create`, and `asset_delete` — the last three from the site-facing
@@ -837,6 +842,7 @@ PodMonitor, pod annotations, or any in-cluster scraper.
 | `simplehost_db_wait_count_total`, `simplehost_db_wait_seconds_total` | Waits for a free connection |
 | `simplehost_build_info{version,commit,schema}` | The running release |
 | `simplehost_bucket_ok` | 1 when the last bucket check (made by `/readyz`) succeeded, 0 when it failed |
+| `simplehost_config_warning{check}` | 1 while a startup warning stands, 0 once its check passed: `no_admin` (neither `ADMIN_EMAILS` nor `OIDC_ADMIN_CLAIM` is set) and `bucket_versioning` (the bucket reports versioning is not enabled; a provider that cannot report it is logged and not flagged) |
 | `simplehost_audit_stream_dropped_total` | Audit lines not written to stdout because the writer fell behind (the database rows are intact); should stay 0 |
 
 Probes: `/healthz` is liveness and checks nothing else. `/readyz` checks
@@ -855,6 +861,9 @@ No alerting stack ships with the package. What to watch:
 - `simplehost_bucket_ok` at 0, or `readyz: bucket:` in the logs. Pods stay
   Ready and cached pages keep serving, but uncached pages answer 503 and
   publishing fails until the bucket is fixed.
+- `simplehost_config_warning` at 1, or `WARNING:` lines at startup: no admin
+  configured, or bucket versioning off (a swept object then cannot be
+  brought back).
 - Failed CronJob runs (`kube_job_status_failed`), the prune job included.
 - The 5xx rate from `simplehost_http_requests_total`.
 - Certificate expiry (`certmanager_certificate_expiration_timestamp_seconds`,

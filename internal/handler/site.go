@@ -48,6 +48,9 @@ type SiteHandler struct {
 	// when CLAMD_ADDR is unset).
 	quota   UploadQuota
 	scanner scan.Scanner
+	// allowedEmailDomains is ALLOWED_EMAIL_DOMAINS, for viewers named by
+	// email (viewers.go).
+	allowedEmailDomains []string
 }
 
 // WithUploadLimits sets the per-owner quota and the malware scanner (nil for
@@ -232,6 +235,10 @@ func (h *SiteHandler) Register(mux *http.ServeMux, authMiddleware, skillVersionM
 	mux.Handle("POST /api/collaboration/sites/{owner}/{sitename}", browserWrite(ownerUpload(http.HandlerFunc(h.createCollaborationSite))))
 	mux.Handle("DELETE /api/collaboration/sites/{owner}/{sitename}", browserWrite(ownerMutation(http.HandlerFunc(h.deleteCollaborationSite))))
 	mux.Handle("POST /api/collaboration/sites/{owner}/{sitename}/access", browserWrite(ownerMutation(http.HandlerFunc(h.setCollaborationSiteAccess))))
+	// Recently deleted (site_restore.go).
+	mux.Handle("GET /api/deleted-sites", ownerMutation(http.HandlerFunc(h.listDeletedSites)))
+	mux.Handle("POST /api/sites/{sitename}/restore", browserWrite(ownerMutation(http.HandlerFunc(h.restoreSite))))
+	mux.Handle("POST /api/collaboration/sites/{owner}/{sitename}/restore", browserWrite(ownerMutation(http.HandlerFunc(h.restoreCollaborationSite))))
 }
 
 func (h *SiteHandler) limitUploadConcurrency(next http.Handler) http.Handler {
@@ -298,7 +305,7 @@ func (h *SiteHandler) newSiteNameAddressable(w http.ResponseWriter, r *http.Requ
 		})
 		return false
 	}
-	existing, err := db.ListSiteNamesByOwnerUsername(r.Context(), h.database, owner)
+	existing, err := db.ListHeldSiteNamesByOwnerUsername(r.Context(), h.database, owner)
 	if err != nil {
 		log.Printf("list sites for %q: %v", owner, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
@@ -438,6 +445,13 @@ func (h *SiteHandler) createSiteForTarget(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
+	if held, err := db.DeletedSiteHoldsName(r.Context(), h.database, target.OwnerID, siteName); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	} else if held {
+		writeNameHeld(w)
+		return
+	}
 
 	tx, err := h.database.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -453,6 +467,10 @@ func (h *SiteHandler) createSiteForTarget(w http.ResponseWriter, r *http.Request
 	site, err := db.CreateSite(r.Context(), tx, target.OwnerID, siteName)
 	if err != nil {
 		if isUniqueViolation(err) {
+			if held, _ := db.DeletedSiteHoldsName(r.Context(), h.database, target.OwnerID, siteName); held {
+				writeNameHeld(w)
+				return
+			}
 			writeJSON(w, http.StatusConflict, errorResponse{Error: "site already exists"})
 			return
 		}
@@ -809,19 +827,11 @@ func (h *SiteHandler) deleteSiteForTarget(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	// Serving stops the moment the row is gone; the objects follow after the
-	// grace period, so a replica mid-request on the old version finishes it.
-	sitePrefix, err := storage.SitePrefix(site.ID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	if err := db.RetireObjects(r.Context(), tx, sitePrefix, storage.RetireGrace); err != nil {
-		log.Printf("retire objects for %s/%s: %v", target.OwnerUsername, siteName, err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	if err := db.DeleteSite(r.Context(), tx, target.OwnerID, siteName); err != nil {
+	// Serving stops the moment the row is marked deleted. The row and the
+	// bucket objects stay as they are for db.DeletedSiteRetention, so the
+	// site can be restored whole (site_restore.go); the sweeper then purges
+	// the row and retires the objects.
+	if err := db.SoftDeleteSite(r.Context(), tx, site.ID, target.ActorID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, errorResponse{Error: "site not found"})
 			return
@@ -834,7 +844,10 @@ func (h *SiteHandler) deleteSiteForTarget(w http.ResponseWriter, r *http.Request
 		ActorID: target.ActorID, ActorKind: actorKind, KeyID: keyID,
 		Action: "site_delete", OwnerID: target.OwnerID, SiteID: site.ID,
 		RequestID: auditRequestID(r.Context()),
-		Extra:     map[string]any{"active_version": site.ActiveVersion},
+		Extra: map[string]any{
+			"active_version":   site.ActiveVersion,
+			"restorable_until": time.Now().Add(db.DeletedSiteRetention).UTC().Format(time.RFC3339),
+		},
 	}); err != nil {
 		log.Printf("record audit for site_delete %s/%s: %v", target.OwnerUsername, siteName, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})

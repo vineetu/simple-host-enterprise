@@ -431,7 +431,7 @@ paths:
 
     delete:
       summary: Delete a site
-      description: Deletes the site and all its versions from storage and the database.
+      description: The site stops serving at once and leaves every list. For 30 days it can be restored whole (`POST /api/sites/{sitename}/restore`) with its versions, saved data and history, access level, viewers and assets, and its name stays held (a create answers `409` `name_held`); then it is removed for good. Audited as `site_delete` with `restorable_until`.
       tags: [Sites]
       security:
         - apiKey: []
@@ -461,6 +461,107 @@ paths:
                 $ref: '#/components/schemas/Error'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+
+  /api/deleted-sites:
+    get:
+      summary: List recently deleted sites
+      description: Sites deleted in the last 30 days from the caller's own namespace and every team they belong to, newest first. A full-scope key or a browser session.
+      tags: [Sites]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+      responses:
+        '200':
+          description: The deleted sites
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeletedSite'
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/sites/{sitename}/restore:
+    post:
+      summary: Restore a recently deleted site
+      description: Brings back a site of the caller's own namespace deleted in the last 30 days, exactly as it was, and serves it again. It counts toward the owner's quota again (`409` `site_limit`, `413` `storage_quota`, restoring nothing). Audited as `site_restore`. A full-scope key or a browser session.
+      tags: [Sites]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/sitename'
+      responses:
+        '200':
+          description: Restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoredSite'
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`site_limit`: the namespace is at its site limit'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: '`storage_quota`: the site does not fit in the namespace''s storage quota'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/collaboration/sites/{owner}/{sitename}/restore:
+    post:
+      summary: Restore a recently deleted site in a named namespace
+      description: As `POST /api/sites/{sitename}/restore`, for the owner or any member of the owning team.
+      tags: [Collaboration]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+      responses:
+        '200':
+          description: Restored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoredSite'
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`site_limit`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: '`storage_quota`'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/sites/{sitename}/versions:
     get:
@@ -1338,6 +1439,47 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/admin/deleted-sites:
+    get:
+      summary: List every recently deleted site
+      description: Admin only, browser session only. Every site deleted in the last 30 days, across every owner.
+      tags: [Admin]
+      responses:
+        '200':
+          description: The deleted sites
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DeletedSite'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/admin/deleted-sites/{owner}/{sitename}/restore:
+    post:
+      summary: Restore a recently deleted site for its owner
+      description: Admin only, browser session only (the Recently deleted card on /admin). Same restore and quota check as the owner's route; audited as `site_restore` with `by_admin`.
+      tags: [Admin]
+      parameters:
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+      responses:
+        '200':
+          description: Restored
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`site_limit`'
+        '413':
+          description: '`storage_quota`'
+
   /api/admin/access-requests/{owner}/{sitename}/approve:
     post:
       summary: Approve a network access request
@@ -1888,12 +2030,12 @@ paths:
       tags: [Teams]
       responses:
         '200':
-          description: '`{"team", "members": [{"user_id", "username", "joined_at"}]}`'
+          description: '`{"team", "members": [{"user_id", "username", "joined_at"}]}`. Anyone added by email who has not signed in yet follows as `{"username": "<email>", "pending": true, "added_at"}`.'
         '404':
           $ref: '#/components/responses/NotFound'
     post:
       summary: Add people to a team
-      description: 'Body `{"usernames": [...]}`, at most 50.'
+      description: 'Body `{"usernames": [...]}`, at most 50. An entry may be a company email (refused with `400` `invalid_email` outside `ALLOWED_EMAIL_DOMAINS` when that is set): it adds the person whose account carries it, or, when nobody has signed in with it yet, a pending member who joins at their first sign-in with that verified email. Pending members count toward the 50.'
       tags: [Teams]
       responses:
         '200':
@@ -1904,7 +2046,7 @@ paths:
   /api/teams/{team}/members/{username}:
     delete:
       summary: Remove a member
-      description: Removing yourself is the same as `POST /api/teams/{team}/leave`, including its `confirm_name`.
+      description: Removing yourself is the same as `POST /api/teams/{team}/leave`, including its `confirm_name`. `username` may be an email, which removes that pending member (or the member whose account carries it).
       tags: [Teams]
       parameters:
         - $ref: '#/components/parameters/team'
@@ -2173,6 +2315,26 @@ components:
       example: '"site-4b256b3b-9d15-4ce5-bba7-b04ef26f49e5-v7"'
 
   schemas:
+    DeletedSite:
+      type: object
+      required: [owner, site, active_version, access, deleted_at, restorable_until]
+      properties:
+        owner: {type: string, description: The namespace it was in}
+        site: {type: string, description: Its name; held until it is restored or removed for good}
+        active_version: {type: integer, description: The version live when it was deleted}
+        access: {type: string, description: Who could open it; restored as it was}
+        deleted_at: {type: string, format: date-time}
+        deleted_by: {type: string, description: Username of whoever deleted it}
+        restorable_until: {type: string, format: date-time, description: When it is removed for good}
+    RestoredSite:
+      type: object
+      required: [owner, site, active_version, access, url]
+      properties:
+        owner: {type: string}
+        site: {type: string}
+        active_version: {type: integer}
+        access: {type: string}
+        url: {type: string, description: The site's address}
     Site:
       type: object
       properties:

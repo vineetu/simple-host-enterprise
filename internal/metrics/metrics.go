@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 )
@@ -28,6 +29,9 @@ type Registry struct {
 	// auditDropped reports SIEM stream lines dropped (audit.Stream); nil
 	// leaves the metric out.
 	auditDropped func() uint64
+	// warnings are the startup configuration checks (SetConfigWarning), by
+	// name; true means the warning is raised.
+	warnings map[string]bool
 }
 
 func New() *Registry {
@@ -70,6 +74,18 @@ func (r *Registry) SetBucketOK(ok bool) {
 	}
 }
 
+// SetConfigWarning records one startup configuration check, exported as
+// simplehost_config_warning{check=name}: 1 while the warning stands, 0 once
+// the check passed.
+func (r *Registry) SetConfigWarning(name string, raised bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.warnings == nil {
+		r.warnings = map[string]bool{}
+	}
+	r.warnings[name] = raised
+}
+
 // Middleware counts every request the wrapped handler answers.
 func (r *Registry) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -105,6 +121,15 @@ func (r *Registry) Handler(db *sql.DB, build Build) http.Handler {
 		counts := append([]uint64(nil), r.counts...)
 		sum, total := r.sum, r.total
 		bucket := r.bucket
+		warnings := make([]string, 0, len(r.warnings))
+		for name := range r.warnings {
+			warnings = append(warnings, name)
+		}
+		sort.Strings(warnings)
+		raised := make([]bool, len(warnings))
+		for i, name := range warnings {
+			raised[i] = r.warnings[name]
+		}
 		r.mu.Unlock()
 
 		fmt.Fprintln(w, "# HELP simplehost_http_requests_total HTTP requests answered, by status class.")
@@ -133,6 +158,18 @@ func (r *Registry) Handler(db *sql.DB, build Build) http.Handler {
 				ok = 1
 			}
 			fmt.Fprintf(w, "simplehost_bucket_ok %d\n", ok)
+		}
+
+		if len(warnings) > 0 {
+			fmt.Fprintln(w, "# HELP simplehost_config_warning A startup configuration check: 1 while its warning stands (see the startup log).")
+			fmt.Fprintln(w, "# TYPE simplehost_config_warning gauge")
+			for i, name := range warnings {
+				v := 0
+				if raised[i] {
+					v = 1
+				}
+				fmt.Fprintf(w, "simplehost_config_warning{check=%q} %d\n", name, v)
+			}
 		}
 
 		if r.auditDropped != nil {

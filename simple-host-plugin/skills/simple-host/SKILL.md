@@ -1,6 +1,6 @@
 ---
 name: simple-host
-description: Deploy and collaborate on static websites in Simple Host. Use when an agent needs to get the user signed in and holding an API key, validate and package a local site, choose the namespace a site is published under, create or update a site, choose who can open it, resolve owned/team sites, download an exact retained artifact, deploy with ETag conflict protection, create a team or manage its members, restore saved data, list versions, roll back, or delete.
+description: Deploy and collaborate on static websites in Simple Host. Use when an agent needs to get the user signed in and holding an API key, validate and package a local site, choose the namespace a site is published under, create or update a site, choose who can open it, resolve owned/team sites, download an exact retained artifact, deploy with ETag conflict protection, create a team or manage its members, restore saved data, list versions, roll back, delete, or restore a recently deleted site.
 ---
 
 # Simple Host
@@ -190,7 +190,7 @@ References are one level deep. Read each selected file completely before acting.
 |---|---|
 | Install or update skills | [`references/updating.md`](references/updating.md) |
 | Sign in and get a key | [`references/account-recovery.md`](references/account-recovery.md) |
-| Edit, download, roll back, delete, share, or restore saved data of an existing site | [`references/collaboration.md`](references/collaboration.md) |
+| Edit, download, roll back, delete, restore a deleted site, share, or restore saved data of an existing site | [`references/collaboration.md`](references/collaboration.md) |
 | Create, list, join, leave, or delete a team; rename a site or hand it to a team or another person | [`references/teams.md`](references/teams.md) |
 | Detect and build a framework with relative paths | [`references/frameworks.md`](references/frameworks.md) |
 | Validate, package, upload, and verify a site | [`references/packaging-and-validation.md`](references/packaging-and-validation.md) |
@@ -240,7 +240,7 @@ Typical combinations:
     | Level | Who can open it |
     |---|---|
     | `only_me` | You, or the team's members. The default. |
-    | `specific` | Also named people or teams (`grant_site_viewer`). |
+    | `specific` | Also named people or teams (`grant_site_viewer`; a company email adds someone who has not signed in yet, who gets access at first sign-in). |
     | `company` | Anyone signed in at the company with the link. |
     | `listed` | Company, and shown in the showcase and search. |
     | `network` | Anyone who can reach the server, no sign-in. Needs an admin's approval. |

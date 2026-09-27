@@ -77,6 +77,22 @@ func (s *Store) Close() error { return s.cache.close() }
 // Objects exposes the bucket for the operator subcommands.
 func (s *Store) Objects() Objects { return s.objects }
 
+// BucketVersioning reports whether the bucket keeps noncurrent versions.
+// known is false when the bucket kind or provider cannot say.
+func (s *Store) BucketVersioning(ctx context.Context) (enabled, known bool) {
+	reporter, ok := s.objects.(interface {
+		Versioning(context.Context) (bool, error)
+	})
+	if !ok {
+		return false, false
+	}
+	enabled, err := reporter.Versioning(ctx)
+	if err != nil {
+		return false, false
+	}
+	return enabled, true
+}
+
 // Ping proves the bucket is reachable, for readiness.
 func (s *Store) Ping(ctx context.Context) error { return s.objects.Ping(ctx) }
 

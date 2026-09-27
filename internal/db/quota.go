@@ -32,10 +32,11 @@ func LockOwnerQuota(ctx context.Context, tx *sql.Tx, ownerID string) error {
 func OwnerUsageOf(ctx context.Context, q Querier, ownerID string) (OwnerUsage, error) {
 	const query = `
 		SELECT
-			(SELECT count(*) FROM sites WHERE user_id = $1),
-			(SELECT COALESCE(sum(v.size_bytes), 0) FROM versions v JOIN sites s ON s.id = v.site_id WHERE s.user_id = $1)
+			(SELECT count(*) FROM sites WHERE user_id = $1 AND deleted_at IS NULL),
+			(SELECT COALESCE(sum(v.size_bytes), 0) FROM versions v JOIN sites s ON s.id = v.site_id
+			   WHERE s.user_id = $1 AND s.deleted_at IS NULL)
 			+ (SELECT COALESCE(sum(a.size), 0) FROM site_assets a JOIN sites s ON s.id = a.site_id
-			   WHERE s.user_id = $1 AND a.deleted_at IS NULL)
+			   WHERE s.user_id = $1 AND s.deleted_at IS NULL AND a.deleted_at IS NULL)
 	`
 	var usage OwnerUsage
 	err := q.QueryRowContext(ctx, query, ownerID).Scan(&usage.Sites, &usage.Bytes)

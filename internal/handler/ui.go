@@ -28,8 +28,10 @@ const (
 	skillBundleName      = "simple-host-skills"
 	skillBundleURL       = "/skills.zip"
 	// skillReleaseType is hand-set, so it has to move with the version above
-	// it. 0.13.2 documents handing a site over and renaming it
-	// (transfer_site, rename_site); 0.13.1 corrects skill and tool text (428 on owner-qualified
+	// it. 0.14.0 documents handing a site over and renaming it
+	// (transfer_site, rename_site), restoring a deleted site (list_deleted_sites,
+	// restore_site), and viewers and team members named by email before they
+	// sign in (pending); 0.13.1 corrects skill and tool text (428 on owner-qualified
 	// routes, team limits, asset URLs); 0.13.0 documents per-site addresses
 	// (<site>.<owner>.<base>) and team- names; 0.12.1 asks for a publish key
 	// by default (Full only for management actions); 0.12.0 documented API key scopes

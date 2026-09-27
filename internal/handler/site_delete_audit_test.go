@@ -104,6 +104,12 @@ func (s *siteDeleteAuditState) exec(query string, args []driver.NamedValue) (dri
 	case strings.Contains(normalized, "INSERT INTO site_search_queue"):
 		// db.EnqueueSiteSearch.
 		return driver.RowsAffected(1), nil
+	case strings.Contains(normalized, "UPDATE sites SET deleted_at = now()"):
+		// db.SoftDeleteSite: the row stays, marked deleted.
+		s.mu.Lock()
+		s.siteDeleted = true
+		s.mu.Unlock()
+		return driver.RowsAffected(1), nil
 	case strings.Contains(normalized, "DELETE FROM sites"):
 		// db.DeleteSite. This runs BEFORE the audit_events insert below,
 		// which is exactly the ordering that violates
@@ -228,13 +234,14 @@ func TestDeleteSiteCommitsAuditAfterSiteRowIsGone(t *testing.T) {
 	retired := append([]string(nil), state.retired...)
 	state.mu.Unlock()
 
-	// The site's objects are queued for the sweep in the same transaction.
-	if len(retired) != 1 || retired[0] != "sites/"+siteDeleteTestSiteID+"/" {
-		t.Fatalf("retired = %v, want the site's prefix", retired)
+	// The objects stay put while the site can be restored; the sweeper
+	// retires them when it purges the row.
+	if len(retired) != 0 {
+		t.Fatalf("retired = %v, want nothing queued at delete", retired)
 	}
 
 	if !deleted {
-		t.Fatal("DELETE FROM sites was never executed")
+		t.Fatal("the site was never marked deleted")
 	}
 	if len(actions) != 1 || actions[0] != "site_delete" {
 		t.Fatalf("audit actions = %v, want exactly one site_delete", actions)

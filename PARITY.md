@@ -23,6 +23,7 @@ that should get it). Last derived from both `FEATURES.md` files and code on 2026
 | Area | Hosted | Enterprise | Status |
 |---|---|---|---|
 | Sites: deploy, versions, rollback, delete | tar.gz/zip or inline JSON files; `KEEP_VERSIONS`; rollback; delete | tar.gz or MCP file list, `If-Match` ETags; 5 versions kept; rollback; delete | `same` |
+| Recently deleted (undo a delete) | delete is immediate and final | 30 days: whole site (files, saved data, access, viewers, assets) restorable by owner, team member or admin; name held; purged by the sweeper | `gap → hosted` |
 | Site rename | `PATCH /v1/sites/{s}`, `rename_site`; old address 404s | `POST .../rename`, `rename_site`, dashboard; old address redirects until the name is reused | `gap → hosted` — the old address should redirect |
 | Hand a site to another owner | none | `POST .../transfer`, `transfer_site`, dashboard; admin moves a leaver's or abandoned team's sites; old address redirects | `different on purpose` — hosted has no teams or company leavers |
 | Site export with saved data | `export.tar.gz` (files + state + collections) | version archive download only (files, no saved data) | `gap → enterprise` |
@@ -32,8 +33,8 @@ that should get it). Last derived from both `FEATURES.md` files and code on 2026
 | Person / owner index page | `<handle>.<domain>/`, public, lists public sites | `<owner>.<base>/`, sign-in required, only listed sites to others | `different on purpose` — company content stays behind company sign-in |
 | Free `<name>.<domain>` names | first come, verified at once | none | `different on purpose` — enterprise non-goal: the person's name in the address is the identity |
 | Custom domains | CNAME/A bind, 24 h provisional, Caddy on-demand TLS on boxes | none | `different on purpose` — enterprise non-goal (no per-site custom domains) |
-| Who can open a site | pages always public; `public`/`unlisted` listing only | five levels `only_me`/`specific`/`company`/`listed`/`network`, admin approval (optionally two) for network, named viewers | `different on purpose` — hosted non-goal: no private pages; enterprise default is only-me |
-| Teams | none; one person per account | `team-<name>` namespaces, one role | `different on purpose` — hosted accounts are single people (event participants get their own key) |
+| Who can open a site | pages always public; `public`/`unlisted` listing only | five levels `only_me`/`specific`/`company`/`listed`/`network`, admin approval (optionally two) for network, named viewers (by username or company email, pending until first sign-in) | `different on purpose` — hosted non-goal: no private pages; enterprise default is only-me |
+| Teams | none; one person per account | `team-<name>` namespaces, one role; members by username or company email (pending until first sign-in) | `different on purpose` — hosted accounts are single people (event participants get their own key) |
 | Saved state | one JSON doc; atomic ops (`set`/`inc`/`append`/`remove`/`removeWhere`) + `PUT` with `If-Match`; 1 MB | one JSON doc; last-write-wins or versioned compare-and-set | `different on purpose` — hosted writes need a signed-in visitor or key; enterprise: every viewer is signed in |
 | Saved-state history and restore | none | last 20 writes kept, owner or team restores | `gap → hosted` — any signed-in visitor can overwrite state, so it needs the same undo |
 | Collections and private collections | append-only lists; private ones on a site's own origin, owner-only read, CSV export | none | `different on purpose` — enterprise decision 2026-09-23: per-site state is the only data store |
@@ -62,7 +63,7 @@ that should get it). Last derived from both `FEATURES.md` files and code on 2026
 | Event / hackathon instances | setup page, participant accounts, `simple-hack.app` names | none | `different on purpose` — this is the small-box edition's job |
 | Storage backend | local disk (`DATA_DIR`), served by nginx or Caddy | S3-compatible bucket, pod cache, SSE, optional envelope encryption, retire sweep | `different on purpose` — one folder on one box vs replicas |
 | Deployment model | one binary + Postgres + disk: systemd on simple-host.app; `deploy/install/install.sh` + Docker Compose + Caddy for a small box | Kubernetes (kustomize), cert-manager, least-privilege DB role, TLS-only DB and bucket, startup refusals, rollback-safe migrations | `different on purpose` — owner decision: hosted is the small-box edition, enterprise the cluster edition |
-| Health and metrics | `/healthz`, `/readyz` | `/healthz`, `/readyz`, `/metrics` on its own port | `different on purpose` — no metrics stack on a small box |
+| Health and metrics | `/healthz`, `/readyz` | `/healthz`, `/readyz`, `/metrics` on its own port; startup warnings (no admin, bucket versioning off) logged and exported | `different on purpose` — no metrics stack on a small box |
 | Static, marketing and legal pages | landing, features, enterprise pages, terms, privacy, support | landing, docs, capabilities, install, changelog | `different on purpose` — public service vs internal install |
 | Notifications | none (sign-in email only) | none (SIEM stream only) | `same` |
 
@@ -106,7 +107,7 @@ Every numbered `FEATURES.md` section, per repo, and the rows above that cover it
 | enterprise | API keys (CI and automation) | API keys rows |
 | enterprise | MCP server, OAuth connector, plugin.zip | MCP connector; Connector token lifetime; Skills and plugin |
 | enterprise | Skills bundle and skill-version gate | Skills and plugin |
-| enterprise | Sites: deploy, versions, rollback, delete | Sites; Site rename; Hand a site to another owner; Site export; Per-site hosts; Quotas; Malware scan |
+| enterprise | Sites: deploy, versions, rollback, delete | Sites; Recently deleted; Site rename; Hand a site to another owner; Site export; Per-site hosts; Quotas; Malware scan |
 | enterprise | Bucket storage, cache, retire sweep, migrate-storage, restore and reencrypt | Storage backend |
 | enterprise | Access levels and network approval | Who can open a site |
 | enterprise | Named viewers (restricted sites) | Who can open a site |

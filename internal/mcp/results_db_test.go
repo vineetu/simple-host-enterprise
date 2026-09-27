@@ -186,7 +186,8 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	call("list_teams", map[string]any{})
 	call("get_account", map[string]any{}) // now with a team
 	call("find_team_members", map[string]any{"team": "acme-team", "query": "bo"})
-	call("add_team_member", map[string]any{"team": "acme-team", "usernames": []any{"bob"}})
+	// An email nobody has signed in with yet is a pending member.
+	call("add_team_member", map[string]any{"team": "acme-team", "usernames": []any{"bob", "new.hire@example.com"}})
 	call("list_team_members", map[string]any{"team": "acme-team"})
 
 	call("deploy_site", map[string]any{"site": "demo", "files": []any{index, logo}})
@@ -212,7 +213,7 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	call("set_site_access", map[string]any{"site": "demo", "owner": "alice", "level": "company"})
 
 	call("find_users", map[string]any{"site": "demo", "owner": "alice", "query": "a"})
-	call("grant_site_viewer", map[string]any{"site": "demo", "owner": "alice", "usernames": []any{"team-acme-team"}})
+	call("grant_site_viewer", map[string]any{"site": "demo", "owner": "alice", "usernames": []any{"team-acme-team", "guest@example.com"}})
 	call("list_site_viewers", map[string]any{"site": "demo", "owner": "alice"})
 
 	// State and files, on a restricted site: the owner host still answers.
@@ -255,6 +256,7 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 		t.Errorf("restore_state_version = %v, want version 2", got)
 	}
 	call("revoke_site_viewer", map[string]any{"site": "demo", "owner": "alice", "username": "team-acme-team"})
+	call("revoke_site_viewer", map[string]any{"site": "demo", "owner": "alice", "username": "guest@example.com"})
 
 	call("list_sites", map[string]any{})
 	if got := call("rename_site", map[string]any{"site": "other", "name": "other-two"}); got["name"] != "other-two" || got["previous_url_status"] != "redirects" {
@@ -266,13 +268,20 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	call("transfer_site", map[string]any{"site": "other-two", "owner": "team-acme-team", "to": "alice"})
 	call("delete_site", map[string]any{"site": "other-two", "owner": "alice", "confirm_name": "other-two"})
 	call("delete_site", map[string]any{"site": "demo", "confirm_name": "demo"})
+	if deleted := call("list_deleted_sites", map[string]any{}); deleted["count"] != float64(2) {
+		t.Errorf("list_deleted_sites = %v, want both deleted sites", deleted)
+	}
+	if restored := call("restore_site", map[string]any{"site": "other", "owner": "alice"}); restored["site"] != "other" {
+		t.Errorf("restore_site = %v", restored)
+	}
+	call("delete_site", map[string]any{"site": "other", "owner": "alice", "confirm_name": "other"})
 	call("remove_team_member", map[string]any{"team": "acme-team", "username": "bob"})
 	call("delete_team", map[string]any{"team": "acme-team"})
 
 	// Leaving: once with somebody left, once as the last member, which
 	// deletes the team; and removing yourself, which is leaving.
 	call("create_team", map[string]any{"name": "crew"})
-	call("add_team_member", map[string]any{"team": "crew", "usernames": []any{"bob"}})
+	call("add_team_member", map[string]any{"team": "crew", "usernames": []any{"bob", "later@example.com"}})
 	call("leave_team", map[string]any{"team": "crew"})
 	call("create_team", map[string]any{"name": "crew-two"})
 	call("leave_team", map[string]any{"team": "crew-two", "confirm_name": "crew-two"})

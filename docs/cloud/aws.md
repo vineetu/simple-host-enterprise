@@ -115,7 +115,7 @@ and EKS Pod Identity. The code requires both keys set or neither.
 - **IRSA:** annotate the `simple-host` ServiceAccount with `eks.amazonaws.com/role-arn: <role-arn>`.
 - **Pod Identity:** create a pod identity association for `simple-host/simple-host`.
 
-The role needs `s3:ListBucket` on the bucket, and `s3:GetObject`, `s3:PutObject` and
+The role needs `s3:ListBucket` (and, for the startup versioning check, `s3:GetBucketVersioning`) on the bucket, and `s3:GetObject`, `s3:PutObject` and
 `s3:DeleteObject` on `<bucket>/*`. With SSE-KMS, it also needs `kms:GenerateDataKey` and `kms:Decrypt` on the key.
 
 ## 6. OIDC provider notes

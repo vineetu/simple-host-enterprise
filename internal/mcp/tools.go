@@ -461,6 +461,42 @@ func toolList() []Tool {
 			},
 		},
 		{
+			Name:  "list_deleted_sites",
+			Title: "List recently deleted sites",
+			Description: "List the sites deleted in the last 30 days from your account and from every team you are in. " +
+				"Each entry gives `owner`, `site`, who deleted it (`deleted_by`), `deleted_at`, and `restorable_until`, after which it is gone for good. " +
+				"Call this when the user wants a deleted site back, then restore_site with the exact owner and site.",
+			InputSchema: noArgs(),
+			Annotations: readOnly(),
+			family:      familySite,
+			call: func(map[string]any) (upstream, error) {
+				return upstream{Method: "GET", Path: "/api/deleted-sites"}, nil
+			},
+		},
+		{
+			Name:  "restore_site",
+			Title: "Restore a deleted site",
+			Description: "Bring back a site deleted in the last 30 days, exactly as it was: its live version and older versions, saved data and its history, who can open it, its viewers and its uploaded files. " +
+				"It is served again at once at the returned `url`. Get the exact owner and site from list_deleted_sites. " +
+				"Works for your own sites and for sites of a team you are in. It counts toward the namespace's site and storage limits again, so it can be refused with `site_limit` or `storage_quota`.",
+			InputSchema: object(map[string]any{
+				"site":  str("The deleted site's name, exactly as list_deleted_sites shows it."),
+				"owner": str(ownerArgDesc + " Omit only for a site that was in your own account."),
+			}, "site"),
+			Annotations: writes(false, false),
+			family:      familySite,
+			call: func(args map[string]any) (upstream, error) {
+				ownerScoped, collaboration, err := siteRoute(args, "restore")
+				if err != nil {
+					return upstream{}, err
+				}
+				if collaboration != "" {
+					return upstream{Method: "POST", Path: collaboration}, nil
+				}
+				return upstream{Method: "POST", Path: ownerScoped}, nil
+			},
+		},
+		{
 			Name:  "rollback_site",
 			Title: "Roll back to an earlier version",
 			Description: "Make one of a site's earlier versions live again. This changes what visitors see immediately. " +
@@ -574,7 +610,8 @@ func toolList() []Tool {
 			Name:  "list_site_viewers",
 			Title: "List a site's named viewers",
 			Description: "List the named viewers (people or teams) of a site. They matter only while the site's access level is `specific`. " +
-				"The owner and members of the owning team can always open it and are not listed.",
+				"The owner and members of the owning team can always open it and are not listed. " +
+				"Someone added by email who hasn't signed in yet is listed with `pending: true` and their email as `username`.",
 			InputSchema: object(map[string]any{
 				"site":  str(siteArgDesc),
 				"owner": str(ownerArgDesc),
@@ -589,13 +626,15 @@ func toolList() []Tool {
 			Name:  "grant_site_viewer",
 			Title: "Share a site with named people or teams",
 			Description: "Add people or teams to a site's viewer list and set its access level to `specific`: only they, plus the owner or the owning team, can open it. " +
-				"Names must be exact — call find_users. Works for the owner or a member of the owning team.",
+				"Names must be exact — call find_users. A company email also works: it adds the person with that account, or, if they haven't signed in yet, " +
+				"adds them as pending (counted toward the 50-viewer limit) and they can open the site after their first sign-in. " +
+				"Works for the owner or a member of the owning team.",
 			InputSchema: object(map[string]any{
 				"site":  str(siteArgDesc),
 				"owner": str(ownerArgDesc),
 				"usernames": map[string]any{
 					"type":        "array",
-					"description": "Exact usernames or team names to add as viewers.",
+					"description": "Exact usernames or team names, or company emails, to add as viewers.",
 					"minItems":    1,
 					"items":       map[string]any{"type": "string"},
 				},
@@ -614,11 +653,11 @@ func toolList() []Tool {
 		{
 			Name:        "revoke_site_viewer",
 			Title:       "Remove a named viewer",
-			Description: "Remove one person or team from a site's viewer list. The access level does not change: removing the last viewer leaves the site open only to its owner or team until set_site_access says otherwise.",
+			Description: "Remove one person or team from a site's viewer list, or a pending viewer by their email. The access level does not change: removing the last viewer leaves the site open only to its owner or team until set_site_access says otherwise.",
 			InputSchema: object(map[string]any{
 				"site":     str(siteArgDesc),
 				"owner":    str(ownerArgDesc),
-				"username": str("Exact username or team name to remove, as shown by list_site_viewers."),
+				"username": str("Exact username, team name or email to remove, as shown by list_site_viewers."),
 			}, "site", "owner", "username"),
 			Annotations: writes(true, true),
 			family:      familySite,
@@ -776,8 +815,10 @@ func toolList() []Tool {
 		},
 		{
 			Name:  "delete_site",
-			Title: "Delete a site permanently",
-			Description: "Permanently delete a site and every version of it. This cannot be undone and the URL stops working immediately. " +
+			Title: "Delete a site",
+			Description: "Delete a site and every version of it. The URL stops working immediately and the site leaves every list. " +
+				"For 30 days it stays in Recently deleted and restore_site brings it back whole (files, saved data and its history, who can open it, viewers, uploaded files); " +
+				"its name stays taken until then. After 30 days it is gone for good. " +
 				"Works on a site you own and on a site owned by a team you are in. " +
 				"Always confirm with the user before calling this. " +
 				"There is no way to delete a single version — use rollback_site to stop serving an unwanted one.",
@@ -905,7 +946,7 @@ func toolList() []Tool {
 		{
 			Name:  "list_team_members",
 			Title: "List a team's members",
-			Description: "List the people in a team and when each of them joined. " +
+			Description: "List the people in a team and when each of them joined, then anyone added by email who hasn't signed in yet (`pending: true`, their email as `username`). " +
 				"Everybody listed has the same powers over the team and over every site it owns; there are no roles to compare.",
 			InputSchema: object(map[string]any{
 				"team": str(teamArgDesc),
@@ -946,13 +987,14 @@ func toolList() []Tool {
 		{
 			Name:  "add_team_member",
 			Title: "Add people to a team",
-			Description: "Add registered people to a team. There is no lesser role to add somebody as: everyone added can immediately publish over, roll back and delete every site the team owns, add and remove other members, and delete the team. " +
-				"Confirm with the user before adding anyone. Usernames must be exact — call find_team_members first if you only know a person's name.",
+			Description: "Add people to a team. There is no lesser role to add somebody as: everyone added can immediately publish over, roll back and delete every site the team owns, add and remove other members, and delete the team. " +
+				"Confirm with the user before adding anyone. Usernames must be exact — call find_team_members first if you only know a person's name. " +
+				"A company email also works: it adds the person with that account, or, if they haven't signed in yet, adds them as pending (counted toward the 50-member limit) and they join at their first sign-in.",
 			InputSchema: object(map[string]any{
 				"team": str(teamArgDesc),
 				"usernames": map[string]any{
 					"type":        "array",
-					"description": "Exact usernames to add to the team, as shown by find_team_members.",
+					"description": "Exact usernames to add to the team, as shown by find_team_members, or company emails.",
 					"minItems":    1,
 					"items":       map[string]any{"type": "string"},
 				},
@@ -975,11 +1017,11 @@ func toolList() []Tool {
 		{
 			Name:  "remove_team_member",
 			Title: "Remove somebody from a team",
-			Description: "Remove one person from a team. They lose access to every site the team owns immediately, but versions they deployed stay live until somebody rolls them back. " +
+			Description: "Remove one person from a team, or a pending member by their email. They lose access to every site the team owns immediately, but versions they deployed stay live until somebody rolls them back. " +
 				"To take the user themself out, call leave_team instead.",
 			InputSchema: object(map[string]any{
 				"team":     str(teamArgDesc),
-				"username": str("Exact username to remove, as shown by list_team_members."),
+				"username": str("Exact username or email to remove, as shown by list_team_members."),
 				"confirm_name": str("Only when removing yourself would delete the team (you are its last active member): the team's name typed again, after the user agreed. " +
 					"Otherwise omit it."),
 			}, "team", "username"),

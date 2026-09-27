@@ -362,14 +362,14 @@ func TestOpenAPIDocumentsEveryManagementClientBootstrap(t *testing.T) {
 			t.Errorf("OpenAPI is missing %q", want)
 		}
 	}
-	if got := strings.Count(document, "#/components/parameters/SkillVersion"); got != 22 {
-		t.Fatalf("documented %d guarded management operations, want 22", got)
+	if got := strings.Count(document, "#/components/parameters/SkillVersion"); got != 25 {
+		t.Fatalf("documented %d guarded management operations, want 25", got)
 	}
-	if got := strings.Count(document, "#/components/parameters/SimpleHostClient"); got != 22 {
-		t.Fatalf("documented %d direct-client classifications, want 22", got)
+	if got := strings.Count(document, "#/components/parameters/SimpleHostClient"); got != 25 {
+		t.Fatalf("documented %d direct-client classifications, want 25", got)
 	}
 	if got := strings.Count(document, "#/components/responses/SkillVersionRequired") +
-		strings.Count(document, "#/components/responses/ManagementBadRequest"); got != 22 {
-		t.Fatalf("documented %d management bootstrap errors, want 22", got)
+		strings.Count(document, "#/components/responses/ManagementBadRequest"); got != 25 {
+		t.Fatalf("documented %d management bootstrap errors, want 25", got)
 	}
 }

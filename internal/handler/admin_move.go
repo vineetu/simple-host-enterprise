@@ -16,8 +16,8 @@ import (
 // has been disabled, and those of a team none of whose members can sign in.
 // Anyone else's sites are theirs (or their team's) to hand over or delete.
 
-// WithQuota sets the per-owner quota an admin's move is held to, the same one
-// deploys and owners' own moves are.
+// WithQuota sets the per-owner quota an admin's move or restore is held to,
+// the same one deploys and owners' own moves are.
 func (h *AdminHandler) WithQuota(quota UploadQuota) *AdminHandler {
 	h.quota = quota
 	return h

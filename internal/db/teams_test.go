@@ -204,7 +204,7 @@ func TestTeamMemberBatchIsDeterministicAndStrict(t *testing.T) {
 	if MaxTeamMembers != 50 {
 		t.Fatalf("MaxTeamMembers = %d, want 50", MaxTeamMembers)
 	}
-	if err := AddTeamMembers(context.Background(), &teamExecQuerier{}, "team", nil, "actor"); err != nil {
+	if _, err := AddTeamMembers(context.Background(), &teamExecQuerier{}, "team", nil, "actor"); err != nil {
 		t.Fatalf("empty batch returned %v", err)
 	}
 
@@ -212,7 +212,7 @@ func TestTeamMemberBatchIsDeterministicAndStrict(t *testing.T) {
 	for i := 0; i <= MaxTeamMembers; i++ {
 		oversized = append(oversized, string(rune('a'+i%26))+string(rune('a'+i/26))+"user")
 	}
-	if err := AddTeamMembers(context.Background(), &teamExecQuerier{}, "team", oversized, "actor"); !errors.Is(err, ErrTeamMemberLimit) {
+	if _, err := AddTeamMembers(context.Background(), &teamExecQuerier{}, "team", oversized, "actor"); !errors.Is(err, ErrTeamMemberLimit) {
 		t.Fatalf("oversized batch error = %v, want ErrTeamMemberLimit", err)
 	}
 }

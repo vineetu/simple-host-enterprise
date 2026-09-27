@@ -211,6 +211,7 @@ func run() (runErr error) {
 
 	requestMetrics := metrics.New()
 	requestMetrics.SetAuditStreamDropped(auditStream.Dropped)
+	startupWarnings(cfg, siteStore, requestMetrics)
 	handler.RegisterHealthRoutes(mux, database, siteStore.Ping, requestMetrics.SetBucketOK)
 	publicSearchHandler.Register(mux, authMW, handler.CookieOriginCheck(hosts, cfg.PublicBaseURL))
 	// Upload limits: per-owner quotas, and the malware scan when CLAMD_ADDR
@@ -222,8 +223,8 @@ func run() (runErr error) {
 		log.Printf("malware scan: uploads are scanned by clamd at %s", cfg.Clamd.Addr)
 	}
 	handler.NewUserHandler(database, abuseLimits).WithQuota(quota).Register(mux, authMW, skillVersionMW)
-	handler.NewSiteHandler(database, siteStore, cfg.PublicBaseURL, hosts, abuseLimits).WithAudit(auditRecorder).WithNetworkAccessApprovals(cfg.NetworkAccessApprovals).WithUploadLimits(quota, scanner).Register(mux, authMW, skillVersionMW)
-	handler.NewTeamHandler(database, abuseLimits).WithAudit(auditRecorder).Register(mux, authMW, skillVersionMW, hosts, cfg.PublicBaseURL)
+	handler.NewSiteHandler(database, siteStore, cfg.PublicBaseURL, hosts, abuseLimits).WithAudit(auditRecorder).WithNetworkAccessApprovals(cfg.NetworkAccessApprovals).WithUploadLimits(quota, scanner).WithAllowedEmailDomains(cfg.OIDC.AllowedEmailDomains).Register(mux, authMW, skillVersionMW)
+	handler.NewTeamHandler(database, abuseLimits).WithAudit(auditRecorder).WithAllowedEmailDomains(cfg.OIDC.AllowedEmailDomains).Register(mux, authMW, skillVersionMW, hosts, cfg.PublicBaseURL)
 	// Held rather than registered inline: the classification worker starts
 	// after the routes are wired, and the handler is given it once it exists.
 	// The route closures capture this pointer, so attaching later is enough.
@@ -350,6 +351,29 @@ const maxOpenDBConns = 20
 // openStore builds the site store the server and the storage subcommands
 // share: the configured bucket, the database as the index of what is live,
 // and the pod-local cache.
+// startupWarnings logs, and exports as simplehost_config_warning, the
+// settings that let the server start but leave something unrecoverable: no
+// way to name an admin, and a bucket that keeps no noncurrent versions (the
+// only copy of a swept site). A provider that cannot report versioning is
+// logged as unknown and not flagged.
+func startupWarnings(cfg config.Config, siteStore *storage.Store, registry *metrics.Registry) {
+	noAdmin := len(cfg.OIDC.AdminEmails) == 0 && cfg.OIDC.AdminClaim == ""
+	if noAdmin {
+		log.Print("WARNING: no admin is configured (neither ADMIN_EMAILS nor OIDC_ADMIN_CLAIM): nobody can approve network access, disable people or restore deleted sites from /admin")
+	}
+	registry.SetConfigWarning("no_admin", noAdmin)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	enabled, known := siteStore.BucketVersioning(ctx)
+	switch {
+	case !known:
+		log.Print("bucket versioning: the bucket did not report its versioning status; make sure versioning is on (docs/storage.md, Bucket requirements)")
+	case !enabled:
+		log.Print("WARNING: bucket versioning is not enabled: a deleted or overwritten object cannot be recovered once swept; turn it on with a lifecycle rule (docs/storage.md, Bucket requirements)")
+	}
+	registry.SetConfigWarning("bucket_versioning", known && !enabled)
+}
+
 func openStore(cfg config.Config, database *sql.DB) (*storage.Store, error) {
 	objects, err := storage.NewS3Objects(context.Background(), s3Config(cfg))
 	if err != nil {

@@ -43,7 +43,7 @@ func TestSiteSearchEnqueueTransactionalPlacementAndFailureGuards(t *testing.T) {
 		{
 			function:     "deleteSiteForTarget",
 			operation:    "SiteSearchDelete",
-			orderedCalls: []string{"EnqueueSiteSearch", "RetireObjects", "DeleteSite", "Commit"},
+			orderedCalls: []string{"EnqueueSiteSearch", "SoftDeleteSite", "Commit"},
 		},
 		{
 			function:     "rollbackSite",

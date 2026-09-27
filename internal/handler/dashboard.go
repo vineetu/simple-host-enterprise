@@ -146,6 +146,12 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
   ` + usageHTML + `
   <div id="site-list" class="rank-list" role="region" aria-label="Sites"></div>
 </section>
+
+<section id="deleted-section" hidden>
+  <h2 class="section-title">Recently deleted</h2>
+  <p class="login-copy">A deleted site stays here for 30 days, and its name stays yours. Restore brings it back as it was: its files, saved data, who can open it, its viewers and uploaded files.</p>
+  <div id="deleted-list" class="rank-list" role="region" aria-label="Recently deleted sites"></div>
+</section>
 </main>`)
 	b.WriteString(dashboardScript)
 	b.WriteString(`</body></html>`)
@@ -286,7 +292,7 @@ const dashboardScript = `<script>
     });
   }
 })();
-</script>` + dashboardSitesScript
+</script>` + dashboardSitesScript + dashboardDeletedScript
 
 // dashboardSitesScript renders the signed-in person's accessible sites and,
 // for a site they own or belong to the owning team of (requireOwnerRole's
@@ -379,9 +385,9 @@ const dashboardSitesScript = `<script>
       '<button type="button" class="btn-login access-button">Save</button></div>' +
       '<p class="share-help access-status">' + (site.network_request ? 'Network access requested; waiting for ' + (site.network_request.approvals_required > 1 ? 'two admins' + approvalProgress(site.network_request) : 'an admin') + '. The site keeps its current level until then.' : '') + '</p></div>' +
       '<div class="site-subsection"><h4>Viewers</h4>' +
-      '<p class="share-help">Named viewers can open the site while it is set to specific people or teams. Adding one sets that level.</p>' +
+      '<p class="share-help">Named viewers can open the site while it is set to specific people or teams. Adding one sets that level. Someone who hasn\'t signed in yet can be added by work email; they can open the site after their first sign-in.</p>' +
       '<div class="viewer-list" aria-live="polite"></div>' +
-      '<div class="add-row"><input type="text" class="add-viewer-input" placeholder="username, another-username" autocomplete="off">' +
+      '<div class="add-row"><input type="text" class="add-viewer-input" placeholder="username or work email, another" autocomplete="off">' +
       '<button type="button" class="btn-login add-viewer-button">Add</button></div></div>' +
       '<div class="site-subsection"><h4>Assets</h4><div class="asset-list" aria-live="polite"></div></div>' +
       '<div class="site-subsection"><h4>Rename</h4>' +
@@ -478,7 +484,7 @@ const dashboardSitesScript = `<script>
           viewers.forEach(function(v){
             var row = document.createElement('div');
             row.className = 'rank-row';
-            row.innerHTML = '<span class="rank-name">' + esc(v.username) + ' <span class="rank-sub">' + esc(v.kind) + '</span></span>' +
+            row.innerHTML = '<span class="rank-name">' + esc(v.username) + ' <span class="rank-sub">' + (v.pending ? 'hasn\'t signed in yet' : esc(v.kind)) + '</span></span>' +
               '<button type="button" class="btn-reject remove-viewer" data-username="' + esc(v.username) + '">Remove</button>';
             viewerList.appendChild(row);
           });
@@ -590,5 +596,54 @@ const dashboardSitesScript = `<script>
   }
 
   loadSites();
+})();
+</script>`
+
+// dashboardDeletedScript fills the "Recently deleted" section from
+// GET /api/deleted-sites (the person's own and their teams'), and restores
+// one through the owner-qualified restore route. The section stays hidden
+// while nothing is recently deleted.
+const dashboardDeletedScript = `<script>
+(function(){
+  var section = document.getElementById('deleted-section');
+  var list = document.getElementById('deleted-list');
+  if (!section || !list) return;
+  var CH = {'X-Simple-Host-Client': 'control-ui'};
+  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+  function when(s) { var d = new Date(s); return isNaN(d) ? '' : d.toLocaleString(); }
+
+  function load() {
+    fetch('/api/deleted-sites', {credentials: 'same-origin', headers: CH})
+      .then(function(r){ return r.ok ? r.json() : []; })
+      .then(render)
+      .catch(function(){});
+  }
+
+  function render(sites) {
+    if (!sites || !sites.length) { section.hidden = true; list.innerHTML = ''; return; }
+    section.hidden = false;
+    list.innerHTML = sites.map(function(s){
+      var by = s.deleted_by ? 'deleted by ' + esc(s.deleted_by) + ' ' : 'deleted ';
+      return '<div class="rank-row"><span class="rank-name">' + esc(s.owner) + '/' + esc(s.site) +
+        ' <span class="rank-sub">' + by + esc(when(s.deleted_at)) + ' · restorable until ' + esc(when(s.restorable_until)) + '</span></span>' +
+        '<button type="button" class="btn-reset restore-site" data-owner="' + esc(s.owner) + '" data-site="' + esc(s.site) + '">Restore</button></div>';
+    }).join('');
+  }
+
+  list.addEventListener('click', function(ev){
+    var button = ev.target.closest('.restore-site');
+    if (!button) return;
+    button.disabled = true;
+    var path = '/api/collaboration/sites/' + encodeURIComponent(button.getAttribute('data-owner')) + '/' +
+      encodeURIComponent(button.getAttribute('data-site')) + '/restore';
+    fetch(path, {method: 'POST', credentials: 'same-origin', headers: CH})
+      .then(function(r){
+        if (r.ok) { location.reload(); return; }
+        return r.json().then(function(body){ alert((body && body.error) || 'Could not restore the site.'); button.disabled = false; });
+      })
+      .catch(function(){ alert('Network error restoring the site.'); button.disabled = false; });
+  });
+
+  load();
 })();
 </script>`

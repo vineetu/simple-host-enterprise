@@ -32,6 +32,17 @@ type TeamHandler struct {
 	// audit defaults to audit.NoOp{} (see WithAudit), the same chaining
 	// shape SiteHandler.WithAudit uses.
 	audit audit.Recorder
+	// allowedEmailDomains is ALLOWED_EMAIL_DOMAINS, for members named by
+	// email.
+	allowedEmailDomains []string
+}
+
+// WithAllowedEmailDomains sets ALLOWED_EMAIL_DOMAINS: a member named by
+// email must be at one of them, the same rule sign-in applies. Empty means
+// any domain.
+func (h *TeamHandler) WithAllowedEmailDomains(domains []string) *TeamHandler {
+	h.allowedEmailDomains = domains
+	return h
 }
 
 func NewTeamHandler(database *sql.DB, limits ...*AbuseLimits) *TeamHandler {
@@ -79,10 +90,28 @@ type teamResponse struct {
 	Name string `json:"name"`
 }
 
+// teamMemberResponse is one member. A person named by email who has not
+// signed in yet is Pending, with the address as Username (what removing
+// them takes), no UserID, and AddedAt instead of JoinedAt.
 type teamMemberResponse struct {
-	UserID   string `json:"user_id"`
+	UserID   string `json:"user_id,omitempty"`
 	Username string `json:"username"`
-	JoinedAt string `json:"joined_at"`
+	JoinedAt string `json:"joined_at,omitempty"`
+	Pending  bool   `json:"pending,omitempty"`
+	AddedAt  string `json:"added_at,omitempty"`
+}
+
+func teamMemberResponses(members []db.TeamMember) []teamMemberResponse {
+	response := make([]teamMemberResponse, 0, len(members))
+	for _, member := range members {
+		at := member.CreatedAt.UTC().Format("2006-01-02T15:04:05Z")
+		if member.Pending {
+			response = append(response, teamMemberResponse{Username: member.Username, Pending: true, AddedAt: at})
+			continue
+		}
+		response = append(response, teamMemberResponse{UserID: member.UserID, Username: member.Username, JoinedAt: at})
+	}
+	return response
 }
 
 // requireMember resolves the team named in the path and checks the caller
@@ -270,14 +299,7 @@ func (h *TeamHandler) listMembers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	response := make([]teamMemberResponse, 0, len(members))
-	for _, member := range members {
-		response = append(response, teamMemberResponse{
-			UserID:   member.UserID,
-			Username: member.Username,
-			JoinedAt: member.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
-		})
-	}
+	response := teamMemberResponses(members)
 	writeJSON(w, http.StatusOK, map[string]any{"team": team.Username, "members": response})
 }
 
@@ -349,23 +371,39 @@ func (h *TeamHandler) addMembers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "too many usernames"})
 		return
 	}
+	if refusal := checkGrantEmails(request.Usernames, h.allowedEmailDomains); refusal != "" {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: refusal, Code: "invalid_email"})
+		return
+	}
 
 	err := h.inTeamTransaction(r, team.ID, func(tx *sql.Tx) error {
-		if err := db.AddTeamMembers(r.Context(), tx, team.ID, request.Usernames, user.ID); err != nil {
+		pending, err := db.AddTeamMembers(r.Context(), tx, team.ID, request.Usernames, user.ID)
+		if err != nil {
 			return err
 		}
 		if err := db.TeamAudit(r.Context(), tx, team.ID, user.ID, "add_members", "", strings.Join(request.Usernames, ",")); err != nil {
 			return err
+		}
+		extra := map[string]any{"usernames": request.Usernames}
+		if len(pending) > 0 {
+			// Named by email, not signed in yet: a pending grant.
+			extra["pending"] = pending
 		}
 		actorKind, keyID := auditActorKind(r.Context())
 		return h.audit.RecordTx(r.Context(), tx, audit.Event{
 			ActorID: user.ID, ActorKind: actorKind, KeyID: keyID,
 			Action: "member_add", TeamID: team.ID,
 			RequestID: auditRequestID(r.Context()),
-			Extra:     map[string]any{"usernames": request.Usernames},
+			Extra:     extra,
 		})
 	})
 	switch {
+	case errors.Is(err, db.ErrAmbiguousEmail):
+		writeJSON(w, http.StatusConflict, errorResponse{
+			Error: "more than one account has that email; use the username",
+			Code:  "member_not_found",
+		})
+		return
 	case errors.Is(err, db.ErrTeamMemberNotFound):
 		writeJSON(w, http.StatusConflict, errorResponse{
 			Error: "one or more of those names is not a person on Simple Host",
@@ -402,7 +440,26 @@ func (h *TeamHandler) removeMember(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid username"})
 		return
 	}
-	subject, err := db.GetUserByUsername(r.Context(), h.database, username)
+	if db.IsEmailName(username) {
+		removed, err := h.removePendingMember(r, user, team, username)
+		if err != nil {
+			log.Printf("remove pending member from %q: %v", team.Username, err)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+			return
+		}
+		if removed {
+			h.writeMembers(w, r, team, "team_deleted", false)
+			return
+		}
+	}
+	var subject db.User
+	var err error
+	if db.IsEmailName(username) {
+		// Not pending: the member whose account carries the address.
+		subject, err = db.GetUserByEmail(r.Context(), h.database, username)
+	} else {
+		subject, err = db.GetUserByUsername(r.Context(), h.database, username)
+	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, errorResponse{Error: "not a member", Code: "not_found"})
@@ -450,6 +507,30 @@ func (h *TeamHandler) removeMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.writeMembers(w, r, team, "team_deleted", false)
+}
+
+// removePendingMember removes a team's pending grant for an email, with the
+// same audit rows as removing a member, reporting whether there was one.
+func (h *TeamHandler) removePendingMember(r *http.Request, user *db.User, team db.Team, email string) (bool, error) {
+	removed := false
+	err := h.inTeamTransaction(r, team.ID, func(tx *sql.Tx) error {
+		var err error
+		if removed, err = db.RemovePendingTeamMember(r.Context(), tx, team.ID, email); err != nil || !removed {
+			return err
+		}
+		if err := db.TeamAudit(r.Context(), tx, team.ID, user.ID, "remove_member", "", email); err != nil {
+			return err
+		}
+		actorKind, keyID := auditActorKind(r.Context())
+		return h.audit.RecordTx(r.Context(), tx, audit.Event{
+			ActorID: user.ID, ActorKind: actorKind, KeyID: keyID,
+			Action: "member_remove", TeamID: team.ID,
+			RequestID: auditRequestID(r.Context()),
+			Detail:    "pending",
+			Extra:     map[string]any{"email": email},
+		})
+	})
+	return removed, err
 }
 
 func (h *TeamHandler) deleteTeam(w http.ResponseWriter, r *http.Request) {
@@ -714,14 +795,7 @@ func (h *TeamHandler) writeMembers(w http.ResponseWriter, r *http.Request, team 
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	response := make([]teamMemberResponse, 0, len(members))
-	for _, member := range members {
-		response = append(response, teamMemberResponse{
-			UserID:   member.UserID,
-			Username: member.Username,
-			JoinedAt: member.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
-		})
-	}
+	response := teamMemberResponses(members)
 	body := map[string]any{"team": team.Username, "members": response}
 	for i := 0; i+1 < len(extra); i += 2 {
 		body[extra[i].(string)] = extra[i+1]

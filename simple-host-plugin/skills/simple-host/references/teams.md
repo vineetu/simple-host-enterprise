@@ -105,7 +105,12 @@ POST /api/teams/<team>/leave
 ```
 
 Candidates are registered people, each marked `already_member`; the search
-never returns teams. Add in one bounded batch, at most 50. Removal takes any
+never returns teams. Add in one bounded batch, at most 50. A company email
+works wherever a username does: it adds the person whose account carries it,
+or, if they have not signed in yet, a pending member (listed with
+`"pending": true` and the email as `username`, counted toward the 50,
+removed by that email) who joins at their first sign-in. An email outside the
+company's sign-in domains is refused (`400` `invalid_email`). Removal takes any
 other member. Removing yourself is the same as `leave`, which answers the
 remaining members, or `team_deleted: true` and `sites_deleted` when you were the
 last active member (see above).
