@@ -129,6 +129,15 @@ than an image, video, audio clip, or PDF, `Content-Disposition: attachment` —
 so a page that wants to *display* a downloaded file (an image, a PDF preview)
 gets exactly that, and everything else downloads instead of executing.
 
+The owner or a team member manages a site's uploaded files without opening
+the site: `list_site_assets` and `delete_site_asset` (or
+`GET /api/collaboration/sites/<owner>/<site>/assets` and
+`DELETE .../assets/<id>`; the dashboard's Assets list does the same). A delete
+is final and the file's address stops working, so name the file and its size
+and ask before each one. When a deploy or upload is refused with
+`storage_quota`, listing the site's uploads shows what could be freed; never
+delete files to make room on your own judgement.
+
 ## State defaults
 
 Choose versioned state automatically for every new stateful site. Do not ask

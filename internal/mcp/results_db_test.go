@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"sort"
@@ -113,8 +114,9 @@ func realApp(t *testing.T, database *sql.DB) (*Server, *http.ServeMux, func(http
 
 	mux := http.NewServeMux()
 	handler.NewUserHandler(database, limits).Register(mux, authMW, skillMW)
-	handler.NewSiteHandler(database, disk, base, hosts, limits).WithAudit(recorder).Register(mux, authMW, skillMW)
+	handler.NewSiteHandler(database, disk, base, hosts, limits).WithAudit(recorder).WithPreviewKeys(keys).Register(mux, authMW, skillMW)
 	handler.NewTeamHandler(database, limits).WithAudit(recorder).Register(mux, authMW, skillMW, hosts, base)
+	handler.NewAuditHandler(database, audit.NewReader(database), "", limits).Register(mux, authMW, skillMW)
 	files := handler.NewSiteFiles(disk, database, handler.CookiePolicy{Secure: true}, keys, time.Hour)
 	siteAPI := handler.NewSiteAPIHandler(database, disk, storage.AssetLimits{MaxFileBytes: 1 << 20, MaxSiteBytes: 8 << 20, MaxSiteCount: 100}, recorder, hosts, limits)
 	handoff := handler.NewHandoffHandler(database, keys, hosts, recorder, limits)
@@ -153,14 +155,26 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 		byName[tool.Name] = tool
 	}
 	seen := map[string]map[string]bool{}
-	call := func(name string, args map[string]any) map[string]any {
+	// callFrom calls a tool with key from remote ("" keeps the default
+	// address), so a later part of the fixture can run as another person
+	// from another address, outside the rate-limit bursts the first part uses.
+	callFrom := func(key, remote, name string, args map[string]any) map[string]any {
 		t.Helper()
 		params, _ := json.Marshal(map[string]any{"name": name, "arguments": args})
 		body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":` +
 			strings.TrimSuffix(string(params), "}") + `,` + meta + `}}`
-		headers := modern("tools/call", name)
-		headers["X-API-Key"] = aliceKey
-		res, ok := decode(t, post(t, s, body, headers))["result"].(map[string]any)
+		req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range modern("tools/call", name) {
+			req.Header.Set(k, v)
+		}
+		req.Header.Set("X-API-Key", key)
+		if remote != "" {
+			req.RemoteAddr = remote
+		}
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		res, ok := decode(t, rec)["result"].(map[string]any)
 		if !ok {
 			t.Fatalf("%s: no result", name)
 		}
@@ -176,6 +190,10 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 			t.Errorf("%s %v: %v\nstructuredContent: %s", name, args, err, text)
 		}
 		return structured
+	}
+	call := func(name string, args map[string]any) map[string]any {
+		t.Helper()
+		return callFrom(aliceKey, "", name, args)
 	}
 
 	index := map[string]any{"path": "index.html", "content": "<h1>hi</h1>"}
@@ -295,6 +313,63 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	call("leave_team", map[string]any{"team": "crew-two", "confirm_name": "crew-two"})
 	call("create_team", map[string]any{"name": "crew-three"})
 	call("remove_team_member", map[string]any{"team": "crew-three", "username": "alice", "confirm_name": "crew-three"})
+
+	// Preview before live, uploaded files and site activity, as carol from
+	// another address: the fixture above is at alice's write burst and at
+	// this address's request burst.
+	carolKey := createPerson(t, database, "carol")
+	const carolAddr = "198.51.100.7:4321"
+	as := func(name string, args map[string]any) map[string]any {
+		t.Helper()
+		return callFrom(carolKey, carolAddr, name, args)
+	}
+	as("deploy_site", map[string]any{"site": "draft", "files": []any{index}})
+	etag = as("get_site", map[string]any{"site": "draft", "owner": "carol"})["etag"].(string)
+	held := as("deploy_site", map[string]any{"site": "draft", "owner": "carol", "intent": "update", "etag": etag, "publish": false, "files": []any{index, logo}})
+	if held["active_version"] != float64(1) || held["new_version"] != float64(2) {
+		t.Errorf("deploy_site publish false = %v, want v1 still live and new_version 2", held)
+	}
+	if got := as("preview_version", map[string]any{"site": "draft", "owner": "carol", "version": 2}); got["live"] != false || !strings.Contains(got["url"].(string), "/_preview/2-") {
+		t.Errorf("preview_version = %v", got)
+	}
+	var draftID, carolID string
+	if err := database.QueryRow(`SELECT s.id, s.user_id FROM sites s JOIN users u ON u.id = s.user_id WHERE u.username = 'carol' AND s.name = 'draft'`).Scan(&draftID, &carolID); err != nil {
+		t.Fatal(err)
+	}
+	asset, err := db.CreateAsset(context.Background(), database, "6f1d7c52-0000-4000-8000-000000000001", draftID, "photo.png", "image/png", 7, []byte("sum"), &carolID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := as("list_site_assets", map[string]any{"site": "draft", "owner": "carol"}); got["count"] != float64(1) {
+		t.Errorf("list_site_assets = %v, want the one file", got)
+	}
+	as("delete_site_asset", map[string]any{"site": "draft", "owner": "carol", "id": asset.ID})
+	if err := db.InsertAccessLogBatch(context.Background(), database, []db.AccessLogEvent{{
+		At: time.Now().UTC(), UserID: carolID, OwnerLabel: "carol", SiteName: "draft", Path: "/", Method: "GET", Status: 200, ClientKind: "browser",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	activity := as("site_activity", map[string]any{"site": "draft", "owner": "carol"})
+	if activity["live_version"] != float64(1) || len(activity["versions"].([]any)) != 2 {
+		t.Errorf("site_activity versions = %v", activity)
+	}
+	changes, _ := activity["changes"].([]any)
+	if len(changes) == 0 || changes[0].(map[string]any)["action"] != "asset_delete" || changes[0].(map[string]any)["actor"] != "carol" {
+		t.Errorf("site_activity changes = %v, want the asset delete first, by carol", changes)
+	}
+	if visits, _ := activity["visits"].(map[string]any); visits == nil || visits["unique_viewers"] != float64(1) {
+		t.Errorf("site_activity visits = %v, want one viewer", activity["visits"])
+	}
+	// A publish-scope key reads the versions but not the logs: both parts
+	// say why instead of failing the call.
+	publishKey := "key-carol-publish-" + strings.Repeat("1", 32)
+	if _, err := db.CreateAPIKey(context.Background(), database, carolID, "ci", db.HashAPIKey(publishKey), publishKey[:8], time.Now().Add(time.Hour), db.APIKeyScopePublish); err != nil {
+		t.Fatal(err)
+	}
+	limited := callFrom(publishKey, carolAddr, "site_activity", map[string]any{"site": "draft", "owner": "carol"})
+	if limited["changes"] != nil || !strings.Contains(limited["changes_note"].(string), "full-scope") || !strings.Contains(limited["visits_note"].(string), "full-scope") {
+		t.Errorf("site_activity with a publish key = %v", limited)
+	}
 
 	// Properties that a single-account fixture cannot produce: download
 	// counts need a real browser download, and admin/team kinds are never the

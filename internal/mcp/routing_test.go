@@ -21,6 +21,7 @@ func appRoutes(t *testing.T) *http.ServeMux {
 	handler.NewUserHandler(nil, nil).Register(mux, passthrough, passthrough)
 	handler.NewSiteHandler(nil, nil, "", handler.HostModel{}, nil).Register(mux, passthrough, passthrough)
 	handler.NewTeamHandler(nil, nil).Register(mux, passthrough, passthrough, handler.HostModel{}, "")
+	handler.NewAuditHandler(nil, nil, "").Register(mux, passthrough, passthrough)
 	return mux
 }
 
@@ -47,7 +48,11 @@ var fixtures = []fixture{
 		{"site": "demo", "intent": "update", "files": []any{map[string]any{"path": "index.html", "content": "<h1>hi</h1>"}}},
 		{"site": "demo", "owner": "alice", "intent": "create", "files": []any{map[string]any{"path": "index.html", "content": "<h1>hi</h1>"}}},
 		{"site": "demo", "owner": "alice", "intent": "update", "files": []any{map[string]any{"path": "index.html", "content": "<h1>hi</h1>"}}},
+		{"site": "demo", "publish": false, "files": []any{map[string]any{"path": "index.html", "content": "<h1>hi</h1>"}}},
+		{"site": "demo", "owner": "alice", "intent": "update", "publish": false, "files": []any{map[string]any{"path": "index.html", "content": "<h1>hi</h1>"}}},
 	}},
+	{"preview_version", []map[string]any{{"owner": "alice", "site": "demo", "version": float64(2)}}},
+	{"site_activity", []map[string]any{{"owner": "alice", "site": "demo"}}},
 	{"list_site_versions", []map[string]any{
 		{"site": "demo"},
 		{"site": "demo", "owner": "alice"},
@@ -75,6 +80,8 @@ var fixtures = []fixture{
 		{"owner": "alice", "site": "demo", "id": float64(3)},
 	}},
 	{"restore_state_version", []map[string]any{{"owner": "alice", "site": "demo", "id": float64(3)}}},
+	{"list_site_assets", []map[string]any{{"owner": "alice", "site": "demo"}}},
+	{"delete_site_asset", []map[string]any{{"owner": "alice", "site": "demo", "id": "0f8c"}}},
 	{"list_deleted_sites", []map[string]any{{}}},
 	{"restore_site", []map[string]any{
 		{"site": "demo"},
@@ -228,7 +235,7 @@ func routesOf(up upstream) []upstream {
 	if up.Fallback != nil {
 		routes = append(routes, *up.Fallback)
 	}
-	return routes
+	return append(routes, up.Also...)
 }
 
 func byName(name string) (Tool, bool) {
@@ -278,6 +285,25 @@ func TestDeploySiteIntentPicksTheRequest(t *testing.T) {
 			path:   "/api/sites/demo",
 		},
 		{
+			name:    "publish false holds an update in a team back",
+			args:    map[string]any{"site": "demo", "owner": "acme-team", "intent": "update", "etag": `"v1"`, "publish": false, "files": files},
+			method:  http.MethodPut,
+			path:    "/api/collaboration/sites/acme-team/demo?publish=false",
+			ifMatch: `"v1"`,
+		},
+		{
+			name:   "publish false with neither argument is an update of the caller's own site, with no fallback",
+			args:   map[string]any{"site": "demo", "publish": false, "files": files},
+			method: http.MethodPut,
+			path:   "/api/sites/demo?publish=false",
+		},
+		{
+			name:   "publish true is the ordinary update",
+			args:   map[string]any{"site": "demo", "intent": "update", "publish": true, "files": files},
+			method: http.MethodPut,
+			path:   "/api/sites/demo",
+		},
+		{
 			name:     "neither argument is the pre-0.9 client, which still falls back",
 			args:     map[string]any{"site": "demo", "files": files},
 			method:   http.MethodPost,
@@ -310,5 +336,13 @@ func TestDeploySiteIntentPicksTheRequest(t *testing.T) {
 	}
 	if _, err := tool.call(map[string]any{"site": "demo", "intent": "publish", "files": files}); err == nil {
 		t.Error("an intent outside create/update was accepted")
+	}
+	// A new site has nothing else to keep live, so holding its first
+	// version back is refused where the model can read why.
+	if _, err := tool.call(map[string]any{"site": "demo", "intent": "create", "publish": false, "files": files}); err == nil {
+		t.Error("create with publish false was accepted")
+	}
+	if _, err := tool.call(map[string]any{"site": "demo", "intent": "update", "publish": "no", "files": files}); err == nil {
+		t.Error("a non-boolean publish was accepted")
 	}
 }

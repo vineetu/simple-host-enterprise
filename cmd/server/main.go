@@ -223,7 +223,7 @@ func run() (runErr error) {
 		log.Printf("malware scan: uploads are scanned by clamd at %s", cfg.Clamd.Addr)
 	}
 	handler.NewUserHandler(database, abuseLimits).WithQuota(quota).Register(mux, authMW, skillVersionMW)
-	handler.NewSiteHandler(database, siteStore, cfg.PublicBaseURL, hosts, abuseLimits).WithAudit(auditRecorder).WithNetworkAccessApprovals(cfg.NetworkAccessApprovals).WithUploadLimits(quota, scanner).WithAllowedEmailDomains(cfg.OIDC.AllowedEmailDomains).Register(mux, authMW, skillVersionMW)
+	handler.NewSiteHandler(database, siteStore, cfg.PublicBaseURL, hosts, abuseLimits).WithAudit(auditRecorder).WithNetworkAccessApprovals(cfg.NetworkAccessApprovals).WithUploadLimits(quota, scanner).WithAllowedEmailDomains(cfg.OIDC.AllowedEmailDomains).WithPreviewKeys(signingKeys).Register(mux, authMW, skillVersionMW)
 	handler.NewTeamHandler(database, abuseLimits).WithAudit(auditRecorder).WithAllowedEmailDomains(cfg.OIDC.AllowedEmailDomains).Register(mux, authMW, skillVersionMW, hosts, cfg.PublicBaseURL)
 	// Held rather than registered inline: the classification worker starts
 	// after the routes are wired, and the handler is given it once it exists.

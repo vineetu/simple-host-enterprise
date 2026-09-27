@@ -190,10 +190,43 @@ Response handling:
 - `400` with `code: "skill_version_required"`: stop, follow the permissioned
   update flow, reload the updated instructions, then resolve access again.
 
+### Holding a version back to look first
+
+When the person wants to see a change before visitors do (a redesign, a
+risky edit), add `?publish=false` to the `PUT` (the `deploy_site` tool:
+`publish: false`). The version is stored, checked against quota and scanned
+like any deploy, but visitors keep seeing the live one: the answer's
+`new_version` is its number, `active_version` and the ETag do not change. A
+create cannot be held back (`400` `publish_required`); a new site only opens to
+its owner or team anyway.
+
+Then get a preview link and give it to the person:
+
+```
+GET /api/collaboration/sites/<owner>/<site>/versions/<N>/preview
+X-API-Key: <actor key>
+X-Skill-Version: <installed skill version>
+```
+
+or `preview_version`. The answer's `url` (the site's address plus
+`_preview/<token>/`) works for one hour (`expires_at`) and opens only for the
+site's owner or a member of the owning team, signed in as themselves, whatever
+the site's access level; anyone else gets not-found even with the link. It
+reads the site's live saved data, but its saves are refused (`403`
+`preview_read_only`), and it is never indexed. Links written as absolute paths
+(`/about.html`) leave the preview for the live site; relative ones stay in it.
+Any kept version can be previewed the same way, which is how to look at an old
+version before rolling back to it.
+
+When the person is happy, make it live with the rollback below, to `N`. The
+dashboard's Versions list (in a site's Manage panel) does the same with
+Preview and Make live.
+
 ## 5. Versions and rollback
 
 List versions with the owner-qualified versions endpoint. It returns uploader
-usernames when attribution is available, never uploader API keys.
+usernames when attribution is available, never uploader API keys, and `live`
+on the version visitors see now.
 
 Rollback is also conflict-protected:
 
@@ -208,6 +241,16 @@ Content-Type: application/json
 ```
 
 Handle `412` and `428` exactly like deployment.
+
+"Who published the last version, and when?" and "how many people opened it?"
+have one answer in `site_activity`: the kept versions with who deployed each
+and which is live, the site's recent recorded changes (`site_update`,
+`site_rollback`, `site_access`, `viewer_grant`, `state_write`, `asset_delete`,
+... with the `actor` who made each), and its visits per day over the last 30
+days (counts, never who). Without the tool, the same comes from
+`GET /api/audit?owner=<owner>&site=<site>` and
+`GET /api/access?owner=<owner label>&site=<site>&summary=counts` (full-scope
+key). A publish-scope key sees the versions only.
 
 ## 6. Who can open the site
 

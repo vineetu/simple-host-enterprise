@@ -375,6 +375,7 @@ paths:
         - $ref: '#/components/parameters/SkillVersion'
         - $ref: '#/components/parameters/SimpleHostClient'
         - $ref: '#/components/parameters/sitename'
+        - $ref: '#/components/parameters/publish'
         - name: If-Match
           in: header
           required: false
@@ -907,6 +908,7 @@ paths:
         - $ref: '#/components/parameters/SimpleHostClient'
         - $ref: '#/components/parameters/owner'
         - $ref: '#/components/parameters/sitename'
+        - $ref: '#/components/parameters/publish'
         - $ref: '#/components/parameters/IfMatch'
       requestBody:
         required: true
@@ -1037,6 +1039,110 @@ paths:
           $ref: '#/components/responses/SkillVersionRequired'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/collaboration/sites/{owner}/{sitename}/versions/{version}/preview:
+    get:
+      summary: Get a preview link for one kept version
+      description: |
+        Owner/member operation. Returns a private address that shows the
+        version (one stored with `publish=false`, or an older one) without
+        changing what visitors see. It lasts one hour and opens only for the
+        site's owner or a member of the owning team with their own sign-in,
+        whatever the site's access level; it is not indexed or cached, and
+        saves and uploads from it are refused (403 `preview_read_only`). Make
+        it live with the rollback route. A publish-scope key may call it.
+      tags: [Collaboration]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+        - $ref: '#/components/parameters/version'
+      responses:
+        '200':
+          description: The preview link
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Preview'
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '503':
+          description: Previews are not available on this server
+
+  /api/collaboration/sites/{owner}/{sitename}/assets:
+    get:
+      summary: List a site's uploaded files
+      description: Owner/member operation. The files the site's pages uploaded, newest first. A publish-scope key may call it.
+      tags: [Collaboration]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+      responses:
+        '200':
+          description: The uploaded files
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Asset'
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/collaboration/sites/{owner}/{sitename}/assets/{id}:
+    delete:
+      summary: Delete one uploaded file
+      description: Owner/member operation. The file stops being served at once and its space is freed; it cannot be brought back. Audited as `asset_delete`. A publish-scope key may call it.
+      tags: [Collaboration]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -1382,6 +1488,83 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/audit:
+    get:
+      summary: Read the action log
+      description: |
+        Recorded actions, newest first, 100 a page. A non-admin (and any API
+        key or connected app, an admin's included) sees their own namespace
+        and their teams'; `site` needs `owner`. Each event carries `actor`,
+        the actor's username. A full-scope key or a browser session.
+      tags: [Audit]
+      security:
+        - apiKey: []
+      parameters:
+        - name: owner
+          in: query
+          schema:
+            type: string
+        - name: site
+          in: query
+          schema:
+            type: string
+        - name: actor
+          in: query
+          schema:
+            type: string
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A page of events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                        at:
+                          type: string
+                          format: date-time
+                        actor:
+                          type: string
+                          description: The actor's username
+                        actor_kind:
+                          type: string
+                          enum: [person, key, system]
+                        action:
+                          type: string
+                        detail:
+                          type: object
+                  next_cursor:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   /api/access:
     get:
       summary: Read a site's access log
@@ -1391,7 +1574,8 @@ paths:
         `counts` (the default) a non-admin gets `AccessCounts` — views per
         day and distinct viewers, the last 30 days unless `from`/`to` say
         otherwise, never who; under `owner` they get rows with user ids but
-        no IP or user agent; under `admin` they are refused. Admins always
+        no IP or user agent, or `AccessCounts` with `summary=counts`; under
+        `admin` they are refused. Admins always
         get full rows. API-key callers send `X-Skill-Version` as on the other
         management routes.
       tags: [Audit]
@@ -1420,9 +1604,15 @@ paths:
           in: query
           schema:
             type: string
+        - name: summary
+          in: query
+          description: '`counts` asks a non-admin for `AccessCounts` whatever the visibility (short of `admin`).'
+          schema:
+            type: string
+            enum: [counts]
       responses:
         '200':
-          description: Aggregates under `counts` for a non-admin; otherwise a page of rows
+          description: Aggregates under `counts` (or with `summary=counts`) for a non-admin; otherwise a page of rows
           content:
             application/json:
               schema:
@@ -2501,6 +2691,13 @@ components:
         type: integer
         minimum: 1
       example: 4
+    publish:
+      name: publish
+      in: query
+      required: false
+      description: 'Absent or `true`: the new version goes live. `false`: it is stored but not made live (the answer has `new_version`; `active_version` and the ETag stay), to be previewed and made live later by a rollback to it. Refused on a create (400 `publish_required`).'
+      schema:
+        type: boolean
     IfMatch:
       name: If-Match
       in: header
@@ -2554,6 +2751,9 @@ components:
           type: string
           description: The site's address. Use it as given.
           example: https://my-cool-site.alice-smith.simple-host.example.com/
+        new_version:
+          type: integer
+          description: Only after a deploy with `publish=false`, the version it stored, which is not live.
         analytics:
           $ref: '#/components/schemas/SiteAnalytics'
 
@@ -2623,6 +2823,9 @@ components:
         etag:
           type: string
           example: '"site-4b256b3b-9d15-4ce5-bba7-b04ef26f49e5-v7"'
+        new_version:
+          type: integer
+          description: Only after a deploy with `publish=false`, the version it stored, which is not live.
         created_at:
           type: string
           format: date-time
@@ -2631,6 +2834,34 @@ components:
           format: date-time
         analytics:
           $ref: '#/components/schemas/SiteAnalytics'
+
+    Preview:
+      type: object
+      required: [url, expires_at, version, live]
+      properties:
+        url:
+          type: string
+          description: The private preview address, the site's own address plus `_preview/<token>/`. It opens only for the site's owner or a member of the owning team, signed in.
+          example: https://my-cool-site.alice-smith.simple-host.example.com/_preview/5-1790000000-Qm9n/
+        expires_at:
+          type: string
+          format: date-time
+          description: One hour from when it was made; after that the address answers 410.
+        version:
+          type: integer
+        live:
+          type: boolean
+          description: Whether that version is already live.
+
+    Asset:
+      type: object
+      required: [id, name, content_type, size, url]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string, description: The file's name as uploaded}
+        content_type: {type: string}
+        size: {type: integer, description: Bytes}
+        url: {type: string, description: Where it is served}
 
     CollaborationVersion:
       type: object
@@ -2642,6 +2873,9 @@ components:
         status:
           type: string
           enum: [uploading, active]
+        live:
+          type: boolean
+          description: Whether this is the version visitors see now.
         uploaded_by:
           type: string
           nullable: true
@@ -2776,6 +3010,9 @@ components:
         status:
           type: string
           enum: [uploading, active]
+        live:
+          type: boolean
+          description: Whether this is the version visitors see now.
         created_at:
           type: string
           format: date-time

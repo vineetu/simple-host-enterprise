@@ -128,7 +128,7 @@ Config names are documented in `docs/configuration.md`; schema in
   `GET /oauth/authorize`, `POST /oauth/authorize`, `POST /oauth/token`,
   `POST /oauth/revoke`, `GET /plugin.zip`, `GET /api/me/connections`,
   `DELETE /api/me/connections/{id}` (both browser session only).
-- **MCP.** Every tool below, sections 1–11; the full list is in
+- **MCP.** Every tool below, sections 1–12; the full list is in
   `internal/mcp/tools.go` `toolList()`.
 - **Skill.** `SKILL.md` (Service); plugin manifests
   `simple-host-plugin/plugin.json`, `mcp.json`.
@@ -247,6 +247,26 @@ Config names are documented in `docs/configuration.md`; schema in
   deletes the sites of a disabled person or of a team with no active member
   (section 13); nobody else's. Visitor counts are kept per address, so a
   moved site's Visitors tab starts again.
+  **Preview before live.** An update sent with `?publish=false` (MCP
+  `deploy_site` `publish: false`) stores the new version, quota-checked and
+  scanned like any deploy, without making it live: `active_version` and the
+  ETag stay, the answer carries `new_version`, and it is audited as
+  `site_update` with `published: false`. A create refuses it (400
+  `publish_required`). Every version list carries `live`. The owner or a
+  team member mints a preview link for any kept version (`GET
+  .../versions/{version}/preview`, MCP `preview_version`, "Preview" in the
+  Manage panel's Versions list): the site's own address plus
+  `_preview/<version>-<expiry>-<HMAC>/`, signed with the session signing key
+  over site id, version and expiry, valid one hour. The host gate serves it
+  (on the site host, and on the fallback owner path) only to a host session
+  of the owner or a team member (`db.PreviewAllowed`, whatever the access
+  level; anyone else 404, audited `access_denied` `not_owner_preview`;
+  signed out, the hand-off), `X-Robots-Tag: noindex`, `Cache-Control:
+  no-store`, not counted as a visit. An expired link is 410; a signature
+  that does not verify is ordinary content. A save or upload from a preview
+  page (Referer under a verifying preview path) is 403
+  `preview_read_only`. Make live is the rollback to that version ("Make
+  live" in Versions).
 - **Status.** Built.
 - **Routes.** `POST /api/sites/{sitename}`, `PUT /api/sites/{sitename}`,
   `DELETE /api/sites/{sitename}`, `POST /api/sites/{sitename}/rollback`,
@@ -263,6 +283,7 @@ Config names are documented in `docs/configuration.md`; schema in
   `POST /api/collaboration/sites/{owner}/{sitename}/rollback`,
   `GET /api/collaboration/sites/{owner}/{sitename}/versions`,
   `GET /api/collaboration/sites/{owner}/{sitename}/versions/{version}/archive`,
+  `GET /api/collaboration/sites/{owner}/{sitename}/versions/{version}/preview`,
   `POST /api/sites/{sitename}/transfer`,
   `POST /api/collaboration/sites/{owner}/{sitename}/transfer`,
   `POST /api/sites/{sitename}/rename`,
@@ -270,8 +291,10 @@ Config names are documented in `docs/configuration.md`; schema in
   Host-gate: every path on the site host `<site>.<owner>.<base>` (hosted
   content, root-served); `/{site}/...` on the owner host (served before the
   owner is ready, redirected after); every path on a v1.2
-  `<owner>--<site>.<base>` host (redirect).
+  `<owner>--<site>.<base>` host (redirect); `_preview/<token>/...` under
+  either content path (preview).
 - **MCP.** `list_sites`, `get_site`, `deploy_site`, `list_site_versions`,
+  `preview_version`,
   `rollback_site`, `delete_site`, `list_deleted_sites`, `restore_site`,
   `list_site_files`, `read_site_file` (the last
   two read a version archive), `transfer_site`, `rename_site`.
@@ -279,9 +302,9 @@ Config names are documented in `docs/configuration.md`; schema in
   and conflict rules; `references/packaging-and-validation.md`,
   `references/collaboration.md` §1–5 and §8, `references/frameworks.md`;
   `skills/fix-paths-for-subpath-hosting/`, `skills/simple-host-builder/`.
-- **Pages.** `/dashboard` "Your sites" (Manage: Rename, Move to a team; both off while an admin's restriction stands) and
+- **Pages.** `/dashboard` "Your sites" (Manage: Versions with Preview and Make live; Rename, Move to a team, both off while an admin's restriction stands) and
   "Recently deleted"; `/admin` "Recently deleted".
-- **Go.** `internal/handler/site.go`, `site_restore.go`, `collaboration.go`, `site_mutation.go`,
+- **Go.** `internal/handler/site.go`, `site_restore.go`, `collaboration.go`, `site_mutation.go`, `preview.go`, `dashboard_versions.go`,
   `site_move.go`, `admin_move.go`,
   `upload_limits.go`, `serve.go`, `serve_self_traffic.go`, `host_gate.go`, `host.go`, `names.go`,
   `security.go`; `internal/tarball/`; `internal/scan/clamd.go`;
@@ -498,14 +521,15 @@ Config names are documented in `docs/configuration.md`; schema in
   per-site byte and count limits; asset bytes also count toward the owner's
   `QUOTA_MAX_BYTES` (413 `storage_quota`), and with `CLAMD_ADDR` set each
   upload is scanned before it is stored (422/503). Owners list and delete assets from the
-  dashboard through base-host mirror routes.
+  dashboard and from a chat app through base-host mirror routes.
 - **Status.** Built.
 - **Routes.** Host-gate, on the site's own host: `GET|POST /api/sites/{site}/assets`,
   `DELETE /api/sites/{site}/assets/{id}` (or nameless `/api/site/assets[...]`),
   serve at `GET /_assets/{id}[/{name}]`; on the fallback owner host the named
   routes and `GET /{site}/_assets/{id}[/{name}]`. Mux: `GET /api/collaboration/sites/{owner}/{sitename}/assets`,
   `DELETE /api/collaboration/sites/{owner}/{sitename}/assets/{id}`.
-- **MCP.** None.
+- **MCP.** `list_site_assets`, `delete_site_asset` (over the two mux routes;
+  owner or team member; a publish key may use both, as on REST).
 - **Skill.** `references/state-and-ai.md` (Uploaded assets);
   `simple-host-builder` §3.
 - **Pages.** `/dashboard` assets panel.
@@ -533,7 +557,12 @@ Config names are documented in `docs/configuration.md`; schema in
   `GET /api/access` are scoped to the caller's namespaces (admins see all,
   from a browser session only: an admin's API key or connected app gets the
   same own-namespace view as anyone else);
-  access-log detail follows `ACCESS_LOG_VISIBILITY`. Admins export either as
+  access-log detail follows `ACCESS_LOG_VISIBILITY`; `summary=counts` asks
+  for the counts shape under `owner` too. Each audit event carries `actor`,
+  the actor's current username. MCP `site_activity` reads one site's
+  versions, its audit events and its visit counts in one call; a part the
+  credential cannot read (a publish key; `ACCESS_LOG_VISIBILITY=admin`)
+  becomes a note, not a failure. Admins export either as
   CSV (formula-safe) or NDJSON. `simple-host prune` (a daily CronJob) drops
   partitions past retention (so a row lives its retention plus up to one
   month), trims the chain's rows for them, and keeps partitions twelve
@@ -542,7 +571,7 @@ Config names are documented in `docs/configuration.md`; schema in
   chained, instead of wedging every later run (0046).
 - **Status.** Built.
 - **Routes.** `GET /api/audit`, `GET /api/access`, `GET /api/admin/export`.
-- **MCP.** None.
+- **MCP.** `site_activity`.
 - **Skill.** None.
 - **Pages.** `/dashboard` and `/admin` activity/visitor panels.
 - **Go.** `internal/audit/` (`stream.go`, `audit.go`, `db_recorder.go`, `access_writer.go`,

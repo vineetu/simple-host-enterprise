@@ -51,6 +51,7 @@ var routeKeyAccess = map[string]keyAccess{
 	"POST /api/collaboration/sites/{owner}/{sitename}/rollback":                    keyPublish,
 	"GET /api/collaboration/sites/{owner}/{sitename}/versions":                     keyPublish,
 	"GET /api/collaboration/sites/{owner}/{sitename}/versions/{version}/archive":   keyPublish,
+	"GET /api/collaboration/sites/{owner}/{sitename}/versions/{version}/preview":   keyPublish,
 	"GET /api/collaboration/sites/{owner}/{sitename}/state-versions":               keyPublish,
 	"GET /api/collaboration/sites/{owner}/{sitename}/state-versions/{id}":          keyPublish,
 	"POST /api/collaboration/sites/{owner}/{sitename}/state-versions/{id}/restore": keyPublish,

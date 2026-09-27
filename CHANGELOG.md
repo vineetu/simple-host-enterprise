@@ -4,6 +4,36 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## Unreleased
+
+No schema change. Skills are at 0.14.2 (0.11.0 still works).
+
+### Sites
+- Preview before live. An update sent with `?publish=false` (MCP
+  `deploy_site` with `publish: false`) stores the new version without
+  changing what visitors see; the answer's `new_version` is its number, and
+  it is audited as `site_update` with `published: false`. A create refuses
+  it (`publish_required`). The owner or a team member opens any kept version
+  through a private link that lasts an hour (`GET .../versions/{version}/preview`,
+  MCP `preview_version`, "Preview" in the Manage panel's new Versions list):
+  it still needs their own sign-in, nobody else can open it whatever the
+  site's access level, it is never indexed or cached, and saves from it are
+  refused (`preview_read_only`). "Make live" (and `rollback_site`) publishes
+  it. Version lists now say which version is `live`.
+
+### Agents
+- `list_site_assets` and `delete_site_asset`: list and delete a site's
+  uploaded files from a chat app (delete asks first). The storage-quota hint
+  now points at them.
+- `site_activity`: one site's versions (who published each, and which is
+  live), its recent recorded changes with who made them, and its visit
+  counts, in one read. A part the credential cannot read becomes a sentence.
+
+### Audit
+- `GET /api/audit` events carry `actor`, the actor's username.
+  `GET /api/access?summary=counts` returns the counts shape under
+  `ACCESS_LOG_VISIBILITY=owner` too.
+
 ## v1.4.0 — 2026-09-27
 
 Schema 0049 (from 0042). Run `simple-host migrate` before the new image.

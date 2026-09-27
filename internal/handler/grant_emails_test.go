@@ -65,9 +65,10 @@ func TestCheckGrantEmailsChecksOnlyEmails(t *testing.T) {
 // stored string can never close the attribute it is placed in.
 func TestPageEscapeCoversQuotes(t *testing.T) {
 	for name, script := range map[string]string{
-		"dashboard sites":   dashboardSitesScript,
-		"dashboard deleted": dashboardDeletedScript,
-		"admin activity":    adminActivityScript,
+		"dashboard sites":    dashboardSitesScript,
+		"dashboard deleted":  dashboardDeletedScript,
+		"dashboard versions": dashboardVersionsScript,
+		"admin activity":     adminActivityScript,
 	} {
 		i := strings.Index(script, "function esc(s)")
 		if i < 0 {

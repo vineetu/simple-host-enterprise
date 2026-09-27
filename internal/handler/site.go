@@ -51,6 +51,8 @@ type SiteHandler struct {
 	// allowedEmailDomains is ALLOWED_EMAIL_DOMAINS, for viewers named by
 	// email (viewers.go).
 	allowedEmailDomains []string
+	// previewKeys sign preview links (preview.go); the session signing keys.
+	previewKeys []auth.SigningKey
 }
 
 // WithUploadLimits sets the per-owner quota and the malware scanner (nil for
@@ -81,7 +83,10 @@ type siteResponse struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 	URL           string    `json:"url,omitempty"`
 	Note          string    `json:"note,omitempty"`
-	Analytics     analytics `json:"analytics"`
+	// NewVersion is set only by a deploy with publish=false: the version it
+	// stored, which is not live.
+	NewVersion int       `json:"new_version,omitempty"`
+	Analytics  analytics `json:"analytics"`
 }
 
 type analytics struct {
@@ -98,10 +103,12 @@ type fileDownloadStat struct {
 }
 
 type versionResponse struct {
-	ID            string    `json:"id"`
-	VersionNumber int       `json:"version_number"`
-	Status        string    `json:"status"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID            string `json:"id"`
+	VersionNumber int    `json:"version_number"`
+	Status        string `json:"status"`
+	// Live is whether this is the version visitors see now.
+	Live      bool      `json:"live"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type rollbackSiteRequest struct {
@@ -230,6 +237,7 @@ func (h *SiteHandler) Register(mux *http.ServeMux, authMiddleware, skillVersionM
 	h.registerAssetAdminRoutes(mux, ownerMutation, browserWrite)
 	h.registerStateHistoryRoutes(mux, ownerMutation, browserWrite)
 	h.registerMoveRoutes(mux, ownerMutation, browserWrite)
+	h.registerPreviewRoutes(mux, ownerMutation)
 	// Namespace-scoped writes: create, delete and access level in a namespace
 	// the caller owns or belongs to — see requireOwnerOrMember.
 	mux.Handle("POST /api/collaboration/sites/{owner}/{sitename}", browserWrite(ownerUpload(http.HandlerFunc(h.createCollaborationSite))))
@@ -406,6 +414,9 @@ func (h *SiteHandler) createSite(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if refuseUnpublishedCreate(w, r) {
+		return
+	}
 	h.createSiteForTarget(w, r, selfTarget(user), siteName)
 }
 
@@ -571,6 +582,10 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	publish, ok := deployPublishes(w, r)
+	if !ok {
+		return
+	}
 	if !validateStoredUsername(w, target.OwnerUsername) {
 		return
 	}
@@ -649,16 +664,20 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := db.UpdateSiteActiveVersion(r.Context(), tx, site.ID, versionNumber); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, errorResponse{Error: "site not found"})
+	liveVersion := previousVersion
+	if publish {
+		liveVersion = versionNumber
+		if err := db.UpdateSiteActiveVersion(r.Context(), tx, site.ID, versionNumber); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				writeJSON(w, http.StatusNotFound, errorResponse{Error: "site not found"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
 	}
 
-	freed, err := pruneVersions(r.Context(), tx, h.quota, site.ID, versionNumber)
+	freed, err := pruneVersions(r.Context(), tx, h.quota, site.ID, liveVersion)
 	if err != nil {
 		log.Printf("prune versions for %s/%s: %v", target.OwnerUsername, siteName, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
@@ -679,14 +698,21 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 		ActorID: target.ActorID, ActorKind: actorKind, KeyID: keyID,
 		Action: "site_update", OwnerID: target.OwnerID, SiteID: site.ID,
 		RequestID: auditRequestID(r.Context()),
-		Extra:     map[string]any{"version": versionNumber, "previous_version": previousVersion},
+		Extra:     map[string]any{"version": versionNumber, "previous_version": previousVersion, "published": publish},
 	}); err != nil {
 		log.Printf("record audit for site_update %s/%s: %v", target.OwnerUsername, siteName, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
 
-	if commitErr := audit.Commit(tx); commitErr != nil {
+	if commitErr := audit.Commit(tx); commitErr != nil && !publish {
+		applied, known := reconcileStoredVersion(h.database, site.ID, versionNumber, commitErr)
+		keepObject = applied || !known
+		if !applied {
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+			return
+		}
+	} else if commitErr != nil {
 		result := reconcileSiteCommit(h.database, target.OwnerID, siteName, siteCommitExpectation{
 			applied:    existingSiteCommitSnapshot(site.ID, versionNumber),
 			rolledBack: existingSiteCommitSnapshot(site.ID, previousVersion),
@@ -700,11 +726,58 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 	}
 	keepObject = true
 
-	site.ActiveVersion = versionNumber
+	site.ActiveVersion = liveVersion
 
 	url := h.siteURL(r.Context(), target.OwnerUsername, siteName, site.ID)
 	setSiteETag(w, site)
+	if !publish {
+		resp := toSiteResponse(site, url, fmt.Sprintf("Version %d is stored but not live: visitors still see version %d at %s. Preview it, then make it live with a rollback to version %d.", versionNumber, liveVersion, url, versionNumber), db.SiteAnalyticsSummary{}, nil)
+		resp.NewVersion = versionNumber
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
 	writeJSON(w, http.StatusOK, toSiteResponse(site, url, fmt.Sprintf("Site is available at %s", url), db.SiteAnalyticsSummary{}, nil))
+}
+
+// deployPublishes reads a deploy's ?publish=: absent or true makes the new
+// version live, false stores it without changing what visitors see, to be
+// previewed (preview.go) and made live later by a rollback to it. ok is false
+// when it already wrote the 400.
+func deployPublishes(w http.ResponseWriter, r *http.Request) (publish, ok bool) {
+	switch r.URL.Query().Get("publish") {
+	case "", "true":
+		return true, true
+	case "false":
+		return false, true
+	}
+	writeJSON(w, http.StatusBadRequest, errorResponse{Error: "publish must be true or false"})
+	return false, false
+}
+
+// reconcileStoredVersion is reconcileSiteCommit for a deploy with
+// publish=false, whose live version does not move and so cannot say whether
+// the commit landed: the version row can. known is false when even that
+// could not be read, in which case the object is kept.
+func reconcileStoredVersion(database *sql.DB, siteID string, version int, commitErr error) (applied, known bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), siteCommitReconcileTimeout)
+	defer cancel()
+	exists, err := db.VersionExists(ctx, database, siteID, version)
+	log.Printf("site commit reconciliation operation=\"store_version\" site_id=%q version=%d exists=%t commit_error=%v query_error=%v", siteID, version, exists, commitErr, err)
+	return err == nil && exists, err == nil
+}
+
+// refuseUnpublishedCreate answers a create sent with publish=false: a new
+// site's first version is the only one it has, so there is nothing else to
+// keep live while it waits.
+func refuseUnpublishedCreate(w http.ResponseWriter, r *http.Request) bool {
+	if r.URL.Query().Get("publish") == "" || r.URL.Query().Get("publish") == "true" {
+		return false
+	}
+	writeJSON(w, http.StatusBadRequest, errorResponse{
+		Error: "publish=false applies to an update of a site that already exists; a new site's first version is always live (only its owner or team can open it until its access level changes)",
+		Code:  "publish_required",
+	})
+	return true
 }
 
 func siteVersionPrefix(username, siteName string, versionNumber int) string {
@@ -1018,6 +1091,7 @@ func (h *SiteHandler) listVersions(w http.ResponseWriter, r *http.Request) {
 			ID:            v.ID,
 			VersionNumber: v.VersionNumber,
 			Status:        v.Status,
+			Live:          v.VersionNumber == site.ActiveVersion,
 			CreatedAt:     v.CreatedAt,
 		}
 	}

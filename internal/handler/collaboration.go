@@ -45,9 +45,12 @@ type collaborationSiteResponse struct {
 	// the relative long path on the base host; after the subdomain cutover
 	// it is the absolute short address on the owner's host. Clients use it
 	// as returned rather than prefixing it with the server origin.
-	PublicPath string    `json:"public_path"`
-	URL        string    `json:"url"`
-	ETag       string    `json:"etag"`
+	PublicPath string `json:"public_path"`
+	URL        string `json:"url"`
+	ETag       string `json:"etag"`
+	// NewVersion is set only by a deploy with publish=false: the version it
+	// stored, which is not live (active_version is still what visitors see).
+	NewVersion int       `json:"new_version,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 	Analytics  analytics `json:"analytics"`
@@ -78,10 +81,12 @@ type networkRequestResponse struct {
 }
 
 type collaborationVersionResponse struct {
-	VersionNumber int       `json:"version_number"`
-	Status        string    `json:"status"`
-	UploadedBy    *string   `json:"uploaded_by,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	VersionNumber int    `json:"version_number"`
+	Status        string `json:"status"`
+	// Live is whether this is the version visitors see now.
+	Live       bool      `json:"live"`
+	UploadedBy *string   `json:"uploaded_by,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 type collaborationPreconditionResponse struct {
@@ -297,6 +302,7 @@ func (h *SiteHandler) listCollaborationVersions(w http.ResponseWriter, r *http.R
 		response = append(response, collaborationVersionResponse{
 			VersionNumber: version.VersionNumber,
 			Status:        version.Status,
+			Live:          version.VersionNumber == access.Site.ActiveVersion,
 			UploadedBy:    version.UploaderUsername,
 			CreatedAt:     version.CreatedAt,
 		})
@@ -307,6 +313,10 @@ func (h *SiteHandler) listCollaborationVersions(w http.ResponseWriter, r *http.R
 
 func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Request) {
 	ownerUsername, siteName, ok := validatedCollaborationPath(w, r)
+	if !ok {
+		return
+	}
+	publish, ok := deployPublishes(w, r)
 	if !ok {
 		return
 	}
@@ -384,15 +394,19 @@ func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	if err := db.UpdateSiteActiveVersion(r.Context(), tx, access.Site.ID, versionNumber); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, errorResponse{Error: "site not found"})
+	liveVersion := previousVersion
+	if publish {
+		liveVersion = versionNumber
+		if err := db.UpdateSiteActiveVersion(r.Context(), tx, access.Site.ID, versionNumber); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				writeJSON(w, http.StatusNotFound, errorResponse{Error: "site not found"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
 	}
-	freed, err := pruneVersions(r.Context(), tx, h.quota, access.Site.ID, versionNumber)
+	freed, err := pruneVersions(r.Context(), tx, h.quota, access.Site.ID, liveVersion)
 	if err != nil {
 		log.Printf("prune collaboration versions for %s/%s: %v", access.OwnerUsername, siteName, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
@@ -411,13 +425,20 @@ func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Req
 		ActorID: actor.ID, ActorKind: actorKind, KeyID: keyID,
 		Action: "site_update", OwnerID: access.OwnerID, SiteID: access.Site.ID,
 		RequestID: auditRequestID(r.Context()),
-		Extra:     map[string]any{"version": versionNumber, "previous_version": previousVersion},
+		Extra:     map[string]any{"version": versionNumber, "previous_version": previousVersion, "published": publish},
 	}); err != nil {
 		log.Printf("record audit for site_update %s/%s: %v", access.OwnerUsername, siteName, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
-	if commitErr := audit.Commit(tx); commitErr != nil {
+	if commitErr := audit.Commit(tx); commitErr != nil && !publish {
+		applied, known := reconcileStoredVersion(h.database, access.Site.ID, versionNumber, commitErr)
+		keepObject = applied || !known
+		if !applied {
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+			return
+		}
+	} else if commitErr != nil {
 		result := reconcileSiteCommit(h.database, access.OwnerID, siteName, siteCommitExpectation{
 			applied:    existingSiteCommitSnapshot(access.Site.ID, versionNumber),
 			rolledBack: existingSiteCommitSnapshot(access.Site.ID, previousVersion),
@@ -430,12 +451,14 @@ func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Req
 		}
 	}
 	keepObject = true
-	access.Site.ActiveVersion = versionNumber
+	access.Site.ActiveVersion = liveVersion
 	access.Site.UpdatedAt = time.Now().UTC()
 	setSiteETag(w, access.Site)
-	writeJSON(w, http.StatusOK, h.collaborationSiteResponse(
-		r, access.Site, access.OwnerUsername, access.Role, db.SiteAnalyticsSummary{}, nil,
-	))
+	resp := h.collaborationSiteResponse(r, access.Site, access.OwnerUsername, access.Role, db.SiteAnalyticsSummary{}, nil)
+	if !publish {
+		resp.NewVersion = versionNumber
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *SiteHandler) rollbackCollaborationSite(w http.ResponseWriter, r *http.Request) {
@@ -764,6 +787,9 @@ func (h *SiteHandler) createCollaborationSite(w http.ResponseWriter, r *http.Req
 	}
 	ownerUsername, siteName, ok := validatedCollaborationPath(w, r)
 	if !ok {
+		return
+	}
+	if refuseUnpublishedCreate(w, r) {
 		return
 	}
 	access, err := db.ResolveNamespaceAccess(r.Context(), h.database, user.ID, ownerUsername)

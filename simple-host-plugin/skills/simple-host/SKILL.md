@@ -100,7 +100,8 @@ user's own username.
 Before any existing-site operation, read
 [`references/collaboration.md`](references/collaboration.md) completely. It is
 the source of truth for owner-qualified routes, retained ETags, exact artifact
-downloads, conflict handling, rollback, access levels, and viewers.
+downloads, conflict handling, holding a version back to preview it, rollback,
+who changed the site and who visited, access levels, and viewers.
 
 ## 3. Choose the namespace before you build
 
@@ -230,7 +231,10 @@ Typical combinations:
      `deploy_site` tool with `owner` and `intent: "create"`. No ETag.
    - **Update:** the owner-qualified `PUT` with the ETag retained before
      editing, or `deploy_site` with `owner`, `intent: "update"`, and that same
-     ETag.
+     ETag. When the person wants to look before visitors see it, add
+     `?publish=false` (`publish: false`), give them the `preview_version`
+     link, and make it live with a rollback to it once they are happy
+     (`references/collaboration.md`).
 9. Verify the site at the `url` the deploy response returns, quoted as
    returned, including its asset requests.
 10. After a first publish, tell the user only they (or their team) can open the

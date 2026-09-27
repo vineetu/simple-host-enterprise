@@ -399,6 +399,20 @@ func (s *Server) callTool(r *http.Request, req request) response {
 	if up.Fallback != nil && status == up.FallbackOn {
 		status, payload, etag, overflow = s.serveUpstream(r, *up.Fallback)
 	}
+	if status < 400 && up.Merge != nil {
+		parts := make([]partResult, 0, len(up.Also))
+		for _, also := range up.Also {
+			partStatus, partBody, _, _ := s.serveUpstream(r, also)
+			parts = append(parts, partResult{Status: partStatus, Body: partBody})
+		}
+		merged, err := up.Merge(payload, parts)
+		if err != nil {
+			return toolResult(req.ID, err.Error(), nil, true)
+		}
+		// The ETag belonged to the first read alone; the merged answer is
+		// not something to change the site against.
+		payload, etag = merged, ""
+	}
 	if status < 400 && up.Transform != nil {
 		if overflow {
 			return toolResult(req.ID, errArchiveTooLarge.Error(), nil, true)
@@ -527,13 +541,15 @@ func codeHint(code string, tool Tool) string {
 			"or update one of their existing sites instead. get_account shows each namespace's usage."
 	case "storage_quota":
 		return "The namespace's storage quota is full, so nothing was deployed. Do not retry the same upload. Tell the user the numbers in the message; " +
-			"deleting uploaded files they no longer need frees space at once; a deleted site's space frees when its 30-day recovery window ends. get_account shows each namespace's usage."
+			"deleting uploaded files they no longer need frees space at once (list_site_assets shows them; delete_site_asset only with the user's say-so, file by file); a deleted site's space frees when its 30-day recovery window ends. get_account shows each namespace's usage."
 	case "malware_found":
 		return "The malware scan flagged the file named in the message, so nothing was stored. Tell the user which file and what was found. " +
 			"Do not retry, rename, re-encode or split the file to get it past the scan."
 	case "scanner_unavailable":
 		return "The server's malware scanner is not answering, so it refused the upload and stored nothing. Nothing in the arguments will fix it; " +
 			"wait and try once more later, and tell the user if it keeps failing."
+	case "publish_required":
+		return "A new site's first version is always live, so publish false applies only to an update. Create the site normally; it opens only to its owner or team until set_site_access widens it."
 	case "skill_version_required":
 		return "This client is too old for the management API. Nothing in the arguments will fix it; tell the user the Simple Host plugin needs updating."
 	}
@@ -563,6 +579,12 @@ func statusHint(status int, tool Tool) string {
 		}
 		return "This account may not do that. Call list_sites to see what it can act on."
 	case http.StatusNotFound:
+		switch tool.Name {
+		case "delete_site_asset":
+			return "No uploaded file with that id on this site (it may already be deleted). Call list_site_assets for the files there are."
+		case "preview_version":
+			return "No such site for this account, or that version is no longer kept. Call list_site_versions for the versions there are."
+		}
 		if tool.family == familyTeam {
 			return "No team of that name that this account is in. Call list_teams for the exact names."
 		}
