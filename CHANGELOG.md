@@ -20,6 +20,14 @@ backward-compatible. Skills are at 0.14.2 (0.11.0 still works).
   `list_sites` add the sites shared with the caller by name or through a
   team, as `access_role: "viewer"` entries with `shared_via`.
 
+### Access
+- Opening a site you can't see now shows a page instead of a bare 404: "This
+  site doesn't exist or isn't shared with you", who you are signed in as,
+  and Switch account (sign out and back in as someone else, then return to
+  the site). A missing site and one not shared with you look the same, and a
+  signed-out browser is asked to sign in first for both; scripts and agents
+  still get a plain 404.
+
 ### Search
 - The `/showcase` search box also finds sites by the words on their pages
   (full-text search), not only by owner and site name; the name match still

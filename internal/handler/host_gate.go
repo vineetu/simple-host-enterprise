@@ -109,6 +109,9 @@ type hostGate struct {
 	// for a person): a member sees a team's index page as its owner does.
 	// Nil counts nobody as a member.
 	teamMember func(ctx context.Context, ownerID, userID string) (bool, error)
+	// userLabel names a signed-in person on the no-access page
+	// (no_access.go). Nil leaves the name out.
+	userLabel func(ctx context.Context, userID string) string
 	// recordAccess writes one access_log row, reading SiteFiles' writer at
 	// call time because it is attached after NewHostGate runs. A field for
 	// the same reason as the funcs above: a test asserts what was logged
@@ -161,6 +164,7 @@ func NewHostGate(hosts HostModel, files *SiteFiles, database *sql.DB, signingKey
 		teamMember: func(ctx context.Context, ownerID, userID string) (bool, error) {
 			return db.IsTeamMember(ctx, database, ownerID, userID)
 		},
+		userLabel: newUserLabel(database),
 		legacyTeam: func(r *http.Request, label string) (string, bool, error) {
 			return db.LegacyTeamName(r.Context(), database, label)
 		},
@@ -274,6 +278,10 @@ func (g *hostGate) serveOwnerHost(w http.ResponseWriter, r *http.Request, label 
 	requestHost := label + "." + g.hosts.BaseHost()
 	if r.URL.Path == "/auth/session" {
 		g.handoff.redeemHandoffSession(w, r, requestHost)
+		return
+	}
+	if r.URL.Path == switchAccountPath {
+		g.switchAccount(w, r, requestHost)
 		return
 	}
 	if r.URL.Path == "/" {
@@ -618,6 +626,10 @@ func (g *hostGate) serveSiteHost(w http.ResponseWriter, r *http.Request, label s
 		g.handoff.redeemHandoffSession(w, r, requestHost)
 		return
 	}
+	if r.URL.Path == switchAccountPath {
+		g.switchAccount(w, r, requestHost)
+		return
+	}
 
 	sitePart, ownerLabelPart, ok := SplitSiteLabel(label)
 	if !ok {
@@ -633,7 +645,7 @@ func (g *hostGate) serveSiteHost(w http.ResponseWriter, r *http.Request, label s
 		// Nothing lives here now. A site handed over or renamed away from
 		// this address is sent on to where it is, path and query kept.
 		if !g.redirectMovedSite(w, r, requestHost, ownerLabelPart, sitePart, r.URL.EscapedPath()) {
-			http.NotFound(w, r)
+			g.missingSite(w, r, requestHost)
 		}
 		return
 	}
@@ -656,8 +668,10 @@ func (g *hostGate) serveSiteHost(w http.ResponseWriter, r *http.Request, label s
 	if err != nil {
 		if err != db.ErrSiteNotFound {
 			log.Printf("host gate: resolve site %s/%s for serving: %v", owner, sitename, err)
+			http.NotFound(w, r)
+			return
 		}
-		http.NotFound(w, r)
+		g.missingSite(w, r, requestHost)
 		return
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -761,7 +775,7 @@ func (g *hostGate) checkViewerAllowed(w http.ResponseWriter, r *http.Request, si
 	}
 	if !allowed {
 		g.recordDenied(r, siteID, userID, "not_a_viewer")
-		http.NotFound(w, r)
+		g.noAccess(w, r, userID)
 		return false
 	}
 	return true

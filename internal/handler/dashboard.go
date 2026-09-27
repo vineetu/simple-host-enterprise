@@ -28,6 +28,15 @@ type DashboardHandler struct {
 	signingKeys []auth.SigningKey
 	sessionIdle time.Duration
 	quota       UploadQuota
+	// hosts validates ?switch= (a site's "Switch account" link).
+	hosts HostModel
+}
+
+// WithHosts sets the host model the switch-account notice checks its
+// address against.
+func (h *DashboardHandler) WithHosts(hosts HostModel) *DashboardHandler {
+	h.hosts = hosts
+	return h
 }
 
 // WithQuota sets the per-owner limits the page shows usage against.
@@ -78,7 +87,15 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 	usageHTML := h.usageHTML(r, user)
 
 	notice := ""
-	if r.URL.Query().Get("notice") == "username_suffixed" {
+	if target, ok := switchTarget(h.hosts, r.URL.Query().Get("switch")); ok {
+		// Arrived from a site's "Switch account" link: signing out here ends
+		// this session everywhere and goes back to the site, which asks for
+		// sign-in again.
+		notice = `<section class="roadmap-block"><span class="roadmap-tag">Switch account</span>
+  <span class="roadmap-text">You're signed in as ` + html.EscapeString(user.Username) + `. To open ` + html.EscapeString(strings.TrimSuffix(strings.TrimPrefix(target, "https://"), "/")) + ` with a different account, sign out, then sign in with that account.</span>
+  <form method="POST" action="/auth/logout"><input type="hidden" name="to" value="` + html.EscapeString(target) + `"><button type="submit" class="btn-logout">Sign out and switch</button></form>
+</section>`
+	} else if r.URL.Query().Get("notice") == "username_suffixed" {
 		notice = `<section class="roadmap-block"><span class="roadmap-tag">Note</span>
   <span class="roadmap-text">Your usual username was already taken, so your account and site address use a suffixed version instead.</span>
 </section>`

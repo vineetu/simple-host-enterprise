@@ -49,19 +49,33 @@ Config names are documented in `docs/configuration.md`; schema in
   page lists sessions with Revoke, the person's connected apps with
   Disconnect (section 3), and "Sign out everywhere": every session, and by
   default every API key and connected app, revoked in one transaction
-  (`sign_out_everywhere`), leaving the browser signed out.
+  (`sign_out_everywhere`), leaving the browser signed out. **No access and
+  switch account.** A browser opening a site host whose site does not exist,
+  or that the signed-in person may not open, gets the same 404 page: "This
+  site doesn't exist or isn't shared with you", who they are signed in as
+  (username and email), "Ask the person who sent you the link to share it
+  with you", and Switch account. A signed-out browser is sent to sign in
+  first in both cases, so the page confirms nothing; scripts and agents get
+  the plain 404 (only a refused existing site is audited `access_denied`).
+  Switch account (`GET /auth/switch` on the site or owner host, reserved
+  like `/auth/session`) clears that host's cookie and goes to
+  `/dashboard?switch=<site address>`, which offers "Sign out and switch";
+  `POST /auth/logout` with form field `to` (an https address on this
+  server's owner or site hosts, anything else ignored) signs out and returns
+  there, which asks for sign-in again.
 - **Status.** Built.
 - **Routes.** `GET /auth/login`, `GET /auth/callback`, `POST /auth/logout`,
   `GET /auth/sessions` (sessions page), `POST /auth/sessions/{id}/revoke`,
   `POST /auth/sessions/revoke-all` (sign out everywhere; form field
   `credentials` set = keys and apps too), `GET /auth/handoff`, `GET /api/me`.
-  Host-gate: `GET /auth/session` (redeem, owner and site hosts).
+  Host-gate: `GET /auth/session` (redeem, owner and site hosts),
+  `GET /auth/switch` (switch account, owner and site hosts).
 - **MCP.** `get_account` (→ `GET /api/me`).
 - **Skill.** `references/account-recovery.md` (Sign-in and API keys);
   `SKILL.md` §1–2.
 - **Pages.** `/auth/sessions` (sessions, connected apps, sign out
   everywhere); sign-in prompt on `/dashboard`.
-- **Go.** `internal/handler/auth.go`, `handoff.go`, `user.go`, `origin.go`;
+- **Go.** `internal/handler/auth.go`, `handoff.go`, `user.go`, `origin.go`, `no_access.go`;
   `internal/auth/` (`middleware.go`, `session_cookie.go`, `hostsession.go`);
   `internal/oidc/`; `internal/db/identity.go`, `sessions.go`, `handoff.go`.
 - **DB.** `users` (0001, 0017 email, 0023 OIDC identity), `sessions` (0021),

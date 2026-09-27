@@ -249,7 +249,9 @@ func TestErasePersonRemovesEverything(t *testing.T) {
 	if !isOwnerLabelViolation(err) {
 		t.Errorf("new account under the erased name: %v", err)
 	}
-	if code := w.view("", "alice", "tracker", false); code != http.StatusNotFound {
+	// Signed in, the old address is the no-access page (a signed-out
+	// browser is first sent to sign in, as for any site host).
+	if code := w.view("vera", "alice", "tracker", false); code != http.StatusNotFound {
 		t.Errorf("old address = %d, want 404", code)
 	}
 }

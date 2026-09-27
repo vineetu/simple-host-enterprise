@@ -587,6 +587,12 @@ func (h *AuthHandler) logout(w http.ResponseWriter, r *http.Request) {
 		Name: auth.SessionCookieName, Value: "", Path: "/", HttpOnly: true, Secure: true,
 		SameSite: http.SameSiteLaxMode, MaxAge: -1,
 	})
+	// "Sign out and switch" goes back to the site it came from, which then
+	// asks for sign-in; only an address on this server's owner or site hosts.
+	if target, ok := switchTarget(h.hosts, r.PostFormValue("to")); ok {
+		http.Redirect(w, r, target, http.StatusSeeOther)
+		return
+	}
 	http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
 }
 

@@ -235,7 +235,7 @@ func run() (runErr error) {
 	handler.NewShowcaseHandler(database, hosts, signingKeys, cfg.Session.Idle).Register(mux)
 	handler.NewAuthHandler(database, oidcProvider, oidcClaims, signingKeys, cfg.Session.TTL, cfg.Session.Idle, auditRecorder, hosts, cfg.PublicBaseURL, abuseLimits).Register(mux, authMW)
 	handler.NewKeysHandler(database, auditRecorder, hosts, cfg.PublicBaseURL, abuseLimits).WithMaxKeyDays(int(cfg.APIKeyMaxDays)).Register(mux, authMW)
-	handler.NewDashboardHandler(database, signingKeys, cfg.Session.Idle).WithQuota(quota).Register(mux, authMW)
+	handler.NewDashboardHandler(database, signingKeys, cfg.Session.Idle).WithQuota(quota).WithHosts(hosts).Register(mux, authMW)
 	handoffHandler := handler.NewHandoffHandler(database, signingKeys, hosts, auditRecorder, abuseLimits)
 	handoffHandler.Register(mux, authMW)
 	handler.RegisterUIRoutes(mux, cfg.PublicBaseURL)
