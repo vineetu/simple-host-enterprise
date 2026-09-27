@@ -276,7 +276,10 @@ person's address rather than the ingress's (`docs/configuration.md`).
 10. Mint an API key with scope **Full** on `/dashboard`, save it to a file, and run
     `make smoke BASE=https://<base> KEY_FILE=<that file>`. It publishes,
     restricts and deletes a throwaway site over public HTTPS only; the key
-    is never printed. Revoke the key afterwards.
+    is never printed. Revoke the key afterwards. Your own scripts and CI
+    jobs that call the API with a key send `X-Simple-Host-Client: api`
+    (an agent's skill sends `X-Skill-Version` instead); with neither header
+    a keyed call gets `400 skill_version_required` (`docs/ci.md`).
 
 `deploy/overlays/staging` and `deploy/overlays/production` are templates on
 top of the same `byo` shape, for a company that wants a separate

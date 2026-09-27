@@ -43,6 +43,13 @@ release, commit and schema.
   `make prereqs`; and why a node-IP database filter breaks when nodes
   change. `docs/storage.md`'s bucket `curl` commands read the key pair from
   a 0600 file (`-K`), not the command line.
+- Calls with an API key must name their client: an agent's skill sends
+  `X-Skill-Version`, and a script or pipeline sends
+  `X-Simple-Host-Client: api`. `docs/ci.md`'s publish commands now send
+  it (without it they got `400 skill_version_required`), INSTALL.md and
+  `docs/install.md` say so, and the 400's message names both headers.
+  `docs/ci.md` also says a publish key cannot delete uploaded files or
+  download a whole site.
 - `make smoke` against a real install checks the key's scope first and
   stops before publishing when it is not Full, instead of failing four
   checks and leaving its throwaway site behind; if the site cannot be

@@ -4,13 +4,19 @@ A build pipeline publishes a site with one call and a `publish` API key.
 
 1. Sign in to the dashboard and mint a key with the **Publish** scope (the
    default). It can deploy, update, roll back and list your sites and your
-   teams' sites, read their versions, and read and write their saved data
-   and uploaded files; it cannot delete a site, change who can open it, or
-   read the audit log. Keys expire (`API_KEY_DEFAULT_DAYS`, at most
+   teams' sites, read their versions, read and write their saved data, and
+   upload files; it cannot delete a site or an uploaded file, download a
+   whole site, change who can open it, or read the audit log. Keys expire (`API_KEY_DEFAULT_DAYS`, at most
    `API_KEY_MAX_DAYS`); responses carry `X-Key-Expires` in the last
    `API_KEY_EXPIRY_WARNING_DAYS`, so a job can warn before it breaks.
 2. Store it as a CI secret, for example `SIMPLE_HOST_KEY`.
-3. Package the built site with `index.html` at the archive root and send it
+3. Send `X-Simple-Host-Client: api` with the key on every call, as below.
+   A call with a key must say what it is: an agent's skill sends
+   `X-Skill-Version: <its version>` (so an outdated skill is told to
+   update), and anything else (a pipeline, a script, a check) sends
+   `X-Simple-Host-Client: api`. With neither, the answer is
+   `400 skill_version_required`.
+4. Package the built site with `index.html` at the archive root and send it
    with `PUT ...?create=true`: the site is created the first time (`201`)
    and updated on every run after (`200`). Without `create=true` a missing
    site is `404`, so a mistyped name never creates a second site.
@@ -18,13 +24,13 @@ A build pipeline publishes a site with one call and a `publish` API key.
 A personal site:
 
 ```sh
-tar -C dist -czf site.tar.gz . && curl -fsS -X PUT -H "X-API-Key: $SIMPLE_HOST_KEY" -H "Content-Type: application/gzip" --data-binary @site.tar.gz "https://$SIMPLE_HOST_BASE/api/sites/my-site?create=true"
+tar -C dist -czf site.tar.gz . && curl -fsS -X PUT -H "X-API-Key: $SIMPLE_HOST_KEY" -H "X-Simple-Host-Client: api" -H "Content-Type: application/gzip" --data-binary @site.tar.gz "https://$SIMPLE_HOST_BASE/api/sites/my-site?create=true"
 ```
 
 A team site (the key's owner must be a member of the team):
 
 ```sh
-tar -C dist -czf site.tar.gz . && curl -fsS -X PUT -H "X-API-Key: $SIMPLE_HOST_KEY" -H "Content-Type: application/gzip" --data-binary @site.tar.gz "https://$SIMPLE_HOST_BASE/api/collaboration/sites/team-docs/handbook?create=true"
+tar -C dist -czf site.tar.gz . && curl -fsS -X PUT -H "X-API-Key: $SIMPLE_HOST_KEY" -H "X-Simple-Host-Client: api" -H "Content-Type: application/gzip" --data-binary @site.tar.gz "https://$SIMPLE_HOST_BASE/api/collaboration/sites/team-docs/handbook?create=true"
 ```
 
 The team route requires `If-Match` with the ETag of the version being
@@ -33,7 +39,7 @@ other. A pipeline that owns the site outright can read the current ETag
 just before deploying:
 
 ```sh
-etag=$(curl -sS -o /dev/null -D - -H "X-API-Key: $SIMPLE_HOST_KEY" "https://$SIMPLE_HOST_BASE/api/collaboration/sites/team-docs/handbook" | awk 'tolower($1)=="etag:"{print $2}' | tr -d '\r'); curl -fsS -X PUT -H "X-API-Key: $SIMPLE_HOST_KEY" -H "If-Match: $etag" -H "Content-Type: application/gzip" --data-binary @site.tar.gz "https://$SIMPLE_HOST_BASE/api/collaboration/sites/team-docs/handbook?create=true"
+etag=$(curl -sS -o /dev/null -D - -H "X-API-Key: $SIMPLE_HOST_KEY" -H "X-Simple-Host-Client: api" "https://$SIMPLE_HOST_BASE/api/collaboration/sites/team-docs/handbook" | awk 'tolower($1)=="etag:"{print $2}' | tr -d '\r'); curl -fsS -X PUT -H "X-API-Key: $SIMPLE_HOST_KEY" -H "X-Simple-Host-Client: api" -H "If-Match: $etag" -H "Content-Type: application/gzip" --data-binary @site.tar.gz "https://$SIMPLE_HOST_BASE/api/collaboration/sites/team-docs/handbook?create=true"
 ```
 
 (The first deploy of a team site needs no ETag: `create=true` creates it.)

@@ -3799,7 +3799,7 @@ components:
       properties:
         error:
           type: string
-          example: a supported Simple Host skill version is required
+          example: "a supported Simple Host skill version is required: an agent's skill sends X-Skill-Version: <its version>; a script or pipeline that is not a skill sends X-Simple-Host-Client: api"
         code:
           type: string
           enum: [skill_version_required]

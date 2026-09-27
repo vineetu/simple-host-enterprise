@@ -705,7 +705,11 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://install-check.<base>/healthz
 make smoke BASE=https://<base> KEY_FILE="$HOME/.simple-host-install-key"
 ```
 
-This is `scripts/smoke-remote.sh`. It uses only public HTTPS and the admin's
+This is `scripts/smoke-remote.sh`. (Every REST call made with an API key
+names its client: an agent's skill sends `X-Skill-Version: <its version>`,
+and a script, pipeline or check you write sends `X-Simple-Host-Client: api`;
+with neither the answer is `400 skill_version_required`. `docs/ci.md` has
+the publish call.) It uses only public HTTPS and the admin's
 key from HUMAN STEP D (read from the file, never printed): probes and TLS,
 key auth and its scope (Full, or it stops before publishing), publish, update and roll back a throwaway `smoke-…` site, the
 owner host, state read/write, an asset upload, list and delete, restricting

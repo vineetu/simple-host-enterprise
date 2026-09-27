@@ -75,7 +75,7 @@ func SkillVersionMiddleware(serverVersion, minimumVersion string) (func(http.Han
 
 			w.Header().Set("Cache-Control", "no-store")
 			writeJSON(w, http.StatusBadRequest, skillVersionRequiredResponse{
-				Error:                   "a supported Simple Host skill version is required",
+				Error:                   "a supported Simple Host skill version is required: an agent's skill sends X-Skill-Version: <its version>; a script or pipeline that is not a skill sends X-Simple-Host-Client: api",
 				Code:                    "skill_version_required",
 				LatestVersion:           serverVersion,
 				MinimumSupportedVersion: minimumVersion,
