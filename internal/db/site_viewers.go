@@ -116,12 +116,32 @@ func ViewerAllowed(ctx context.Context, q Querier, siteID, userID string) (bool,
 	return false, nil
 }
 
-// WriterAllowed is who may write a site's saved data and upload or delete
-// its assets as a signed-in person: whoever may open it. Saved data follows
+// WriterAllowed is who may write a site's saved data and upload its assets
+// as a signed-in person: whoever may open it. Deleting an uploaded file is
+// narrower (SiteAPIHandler.DeleteAsset): it cannot be undone. Saved data follows
 // opening; anonymous visitors to a network site are refused before this is
 // ever asked.
 func WriterAllowed(ctx context.Context, q Querier, siteID, userID string) (bool, error) {
 	return ViewerAllowed(ctx, q, siteID, userID)
+}
+
+const siteOwnerOrMemberQuery = `
+	SELECT EXISTS (
+		SELECT 1 FROM sites s
+		WHERE s.id = $1::uuid AND s.deleted_at IS NULL
+		  AND (s.user_id = $2::uuid OR EXISTS (
+			SELECT 1 FROM team_members tm WHERE tm.team_id = s.user_id AND tm.user_id = $2::uuid
+		  ))
+	) AS owner_or_member
+`
+
+// SiteOwnerOrMember reports whether a person owns a site or, for a team
+// site, is a member of its team: the people who manage it, whatever its
+// access level.
+func SiteOwnerOrMember(ctx context.Context, q Querier, siteID, userID string) (bool, error) {
+	var ok bool
+	err := q.QueryRowContext(ctx, siteOwnerOrMemberQuery, siteID, userID).Scan(&ok)
+	return ok, err
 }
 
 const previewAllowedQuery = `

@@ -135,7 +135,9 @@ the site: `list_site_assets` and `delete_site_asset` (or
 `DELETE .../assets/<id>`; the dashboard's Assets list does the same). A delete
 is final and the file's address stops working, so name the file and its size
 and ask before each one. Deleting needs a full-scope key or a connector; a
-publish key can list and upload but not delete. When a deploy or upload is refused with
+publish key can list and upload but not delete. On the site's own
+`DELETE /api/sites/<site>/assets/<id>`, only the person who uploaded the file,
+the owner or a team member may delete it (403 otherwise). When a deploy or upload is refused with
 `storage_quota`, listing the site's uploads shows what could be freed; never
 delete files to make room on your own judgement.
 

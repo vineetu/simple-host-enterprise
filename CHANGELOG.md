@@ -4,6 +4,15 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## Unreleased
+
+### Security
+- Deleting an uploaded file from the site's own address
+  (`DELETE /api/sites/{site}/assets/{id}`, `/api/site/assets/{id}`) now needs
+  the person who uploaded it, the site's owner or a team member (403
+  otherwise). Anyone who can open the site still uploads and lists; a deleted
+  file cannot be brought back, so opening the site is no longer enough.
+
 ## v1.7.0 — 2026-09-27
 
 Schema 0055–0057 (all backward-compatible); run `simple-host migrate`

@@ -66,6 +66,9 @@ type siteAPITestState struct {
 	// (db.UpdateSiteState's own sql.ErrNoRows path), for
 	// TestSiteAPIPutStateFailureRecordsNoAudit.
 	siteExists bool
+	// managers backs db.SiteOwnerOrMember: the user ids that own the site
+	// or are in its team.
+	managers map[string]bool
 }
 
 type siteAPITestAssetRow struct {
@@ -174,6 +177,10 @@ func (c *siteAPITestConn) QueryContext(_ context.Context, query string, args []d
 			}
 		}
 		return &siteAPITestRows{columns: []string{"count", "sum"}, values: [][]driver.Value{{count, total}}}, nil
+
+	case strings.Contains(normalized, "AS owner_or_member"):
+		userID := args[1].Value.(string)
+		return &siteAPITestRows{columns: []string{"owner_or_member"}, values: [][]driver.Value{{s.managers[userID]}}}, nil
 
 	case strings.Contains(normalized, "FROM users") && strings.Contains(normalized, "WHERE username = $1"):
 		// Backs db.GetUserByUsername, which h.auditEvent (site_api.go) calls
@@ -442,7 +449,7 @@ func TestSiteAPIDeleteAssetRetiresObjectWithRow(t *testing.T) {
 	state := &siteAPITestState{}
 	database := newSiteAPITestDB(t, state)
 	handler := NewSiteAPIHandler(database, store.Store, testAssetLimits(), nil, testHostModel(t))
-	call := siteAPICall{Owner: "alice", SiteName: "demo", SiteID: siteAPITestSiteID}
+	call := siteAPICall{Owner: "alice", SiteName: "demo", SiteID: siteAPITestSiteID, ActorUserID: "uploader-1"}
 
 	createResponse := httptest.NewRecorder()
 	handler.CreateAsset(createResponse, multipartUploadRequest(t, "logo.png", testPNGBytes), call)
@@ -589,4 +596,48 @@ func (r *failingRecorder) Record(context.Context, audit.Event) {}
 func (r *failingRecorder) RecordTx(context.Context, *sql.Tx, audit.Event) error {
 	r.called = true
 	return errors.New("failingRecorder: RecordTx always fails")
+}
+
+// A person who may open (and so write to) a company-wide site but neither
+// uploaded the file nor manages the site cannot delete it: a deleted file
+// has no history. The uploader and the owner or team can.
+func TestSiteAPIDeleteAssetOnlyUploaderOwnerOrTeam(t *testing.T) {
+	store := newTestStore(t)
+	writeGateSite(t, store, "alice", "demo", "index")
+	state := &siteAPITestState{managers: map[string]bool{"owner-1": true}}
+	handler := NewSiteAPIHandler(newSiteAPITestDB(t, state), store.Store, testAssetLimits(), nil, testHostModel(t))
+	upload := func(actor string) string {
+		t.Helper()
+		call := siteAPICall{Owner: "alice", SiteName: "demo", SiteID: siteAPITestSiteID, ActorUserID: actor}
+		response := httptest.NewRecorder()
+		handler.CreateAsset(response, multipartUploadRequest(t, "logo.png", testPNGBytes), call)
+		var created struct {
+			ID string `json:"id"`
+		}
+		_ = json.Unmarshal(response.Body.Bytes(), &created)
+		if created.ID == "" {
+			t.Fatalf("upload failed: %d %s", response.Code, response.Body.String())
+		}
+		return created.ID
+	}
+	remove := func(actor, id string) int {
+		call := siteAPICall{Owner: "alice", SiteName: "demo", SiteID: siteAPITestSiteID, ActorUserID: actor}
+		response := httptest.NewRecorder()
+		handler.DeleteAsset(response, httptest.NewRequest(http.MethodDelete, "/api/site/assets/"+id, nil), call, id)
+		return response.Code
+	}
+	first := upload("uploader-1")
+	if code := remove("colleague-1", first); code != http.StatusForbidden {
+		t.Fatalf("colleague delete = %d, want 403", code)
+	}
+	if code := remove("", first); code != http.StatusForbidden {
+		t.Fatalf("anonymous delete = %d, want 403", code)
+	}
+	if code := remove("uploader-1", first); code != http.StatusNoContent {
+		t.Fatalf("uploader delete = %d, want 204", code)
+	}
+	second := upload("uploader-1")
+	if code := remove("owner-1", second); code != http.StatusNoContent {
+		t.Fatalf("owner delete = %d, want 204", code)
+	}
 }

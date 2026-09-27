@@ -676,7 +676,9 @@ Config names are documented in `docs/configuration.md`; schema in
   owner or team member; a publish key may list but not delete, on either
   host: a deleted file cannot be brought back, so deleting is `keyFull`,
   and the host gate's site API classifies its DELETE as
-  `auth.SiteAPIDeletePattern`).
+  `auth.SiteAPIDeletePattern`). On the site's own routes a delete is also
+  refused (403) unless the caller uploaded the file or is the owner or a
+  team member; anyone who may open the site may still upload and list.
 - **Skill.** `references/state-and-ai.md` (Uploaded assets);
   `simple-host-builder` §3.
 - **Pages.** `/dashboard` assets panel.

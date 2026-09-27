@@ -621,13 +621,32 @@ func (h *SiteAPIHandler) DeleteAsset(w http.ResponseWriter, r *http.Request, cal
 		writeRateLimit(w, decision)
 		return
 	}
-	if _, err := db.GetAsset(r.Context(), h.database, call.SiteID, id); err != nil {
+	asset, err := db.GetAsset(r.Context(), h.database, call.SiteID, id)
+	if err != nil {
 		if errors.Is(err, db.ErrAssetNotFound) {
 			writeJSON(w, http.StatusNotFound, errorResponse{Error: "asset not found"})
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
+	}
+	// A deleted file has no history to restore it from, so unlike saved
+	// data, being able to open the site is not enough: only the person who
+	// uploaded it, the owner, or a member of the owning team deletes it.
+	if !(call.ActorUserID != "" && asset.CreatedBy != nil && *asset.CreatedBy == call.ActorUserID) {
+		allowed := false
+		if call.ActorUserID != "" {
+			allowed, err = db.SiteOwnerOrMember(r.Context(), h.database, call.SiteID, call.ActorUserID)
+			if err != nil {
+				log.Printf("asset delete owner check %s/%s: %v", call.Owner, call.SiteName, err)
+				writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+				return
+			}
+		}
+		if !allowed {
+			writeJSON(w, http.StatusForbidden, errorResponse{Error: "only the person who uploaded this file, the site's owner or its team can delete it"})
+			return
+		}
 	}
 	tx, err := h.database.BeginTx(r.Context(), nil)
 	if err != nil {
