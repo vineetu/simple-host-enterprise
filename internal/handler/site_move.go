@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"log"
 	"mime"
 	"net/http"
@@ -314,7 +315,7 @@ func (s siteMover) checkMoveQuota(ctx context.Context, tx *sql.Tx, ownerID strin
 	}
 	if s.quota.MaxSites > 0 && usage.Sites > s.quota.MaxSites {
 		return refuseMove(http.StatusConflict, "site_limit",
-			"%s would have %s sites, more than the %s allowed (a deleted site counts until its 30-day recovery window ends); delete a site there first", name, formatCount(usage.Sites), formatCount(s.quota.MaxSites)), nil
+			"%s would have %s sites, more than the %s allowed (a deleted site counts until its %s recovery window ends); delete a site there first", name, formatCount(usage.Sites), formatCount(s.quota.MaxSites), oplimits.Days(oplimits.Get().DeletedRetentionDays)), nil
 	}
 	if s.quota.MaxBytes > 0 && usage.Bytes > s.quota.MaxBytes {
 		return &moveRefusal{status: http.StatusRequestEntityTooLarge, body: errorResponse{

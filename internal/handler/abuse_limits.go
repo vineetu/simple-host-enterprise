@@ -169,6 +169,26 @@ func ConfigureRateLimits(overrides map[string]RateLimit) error {
 	return nil
 }
 
+// rateLimitPlaceholders are "{{RATE_LIMIT_<NAME>}}" for every configurable
+// limit, each with its value in words ("200 at once, then one more every
+// 50ms"), for the served documents that state one.
+func rateLimitPlaceholders() []string {
+	out := make([]string, 0, 2*len(configurablePolicies))
+	for _, p := range configurablePolicies {
+		every := time.Duration(float64(time.Second) / p.RefillPerSecond)
+		out = append(out, "{{RATE_LIMIT_"+strings.ToUpper(strings.ReplaceAll(p.Name, "-", "_"))+"}}",
+			fmt.Sprintf("%d at once, then one more every %s", p.Burst, oplimits.Duration(every)))
+	}
+	return out
+}
+
+// expandServedText fills every operational placeholder a served document
+// (a skill file, the plugin bundle, openapi.yaml) may carry: the oplimits
+// values and the rate limits.
+func expandServedText(text string) string {
+	return strings.NewReplacer(append(oplimits.Get().Placeholders(), rateLimitPlaceholders()...)...).Replace(text)
+}
+
 // AbuseLimits owns the process-wide limiter state and the memory-sensitive
 // concurrency slots. Handler constructors accept a shared instance so every
 // route observes one set of process-wide gates. Anonymous search traffic has a

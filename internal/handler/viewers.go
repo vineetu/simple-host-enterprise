@@ -3,6 +3,8 @@ package handler
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"log"
 	"net/http"
 	"strconv"
@@ -221,7 +223,7 @@ func (h *SiteHandler) mutateSiteViewers(w http.ResponseWriter, r *http.Request, 
 		case errors.Is(err, db.ErrAmbiguousEmail):
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "more than one account has that email; use the username"})
 		case errors.Is(err, db.ErrViewerLimit):
-			writeJSON(w, http.StatusConflict, errorResponse{Error: "a site can have at most 50 listed viewers"})
+			writeJSON(w, http.StatusConflict, errorResponse{Error: fmt.Sprintf("a site can have at most %s listed viewers", oplimits.Count(db.MaxSiteViewers()))})
 		case errors.Is(err, sql.ErrNoRows):
 			writeJSON(w, http.StatusNotFound, errorResponse{Error: "site not found"})
 		default:

@@ -235,7 +235,7 @@ func outputSchemas() map[string]map[string]any {
 		"rollback_site": siteSchema(),
 		"preview_version": outObject(map[string]any{
 			"url":        outString("The private preview address to give the user. It works only for the site's owner or team, signed in."),
-			"expires_at": outString("When the address stops working (RFC 3339), one hour from now."),
+			"expires_at": outString("When the address stops working (RFC 3339), {{PREVIEW_LINK_TTL}} from now."),
 			"version":    outInteger("The version it shows."),
 			"live":       outBool("Whether that version is already the live one."),
 		}, "url", "expires_at", "version", "live"),
@@ -348,7 +348,7 @@ func outputSchemas() map[string]map[string]any {
 				"position":      outInteger("Rank, from 1."),
 			}, "impression_id", "owner", "site", "page_path", "url", "title", "snippet", "position")),
 		}, "query_id", "query", "result_count", "results"),
-		"list_deleted_sites": listOf("Every site deleted in the last 30 days from this account or its teams, newest first.", outObject(map[string]any{
+		"list_deleted_sites": listOf("Every site deleted in the last {{DELETED_RETENTION}} from this account or its teams, newest first.", outObject(map[string]any{
 			"owner":            outString("The namespace it was in: a username or a team name."),
 			"site":             outString("The site's name, which it keeps until it is restored or gone for good."),
 			"active_version":   outInteger("The version that was live when it was deleted."),

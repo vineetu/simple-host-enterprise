@@ -209,7 +209,7 @@ X-Skill-Version: <installed skill version>
 ```
 
 or `preview_version`. The answer's `url` (the site's address plus
-`_preview/<token>/`) works for one hour (`expires_at`) and opens only for the
+`_preview/<token>/`) works for {{PREVIEW_LINK_TTL}} (`expires_at`) and opens only for the
 site's owner or a member of the owning team, signed in as themselves, whatever
 the site's access level; anyone else gets not-found even with the link. It
 reads the site's live saved data, and its saves are refused (`403`
@@ -268,7 +268,7 @@ X-Skill-Version: <installed skill version>
 The answer is `{"url", "expires_at"}`. The `url` downloads one zip of the
 live files (`files/`), the current saved data and its history, the version
 list, and the uploaded files with a list naming them. It works once, within
-10 minutes, without signing in: give it to the user to open (do not fetch it
+{{EXPORT_LINK_TTL}}, without signing in: give it to the user to open (do not fetch it
 yourself, or it is used up), and never post it where others can see it. A
 used link answers 410; ask for a new one. Connector tool: `export_site`. The user can also use
 "Download site" in the site's Manage panel on `/dashboard`.
@@ -369,7 +369,7 @@ rename or move it instead of deleting and republishing:
 `POST .../transfer {"to": "<team>"}` (`transfer_site`). Saved data, history, uploads, access and viewers stay with
 the site, and the old address redirects. See [`teams.md`](teams.md).
 
-A deleted site stops serving at once but can be restored for 30 days, whole:
+A deleted site stops serving at once but can be restored for {{DELETED_RETENTION}}, whole:
 its versions, saved data and history, who can open it, viewers and uploaded
 files. Its name stays taken until then (a create answers `409` `name_held`:
 ask the user whether to restore it or pick another name). To bring one back,
@@ -381,19 +381,19 @@ POST /api/collaboration/sites/<owner>/<site>/restore
 ```
 
 or `list_deleted_sites` then `restore_site`. A restore counts toward the
-namespace's limits again (`site_limit`, `storage_quota`). After 30 days the
+namespace's limits again (`site_limit`, `storage_quota`). After {{DELETED_RETENTION}} the
 site is gone for good.
 
 If the admins have turned on the idle cleanup, a site nobody has opened
 (its owner and team count), deployed to, or read or written saved data on for
 a long time shows under "Not used lately" on its
-owner's dashboard and moves to Recently deleted 30 days later. When the user
+owner's dashboard and moves to Recently deleted {{IDLE_CLEANUP_GRACE}} later. When the user
 wants such a site kept, call `POST .../keep` (or `keep_site`); using the site
 also unmarks it. Only do this when the user asks.
 
 Deleting a site does not delete the team that owned it. Deleting a team, or its
-last active member leaving, deletes every site it owns for good (no 30-day
-restore); see [`teams.md`](teams.md).
+last active member leaving, deletes every site it owns for good (no
+restore from Recently deleted); see [`teams.md`](teams.md).
 
 ## Trust and state boundaries
 

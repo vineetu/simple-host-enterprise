@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"html"
 	"log"
 	"net/http"
@@ -304,9 +305,9 @@ func (h *AdminHandler) renderDeletedSites(r *http.Request, b *strings.Builder) {
 	if len(sites) == 0 {
 		return
 	}
-	b.WriteString(`<section id="deleted-sites" class="overview"><div class="overview-card"><h2 class="section-title">Recently deleted</h2>
-<p class="login-copy">Sites deleted in the last 30 days. Restore brings one back as it was, for its owner: files, saved data, who can open it, viewers and uploaded files. After 30 days a site is removed for good.</p>
-<div class="rank-list" role="region" aria-label="Recently deleted sites">`)
+	b.WriteString(oplimits.Expand(`<section id="deleted-sites" class="overview"><div class="overview-card"><h2 class="section-title">Recently deleted</h2>
+<p class="login-copy">Sites deleted in the last {{DELETED_RETENTION}}. Restore brings one back as it was, for its owner: files, saved data, who can open it, viewers and uploaded files. After {{DELETED_RETENTION}} a site is removed for good.</p>
+<div class="rank-list" role="region" aria-label="Recently deleted sites">`))
 	for _, s := range sites {
 		action := "/api/admin/deleted-sites/" + url.PathEscape(s.Owner) + "/" + url.PathEscape(s.Name) + "/restore"
 		by := "deleted"

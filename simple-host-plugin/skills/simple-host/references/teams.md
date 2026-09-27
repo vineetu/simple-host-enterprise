@@ -81,8 +81,8 @@ untouched by this rule. A name is also refused if it is reserved, or if it is a
 different spelling of a name already in use — say which name it collided with
 rather than retrying variations.
 
-A person who already belongs to 10 teams cannot create another (`409`
-`team_limit`). A team has at most 50 members (`409` `member_limit`).
+A person who already belongs to {{MAX_TEAMS_PER_PERSON}} teams cannot create another (`409`
+`team_limit`). A team has at most {{MAX_TEAM_MEMBERS}} members (`409` `member_limit`).
 
 ### List
 
@@ -105,7 +105,7 @@ POST /api/teams/<team>/leave
 ```
 
 Candidates are registered people, each marked `already_member`; the search
-never returns teams. Add in one bounded batch, at most 50. A company email
+never returns teams. Add in one bounded batch, at most {{MAX_TEAM_MEMBERS}}. A company email
 works wherever a username does: it adds the person whose account carries it,
 or, if they have not signed in yet, a pending member (listed with
 `"pending": true` and the email as `username`, counted toward the 50,

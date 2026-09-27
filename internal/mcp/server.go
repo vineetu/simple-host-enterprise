@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"io"
 	"log"
 	"net/http"
@@ -481,6 +482,7 @@ func explainFailure(status int, body string, tool Tool) string {
 	if hint == "" {
 		hint = statusHint(status, tool)
 	}
+	hint = oplimits.Expand(hint)
 	if hint == "" {
 		return fmt.Sprintf("%s failed (HTTP %d): %s", tool.Name, status, body)
 	}
@@ -531,17 +533,17 @@ func codeHint(code string, tool Tool) string {
 	case "name_taken":
 		return "That team name is already registered. Ask the user for a different one rather than composing a variation of it."
 	case "name_held":
-		return "A site deleted in the last 30 days still holds that name. Ask the user whether to bring it back with restore_site (list_deleted_sites shows it) or to use a different name; do not choose for them."
+		return "A site deleted in the last {{DELETED_RETENTION}} still holds that name. Ask the user whether to bring it back with restore_site (list_deleted_sites shows it) or to use a different name; do not choose for them."
 	case "name_conflict":
 		return "That name would share one web address with an existing account or site. Ask the user for a clearly different name."
 	case "team_limit":
 		return "This account already belongs to the maximum number of teams and cannot create another. Do not retry; tell the user."
 	case "site_limit":
-		return "The namespace is at its site limit, so nothing was created. Do not retry. Tell the user; they can delete a site they no longer need (a deleted site still counts until its 30-day recovery window ends), " +
+		return "The namespace is at its site limit, so nothing was created. Do not retry. Tell the user; they can delete a site they no longer need (a deleted site still counts until its {{DELETED_RETENTION}} recovery window ends), " +
 			"or update one of their existing sites instead. get_account shows each namespace's usage."
 	case "storage_quota":
 		return "The namespace's storage quota is full, so nothing was deployed. Do not retry the same upload. Tell the user the numbers in the message; " +
-			"deleting uploaded files they no longer need frees space at once (list_site_assets shows them; delete_site_asset only with the user's say-so, file by file); a deleted site's space frees when its 30-day recovery window ends. get_account shows each namespace's usage."
+			"deleting uploaded files they no longer need frees space at once (list_site_assets shows them; delete_site_asset only with the user's say-so, file by file); a deleted site's space frees when its {{DELETED_RETENTION}} recovery window ends. get_account shows each namespace's usage."
 	case "malware_found":
 		return "The malware scan flagged the file named in the message, so nothing was stored. Tell the user which file and what was found. " +
 			"Do not retry, rename, re-encode or split the file to get it past the scan."

@@ -188,6 +188,7 @@ func (v Values) Placeholders() []string {
 		"{{MAX_ARCHIVE}}", Bytes(v.MaxArchiveBytes),
 		"{{MAX_FILES_PER_SITE}}", Count(v.MaxFilesPerSite),
 		"{{SEARCH_TELEMETRY_RETENTION}}", Days(v.SearchTelemetryRetentionDays),
+		"{{SEARCH_SESSION_MAX_AGE}}", Duration(v.SearchSessionMaxAge),
 	}
 }
 

@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"math"
 	"net/url"
 	"strings"
@@ -321,13 +322,39 @@ func deploySiteSchema() map[string]any {
 
 // Tools is the callable surface. The order is the order a first-time agent
 // needs them, and it is fixed so clients can cache the list.
+//
+// Descriptions may name an installation's operational values as oplimits
+// placeholders ("{{DELETED_RETENTION}}"); they are filled here, so the list
+// states the values this server enforces.
 func Tools() []Tool {
 	tools := toolList()
 	schemas := outputSchemas()
 	for i := range tools {
 		tools[i].OutputSchema = schemas[tools[i].Name]
+		tools[i].Description = oplimits.Expand(tools[i].Description)
+		expandDescriptions(tools[i].InputSchema)
+		expandDescriptions(tools[i].OutputSchema)
 	}
 	return tools
+}
+
+// expandDescriptions fills the oplimits placeholders in every "description"
+// of a JSON schema, however deeply nested.
+func expandDescriptions(node any) {
+	switch n := node.(type) {
+	case map[string]any:
+		for k, v := range n {
+			if text, ok := v.(string); ok && k == "description" {
+				n[k] = oplimits.Expand(text)
+				continue
+			}
+			expandDescriptions(v)
+		}
+	case []any:
+		for _, v := range n {
+			expandDescriptions(v)
+		}
+	}
 }
 
 func toolList() []Tool {
@@ -505,7 +532,7 @@ func toolList() []Tool {
 			Name:  "preview_version",
 			Title: "Open a version before it is live",
 			Description: "Get a private address that shows one kept version of a site — one stored with deploy_site publish false, or an older one before rolling back to it — without changing what visitors see. " +
-				"Give the `url` to the user to open in their browser. It works for one hour (`expires_at`) and only for the site's owner or members of the owning team, signed in; anyone else is refused even with the link. " +
+				"Give the `url` to the user to open in their browser. It works for {{PREVIEW_LINK_TTL}} (`expires_at`) and only for the site's owner or members of the owning team, signed in; anyone else is refused even with the link. " +
 				"The preview reads the site's live saved data; its saves are refused when the browser reports the preview page as the Referer (the default), but a page that turns its Referer off saves to the live data. Search engines are told not to index it. Pages that link with absolute paths (`/about.html`) leave the preview for the live site; relative links stay in it. " +
 				"When the user is happy, make it live with rollback_site to the same version (confirm first). Call list_site_versions for the version numbers.",
 			InputSchema: object(map[string]any{
@@ -574,7 +601,7 @@ func toolList() []Tool {
 		{
 			Name:  "list_deleted_sites",
 			Title: "List recently deleted sites",
-			Description: "List the sites deleted in the last 30 days from your account and from every team you are in. " +
+			Description: "List the sites deleted in the last {{DELETED_RETENTION}} from your account and from every team you are in. " +
 				"Each entry gives `owner`, `site`, who deleted it (`deleted_by`), `deleted_at`, and `restorable_until`, after which it is gone for good. " +
 				"Call this when the user wants a deleted site back, then restore_site with the exact owner and site.",
 			InputSchema: noArgs(),
@@ -587,7 +614,7 @@ func toolList() []Tool {
 		{
 			Name:  "restore_site",
 			Title: "Restore a deleted site",
-			Description: "Bring back a site deleted in the last 30 days, exactly as it was: its live version and older versions, saved data and its history, who can open it, its viewers and its uploaded files. " +
+			Description: "Bring back a site deleted in the last {{DELETED_RETENTION}}, exactly as it was: its live version and older versions, saved data and its history, who can open it, its viewers and its uploaded files. " +
 				"It is served again at once at the returned `url`. Get the exact owner and site from list_deleted_sites. " +
 				"Works for your own sites and for sites of a team you are in. It counts toward the namespace's site and storage limits again, so it can be refused with `site_limit` or `storage_quota`.",
 			InputSchema: object(map[string]any{
@@ -611,7 +638,7 @@ func toolList() []Tool {
 			Name:  "export_site",
 			Title: "Download a copy of a site",
 			Description: "Get a download address for one zip of a site: its live files, its current saved data and the saved-data history, its version list, and its uploaded files with a list naming them. " +
-				"The address works once, within 10 minutes, without signing in, so hand it to the user to open in their browser rather than fetching it yourself (that would use it up), and do not post it anywhere others can see it. A used address answers 410; call this again for a new one. " +
+				"The address works once, within {{EXPORT_LINK_TTL}}, without signing in, so hand it to the user to open in their browser rather than fetching it yourself (that would use it up), and do not post it anywhere others can see it. A used address answers 410; call this again for a new one. " +
 				"Works for your own sites and for sites of a team you are in.",
 			InputSchema: object(map[string]any{
 				"site":  str(siteArgDesc),
@@ -987,8 +1014,8 @@ func toolList() []Tool {
 			Name:  "delete_site",
 			Title: "Delete a site",
 			Description: "Delete a site and every version of it. The URL stops working immediately and the site leaves every list. " +
-				"For 30 days it stays in Recently deleted and restore_site brings it back whole (files, saved data and its history, who can open it, viewers, uploaded files); " +
-				"its name stays taken until then. After 30 days it is gone for good. " +
+				"For {{DELETED_RETENTION}} it stays in Recently deleted and restore_site brings it back whole (files, saved data and its history, who can open it, viewers, uploaded files); " +
+				"its name stays taken until then. After {{DELETED_RETENTION}} it is gone for good. " +
 				"Works on a site you own and on a site owned by a team you are in. " +
 				"Always confirm with the user before calling this. " +
 				"There is no way to delete a single version — use rollback_site to stop serving an unwanted one.",
@@ -1082,7 +1109,7 @@ func toolList() []Tool {
 		{
 			Name:  "keep_site",
 			Title: "Keep a site from the idle cleanup",
-			Description: "When an admin has turned on the idle cleanup, a site nobody has opened (its owner and team count), deployed to, or read or written saved data on for a set number of days is marked on its owner's dashboard (\"Not used lately\") and moves to Recently deleted 30 days later. " +
+			Description: "When an admin has turned on the idle cleanup, a site nobody has opened (its owner and team count), deployed to, or read or written saved data on for a set number of days is marked on its owner's dashboard (\"Not used lately\") and moves to Recently deleted {{IDLE_CLEANUP_GRACE}} later. " +
 				"This keeps it: the site is unmarked and never marked again. Pass `keep: false` to let the cleanup consider it again. Using the site (opening it, a deploy, or reading or writing its saved data) also unmarks it, for that round only. " +
 				"Works on a site you own and on a site owned by a team you are in. Call it only when the user asks to keep a site.",
 			InputSchema: object(map[string]any{

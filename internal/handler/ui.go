@@ -28,7 +28,9 @@ const (
 	skillBundleName      = "simple-host-skills"
 	skillBundleURL       = "/skills.zip"
 	// skillReleaseType is hand-set, so it has to move with the version above
-	// it. 0.15.1 corrects the key refusal codes (no key_owner_disabled),
+	// it. 0.15.2 states this installation's own limits (restore window,
+	// link lifetimes, team and archive limits) instead of fixed numbers;
+	// 0.15.1 corrects the key refusal codes (no key_owner_disabled),
 	// what counts as use for the idle cleanup, single-use download links,
 	// full scope for deleting an uploaded file, and the preview save
 	// refusal's Referer limitation; 0.15.0 documents holding a version back to preview it
@@ -129,6 +131,9 @@ func ExpandSkillText(path string, body []byte, version, baseURL string) ([]byte,
 		return nil, fmt.Errorf("skill %s: no public base URL to expand %s with", path, SkillBaseURLPlaceholder)
 	}
 	text := strings.ReplaceAll(string(body), SkillBaseURLPlaceholder, strings.TrimRight(baseURL, "/"))
+	// The installation's operational values ("{{DELETED_RETENTION}}" and the
+	// rest, internal/oplimits), so the skill states what this server enforces.
+	text = expandServedText(text)
 	if strings.HasSuffix(path, "SKILL.md") {
 		text = strings.ReplaceAll(text, skillVersionPlaceholder, version)
 	}
@@ -153,7 +158,21 @@ func RegisterUIRoutes(mux *http.ServeMux, baseURL string) {
 	mux.HandleFunc("GET /skills.zip", serveSkillsZip(baseURL))
 	mux.HandleFunc("GET /skills/version", serveSkillsVersion(baseURL))
 	mux.HandleFunc("GET /skills/sha256/{digest}/skills.zip", serveImmutableSkillsZip(baseURL))
+	mux.HandleFunc("GET /openapi.yaml", serveOpenAPI)
 	mux.Handle("GET /", fileServer)
+}
+
+// serveOpenAPI is the embedded openapi.yaml with this installation's
+// operational values filled in (internal/oplimits placeholders), so the
+// reference states the limits this server enforces.
+func serveOpenAPI(w http.ResponseWriter, r *http.Request) {
+	body, err := fs.ReadFile(staticFiles, "static/openapi.yaml")
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
+	http.ServeContent(w, r, "openapi.yaml", skillsModTime, strings.NewReader(expandServedText(string(body))))
 }
 
 func serveAgentSkillsDiscoveryIndex(baseURL string) http.HandlerFunc {

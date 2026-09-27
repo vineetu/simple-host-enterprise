@@ -143,7 +143,7 @@ exactly as in "Get a key" above. There is no email-based reset path and
 nothing to poll: the next signal you'll see either way is the next `GET
 /api/me` call.
 
-A key in its last 14 days answers every call with an `X-Key-Expires` header
+A key in its last {{API_KEY_EXPIRY_WARNING}} answers every call with an `X-Key-Expires` header
 (and an `X-Simple-Host-Notice` line). When you see it, tell the user once,
 with the date, that the key needs replacing on the dashboard before then.
 

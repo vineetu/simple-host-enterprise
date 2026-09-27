@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"io"
 	"log"
 	"net/http"
@@ -68,7 +69,7 @@ func checkOwnerQuota(ctx context.Context, tx *sql.Tx, quota UploadQuota, ownerID
 	}
 	if newSite && quota.MaxSites > 0 && usage.Sites > quota.MaxSites {
 		return &quotaRefusal{status: http.StatusConflict, body: errorResponse{
-			Error: fmt.Sprintf("too many sites (%s of %s; a deleted site counts until its 30-day recovery window ends): delete a site to create another", formatCount(usage.Sites-1), formatCount(quota.MaxSites)),
+			Error: fmt.Sprintf("too many sites (%s of %s; a deleted site counts until its %s recovery window ends): delete a site to create another", formatCount(usage.Sites-1), formatCount(quota.MaxSites), oplimits.Days(oplimits.Get().DeletedRetentionDays)),
 			Code:  "site_limit",
 		}}, nil
 	}

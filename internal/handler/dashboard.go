@@ -3,6 +3,7 @@ package handler
 import (
 	"database/sql"
 	"fmt"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"html"
 	"log"
 	"net/http"
@@ -101,7 +102,7 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 </section>`
 	}
 
-	fmt.Fprintf(&b, `<header class="bar">
+	fmt.Fprintf(&b, oplimits.Expand(`<header class="bar">
   <div class="mast" data-username="%s">Simple Host<span class="dot">.</span> <span class="kicker">dashboard</span></div>
   <nav class="dash-nav"><a href="/dashboard">Keys</a> <span class="sep" aria-hidden="true"></span> <a href="/auth/sessions">Sessions</a></nav>
   <form method="POST" action="/auth/logout" class="logout-form"><button type="submit" class="btn-logout">Sign out</button></form>
@@ -111,7 +112,7 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 
 <section>
   <h2 class="section-title">API keys</h2>
-  <p class="login-copy">A key authenticates CI or other automation as you. Mint one per job or machine so each can be revoked without touching the others. Keys expire; mint a fresh one when yours does. A publish key can deploy, update and roll back your sites and use their saved data and files; a full key can do everything you can, except administration.</p>
+  <p class="login-copy">A key authenticates CI or other automation as you. Mint one per job or machine so each can be revoked without touching the others. Keys expire after {{API_KEY_DEFAULT_DAYS}} days; mint a fresh one when yours does. A publish key can deploy, update and roll back your sites and use their saved data and files; a full key can do everything you can, except administration.</p>
   <form id="mint-form" class="login-form" onsubmit="return false">
     <input type="text" id="key-name" placeholder="Name (e.g. laptop, CI)" maxlength="200" autocomplete="off">
     <select id="key-scope" aria-label="What the key can do">
@@ -121,7 +122,7 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
     <button type="button" id="mint-button" class="btn-login">Create key</button>
   </form>
   <div id="mint-result" hidden></div>
-  <div id="key-list" class="rank-list" role="region" aria-label="API keys">`,
+  <div id="key-list" class="rank-list" role="region" aria-label="API keys">`),
 		html.EscapeString(user.Username),
 		notice,
 		html.EscapeString(user.Username),
@@ -157,7 +158,7 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 <section>
   <h2 class="section-title">Your sites</h2>
   <p class="login-copy">Open each site, choose who can open it, name its viewers, manage the files it has uploaded, make an earlier version live, restore its saved data, download it, rename it, hand it to a team, or delete it. A new site opens only for you (or your team). Publishing is done by your AI app.</p>
-  ` + usageHTML + `
+  ` + usageHTML + oplimits.Expand(`
   <div id="site-list" class="rank-list" role="region" aria-label="Sites"></div>
 </section>
 
@@ -179,11 +180,11 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 
 <section id="deleted-section" hidden>
   <h2 class="section-title">Recently deleted</h2>
-  <p class="login-copy">A deleted site stays here for 30 days, and its name stays yours. Restore brings it back as it was: its files, saved data, who can open it, its viewers and uploaded files.</p>
+  <p class="login-copy">A deleted site stays here for {{DELETED_RETENTION}}, and its name stays yours. Restore brings it back as it was: its files, saved data, who can open it, its viewers and uploaded files.</p>
   <div id="deleted-list" class="rank-list" role="region" aria-label="Recently deleted sites"></div>
 </section>
-</main>`)
-	b.WriteString(dashboardScript)
+</main>`))
+	b.WriteString(oplimits.Expand(dashboardScript))
 	b.WriteString(`</body></html>`)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -559,7 +560,7 @@ const dashboardSitesScript = `<script>
       '<button type="button" class="btn-login add-viewer-button"' + locked + '>Add</button></div></div>' +
       '<div class="site-subsection"><h4>Assets</h4><div class="asset-list" aria-live="polite"></div></div>' +
       '<div class="site-subsection"><h4>Versions</h4>' +
-      '<p class="share-help">Preview opens a version in a new tab, for you and your team only, for an hour. Make live shows it to visitors at once; the other versions stay here.</p>' +
+      '<p class="share-help">Preview opens a version in a new tab, for you and your team only, for {{PREVIEW_LINK_TTL}}. Make live shows it to visitors at once; the other versions stay here.</p>' +
       '<div class="version-list" aria-live="polite"></div></div>' +
       '<div class="site-subsection"><h4>Saved data</h4>' +
       '<p class="share-help">The last versions of what the site\'s pages have saved. Restore puts an earlier one back as the current saved data; the data it replaces stays in this list.</p>' +
@@ -576,7 +577,7 @@ const dashboardSitesScript = `<script>
       '<div class="add-row"><input type="text" class="transfer-input" placeholder="team-name" autocomplete="off"' + locked + '>' +
       '<button type="button" class="btn-login transfer-button"' + locked + '>Move</button></div></div>' +
       '<div class="site-subsection"><h4>Delete</h4>' +
-      '<p class="share-help">The site stops being served at once. It stays in Recently deleted for 30 days with its files, saved data, viewers and uploads, and can be restored from there.</p>' +
+      '<p class="share-help">The site stops being served at once. It stays in Recently deleted for {{DELETED_RETENTION}} with its files, saved data, viewers and uploads, and can be restored from there.</p>' +
       '<div class="add-row"><button type="button" class="btn-reject delete-site-button">Delete site</button></div></div>' +
       '<div class="site-subsection site-tabs"><div class="site-tab-buttons">' +
       '<button type="button" class="btn-reject site-tab-button active" data-tab="activity">Activity</button>' +
@@ -879,7 +880,7 @@ const dashboardSitesScript = `<script>
     });
 
     panel.querySelector('.delete-site-button').addEventListener('click', function(){
-      var typed = prompt('Delete ' + owner + '/' + name + '? It stops being served at once and stays in Recently deleted for 30 days. Type the site name to confirm:');
+      var typed = prompt('Delete ' + owner + '/' + name + '? It stops being served at once and stays in Recently deleted for {{DELETED_RETENTION}}. Type the site name to confirm:');
       if (typed === null) return;
       if (typed.trim() !== name) { alert('The name did not match, so nothing was deleted.'); return; }
       fetch(base, {method: 'DELETE', credentials: 'same-origin', headers: CH})

@@ -285,8 +285,8 @@ paths:
       summary: Create a new site
       description: |
         Upload a gzip-compressed tar or ZIP archive. The compressed request is
-        limited to 100 MiB; each regular file and all files in aggregate are
-        limited to 500 MiB of bytes actually read; at most 50,000 entries are
+        limited to {{MAX_ARCHIVE}}; each regular file and all files in aggregate are
+        limited to 500 MiB of bytes actually read; at most {{MAX_FILES_PER_SITE}} entries are
         accepted. Complete gzip/TAR output is independently limited to 768 MiB,
         including framing, extended metadata, padding, and trailing bytes;
         unique path-tracking metadata is limited to 64 MiB. Entries must be
@@ -357,7 +357,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '413':
-          description: Compressed archive request exceeds 100 MiB
+          description: Compressed archive request exceeds {{MAX_ARCHIVE}}
           content:
             application/json:
               schema:
@@ -420,7 +420,7 @@ paths:
         '412':
           $ref: '#/components/responses/PreconditionFailed'
         '413':
-          description: Compressed archive request exceeds 100 MiB
+          description: Compressed archive request exceeds {{MAX_ARCHIVE}}
           content:
             application/json:
               schema:
@@ -432,7 +432,7 @@ paths:
 
     delete:
       summary: Delete a site
-      description: The site stops serving at once and leaves every list. For 30 days it can be restored whole (`POST /api/sites/{sitename}/restore`) with its versions, saved data and history, access level, viewers and assets, and its name stays held (a create answers `409` `name_held`); then it is removed for good. Audited as `site_delete` with `restorable_until`.
+      description: The site stops serving at once and leaves every list. For {{DELETED_RETENTION}} it can be restored whole (`POST /api/sites/{sitename}/restore`) with its versions, saved data and history, access level, viewers and assets, and its name stays held (a create answers `409` `name_held`); then it is removed for good. Audited as `site_delete` with `restorable_until`.
       tags: [Sites]
       security:
         - apiKey: []
@@ -466,7 +466,7 @@ paths:
   /api/deleted-sites:
     get:
       summary: List recently deleted sites
-      description: Sites deleted in the last 30 days from the caller's own namespace and every team they belong to, newest first. A full-scope key or a browser session.
+      description: Sites deleted in the last {{DELETED_RETENTION}} from the caller's own namespace and every team they belong to, newest first. A full-scope key or a browser session.
       tags: [Sites]
       security:
         - apiKey: []
@@ -490,7 +490,7 @@ paths:
   /api/sites/{sitename}/restore:
     post:
       summary: Restore a recently deleted site
-      description: Brings back a site of the caller's own namespace deleted in the last 30 days, exactly as it was, and serves it again. It counts toward the owner's quota again (`409` `site_limit`, `413` `storage_quota`, restoring nothing). Audited as `site_restore`. A full-scope key or a browser session.
+      description: Brings back a site of the caller's own namespace deleted in the last {{DELETED_RETENTION}}, exactly as it was, and serves it again. It counts toward the owner's quota again (`409` `site_limit`, `413` `storage_quota`, restoring nothing). Audited as `site_restore`. A full-scope key or a browser session.
       tags: [Sites]
       security:
         - apiKey: []
@@ -956,7 +956,7 @@ paths:
         '412':
           $ref: '#/components/responses/PreconditionFailed'
         '413':
-          description: Compressed archive request exceeds 100 MiB
+          description: Compressed archive request exceeds {{MAX_ARCHIVE}}
           content:
             application/json:
               schema:
@@ -1060,7 +1060,7 @@ paths:
       description: |
         Owner/member operation. Returns a private address that shows the
         version (one stored with `publish=false`, or an older one) without
-        changing what visitors see. It lasts one hour and opens only for the
+        changing what visitors see. It lasts {{PREVIEW_LINK_TTL}} and opens only for the
         site's owner or a member of the owning team with their own sign-in,
         whatever the site's access level; it is not indexed or cached, and
         saves and uploads from it are refused (403 `preview_read_only`) when
@@ -1462,7 +1462,7 @@ paths:
   /api/collaboration/sites/{owner}/{sitename}/keep:
     post:
       summary: Keep a site from the idle cleanup
-      description: 'With `IDLE_CLEANUP_DAYS` set, a site nobody has opened (its owner and team count; bots and previews do not), deployed to, or read or written saved data on for that many days is marked ("Not used lately" on the dashboard) and moves to Recently deleted 30 days later. `{"keep": true}` (the default, also with no body) unmarks the site and keeps the cleanup away from it for good; `{"keep": false}` lets the cleanup consider it again. `POST /api/sites/{sitename}/keep` does the same for the caller''s own site. Owner or team member; full-scope key or session. 404 when the site was deleted or moved meanwhile. Audited as `site_idle_keep`.'
+      description: 'With `IDLE_CLEANUP_DAYS` set, a site nobody has opened (its owner and team count; bots and previews do not), deployed to, or read or written saved data on for that many days is marked ("Not used lately" on the dashboard) and moves to Recently deleted {{IDLE_CLEANUP_GRACE}} later. `{"keep": true}` (the default, also with no body) unmarks the site and keeps the cleanup away from it for good; `{"keep": false}` lets the cleanup consider it again. `POST /api/sites/{sitename}/keep` does the same for the caller''s own site. Owner or team member; full-scope key or session. 404 when the site was deleted or moved meanwhile. Audited as `site_idle_keep`.'
       tags: [Sites]
       security:
         - apiKey: []
@@ -1677,7 +1677,7 @@ paths:
   /api/collaboration/sites/{owner}/{sitename}/export-link:
     post:
       summary: Get a download address for a whole site
-      description: For the site's owner or a member of the owning team. Returns an address that works once, within 10 minutes, with no key or cookie and downloads one zip of the site. Full-scope key or session.
+      description: For the site's owner or a member of the owning team. Returns an address that works once, within {{EXPORT_LINK_TTL}}, with no key or cookie and downloads one zip of the site. Full-scope key or session.
       tags: [Sites]
       security:
         - apiKey: []
@@ -1814,7 +1814,7 @@ paths:
   /api/admin/deleted-sites:
     get:
       summary: List every recently deleted site
-      description: Admin only, browser session only. Every site deleted in the last 30 days, across every owner.
+      description: Admin only, browser session only. Every site deleted in the last {{DELETED_RETENTION}}, across every owner.
       tags: [Admin]
       responses:
         '200':
@@ -2265,13 +2265,13 @@ paths:
         A valid request reuses exactly one
         valid `simple_host_search_session` cookie or creates a 32-random-byte
         base64url cookie. The cookie is HttpOnly, SameSite=Lax, scoped to `/`,
-        and retained for 180 days; production also marks it Secure. Only its
+        and retained for {{SEARCH_SESSION_MAX_AGE}}; production also marks it Secure. Only its
         SHA-256 digest is retained for rate limiting and telemetry. Query and
         impression telemetry is best-effort.
 
-        The process-local safeguards are a coarse TCP-peer bucket (burst 200,
-        replenished at 20/second), a browser-session bucket (burst 60,
-        replenished at 1/second), and eight concurrent searches. Saturation
+        The process-local safeguards are a coarse TCP-peer bucket
+        ({{RATE_LIMIT_SEARCH_QUERY_PEER}}), a browser-session bucket
+        ({{RATE_LIMIT_SEARCH_QUERY_SESSION}}), and eight concurrent searches. Saturation
         returns `429` with `Retry-After`. Every response is `Cache-Control:
         no-store`; `HEAD` is rejected before cookie, rate, search, or telemetry
         side effects.
@@ -2502,7 +2502,7 @@ paths:
         '201':
           description: '`{"id", "name"}`'
         '409':
-          description: '`name_taken`, `name_conflict` or `team_limit`'
+          description: '`name_taken`, `name_conflict` or `team_limit` (the caller already belongs to {{MAX_TEAMS_PER_PERSON}} teams)'
 
   /api/teams/{team}/members:
     parameters:
@@ -2517,7 +2517,7 @@ paths:
           $ref: '#/components/responses/NotFound'
     post:
       summary: Add people to a team
-      description: 'Body `{"usernames": [...]}`, at most 50. An entry may be a company email (refused with `400` `invalid_email` outside `ALLOWED_EMAIL_DOMAINS` when that is set): it adds the person whose account carries it, or, when nobody has signed in with it yet, a pending member who joins at their first sign-in with that verified email. Pending members count toward the 50.'
+      description: 'Body `{"usernames": [...]}`, at most {{MAX_TEAM_MEMBERS}}. An entry may be a company email (refused with `400` `invalid_email` outside `ALLOWED_EMAIL_DOMAINS` when that is set): it adds the person whose account carries it, or, when nobody has signed in with it yet, a pending member who joins at their first sign-in with that verified email. Pending members count toward the {{MAX_TEAM_MEMBERS}}.'
       tags: [Teams]
       responses:
         '200':
@@ -2635,7 +2635,7 @@ paths:
   /api/admin/users/{username}/delete-sites:
     post:
       summary: Delete every site of a leaver or an abandoned team
-      description: 'Admin only, browser session only. Deletes each site as its owner''s delete would: it stops serving at once and can be restored for 30 days (Recently deleted), audited as `site_delete` with `by_admin`. `409` while the owner can still sign in, or the team still has an active member.'
+      description: 'Admin only, browser session only. Deletes each site as its owner''s delete would: it stops serving at once and can be restored for {{DELETED_RETENTION}} (Recently deleted), audited as `site_delete` with `by_admin`. `409` while the owner can still sign in, or the team still has an active member.'
       tags: [Admin]
       parameters:
         - name: username
@@ -3063,7 +3063,7 @@ components:
         expires_at:
           type: string
           format: date-time
-          description: One hour from when it was made; after that the address answers 410.
+          description: '{{PREVIEW_LINK_TTL}} from when it was made; after that the address answers 410.'
         version:
           type: integer
         live:
@@ -3564,7 +3564,7 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     Unauthorized:
-      description: 'Missing or invalid credentials. For an `X-API-Key` that did not authenticate, `code` says why: `key_expired` (the body names the date; `expired_at` carries it), `key_revoked` or `key_not_recognised` (also given for any key of a disabled person). A key with 14 days or less left gets `X-Key-Expires` (RFC 3339) and `X-Simple-Host-Notice` on every response.'
+      description: 'Missing or invalid credentials. For an `X-API-Key` that did not authenticate, `code` says why: `key_expired` (the body names the date; `expired_at` carries it), `key_revoked` or `key_not_recognised` (also given for any key of a disabled person). A key with {{API_KEY_EXPIRY_WARNING}} or less left gets `X-Key-Expires` (RFC 3339) and `X-Simple-Host-Notice` on every response.'
       content:
         application/json:
           schema:

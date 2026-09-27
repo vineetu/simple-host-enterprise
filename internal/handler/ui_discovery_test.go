@@ -285,7 +285,7 @@ func assertDiscoveryArchive(t *testing.T, skillName string, archive []byte, vers
 			return err
 		}
 		if strings.HasSuffix(filePath, ".md") {
-			body = []byte(strings.ReplaceAll(string(body), "{{BASE_URL}}", testSkillBaseURL))
+			body = []byte(expandServedText(strings.ReplaceAll(string(body), "{{BASE_URL}}", testSkillBaseURL)))
 		}
 		if strings.HasSuffix(filePath, "SKILL.md") {
 			body = []byte(strings.ReplaceAll(string(body), "{{VERSION}}", version))

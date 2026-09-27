@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"html"
 	"log"
 	"net/http"
@@ -613,7 +614,7 @@ func leaverSiteActions(username string, siteCount int, person bool) string {
 		"to", "btn-reset", "Move to team…")
 	if person {
 		actions += confirmForm(base+"/delete-sites",
-			fmt.Sprintf("Delete %s of %s? They stop serving at once and can be restored from Recently deleted for 30 days.", sites, username), "Delete sites")
+			fmt.Sprintf("Delete %s of %s? They stop serving at once and can be restored from Recently deleted for %s.", sites, username, oplimits.Days(oplimits.Get().DeletedRetentionDays)), "Delete sites")
 	}
 	return actions
 }

@@ -1,11 +1,11 @@
 package handler
 
 import (
-	"github.com/vsriram/simple-host/internal/oplimits"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/vsriram/simple-host/internal/oplimits"
 	"html"
 	"log"
 	"net/http"

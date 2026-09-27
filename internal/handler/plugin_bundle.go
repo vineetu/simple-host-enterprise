@@ -31,7 +31,7 @@ func RegisterPluginRoute(mux *http.ServeMux, publicBaseURL string) {
 
 // fillTemplate replaces the placeholders a plugin or skill file may carry.
 func fillTemplate(body, version, baseURL string) string {
-	return strings.NewReplacer("{{VERSION}}", version, "{{BASE_URL}}", baseURL).Replace(body)
+	return expandServedText(strings.NewReplacer("{{VERSION}}", version, "{{BASE_URL}}", baseURL).Replace(body))
 }
 
 func buildPluginZip(baseURL string) ([]byte, error) {

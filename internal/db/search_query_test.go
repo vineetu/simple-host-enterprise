@@ -346,11 +346,11 @@ func TestDeleteExpiredSiteSearchTelemetryIsAgeAndBatchBounded(t *testing.T) {
 	if err != nil || deleted != 25 {
 		t.Fatalf("DeleteExpiredSiteSearchTelemetry = (%d, %v)", deleted, err)
 	}
-	if querier.query != deleteExpiredSiteSearchTelemetryQuery || !reflect.DeepEqual(querier.args, []any{100}) {
+	if querier.query != deleteExpiredSiteSearchTelemetryQuery || !reflect.DeepEqual(querier.args, []any{100, 180}) {
 		t.Fatalf("retention query/args = %q / %#v", querier.query, querier.args)
 	}
 	for _, required := range []string{
-		"created_at < now() - interval '180 days'",
+		"created_at < now() - make_interval(days => $2)",
 		"ORDER BY created_at, id",
 		"FOR UPDATE SKIP LOCKED",
 		"LIMIT $1",

@@ -186,7 +186,7 @@ func (h *TeamHandler) createTeam(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(teams) >= oplimits.Get().MaxTeamsPerPerson {
 		writeJSON(w, http.StatusConflict, errorResponse{
-			Error: "you already belong to the maximum number of teams",
+			Error: fmt.Sprintf("you already belong to the maximum number of teams (%s)", oplimits.Count(oplimits.Get().MaxTeamsPerPerson)),
 			Code:  "team_limit",
 		})
 		return
@@ -412,7 +412,7 @@ func (h *TeamHandler) addMembers(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	case errors.Is(err, db.ErrTeamMemberLimit):
-		writeJSON(w, http.StatusConflict, errorResponse{Error: "team member limit reached", Code: "member_limit"})
+		writeJSON(w, http.StatusConflict, errorResponse{Error: fmt.Sprintf("team member limit reached: a team can have at most %s members", oplimits.Count(db.MaxTeamMembers())), Code: "member_limit"})
 		return
 	case err != nil:
 		log.Printf("add members to %q: %v", team.Username, err)

@@ -18,8 +18,8 @@ never an address you assembled.
 - Reject an empty directory.
 - Require `index.html` at the archive root unless the user has explicitly
   identified a different final static entrypoint supported by the site.
-- Reject a packaged archive larger than 100 MiB.
-- Reject more than 50,000 archive entries, more than 500 MiB of aggregate
+- Reject a packaged archive larger than {{MAX_ARCHIVE}}.
+- Reject more than {{MAX_FILES_PER_SITE}} archive entries, more than 500 MiB of aggregate
   uncompressed regular-file content, or a regular file larger than 500 MiB.
 - Reject symlinks, devices, sockets, and other special files.
 - Reject paths deeper than 32 components, paths longer than 1,024 bytes, or path
