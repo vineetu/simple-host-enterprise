@@ -7,7 +7,7 @@ release, commit and schema.
 ## Unreleased
 
 Schema 0055–0057 (all backward-compatible); run `simple-host migrate`
-before deploying. Skills are at 0.15.3.
+before deploying. Skills are at 0.15.4.
 
 ### Renaming a person's address
 - After a name change an admin presses **Rename…** on the person's row in
@@ -21,7 +21,11 @@ before deploying. Skills are at 0.15.3.
   name is held so no sign-in or rename takes it; erasing the person keeps
   every name they had held. Collisions (another person or team, a held
   name, a team's old address) are refused. Audited as `admin_rename_user`.
-  Schema 0057 (backward-compatible).
+  A sign-in, rename or erasure touching a name takes a per-name lock, so a
+  sign-in racing a rename waits and is refused. Schema 0057
+  (backward-compatible: a binary before it keeps the names held, even
+  through an erasure, but its pre-v1.3 team mapping can answer a renamed
+  person's old owner page for a team created later with that name).
 
 ### Docs
 - `docs/uninstall.md`: removing a real install, in order — what to export

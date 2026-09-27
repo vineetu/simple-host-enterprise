@@ -371,8 +371,10 @@ the site, and the old address redirects. See [`teams.md`](teams.md).
 
 The person's own name in their addresses (`<site>.<name>.<base>`) cannot be
 changed by them or by you. After a name change, an admin renames it on the
-`/admin` page; every old address then redirects. Tell the user to ask their
-admin; do not rename or move sites to imitate it.
+`/admin` page; every old site address then redirects for people who may open
+the site, while the old page listing their sites answers as not found (it never
+shows the new name). Tell the user to ask their admin; do not rename or move
+sites to imitate it.
 
 A deleted site stops serving at once but can be restored for {{DELETED_RETENTION}}, whole:
 its versions, saved data and history, who can open it, viewers and uploaded
