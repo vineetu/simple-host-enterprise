@@ -766,9 +766,10 @@ func (h *AuthHandler) writeConnectedApps(r *http.Request, b *strings.Builder, us
 	}
 	for _, c := range connections {
 		fmt.Fprintf(b, `<div class="rank-row">
-  <span class="rank-name">%s <span class="rank-sub">connected %s · last used %s</span></span>
+  <span class="rank-name">%s <span class="rank-sub">%sconnected %s · last used %s</span></span>
   <button type="button" class="btn-reject disconnect-app" data-id="%s">Disconnect</button></div>`,
 			html.EscapeString(c.ClientName),
+			deviceHintHTML(c.DeviceHint),
 			localTimeHTML(c.CreatedAt, "datetime"),
 			localTimeHTML(c.LastUsedAt, "datetime"),
 			html.EscapeString(c.ID),
@@ -780,6 +781,15 @@ func (h *AuthHandler) writeConnectedApps(r *http.Request, b *strings.Builder, us
 	b.WriteString(`</div>
 </section>
 `)
+}
+
+// deviceHintHTML is the "from Chrome on macOS · " prefix of a connected
+// app's line, or nothing for a connection made before hints were kept.
+func deviceHintHTML(hint string) string {
+	if hint == "" {
+		return ""
+	}
+	return "from " + html.EscapeString(hint) + " · "
 }
 
 // connectedAppsScript disconnects an app via DELETE /api/me/connections/{id},

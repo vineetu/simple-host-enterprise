@@ -4,6 +4,16 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## Unreleased
+
+### Connected apps
+- Two connections of the same app can be told apart: `/auth/sessions`
+  shows, next to when each was connected and last used, the browser that
+  allowed it ("from Chrome on macOS"), and `GET /api/me/connections`
+  returns it as `device`. Only that summary is kept, worked out when Allow
+  is pressed; never the raw browser header or an IP address. Connections
+  made before this show no hint. Schema 0055 (backward-compatible).
+
 ## v1.6.0 — 2026-09-27
 
 Schema 0054 (backward-compatible: nullable `sites.purge_at` and

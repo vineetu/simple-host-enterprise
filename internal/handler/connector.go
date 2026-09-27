@@ -652,6 +652,7 @@ func (h *ConnectorHandler) decide(w http.ResponseWriter, r *http.Request) {
 		CodeChallenge: req.CodeChallenge,
 		Resource:      req.Resource,
 		ExpiresAt:     h.now().Add(oauthCodeTTL),
+		DeviceHint:    deviceHint(r.UserAgent()),
 	}); err != nil {
 		log.Printf("oauth: insert code: %v", err)
 		writeConnectError(w, "Something went wrong. Try connecting again.")

@@ -84,7 +84,7 @@ var PersonExportQueries = []struct{ File, Query string }{
 		SELECT name, scope, created_at, expires_at, last_used_at, revoked_at
 		FROM api_keys WHERE user_id = $1::uuid) t`},
 	{"connected-apps.json", `SELECT COALESCE(json_agg(t ORDER BY t.connected_at), '[]') FROM (
-		SELECT c.client_name AS app, g.resource, g.created_at AS connected_at, g.last_used_at
+		SELECT c.client_name AS app, g.resource, g.created_at AS connected_at, g.last_used_at, g.device_hint AS device
 		FROM oauth_grants g JOIN oauth_clients c ON c.client_id = g.client_id
 		WHERE g.user_id = $1::uuid) t`},
 	{"sessions.json", `SELECT COALESCE(json_agg(t ORDER BY t.created_at), '[]') FROM (

@@ -298,6 +298,7 @@ func (f *connectorFlow) authorize(clientID, redirect, challenge string) string {
 	r = httptest.NewRequest(http.MethodPost, connectorTestBase+"/oauth/authorize", strings.NewReader(form.Encode()))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	r.Header.Set("Origin", connectorTestBase)
+	r.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36")
 	r.AddCookie(f.cookie)
 	rec = serve(f.mux, r)
 	if rec.Code != http.StatusSeeOther {
@@ -373,6 +374,12 @@ func TestConnectorFullFlowAndBearerOnMCP(t *testing.T) {
 	var n int
 	if err := f.database.QueryRow(`SELECT count(*) FROM audit_events WHERE action = 'connector_sign_in' AND actor_id = $1`, f.user.ID).Scan(&n); err != nil || n != 1 {
 		t.Errorf("connector_sign_in audit rows = %d (%v), want 1", n, err)
+	}
+	// The browser that pressed Allow is kept as a summary on the grant, so
+	// the person can tell two connections of the same app apart.
+	conns, err := db.ListOAuthConnectionsForUser(context.Background(), f.database, f.user.ID)
+	if err != nil || len(conns) != 1 || conns[0].DeviceHint != "Chrome on macOS" {
+		t.Errorf("connections = %+v (%v), want one from Chrome on macOS", conns, err)
 	}
 }
 

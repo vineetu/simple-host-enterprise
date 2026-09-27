@@ -65,6 +65,9 @@ type connectionResponse struct {
 	Name        string `json:"name"`
 	ConnectedAt string `json:"connected_at"`
 	LastUsedAt  string `json:"last_used_at"`
+	// Device is the browser that allowed the connection ("Chrome on
+	// macOS"), "" when not known. Never an IP address.
+	Device string `json:"device"`
 }
 
 func (h *KeysHandler) listConnections(w http.ResponseWriter, r *http.Request) {
@@ -81,7 +84,7 @@ func (h *KeysHandler) listConnections(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]connectionResponse, 0, len(connections))
 	for _, c := range connections {
-		out = append(out, connectionResponse{ID: c.ID, Name: c.ClientName, ConnectedAt: c.CreatedAt.Format(time.RFC3339), LastUsedAt: c.LastUsedAt.Format(time.RFC3339)})
+		out = append(out, connectionResponse{ID: c.ID, Name: c.ClientName, ConnectedAt: c.CreatedAt.Format(time.RFC3339), LastUsedAt: c.LastUsedAt.Format(time.RFC3339), Device: c.DeviceHint})
 	}
 	writeJSON(w, http.StatusOK, out)
 }

@@ -27,6 +27,9 @@ type OAuthCode struct {
 	Resource      string
 	ExpiresAt     time.Time
 	GrantID       sql.NullString
+	// DeviceHint summarises the browser that pressed Allow ("Chrome on
+	// macOS"); copied to the grant on redemption. Never the raw header.
+	DeviceHint string
 }
 
 // OAuthToken is a stored access or refresh token with its grant.
@@ -86,9 +89,9 @@ func TouchOAuthClient(ctx context.Context, q Querier, clientID string) error {
 
 func InsertOAuthCode(ctx context.Context, q Querier, codeHash []byte, c OAuthCode) error {
 	_, err := q.ExecContext(ctx, `
-		INSERT INTO oauth_codes (code_hash, client_id, user_id, redirect_uri, code_challenge, resource, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		codeHash, c.ClientID, c.UserID, c.RedirectURI, c.CodeChallenge, c.Resource, c.ExpiresAt)
+		INSERT INTO oauth_codes (code_hash, client_id, user_id, redirect_uri, code_challenge, resource, expires_at, device_hint)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		codeHash, c.ClientID, c.UserID, c.RedirectURI, c.CodeChallenge, c.Resource, c.ExpiresAt, c.DeviceHint)
 	return err
 }
 
@@ -114,8 +117,12 @@ func ConsumeOAuthCode(ctx context.Context, tx *sql.Tx, codeHash []byte) (OAuthCo
 	return c, nil
 }
 
+// SetOAuthCodeGrant links a redeemed code to the grant it created and
+// carries the code's device hint over to the grant.
 func SetOAuthCodeGrant(ctx context.Context, tx *sql.Tx, codeHash []byte, grantID string) error {
-	_, err := tx.ExecContext(ctx, `UPDATE oauth_codes SET grant_id = $2 WHERE code_hash = $1`, codeHash, grantID)
+	_, err := tx.ExecContext(ctx, `
+		WITH c AS (UPDATE oauth_codes SET grant_id = $2::uuid WHERE code_hash = $1 RETURNING device_hint)
+		UPDATE oauth_grants g SET device_hint = c.device_hint FROM c WHERE g.id = $2::uuid`, codeHash, grantID)
 	return err
 }
 
@@ -148,6 +155,9 @@ type OAuthConnection struct {
 	ClientName string
 	CreatedAt  time.Time
 	LastUsedAt time.Time
+	// DeviceHint is the browser that allowed it ("Chrome on macOS"), or ""
+	// for connections made before hints were kept.
+	DeviceHint string
 }
 
 // ListOAuthConnectionsForUser returns a person's connected apps that can
@@ -155,7 +165,7 @@ type OAuthConnection struct {
 // tokens have all expired is left for SweepOAuth.
 func ListOAuthConnectionsForUser(ctx context.Context, q Querier, userID string) ([]OAuthConnection, error) {
 	rows, err := q.QueryContext(ctx, `
-		SELECT g.id::text, c.client_name, g.created_at, g.last_used_at
+		SELECT g.id::text, c.client_name, g.created_at, g.last_used_at, g.device_hint
 		FROM oauth_grants g
 		JOIN oauth_clients c ON c.client_id = g.client_id
 		WHERE g.user_id = $1
@@ -168,7 +178,7 @@ func ListOAuthConnectionsForUser(ctx context.Context, q Querier, userID string) 
 	var out []OAuthConnection
 	for rows.Next() {
 		var c OAuthConnection
-		if err := rows.Scan(&c.ID, &c.ClientName, &c.CreatedAt, &c.LastUsedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.ClientName, &c.CreatedAt, &c.LastUsedAt, &c.DeviceHint); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

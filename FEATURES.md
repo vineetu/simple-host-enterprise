@@ -140,7 +140,10 @@ Config names are documented in `docs/configuration.md`; schema in
   make (`ProtectMCP` marks the request context; `auth.Middleware` refuses an
   unmarked Bearer with 401). An hourly
   sweep deletes expired codes and tokens. A person sees their connected
-  apps (name, connected, last used; only grants with a live token) and
+  apps (name, connected, last used, and the browser that pressed Allow as
+  a summary such as "Chrome on macOS", so two connections of the same app
+  can be told apart; `device` in `GET /api/me/connections`; never an IP
+  address or the raw header; only grants with a live token) and
   disconnects one (the grant and its tokens deleted, audited
   `connector_revoke`) on `/auth/sessions`, through two session-only routes.
   `/plugin.zip` is an installable
@@ -164,7 +167,10 @@ Config names are documented in `docs/configuration.md`; schema in
   `schemacheck.go`, `deploy.go`, `archive.go`); `internal/handler/connector.go`,
   `plugin_bundle.go`; `cmd/server/main.go` (mounts `/mcp`);
   `simple-host-plugin/embed.go`.
-- **DB.** `oauth_clients`, `oauth_grants`, `oauth_codes`, `oauth_tokens` (0031).
+- **DB.** `oauth_clients`, `oauth_grants`, `oauth_codes`, `oauth_tokens` (0031);
+  `oauth_codes.device_hint` / `oauth_grants.device_hint` (0055, the summary
+  from `deviceHint` in `internal/handler/device_hint.go`, copied from the
+  code to the grant on redemption).
 - **Config.** `OAUTH_REDIRECT_HOSTS`, `OAUTH_ACCESS_TTL`, `OAUTH_REFRESH_TTL`,
   `PUBLIC_BASE_URL`.
 
