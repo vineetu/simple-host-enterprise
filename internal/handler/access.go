@@ -132,6 +132,9 @@ func (h *SiteHandler) setSiteAccessForTarget(w http.ResponseWriter, r *http.Requ
 	var note string
 	if req.Level == db.AccessNetwork {
 		if err := db.RequestNetworkAccess(r.Context(), tx, site.ID, target.ActorID, reason); err != nil {
+			if writeSiteRestricted(w, err) {
+				return
+			}
 			if errors.Is(err, db.ErrAlreadyNetwork) {
 				writeJSON(w, http.StatusConflict, errorResponse{Error: "the site is already open to the network", Code: "already_network"})
 				return
@@ -149,6 +152,9 @@ func (h *SiteHandler) setSiteAccessForTarget(w http.ResponseWriter, r *http.Requ
 	} else {
 		previous, err := db.SetSiteAccess(r.Context(), tx, site.ID, req.Level)
 		if err != nil {
+			if writeSiteRestricted(w, err) {
+				return
+			}
 			log.Printf("set access %s/%s: %v", target.OwnerUsername, siteName, err)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 			return
@@ -190,6 +196,26 @@ func (h *SiteHandler) setSiteAccessForTarget(w http.ResponseWriter, r *http.Requ
 	}{h.collaborationSiteResponse(r, access.Site, access.OwnerUsername, access.Role, db.SiteAnalyticsSummary{}, nil), note}
 	setSiteETag(w, access.Site)
 	writeJSON(w, status, response)
+}
+
+// writeSiteRestricted answers a db.SiteRestrictedError: the site's owner or
+// team tried to open up a site an admin restricted. It reports whether it
+// wrote a response.
+func writeSiteRestricted(w http.ResponseWriter, err error) bool {
+	var restricted *db.SiteRestrictedError
+	if !errors.As(err, &restricted) {
+		return false
+	}
+	message := "An admin restricted this site to only you (or your team); only an admin can lift it."
+	if restricted.Reason != "" {
+		message = "An admin restricted this site to only you (or your team): " + restricted.Reason + ". Only an admin can lift it."
+	}
+	writeJSON(w, http.StatusConflict, struct {
+		Error  string `json:"error"`
+		Code   string `json:"code"`
+		Reason string `json:"reason,omitempty"`
+	}{message, "site_restricted_by_admin", restricted.Reason})
+	return true
 }
 
 func accessLevelNote(level string) string {
@@ -534,8 +560,9 @@ func (h *AdminHandler) unrestrictSite(w http.ResponseWriter, r *http.Request) {
 // setSiteRestriction is an admin's take-down of any site, and its undo.
 // Restricting sets the site to only_me (the owner, or the owning team's
 // members) with a required one-line reason the owner sees on their
-// dashboard; the owner lifts it by choosing a level again (or asking for
-// network access), an admin by unrestricting, which restores the level the
+// dashboard. It is sticky: until an admin unrestricts it, the owner or team
+// cannot raise the level, ask for network access or add viewers
+// (db.SiteRestrictedError). Unrestricting restores the level the
 // site had (company for a site that was open to the network). Each is
 // audited in the same transaction: site_restricted, site_restriction_lifted.
 func (h *AdminHandler) setSiteRestriction(w http.ResponseWriter, r *http.Request, restrict bool) {

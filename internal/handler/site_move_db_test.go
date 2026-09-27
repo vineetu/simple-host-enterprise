@@ -252,8 +252,15 @@ func TestAdminMovesAndDeletesLeaverSites(t *testing.T) {
 	if rec := w.adminPost("/api/admin/users/vera/delete-sites", ""); rec.Code != http.StatusOK {
 		t.Fatalf("admin deletes a leaver's sites = %d %s", rec.Code, rec.Body)
 	}
-	if n := w.count(`SELECT count(*) FROM sites s JOIN users u ON u.id = s.user_id WHERE u.username = 'vera'`); n != 0 {
-		t.Errorf("vera still has %d sites", n)
+	// An admin's delete is the owner's: recoverable for 30 days.
+	if n := w.count(`SELECT count(*) FROM sites s JOIN users u ON u.id = s.user_id WHERE u.username = 'vera' AND s.deleted_at IS NULL`); n != 0 {
+		t.Errorf("vera still has %d live sites", n)
+	}
+	if n := w.count(`SELECT count(*) FROM sites s JOIN users u ON u.id = s.user_id WHERE u.username = 'vera' AND s.deleted_at IS NOT NULL`); n != 1 {
+		t.Errorf("vera has %d recently deleted sites, want four", n)
+	}
+	if n := w.count(`SELECT count(*) FROM audit_events WHERE action = 'site_delete' AND detail->>'by_admin' = 'true' AND detail ? 'restorable_until'`); n != 1 {
+		t.Errorf("admin site_delete audit rows = %d, want 1", n)
 	}
 	if n := w.count(`SELECT count(*) FROM sites s JOIN users u ON u.id = s.user_id WHERE u.username = 'mo'`); n != 2 {
 		t.Errorf("mo has %d sites, want keep and three", n)

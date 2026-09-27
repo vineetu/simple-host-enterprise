@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/vsriram/simple-host/internal/audit"
 	"github.com/vsriram/simple-host/internal/auth"
@@ -159,7 +161,9 @@ func (h *AdminHandler) runAdminMoves(w http.ResponseWriter, r *http.Request, sit
 	h.respondAdmin(w, r, http.StatusOK, pluralize(len(moves), "1 site", formatCount(int64(len(moves)))+" sites")+" moved to "+dest.Username)
 }
 
-// deleteLeaverSites deletes every site of a leaver or an abandoned team.
+// deleteLeaverSites deletes every site of a leaver or an abandoned team, the
+// way an owner's delete does: each goes to Recently deleted and can be
+// restored for db.DeletedSiteRetention.
 func (h *AdminHandler) deleteLeaverSites(w http.ResponseWriter, r *http.Request) {
 	from, ok := h.leaverOwner(w, r, r.PathValue("username"))
 	if !ok {
@@ -176,7 +180,7 @@ func (h *AdminHandler) deleteLeaverSites(w http.ResponseWriter, r *http.Request)
 		if err != nil {
 			return err
 		}
-		events, err := retireSites(r.Context(), tx, adminActorID(r), from.ID, sites, map[string]any{"by_admin": true})
+		events, err := softDeleteSites(r.Context(), tx, adminActorID(r), from.ID, sites)
 		if err != nil {
 			return err
 		}
@@ -194,4 +198,37 @@ func (h *AdminHandler) deleteLeaverSites(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	h.respondAdmin(w, r, http.StatusOK, pluralize(deleted, "1 site", formatCount(int64(deleted))+" sites")+" deleted")
+}
+
+// softDeleteSites marks every one of ownerID's sites listed deleted, in tx,
+// as the owner's own delete does (site.go), and returns the site_delete
+// events to record. A site deleted by somebody else before its lock is
+// skipped.
+func softDeleteSites(ctx context.Context, tx *sql.Tx, actorID, ownerID string, sites []db.TeamSite) ([]audit.Event, error) {
+	actorKind, keyID := auditActorKind(ctx)
+	for _, site := range sites {
+		if err := db.LockSiteCollaboration(ctx, tx, ownerID, site.Name); err != nil {
+			return nil, err
+		}
+	}
+	restorableUntil := time.Now().Add(db.DeletedSiteRetention).UTC().Format(time.RFC3339)
+	var events []audit.Event
+	for _, site := range sites {
+		if err := db.SoftDeleteSite(ctx, tx, site.ID, actorID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			return nil, err
+		}
+		if err := db.EnqueueSiteSearch(ctx, tx, site.ID, db.SiteSearchDelete); err != nil {
+			return nil, err
+		}
+		events = append(events, audit.Event{
+			ActorID: actorID, ActorKind: actorKind, KeyID: keyID,
+			Action: "site_delete", OwnerID: ownerID, SiteID: site.ID,
+			RequestID: auditRequestID(ctx),
+			Extra:     map[string]any{"active_version": site.ActiveVersion, "by_admin": true, "restorable_until": restorableUntil},
+		})
+	}
+	return events, nil
 }

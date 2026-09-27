@@ -250,9 +250,11 @@ decision, with `at` and the admin's `reason` when they gave one: `declined`
 network) or `restricted` (an admin set the site to `only_me`, for example
 because it exposed something it should not). Tell the user about it and
 quote the reason. A declined or revoked one stays until the next network
-request. For `restricted`, choosing a level again lifts it and is on
-record next to the admin's action: only do that when the user, told the
-reason, asks for it.
+request. A `restricted` site stays at `only_me` until an admin lifts it:
+raising its level, requesting network access or adding viewers is refused
+with `409` `site_restricted_by_admin` and the admin's `reason`. Tell the
+user the reason and that only an admin can lift it; do not retry. The
+restriction stays with the site if it is renamed or handed over.
 
 ## 7. Named viewers
 

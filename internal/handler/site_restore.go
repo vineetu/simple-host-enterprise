@@ -56,6 +56,16 @@ type restoredSiteResponse struct {
 
 var errDeletedSiteNotFound = errors.New("no recently deleted site of that name")
 
+// restoreNameTaken refuses a restore whose name, or the address it derives,
+// a live site of the same owner now holds. Held names keep this from
+// happening through the API (create, rename and hand-over all refuse them);
+// the check is what makes a restore never serve two sites at one address.
+type restoreNameTaken struct{ name string }
+
+func (e *restoreNameTaken) Error() string {
+	return fmt.Sprintf("another site (%q) now uses this site's name or address; rename or delete that site first, then restore", e.name)
+}
+
 // restoreDeletedSite brings ownerID's deleted site named siteName back, in one
 // transaction under the site's advisory lock: the row is undeleted, the
 // owner's quota is checked with the site counted again, search is told to
@@ -76,6 +86,15 @@ func restoreDeletedSite(ctx context.Context, database *sql.DB, quota UploadQuota
 	}
 	if err != nil {
 		return db.DeletedSite{}, nil, err
+	}
+	live, err := db.ListSiteNamesByOwnerUsername(ctx, tx, site.Owner)
+	if err != nil {
+		return db.DeletedSite{}, nil, err
+	}
+	for _, name := range live {
+		if name == site.Name || siteHostPart(name) == siteHostPart(site.Name) {
+			return db.DeletedSite{}, nil, &restoreNameTaken{name: name}
+		}
 	}
 	if err := db.UndeleteSite(ctx, tx, site.ID); err != nil {
 		return db.DeletedSite{}, nil, err
@@ -114,6 +133,8 @@ func writeRestoreError(w http.ResponseWriter, refusal *quotaRefusal, err error, 
 	switch {
 	case refusal != nil:
 		refusal.write(w)
+	case errors.As(err, new(*restoreNameTaken)):
+		writeJSON(w, http.StatusConflict, errorResponse{Error: err.Error(), Code: "name_taken"})
 	case errors.Is(err, errDeletedSiteNotFound):
 		writeJSON(w, http.StatusNotFound, errorResponse{Error: "no recently deleted site of that name; it was never deleted, is already restored, or its recovery window has ended", Code: "not_found"})
 	default:
@@ -248,6 +269,8 @@ func (h *AdminHandler) restoreDeletedSiteAsAdmin(w http.ResponseWriter, r *http.
 	switch {
 	case refusal != nil:
 		h.respondAdmin(w, r, refusal.status, refusal.body.Error)
+	case errors.As(err, new(*restoreNameTaken)):
+		h.respondAdmin(w, r, http.StatusConflict, err.Error())
 	case errors.Is(err, errDeletedSiteNotFound):
 		h.respondAdmin(w, r, http.StatusNotFound, "no recently deleted site of that name")
 	case err != nil:

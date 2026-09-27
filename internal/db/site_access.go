@@ -62,35 +62,58 @@ func clearNetworkApprovals(ctx context.Context, q Querier, siteID string) error 
 	return err
 }
 
+// SiteRestrictedError refuses an owner's (or team member's) attempt to open
+// up a site an admin restricted: the restriction is sticky, and only an
+// admin lifts it (LiftSiteRestriction). Reason is the admin's note.
+type SiteRestrictedError struct{ Reason string }
+
+func (e *SiteRestrictedError) Error() string {
+	return "the site is restricted by an admin: " + e.Reason
+}
+
+// checkNotRestricted locks the site's row and returns a SiteRestrictedError
+// when an admin restricted it.
+func checkNotRestricted(ctx context.Context, tx *sql.Tx, siteID string) error {
+	var decision, reason sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT access_decision, access_decision_reason FROM sites WHERE id = $1::uuid FOR UPDATE`, siteID).Scan(&decision, &reason); err != nil {
+		return err
+	}
+	if decision.String == AccessDecisionRestricted {
+		return &SiteRestrictedError{Reason: reason.String}
+	}
+	return nil
+}
+
 // SetSiteAccess moves a site to any level but network, which only an
 // admin's approval sets. Moving a site anywhere withdraws a pending
 // network-access request, and moving a network site anywhere revokes its
 // approval: going back up needs a new request.
 //
-// Choosing a level lifts an admin's restriction (the owner has seen it and
-// decided again); a declined or revoked network decision stays until the
-// next network-access request.
+// While an admin's restriction stands, only only_me (where the restriction
+// already put it) is accepted; any other level is a SiteRestrictedError. The
+// restriction stays until an admin lifts it. A declined or revoked network
+// decision stays until the next network-access request.
 func SetSiteAccess(ctx context.Context, tx *sql.Tx, siteID, level string) (previous string, err error) {
 	if !ValidAccessLevel(level) || level == AccessNetwork {
 		return "", errors.New("db: SetSiteAccess: invalid level " + level)
 	}
-	previous, err = setSiteAccess(ctx, tx, siteID, level)
-	if err != nil {
-		return "", err
+	if level != AccessOnlyMe {
+		if err := checkNotRestricted(ctx, tx, siteID); err != nil {
+			return "", err
+		}
 	}
-	_, err = tx.ExecContext(ctx, `
-		UPDATE sites
-		SET access_decision = NULL, access_decision_at = NULL, access_decision_reason = NULL, access_decision_previous = NULL
-		WHERE id = $1::uuid AND access_decision = 'restricted'`, siteID)
-	return previous, err
+	return setSiteAccess(ctx, tx, siteID, level)
 }
 
 // RequestNetworkAccess records a pending request to open a site to the
 // network. The site keeps its current level until an admin approves. A
-// second request replaces the first. A request clears the last admin
-// decision (declined, revoked or restricted): asking again is the owner's
-// answer to it.
+// second request replaces the first. A request clears a declined or revoked
+// decision (asking again is the owner's answer to it); a site an admin
+// restricted is refused with a SiteRestrictedError until an admin lifts it.
 func RequestNetworkAccess(ctx context.Context, tx *sql.Tx, siteID, requestedBy, reason string) error {
+	if err := checkNotRestricted(ctx, tx, siteID); err != nil {
+		return err
+	}
 	var access string
 	if err := tx.QueryRowContext(ctx, `SELECT access FROM sites WHERE id = $1::uuid FOR UPDATE`, siteID).Scan(&access); err != nil {
 		return err

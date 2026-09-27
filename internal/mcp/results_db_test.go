@@ -266,7 +266,6 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	if got := call("restore_state_version", map[string]any{"site": "demo", "owner": "alice", "id": id}); got["version"] != float64(2) {
 		t.Errorf("restore_state_version = %v, want version 2", got)
 	}
-	call("revoke_site_viewer", map[string]any{"site": "demo", "owner": "alice", "username": "team-acme-team"})
 	call("revoke_site_viewer", map[string]any{"site": "demo", "owner": "alice", "username": "guest@example.com"})
 
 	call("list_sites", map[string]any{})
@@ -276,18 +275,16 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	if got := call("transfer_site", map[string]any{"site": "other-two", "owner": "alice", "to": "acme-team"}); got["owner"] != "team-acme-team" {
 		t.Errorf("transfer_site = %v, want team-acme-team", got)
 	}
-	call("transfer_site", map[string]any{"site": "other-two", "owner": "team-acme-team", "to": "alice"})
-	call("delete_site", map[string]any{"site": "other-two", "owner": "alice", "confirm_name": "other-two"})
-	call("delete_site", map[string]any{"site": "demo", "confirm_name": "demo"})
-	if deleted := call("list_deleted_sites", map[string]any{}); deleted["count"] != float64(2) {
-		t.Errorf("list_deleted_sites = %v, want both deleted sites", deleted)
+	call("delete_site", map[string]any{"site": "other-two", "owner": "team-acme-team", "confirm_name": "other-two"})
+	if deleted := call("list_deleted_sites", map[string]any{}); deleted["count"] != float64(1) {
+		t.Errorf("list_deleted_sites = %v, want the deleted site", deleted)
 	}
-	if restored := call("restore_site", map[string]any{"site": "other", "owner": "alice"}); restored["site"] != "other" {
+	// Restored into the team, it goes with the team when the team is deleted.
+	if restored := call("restore_site", map[string]any{"site": "other-two", "owner": "team-acme-team"}); restored["site"] != "other-two" {
 		t.Errorf("restore_site = %v", restored)
 	}
-	call("delete_site", map[string]any{"site": "other", "owner": "alice", "confirm_name": "other"})
 	call("remove_team_member", map[string]any{"team": "acme-team", "username": "bob"})
-	call("delete_team", map[string]any{"team": "acme-team"})
+	call("delete_team", map[string]any{"team": "acme-team", "confirm_name": "acme-team"})
 
 	// Leaving: once with somebody left, once as the last member, which
 	// deletes the team; and removing yourself, which is leaving.

@@ -267,7 +267,7 @@ func (w *accessWorld) siteAccess(owner, site string) string {
 }
 
 // An admin restricts any site to only-me with a reason the owner sees;
-// lifting restores its level; the owner choosing a level lifts it too.
+// lifting restores its level; the owner cannot lift it.
 func TestAdminRestrictSite(t *testing.T) {
 	w := newAccessWorld(t)
 	w.deploy("alice", "/api/sites/mine")
@@ -311,8 +311,10 @@ func TestAdminRestrictSite(t *testing.T) {
 		t.Fatalf("unrestrict an unrestricted site = %d, want 409", rec.Code)
 	}
 
-	// Restricted twice, the lift still restores the level before the first;
-	// the owner choosing a level lifts it.
+	// Restricted twice, the lift still restores the level before the first.
+	// The restriction is sticky: the owner can neither raise the level, ask
+	// for network access nor add viewers; only_me is still accepted and
+	// leaves it in place. Only an admin lifts it.
 	w.adminForm("/api/admin/sites/alice/mine/restrict", url.Values{"reason": {"one"}})
 	w.adminForm("/api/admin/sites/alice/mine/restrict", url.Values{"reason": {"two"}})
 	var previous string
@@ -320,15 +322,34 @@ func TestAdminRestrictSite(t *testing.T) {
 	if previous != db.AccessListed {
 		t.Fatalf("previous level after two restrictions = %q, want listed", previous)
 	}
+	for _, body := range []map[string]any{{"level": "company"}, {"level": "specific"}, {"level": "network", "reason": "event"}} {
+		rec := w.api("alice", http.MethodPost, "/api/sites/mine/access", body)
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"code":"site_restricted_by_admin"`) || !strings.Contains(rec.Body.String(), `"reason":"two"`) {
+			t.Fatalf("owner sets %v on a restricted site = %d %s, want 409 site_restricted_by_admin", body, rec.Code, rec.Body)
+		}
+	}
+	if rec := w.api("alice", http.MethodPost, "/api/collaboration/sites/alice/mine/viewers", map[string]any{"usernames": []string{"vera"}}); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "site_restricted_by_admin") {
+		t.Fatalf("owner adds a viewer to a restricted site = %d %s", rec.Code, rec.Body)
+	}
+	w.setAccess("alice", "/api/sites/mine/access", map[string]any{"level": "only_me"}, http.StatusOK)
+	if d := w.decision("alice", "mine"); d == nil || d["decision"] != "restricted" {
+		t.Fatalf("decision after the owner chose only_me = %v, want still restricted", d)
+	}
+	if got := w.siteAccess("alice", "mine"); got != db.AccessOnlyMe {
+		t.Fatalf("access while restricted = %s", got)
+	}
+	if rec := w.admin(http.MethodPost, "/api/admin/sites/alice/mine/unrestrict"); rec.Code != http.StatusOK {
+		t.Fatalf("second unrestrict = %d %s", rec.Code, rec.Body)
+	}
 	w.setAccess("alice", "/api/sites/mine/access", map[string]any{"level": "company"}, http.StatusOK)
 	if d := w.decision("alice", "mine"); d != nil {
-		t.Fatalf("decision after the owner chose a level = %v", d)
+		t.Fatalf("decision after the lift and the owner's choice = %v", d)
 	}
 	if n := countRows(t, w.database, `SELECT count(*) FROM audit_events WHERE action = 'site_restricted' AND detail->>'reason' IS NOT NULL`); n != 3 {
 		t.Fatalf("site_restricted audit rows = %d, want 3", n)
 	}
-	if n := countRows(t, w.database, `SELECT count(*) FROM audit_events WHERE action = 'site_restriction_lifted' AND detail->>'to' = 'listed'`); n != 1 {
-		t.Fatalf("site_restriction_lifted audit rows = %d, want 1", n)
+	if n := countRows(t, w.database, `SELECT count(*) FROM audit_events WHERE action = 'site_restriction_lifted' AND detail->>'to' = 'listed'`); n != 2 {
+		t.Fatalf("site_restriction_lifted audit rows = %d, want 2", n)
 	}
 	// Not for a non-admin.
 	r := httptest.NewRequest(http.MethodPost, "https://"+accessBase+"/api/admin/sites/alice/mine/restrict", strings.NewReader("reason=x"))

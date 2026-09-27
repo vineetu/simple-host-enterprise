@@ -212,6 +212,9 @@ func (h *SiteHandler) mutateSiteViewers(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 	if err != nil {
+		if writeSiteRestricted(w, err) {
+			return
+		}
 		switch {
 		case errors.Is(err, db.ErrUserNotFound):
 			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "one or more usernames do not exist"})

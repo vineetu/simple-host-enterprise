@@ -8,8 +8,8 @@
 -- is the admin's optional one-line note (required for a restriction);
 -- access_decision_previous is the level a restriction replaced, which lifting
 -- the restriction restores. A declined or revoked decision stays until the
--- owner's next network-access request; a restriction until the owner chooses
--- a level again or an admin lifts it.
+-- owner's next network-access request; a restriction until an admin lifts
+-- it.
 
 BEGIN;
 

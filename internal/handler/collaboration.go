@@ -39,7 +39,7 @@ type collaborationSiteResponse struct {
 	// AccessDecision is the last admin decision about who can open the
 	// site: a network request declined, network access revoked, or the site
 	// restricted to only_me. A declined or revoked one stays until the next
-	// network request; a restriction until the owner chooses a level again.
+	// network request; a restriction until an admin lifts it.
 	AccessDecision *accessDecisionResponse `json:"access_decision,omitempty"`
 	// PublicPath is the address the site should be handed out under. It was
 	// the relative long path on the base host; after the subdomain cutover

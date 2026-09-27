@@ -23,7 +23,7 @@ that should get it). Last derived from both `FEATURES.md` files and code on 2026
 | Area | Hosted | Enterprise | Status |
 |---|---|---|---|
 | Sites: deploy, versions, rollback, delete | tar.gz/zip or inline JSON files; `KEEP_VERSIONS`; rollback; delete | tar.gz or MCP file list, `If-Match` ETags; 5 versions kept; rollback; delete | `same` |
-| Recently deleted (undo a delete) | delete is immediate and final | 30 days: whole site (files, saved data, access, viewers, assets) restorable by owner, team member or admin; name held; purged by the sweeper | `gap → hosted` |
+| Recently deleted (undo a delete) | delete is immediate and final | 30 days: whole site (files, saved data, access, viewers, assets) restorable by owner, team member or admin (also after an admin's "Delete sites" for a leaver); name held against create, rename and hand-over; purged by the sweeper | `gap → hosted` |
 | Site rename | `PATCH /v1/sites/{s}`, `rename_site`; old address 404s | `POST .../rename`, `rename_site`, dashboard; old address redirects until the name is reused | `gap → hosted` — the old address should redirect |
 | Hand a site to another owner | none | `POST .../transfer`, `transfer_site`, dashboard; admin moves a leaver's or abandoned team's sites; old address redirects | `different on purpose` — hosted has no teams or company leavers |
 | Site export with saved data | `export.tar.gz` (files + state + collections) | version archive download only (files, no saved data) | `gap → enterprise` |
@@ -60,7 +60,7 @@ that should get it). Last derived from both `FEATURES.md` files and code on 2026
 | Rate limits and abuse caps | per-IP token buckets in memory; size caps; write auth; reserved names | per-pod buckets plus Postgres-shared counters for sign-in, hand-off, key mint, connector | `different on purpose` — one process needs no shared counters |
 | Security headers and CSP | `SecurityHeaders`, nonce CSP on apex pages | `security.go`, same approach | `same` |
 | Admin | admin key or admin user; usage, bulk participant accounts, delete account, API traffic | IdP admins; disable/enable (revokes sessions, keys, apps), offboard by email, access requests, rankings, export | `different on purpose` — event organiser vs company IT |
-| Admin take-down of one site | none (only deleting the whole account) | Restrict any site to only-me with a reason the owner sees; Lift restores it; audited | `gap → hosted` — abuse reports need a reversible take-down that keeps the evidence |
+| Admin take-down of one site | none (only deleting the whole account) | Restrict any site to only-me with a reason the owner sees; sticky (the owner cannot raise it, `site_restricted_by_admin`) and kept through rename or hand-over; only an admin's Lift restores it; audited | `gap → hosted` — abuse reports need a reversible take-down that keeps the evidence |
 | Dashboard | `/dashboard`, owner app, per-site analytics page | `/dashboard`: keys, sites, access, viewers, assets, usage | `same` — each shows its own features |
 | AI create and voice input | Grok sidecar only, local speech-to-text | none | `different on purpose` — enterprise: the publisher is the person's own agent via MCP; content stays in the cluster |
 | Event / hackathon instances | setup page, participant accounts, `simple-hack.app` names | none | `different on purpose` — this is the small-box edition's job |

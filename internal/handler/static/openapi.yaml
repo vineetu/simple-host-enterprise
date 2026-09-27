@@ -511,7 +511,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: '`site_limit`: the namespace is at its site limit'
+          description: '`site_limit`: the namespace is at its site limit; `name_taken`: another live site of the namespace now holds the name or its address'
           content:
             application/json:
               schema:
@@ -551,7 +551,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: '`site_limit`'
+          description: '`site_limit` or `name_taken`'
           content:
             application/json:
               schema:
@@ -676,7 +676,9 @@ paths:
         withdraws a pending network request. `network` needs a `reason` (at
         most 500 characters) and returns `202`: the site keeps its level until
         an admin approves the request. The site's address does not change;
-        add viewers for `specific` through the viewers routes.
+        add viewers for `specific` through the viewers routes. While an admin's
+        restriction stands (`access_decision` `restricted`), anything but
+        `only_me` is refused with `409 site_restricted_by_admin`.
       tags: [Sites]
       security:
         - apiKey: []
@@ -719,7 +721,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The site is already open to the network
+          description: '`already_network`: the site is already open to the network; `site_restricted_by_admin`: an admin restricted the site, so only `only_me` is accepted until an admin lifts it (the body carries the admin''s `reason`)'
           content:
             application/json:
               schema:
@@ -730,7 +732,7 @@ paths:
   /api/sites/{sitename}/transfer:
     post:
       summary: Hand a site to a team or another person
-      description: Moves one of the caller's own sites to a team the caller is in or to any person who can still sign in. Versions, saved data and its history, assets, access level and viewers move with it; the old address redirects (301, or 308 for other methods, path and query kept) to the new one until a site takes the old name again. Full-scope key or session. Audited as `site_transfer` with `from` and `to`.
+      description: Moves one of the caller's own sites to a team the caller is in or to any person who can still sign in. Versions, saved data and its history, assets, access level (an admin's restriction included) and viewers move with it; a recently deleted site is not found until restored; the old address redirects (301, or 308 for other methods, path and query kept) to the new one until a site takes the old name again. Full-scope key or session. Audited as `site_transfer` with `from` and `to`.
       tags: [Sites]
       security:
         - apiKey: []
@@ -765,7 +767,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: '`name_conflict` (the receiver has a site by that name), `destination_inactive` (a disabled person, or a team nobody in can sign in), or `site_limit`'
+          description: '`name_conflict` (the receiver has a site by that name), `name_held` (a recently deleted site of the receiver holds the name), `destination_inactive` (a disabled person, or a team nobody in can sign in), or `site_limit`'
           content:
             application/json:
               schema:
@@ -811,7 +813,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: '`name_conflict`: the owner already has a site by that name'
+          description: '`name_conflict`: the owner already has a site by that name; `name_held`: a recently deleted site of theirs still holds it'
           content:
             application/json:
               schema:
@@ -1104,7 +1106,9 @@ paths:
         withdraws a pending network request. `network` needs a `reason` (at
         most 500 characters) and returns `202`: the site keeps its level until
         an admin approves the request. The site's address does not change;
-        add viewers for `specific` through the viewers routes.
+        add viewers for `specific` through the viewers routes. While an admin's
+        restriction stands (`access_decision` `restricted`), anything but
+        `only_me` is refused with `409 site_restricted_by_admin`.
       tags: [Collaboration]
       security:
         - apiKey: []
@@ -1148,7 +1152,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The site is already open to the network
+          description: '`already_network`: the site is already open to the network; `site_restricted_by_admin`: an admin restricted the site, so only `only_me` is accepted until an admin lifts it (the body carries the admin''s `reason`)'
           content:
             application/json:
               schema:
@@ -1289,7 +1293,7 @@ paths:
   /api/collaboration/sites/{owner}/{sitename}/transfer:
     post:
       summary: Hand a site to a team or another person
-      description: Moves the named owner's site (a person or team the caller is, or is in) to a team the caller is in or to any person who can still sign in. Versions, saved data and its history, assets, access level and viewers move with it; the old address redirects (301, or 308 for other methods, path and query kept) to the new one until a site takes the old name again. Full-scope key or session. Audited as `site_transfer` with `from` and `to`.
+      description: Moves the named owner's site (a person or team the caller is, or is in) to a team the caller is in or to any person who can still sign in. Versions, saved data and its history, assets, access level (an admin's restriction included) and viewers move with it; a recently deleted site is not found until restored; the old address redirects (301, or 308 for other methods, path and query kept) to the new one until a site takes the old name again. Full-scope key or session. Audited as `site_transfer` with `from` and `to`.
       tags: [Sites]
       security:
         - apiKey: []
@@ -1325,7 +1329,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: '`name_conflict` (the receiver has a site by that name), `destination_inactive` (a disabled person, or a team nobody in can sign in), or `site_limit`'
+          description: '`name_conflict` (the receiver has a site by that name), `name_held` (a recently deleted site of the receiver holds the name), `destination_inactive` (a disabled person, or a team nobody in can sign in), or `site_limit`'
           content:
             application/json:
               schema:
@@ -1372,7 +1376,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: '`name_conflict`: the owner already has a site by that name'
+          description: '`name_conflict`: the owner already has a site by that name; `name_held`: a recently deleted site of theirs still holds it'
           content:
             application/json:
               schema:
@@ -1476,7 +1480,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: '`site_limit`'
+          description: '`site_limit` or `name_taken`'
         '413':
           description: '`storage_quota`'
 
@@ -1573,7 +1577,7 @@ paths:
   /api/admin/sites/{owner}/{sitename}/restrict:
     post:
       summary: Restrict a site to its owner
-      description: Admin only, browser session only (never an API key). Takes any site down to `only_me` (its owner, or the owning team's members) at once, withdrawing any network request or approval. `reason` is required and shown to the owner as the site's `access_decision` (`restricted`). The owner lifts it by choosing a level again or requesting network access; an admin by `unrestrict`. Audited as `site_restricted`.
+      description: Admin only, browser session only (never an API key). Takes any site down to `only_me` (its owner, or the owning team's members) at once, withdrawing any network request or approval. `reason` is required and shown to the owner as the site's `access_decision` (`restricted`). It is sticky: until an admin calls `unrestrict`, the owner or team cannot raise the level, request network access or add viewers (`409 site_restricted_by_admin` with the `reason`). Audited as `site_restricted`.
       tags: [Admin]
       parameters:
         - $ref: '#/components/parameters/owner'
@@ -2228,7 +2232,7 @@ paths:
   /api/admin/users/{username}/delete-sites:
     post:
       summary: Delete every site of a leaver or an abandoned team
-      description: Admin only, browser session only. Deletes each site as its owner's delete would (files retired after the grace period, audited as `site_delete` with `by_admin`). `409` while the owner can still sign in, or the team still has an active member.
+      description: Admin only, browser session only. Deletes each site as its owner's delete would: it stops serving at once and can be restored for 30 days (Recently deleted), audited as `site_delete` with `by_admin`. `409` while the owner can still sign in, or the team still has an active member.
       tags: [Admin]
       parameters:
         - name: username
@@ -2481,7 +2485,7 @@ components:
               description: Approvals needed (`NETWORK_ACCESS_APPROVALS`, 1 or 2).
         access_decision:
           type: object
-          description: The last admin decision about who can open the site. `declined` and `revoked` stay until the next network request; `restricted` until the owner chooses a level again or an admin lifts it.
+          description: The last admin decision about who can open the site. `declined` and `revoked` stay until the next network request; `restricted` until an admin lifts it (the owner cannot).
           required: [decision, at]
           properties:
             decision:

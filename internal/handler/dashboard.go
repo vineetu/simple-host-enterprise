@@ -412,7 +412,7 @@ const dashboardSitesScript = `<script>
     if (!d) return '';
     var when = new Date(d.at).toLocaleString();
     var why = d.reason ? ': "' + d.reason + '"' : '.';
-    if (d.decision === 'restricted') return 'An admin restricted this site to only you (or your team) on ' + when + why + ' Choosing a level again lifts it.';
+    if (d.decision === 'restricted') return 'An admin restricted this site to only you (or your team) on ' + when + why + ' Until an admin lifts it, its level cannot be raised and viewers cannot be added; ask an admin if it should open again.';
     if (d.decision === 'declined') return 'An admin declined network access on ' + when + why + ' You can ask again with a new reason.';
     if (d.decision === 'revoked') return 'An admin took this site off the network on ' + when + why + ' You can ask again with a new reason.';
     return '';
@@ -452,19 +452,22 @@ const dashboardSitesScript = `<script>
 
   function renderPanel(panel, site) {
     var owner = site.owner_username, name = site.name;
+    // An admin's restriction is lifted only by an admin, so the controls
+    // that would open the site up are off while it stands.
+    var locked = site.access_decision && site.access_decision.decision === 'restricted' ? ' disabled' : '';
     var options = LEVELS.map(function(l){
       return '<option value="' + l[0] + '"' + (l[0] === site.access ? ' selected' : '') + '>' + esc(l[1]) + '</option>';
     }).join('');
     panel.innerHTML =
       '<div class="site-subsection"><h4>Who can open it</h4>' +
-      '<div class="add-row"><select class="access-select">' + options + '</select>' +
-      '<button type="button" class="btn-login access-button">Save</button></div>' +
+      '<div class="add-row"><select class="access-select"' + locked + '>' + options + '</select>' +
+      '<button type="button" class="btn-login access-button"' + locked + '>Save</button></div>' +
       '<p class="share-help access-status">' + (site.network_request ? 'Network access requested; waiting for ' + (site.network_request.approvals_required > 1 ? 'two admins' + approvalProgress(site.network_request) : 'an admin') + '. The site keeps its current level until then.' : esc(decisionNote(site))) + '</p></div>' +
       '<div class="site-subsection"><h4>Viewers</h4>' +
       '<p class="share-help">Named viewers can open the site while it is set to specific people or teams. Adding one sets that level. Someone who hasn\'t signed in yet can be added by work email; they can open the site after their first sign-in.</p>' +
       '<div class="viewer-list" aria-live="polite"></div>' +
-      '<div class="add-row"><input type="text" class="add-viewer-input" placeholder="username or work email, another" autocomplete="off">' +
-      '<button type="button" class="btn-login add-viewer-button">Add</button></div></div>' +
+      '<div class="add-row"><input type="text" class="add-viewer-input" placeholder="username or work email, another" autocomplete="off"' + locked + '>' +
+      '<button type="button" class="btn-login add-viewer-button"' + locked + '>Add</button></div></div>' +
       '<div class="site-subsection"><h4>Assets</h4><div class="asset-list" aria-live="polite"></div></div>' +
       '<div class="site-subsection"><h4>Rename</h4>' +
       '<p class="share-help">The site gets a new address. The old one sends visitors on to it until another site takes the name.</p>' +

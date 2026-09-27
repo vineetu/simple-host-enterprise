@@ -592,7 +592,7 @@ func leaverSiteActions(username string, siteCount int, person bool) string {
 	actions := fmt.Sprintf(`<form method="POST" action="/api/admin/users/%s/transfer-sites" onsubmit="var t = prompt('Move %s of %s to which team? (A person who can sign in works too.) Files, saved data, access and viewers go with them, and the old addresses redirect.'); if (!t) return false; this.elements.to.value = t; return true;"><input type="hidden" name="to"><button type="submit" class="btn-reset">Move to team…</button></form>`,
 		name, sites, name)
 	if person {
-		actions += fmt.Sprintf(`<form method="POST" action="/api/admin/users/%s/delete-sites" onsubmit="return confirm('Delete %s of %s permanently, with their saved data? This cannot be undone.');"><button type="submit" class="btn-reset">Delete sites</button></form>`,
+		actions += fmt.Sprintf(`<form method="POST" action="/api/admin/users/%s/delete-sites" onsubmit="return confirm('Delete %s of %s? They stop serving at once and can be restored from Recently deleted for 30 days.');"><button type="submit" class="btn-reset">Delete sites</button></form>`,
 			name, sites, name)
 	}
 	return actions

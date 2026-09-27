@@ -180,7 +180,9 @@ Config names are documented in `docs/configuration.md`; schema in
   held (409 `name_held`). The owner or a team member lists them
   (`GET /api/deleted-sites`, dashboard "Recently deleted") and restores one
   whole (`site_restore`, quota-checked again: 409 `site_limit`, 413
-  `storage_quota`); an admin restores any from `/admin`. After the window the
+  `storage_quota`; 409 `name_taken` if a live site of the owner now holds
+  its name or address); an admin restores any from `/admin`, and an
+  admin's "Delete sites" for a leaver lands there too. After the window the
   sweeper purges the row and retires the objects (section 6). A team's
   deletion still removes its sites for good. Every site, at
   every access level, is served at the root of its own host
@@ -207,16 +209,21 @@ Config names are documented in `docs/configuration.md`; schema in
   (`transfer`, `{"to"}`; a bare `sales` finds `team-sales` unless a person
   holds `sales`), or give it a new name (`rename`, `{"name"}`, the new-site
   name rules). Only the row's owner or name changes: versions, saved data
-  and its history, assets, access level, a pending network request and named
-  viewers are keyed by the site id and stay. The old address
+  and its history, assets, access level (an admin's restriction included), a
+  pending network request and named viewers (pending ones too) are keyed by
+  the site id and stay. A recently deleted site cannot be moved or renamed
+  (404 until restored). The old address
   `<old part>.<old owner>.<base>` is kept in `site_redirects` and redirects
   (301 GET/HEAD, 308 otherwise, path and query kept; a named site-API path
   becomes the nameless `/api/site/...`) to the current address, following
   later moves, until a live site takes that address (live always wins); the
-  fallback owner path and v1.2 hosts redirect the same way. Refused: `404
+  fallback owner path and v1.2 hosts redirect the same way. While the site
+  it points to is recently deleted, the old address answers the ordinary
+  not-found, never a redirect. Refused: `404
   destination_not_found` (nobody, or a team the caller is not in), `409
   destination_inactive` (a disabled person, a team nobody in can sign in),
   `409 name_conflict` (the receiver has a site with that name or address),
+  `409 name_held` (a recently deleted site of the receiver holds it),
   `409 site_limit` / `413 storage_quota` (the receiver's quota), `400
   same_owner` / `same_name`. Full-scope key or session. Audited as
   `site_transfer` / `site_rename` (owner = the receiver) with `from`, `to`,
@@ -330,10 +337,12 @@ Config names are documented in `docs/configuration.md`; schema in
   optional note, until the next network request) and shown on the
   dashboard and by `get_site`/`list_sites`. An admin can also restrict any
   site to `only_me` with a required reason (a take-down: `restricted` in
-  `access_decision`, audited `site_restricted`); the owner lifts it by
-  choosing a level again or requesting network access, an admin by
-  unrestricting, which restores the earlier level (`company` for a site
-  that was on the network; `site_restriction_lifted`).
+  `access_decision`, audited `site_restricted`). The restriction is sticky:
+  while it stands the owner or team cannot raise the level, request network
+  access or add viewers (`409 site_restricted_by_admin` with the reason),
+  and it stays with the site through a rename or hand-over. Only an admin
+  lifts it (Lift, `unrestrict`), which restores the earlier level
+  (`company` for a site that was on the network; `site_restriction_lifted`).
 - **Status.** Built.
 - **Routes.** `POST /api/sites/{sitename}/access`,
   `POST /api/collaboration/sites/{owner}/{sitename}/access`,

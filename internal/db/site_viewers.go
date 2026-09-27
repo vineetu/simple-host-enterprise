@@ -244,7 +244,8 @@ const resolveRequestedViewersQuery = `
 // each email's shape and domain. It restricts the site the moment the first row lands.
 // Granting also moves the site to the named-viewers level (AccessSpecific):
 // a viewer list means nothing at any other level. It takes the same
-// LockSiteCollaboration advisory lock deploys and access changes take.
+// LockSiteCollaboration advisory lock deploys and access changes take. A site
+// an admin restricted is refused with a SiteRestrictedError.
 func GrantSiteViewers(ctx context.Context, tx *sql.Tx, ownerID, siteName, siteID string, addedByID *string, usernames []string) ([]SiteViewer, error) {
 	if tx == nil {
 		return nil, fmt.Errorf("grant site viewers: nil transaction")
@@ -253,6 +254,11 @@ func GrantSiteViewers(ctx context.Context, tx *sql.Tx, ownerID, siteName, siteID
 		return nil, err
 	}
 	if err := requireSiteIncarnation(ctx, tx, ownerID, siteName, siteID); err != nil {
+		return nil, err
+	}
+	// Granting raises the level to AccessSpecific, which an admin's
+	// restriction forbids until an admin lifts it.
+	if err := checkNotRestricted(ctx, tx, siteID); err != nil {
 		return nil, err
 	}
 

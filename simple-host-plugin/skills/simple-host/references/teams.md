@@ -127,12 +127,16 @@ POST /api/collaboration/sites/<owner>/<site>/transfer   {"to": "team-sales"}
 
 Moves a site to a team the caller is in, or to any person who can still sign
 in (`to` is their exact username). Its versions, saved data and history,
-uploads, access level and viewers all go with it; only the owner, and so the
+uploads, access level (an admin's restriction included) and viewers all go
+with it; only the owner, and so the
 address, changes. The response carries the new `url` and `previous_url`; the old
 address redirects to the new one until a site takes the old name again. `404`
 `destination_not_found` means no such person or team you are in; `409`
 `name_conflict` means the receiver already has a site by that name (rename one
-with `POST .../rename {"name": "..."}` first); `409` `site_limit` or `413`
+with `POST .../rename {"name": "..."}` first); `409` `name_held` means a
+recently deleted site of the receiver still holds the name (restore it or pick
+another name); a recently deleted site itself is `404` until restored; `409`
+`site_limit` or `413`
 `storage_quota` means the receiver has no room. Connector tools: `transfer_site`,
 `rename_site`. A full-scope key or a connector is needed; a publish key cannot.
 

@@ -45,7 +45,7 @@ func GetMoveDestination(ctx context.Context, q Querier, username string) (MoveDe
 
 const moveSiteQuery = `
 	UPDATE sites SET user_id = $2::uuid, name = $3
-	WHERE id = $1::uuid
+	WHERE id = $1::uuid AND deleted_at IS NULL
 `
 
 const recordSiteRedirectQuery = `
@@ -108,12 +108,13 @@ const siteRedirectQuery = `
 	FROM site_redirects r
 	JOIN sites s ON s.id = r.site_id
 	JOIN users u ON u.id = s.user_id
-	WHERE r.owner_label = $1 AND r.site_part = $2
+	WHERE r.owner_label = $1 AND r.site_part = $2 AND s.deleted_at IS NULL
 `
 
 // SiteRedirect reports where the site that used to be at address now lives:
 // its owner's username and its name. ok is false when the address was never
-// a moved site's, or that site has since been deleted.
+// a moved site's, or that site has since been deleted (recently deleted
+// included: a redirect must not reveal a site that no longer serves).
 func SiteRedirect(ctx context.Context, q Querier, address SiteAddress) (owner, site string, ok bool, err error) {
 	err = q.QueryRowContext(ctx, siteRedirectQuery, address.OwnerLabel, address.SitePart).Scan(&owner, &site)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -126,11 +127,11 @@ func SiteRedirect(ctx context.Context, q Querier, address SiteAddress) (owner, s
 }
 
 const siteIDsByOwnerQuery = `
-	SELECT id::text, name, active_version FROM sites WHERE user_id = $1::uuid ORDER BY name
+	SELECT id::text, name, active_version FROM sites WHERE user_id = $1::uuid AND deleted_at IS NULL ORDER BY name
 `
 
-// ListOwnerSites returns every site ownerID holds, for moving or deleting
-// all of them at once.
+// ListOwnerSites returns every live site ownerID holds, for moving or
+// deleting all of them at once. Recently deleted sites stay where they are.
 func ListOwnerSites(ctx context.Context, q Querier, ownerID string) ([]TeamSite, error) {
 	rows, err := q.QueryContext(ctx, siteIDsByOwnerQuery, ownerID)
 	if err != nil {

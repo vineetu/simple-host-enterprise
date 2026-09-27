@@ -132,19 +132,35 @@ func (s siteMover) applyMoves(ctx context.Context, tx *sql.Tx, actorID, action s
 			return nil, refuseMove(http.StatusConflict, "invalid_site_name",
 				"%s cannot have a site named %q: its web address would be too long; rename the site first", m.To.Username, m.NewName), nil
 		}
-		existing, err := db.ListSiteNamesByOwnerUsername(ctx, tx, m.To.Username)
+		// Held names include the destination's recently deleted sites: a
+		// restore brings each back under its name and address, so a move may
+		// not take either.
+		held, err := db.ListHeldSiteNamesByOwnerUsername(ctx, tx, m.To.Username)
 		if err != nil {
 			return nil, nil, err
 		}
+		live, err := db.ListSiteNamesByOwnerUsername(ctx, tx, m.To.Username)
+		if err != nil {
+			return nil, nil, err
+		}
+		isLive := make(map[string]bool, len(live))
+		for _, name := range live {
+			isLive[name] = true
+		}
 		part := siteHostPart(m.NewName)
-		for _, name := range existing {
+		for _, name := range held {
 			if m.From.ID == m.To.ID && name == m.OldName {
 				continue // the site itself, being renamed
 			}
-			if name == m.NewName || siteHostPart(name) == part {
-				return nil, refuseMove(http.StatusConflict, "name_conflict",
-					"%s already has a site called %q; rename one of the two sites first, then try again", m.To.Username, name), nil
+			if name != m.NewName && siteHostPart(name) != part {
+				continue
 			}
+			if !isLive[name] {
+				return nil, refuseMove(http.StatusConflict, "name_held",
+					"a recently deleted site of %s still holds the name %q; restore it or pick another name (the name frees up when its recovery window ends)", m.To.Username, name), nil
+			}
+			return nil, refuseMove(http.StatusConflict, "name_conflict",
+				"%s already has a site called %q; rename one of the two sites first, then try again", m.To.Username, name), nil
 		}
 		if err := db.MoveSite(ctx, tx, m.SiteID, m.To.ID, m.NewName, m.fromAddress(), m.toAddress()); err != nil {
 			if errors.Is(err, db.ErrSiteNameTaken) {

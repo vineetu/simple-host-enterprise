@@ -544,7 +544,7 @@ func toolList() []Tool {
 				"Anonymous visitors to a network site can read its pages and saved data but cannot change anything. " +
 				"Never request `network` unless the user explicitly asked for anyone without a company sign-in to open the site. " +
 				"Moving to any other level takes effect at once, withdraws a pending network request, and takes a network site off the network. " +
-				"If an admin restricted the site (get_site shows `access_decision` `restricted` with their reason), choosing a level lifts the restriction and the admin's action and yours are both on record: only do it when the user, told the reason, asks for it. A new network request clears a declined or revoked decision. " +
+				"If an admin restricted the site (get_site shows `access_decision` `restricted` with their reason), any level but `only_me` and any network request are refused with `site_restricted_by_admin` and the reason until an admin lifts the restriction: tell the user the reason and that only an admin can lift it; do not retry. A new network request clears a declined or revoked decision. " +
 				"Works on a site you own and on a site owned by a team you are in.",
 			InputSchema: object(map[string]any{
 				"site":  str(siteArgDesc),
@@ -629,6 +629,7 @@ func toolList() []Tool {
 			Description: "Add people or teams to a site's viewer list and set its access level to `specific`: only they, plus the owner or the owning team, can open it. " +
 				"Names must be exact — call find_users. A company email also works: it adds the person with that account, or, if they haven't signed in yet, " +
 				"adds them as pending (counted toward the 50-viewer limit) and they can open the site after their first sign-in. " +
+				"Refused with `site_restricted_by_admin` while an admin's restriction stands (only an admin lifts it). " +
 				"Works for the owner or a member of the owning team.",
 			InputSchema: object(map[string]any{
 				"site":  str(siteArgDesc),
@@ -852,9 +853,9 @@ func toolList() []Tool {
 			Name:  "transfer_site",
 			Title: "Hand a site to a team or a person",
 			Description: "Move a site to another owner: a team you are in, or any person who can sign in (to hand a leaver's work on, or to put your own site into your team). " +
-				"Everything moves with it: every version, its saved data and that data's history, uploaded files, who can open it and its named viewers. Only the owner, and so the address, changes: " +
+				"Everything moves with it: every version, its saved data and that data's history, uploaded files, who can open it (an admin's restriction included) and its named viewers. A recently deleted site cannot be moved: restore_site it first. Only the owner, and so the address, changes: " +
 				"the site's new address is `url` in the response, and the old one (`previous_url`) redirects to it until a site takes the old name again. " +
-				"Works on a site you own and on a site owned by a team you are in. Refused with `name_conflict` when the receiver already has a site by that name (rename_site one of them first), and with `site_limit` or `storage_quota` when the receiver has no room. " +
+				"Works on a site you own and on a site owned by a team you are in. Refused with `name_conflict` when the receiver already has a site by that name (rename_site one of them first), `name_held` when one of the receiver's recently deleted sites still holds the name (restore it or pick another name), and with `site_limit` or `storage_quota` when the receiver has no room. " +
 				"When leaving a team would delete it, move the sites worth keeping first with this tool. Confirm the receiver with the user before calling; a person receiving a site can then do anything with it, including delete it.",
 			InputSchema: object(map[string]any{
 				"site":  str(siteArgDesc),
@@ -885,7 +886,7 @@ func toolList() []Tool {
 			Title: "Rename a site",
 			Description: "Give a site a new name, and so a new address. Everything stays: versions, saved data and its history, uploaded files, who can open it. " +
 				"The new address is `url` in the response; the old one (`previous_url`) redirects to it until a site takes the old name again. " +
-				"Works on a site you own and on a site owned by a team you are in. Refused with `name_conflict` when the owner already has a site by that name.",
+				"Works on a site you own and on a site owned by a team you are in. Refused with `name_conflict` when the owner already has a site by that name, and `name_held` when a recently deleted site of theirs still holds it. A recently deleted site cannot be renamed or handed over: restore_site it first.",
 			InputSchema: object(map[string]any{
 				"site":  str(siteArgDesc),
 				"owner": str(ownerArgDesc + " Omit only for a site in your own account."),

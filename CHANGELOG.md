@@ -6,61 +6,50 @@ release, commit and schema.
 
 ## Unreleased
 
-Schema 0043 (`site_redirects`, backward-compatible: an older binary ignores
-it, and a moved site's old address simply stops redirecting). Run
-`simple-host migrate` before the new image. Skills are at 0.13.2 (0.11.0
-still works).
+Schema 0047 (from 0042). Run `simple-host migrate` before the new image.
+0043 (`site_redirects`), 0045 (`pending_site_viewers`,
+`pending_team_members`), 0046 (rewrites `audit_ensure_partitions`, creates
+audit and access-log partitions twelve months ahead) and 0047 (nullable
+`sites.access_decision*` columns) are backward-compatible. 0044
+(`sites.deleted_at`, `sites.deleted_by`) is not: an older binary would serve
+sites in their recovery window again, so it refuses to start on this
+schema, and rolling back to v1.3.1 needs the database restored from before
+the migration. Skills are at 0.14.0 (0.11.0 still works).
 
 ### Sites
 - Hand a site over: the owner, or any member of the owning team, moves a
   site to a team they are in or to any person who can still sign in
   (`POST .../transfer`, MCP `transfer_site`, "Hand it over" in the site's
   Manage panel). Versions, saved data and its history, uploaded files, the
-  access level and viewers go with it. Refused when the receiver already has
-  a site by that name (`name_conflict`) or has no room (`site_limit`,
-  `storage_quota`). Audited as `site_transfer` with `from` and `to`.
+  access level (an admin's restriction included) and viewers go with it.
+  Refused when the receiver already has a site by that name
+  (`name_conflict`), a recently deleted site of theirs holds it
+  (`name_held`), or they have no room (`site_limit`, `storage_quota`).
+  Audited as `site_transfer` with `from` and `to`.
 - Rename a site (`POST .../rename`, MCP `rename_site`, "Rename" in the
   Manage panel), keeping everything it holds.
 - After either, the old address redirects to the new one (path and query
-  kept) until a site takes the old name again. The owner-hosts reconciler
+  kept) until a site takes the old name again, and answers the ordinary
+  not-found while the site is recently deleted. The owner-hosts reconciler
   keeps the old owner's certificate while any of its addresses redirects.
-- Leaving a team as its last active member, or deleting a team, now says the
-  sites can be kept by moving them first.
-
-### Admin
-- A disabled person's row on `/admin` offers "Move to team…" (all their
-  sites, to a team or a person, all or none) and "Delete sites"; a team with
-  no active member offers "Move to team…" beside "Delete team". Nobody
-  else's sites can be moved or deleted by an admin.
-
-Schema 0044. 0043 (`sites.deleted_at`, `sites.deleted_by`) is not marked
-backward-compatible: an older binary would serve sites in their recovery
-window again, so it refuses to start on this schema. 0044 is
-backward-compatible (adds `pending_site_viewers` and `pending_team_members`).
-Skills are at 0.13.2.
-
-### Sites
 - Deleting a site can be undone for 30 days. It stops serving and leaves
   every list at once, but keeps its versions, saved data and history, access
-  level, viewers and uploaded files, and its name (a new site of that name
-  is refused with `409 name_held`). The owner or a team member restores it
-  from "Recently deleted" on the dashboard, `GET /api/deleted-sites` and
-  `POST /api/sites/{site}/restore` (or the owner-qualified
-  `/api/collaboration/sites/{owner}/{site}/restore`), or the new MCP tools
-  `list_deleted_sites` and `restore_site`; an admin restores any from the
-  "Recently deleted" card on `/admin`. A restore counts toward the quota
-  again and is audited as `site_restore`. After 30 days the sweeper removes
-  the site for good. Deleting a team still removes its sites at once.
+  level, viewers and uploaded files, and its name (a new site, a rename or a
+  hand-over onto that name is refused with `409 name_held`; a deleted site
+  itself cannot be renamed or handed over). The owner or a team member
+  restores it from "Recently deleted" on the dashboard,
+  `GET /api/deleted-sites` and `POST /api/sites/{site}/restore` (or the
+  owner-qualified `/api/collaboration/sites/{owner}/{site}/restore`), or the
+  new MCP tools `list_deleted_sites` and `restore_site`; an admin restores
+  any from the "Recently deleted" card on `/admin`. A restore counts toward
+  the quota again, is refused with `409 name_taken` if a live site now holds
+  its address, and is audited as `site_restore`. After 30 days the sweeper
+  removes the site for good. Deleting a team still removes its sites at
+  once.
 - `simple-host restore` into a name a recently deleted site holds undeletes
   that site rather than creating an empty one.
-
-### Operations
-- Startup warns when no admin is configured (neither `ADMIN_EMAILS` nor
-  `OIDC_ADMIN_CLAIM`) and when the bucket's versioning is not enabled (a
-  provider that cannot report it is logged, not flagged). Both are also
-  exported as `simplehost_config_warning{check="no_admin"|"bucket_versioning"}`.
-  The bucket credentials need `s3:GetBucketVersioning` for the check; without
-  it the status is logged as unknown.
+- Leaving a team as its last active member, or deleting a team, now says the
+  sites can be kept by moving them first.
 
 ### Sharing
 - Site viewers and team members can be named by company email, including
@@ -70,13 +59,12 @@ Skills are at 0.13.2.
   the 50 limit, and removable by that email. At the person's first sign-in
   with that verified email it becomes the real grant, audited as
   `pending_grant_converted`. Emails outside `ALLOWED_EMAIL_DOMAINS` are
-  refused when that is set.
-
-Schema 0044 (from 0042): 0043 rewrites `audit_ensure_partitions` and
-creates audit and access-log partitions twelve months ahead; 0044 adds
-nullable `sites.access_decision*` columns. Both are marked
-backward-compatible, so rolling back to v1.3.1 is safe. Skills are at
-0.13.2 (0.11.0 still works).
+  refused when that is set. Pending viewers follow the site through a
+  rename or hand-over.
+- Your dashboard (and `get_site`/`list_sites` as `access_decision`) shows
+  the last admin decision about who can open a site: a network request
+  declined or network access revoked, with the admin's note, until your
+  next request; or a restriction, with its reason.
 
 ### People
 - A newly created API key stays on the dashboard, with its paste-back
@@ -89,24 +77,34 @@ backward-compatible, so rolling back to v1.3.1 is safe. Skills are at
 - "Sign out everywhere" on `/auth/sessions` ends every session of yours
   and, unless you clear the box, revokes your API keys and connected apps,
   in one audited transaction (`sign_out_everywhere`).
-- Your dashboard (and `get_site`/`list_sites` as `access_decision`) shows
-  the last admin decision about who can open a site: a network request
-  declined or network access revoked, with the admin's note, until your
-  next request; or a restriction, with its reason.
-
-### Admins
-- Restrict any site to only its owner (or team) from `/admin` with a
-  one-line reason: a reversible take-down, audited as `site_restricted`.
-  The owner sees the reason and lifts it by choosing a level again; Lift on
-  `/admin` restores the earlier level (`company` for a site that was on the
-  network).
-- Declining a network request or taking a site off the network asks for
-  an optional note for the owner, recorded in the audit event.
 - Each sign-in refreshes a person's stored email from the address the IdP
   verified, so offboarding by email follows directory changes. An address
   another person already holds is not taken over (`email_change_skipped`).
 
+### Admin
+- Restrict any site to only its owner (or team) from `/admin` with a
+  one-line reason: a take-down, audited as `site_restricted`. The owner sees
+  the reason. The restriction is sticky: until an admin lifts it, the owner
+  or team cannot raise the level, request network access or add viewers
+  (`409 site_restricted_by_admin` with the reason; the dashboard's controls
+  are off), and it stays with the site through a rename or hand-over. Lift
+  on `/admin` restores the earlier level (`company` for a site that was on
+  the network).
+- Declining a network request or taking a site off the network asks for
+  an optional note for the owner, recorded in the audit event.
+- A disabled person's row on `/admin` offers "Move to team…" (all their
+  sites, to a team or a person, all or none) and "Delete sites" (they go to
+  Recently deleted, restorable for 30 days); a team with no active member
+  offers "Move to team…" beside "Delete team". Nobody else's sites can be
+  moved or deleted by an admin.
+
 ### Operations
+- Startup warns when no admin is configured (neither `ADMIN_EMAILS` nor
+  `OIDC_ADMIN_CLAIM`) and when the bucket's versioning is not enabled (a
+  provider that cannot report it is logged, not flagged). Both are also
+  exported as `simplehost_config_warning{check="no_admin"|"bucket_versioning"}`.
+  The bucket credentials need `s3:GetBucketVersioning` for the check; without
+  it the status is logged as unknown.
 - `simple-host migrate-storage` and `simple-host reencrypt` record one
   audit event per run with their counts (`storage_migrate`,
   `storage_reencrypt`), like `restore`; dry runs are not recorded.
