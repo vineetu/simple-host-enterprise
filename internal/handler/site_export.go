@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
@@ -33,7 +34,8 @@ import (
 // A download address works for EXPORT_LINK_TTL (10 minutes by default) and
 // only once: the first download to start uses it up
 // (site_export_links_used), and the request log never records it
-// (reqlog.RedactPath).
+// (reqlog.RedactPath). It also stops working when the session, key or
+// connected app that asked for it is revoked, signed out or disconnected.
 
 // siteExportTimeout bounds one download stream.
 const siteExportTimeout = 10 * time.Minute
@@ -49,6 +51,13 @@ type siteExportClaims struct {
 	Owner   string `json:"own"`
 	Site    string `json:"site"`
 	Exp     int64  `json:"exp"`
+	// CredKind and CredID name the session, API key or connected app that
+	// asked for the link: the download is refused once it no longer works.
+	CredKind string `json:"ck"`
+	CredID   string `json:"cid"`
+	// Nonce makes every link distinct, so two asked for within the same
+	// second are two links, not one that the first download uses up.
+	Nonce string `json:"n"`
 	// signature is the verified MAC, re-encoded canonically (so another
 	// spelling of the same bytes is the same link): what marks it used.
 	signature string
@@ -117,7 +126,7 @@ func verifySiteExport(keys []auth.SigningKey, token string, now time.Time) (site
 		return siteExportClaims{}, errSiteExportToken
 	}
 	var claims siteExportClaims
-	if err := json.Unmarshal(payload, &claims); err != nil || claims.SiteID == "" || claims.ActorID == "" {
+	if err := json.Unmarshal(payload, &claims); err != nil || claims.SiteID == "" || claims.ActorID == "" || claims.CredKind == "" || claims.CredID == "" {
 		return siteExportClaims{}, errSiteExportToken
 	}
 	if !now.Before(time.Unix(claims.Exp, 0)) {
@@ -138,15 +147,33 @@ func (h *SiteHandler) siteExportLink(w http.ResponseWriter, r *http.Request) {
 	if !ok || !requireOwnerRole(w, access) {
 		return
 	}
+	credKind, credID := exportCredential(r.Context())
+	if credID == "" {
+		writeJSON(w, http.StatusForbidden, errorResponse{Error: "forbidden"})
+		return
+	}
+	nonce := make([]byte, 16)
+	if _, err := rand.Read(nonce); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
 	expires := time.Now().Add(oplimits.Get().ExportLinkTTL).UTC().Truncate(time.Second)
 	token, err := signSiteExport(h.signingKeys, siteExportClaims{
 		SiteID: access.Site.ID, ActorID: access.ActorID, Owner: access.OwnerUsername, Site: access.Site.Name, Exp: expires.Unix(),
+		CredKind: credKind, CredID: credID, Nonce: base64.RawURLEncoding.EncodeToString(nonce),
 	})
 	if err != nil {
 		log.Printf("sign export link %s/%s: %v", ownerUsername, siteName, err)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
 	}
+	actorKind, keyID := auditActorKind(r.Context())
+	h.audit.Record(r.Context(), audit.Event{
+		ActorID: access.ActorID, ActorKind: actorKind, KeyID: keyID,
+		Action: "site_export_link", OwnerID: access.OwnerID, SiteID: access.Site.ID,
+		RequestID: auditRequestID(r.Context()),
+		Extra:     map[string]any{"credential": credKind, "expires_at": expires},
+	})
 	writeJSON(w, http.StatusOK, siteExportLinkResponse{
 		URL:       strings.TrimRight(h.publicBaseURL, "/") + "/api/site-export/" + token,
 		ExpiresAt: expires,
@@ -170,6 +197,16 @@ func (h *SiteHandler) downloadSiteExport(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if disabled || errors.Is(err, sql.ErrNoRows) {
+		writeJSON(w, http.StatusNotFound, errorResponse{Error: errSiteExportToken.Error()})
+		return
+	}
+	live, err := db.CredentialLive(r.Context(), h.database, claims.CredKind, claims.CredID, claims.ActorID)
+	if err != nil {
+		log.Printf("export: check credential for %s/%s: %v", claims.Owner, claims.Site, err)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
+	if !live {
 		writeJSON(w, http.StatusNotFound, errorResponse{Error: errSiteExportToken.Error()})
 		return
 	}
@@ -206,11 +243,15 @@ func (h *SiteHandler) downloadSiteExport(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusGone, errorResponse{Error: "this download link has already been used; get a new one"})
 		return
 	}
+	actorKind, keyID := "person", ""
+	if claims.CredKind == db.CredentialKey {
+		actorKind, keyID = "key", claims.CredID
+	}
 	h.audit.Record(r.Context(), audit.Event{
-		ActorID: claims.ActorID, ActorKind: "person",
+		ActorID: claims.ActorID, ActorKind: actorKind, KeyID: keyID,
 		Action: "site_export", OwnerID: access.OwnerID, SiteID: access.Site.ID,
 		RequestID: auditRequestID(r.Context()),
-		Extra:     map[string]any{"active_version": access.Site.ActiveVersion, "via": "download_link"},
+		Extra:     map[string]any{"active_version": access.Site.ActiveVersion, "via": "download_link", "credential": claims.CredKind},
 	})
 
 	deadline := time.Now().Add(siteExportTimeout)
@@ -231,6 +272,17 @@ func (h *SiteHandler) downloadSiteExport(w http.ResponseWriter, r *http.Request)
 	if err := zw.Close(); err != nil {
 		log.Printf("finish export %s/%s: %v", claims.Owner, claims.Site, err)
 	}
+}
+
+// exportCredential names the credential this request authenticated with.
+func exportCredential(ctx context.Context) (kind, id string) {
+	if id := auth.APIKeyID(ctx); id != "" {
+		return db.CredentialKey, id
+	}
+	if id := auth.OAuthGrantID(ctx); id != "" {
+		return db.CredentialApp, id
+	}
+	return db.CredentialSession, auth.SessionID(ctx)
 }
 
 func setSiteExportHeaders(w http.ResponseWriter, filename string) {

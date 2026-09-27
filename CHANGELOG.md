@@ -14,6 +14,18 @@ release, commit and schema.
   file cannot be brought back, so opening the site is no longer enough.
 - `GET /auth/sessions` (your browsers and connected apps) now refuses an
   API key like the other session-only routes.
+- A whole-site download link stops working when the session, API key or
+  connected app that asked for it is revoked, signed out everywhere or
+  disconnected. Asking for a link is audited (`site_export_link`), and the
+  download is recorded as the key when a key asked for it. Links asked for
+  before this release stop working (they last 10 minutes by default).
+
+### Fixes
+- Two download links asked for within the same second were the same link,
+  so using one used up the other; each link is now distinct.
+- A download link validated just before it expired could be used a second
+  time once its first use had been swept; an expired link is now refused
+  when it is used.
 
 ## v1.7.0 — 2026-09-27
 

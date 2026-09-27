@@ -349,8 +349,12 @@ Config names are documented in `docs/configuration.md`; schema in
   keys under its own domain string (a session cookie never verifies as one)
   and names the site id and the caller; at download the caller must still
   be active and still own the site or belong to its team, and the site must
-  be the same one (not deleted, not re-created under the name), else 404.
-  Audited `site_export` when downloaded. **Shared with me.** `GET
+  be the same one (not deleted, not re-created under the name), and the
+  session, key or connected app that asked for the link must still work
+  (not revoked, signed out or disconnected), else 404. Each link carries a
+  random nonce, so every request gets a distinct link. Audited
+  `site_export_link` when asked for and `site_export` when downloaded (as a
+  key when a key asked for it). **Shared with me.** `GET
   /api/collaboration/sites?include=shared` appends the sites the caller, or
   a team they are in, is a named viewer of (not their own or their teams',
   not while the site is `only_me`) as entries with `access_role: "viewer"`

@@ -126,7 +126,11 @@ func TestSiteExportDownload(t *testing.T) {
 	if rec := w.fetchAnonymous(link + "x"); rec.Code != http.StatusNotFound {
 		t.Errorf("tampered link = %d, want 404", rec.Code)
 	}
-	expired, err := signSiteExport(w.keys, siteExportClaims{SiteID: id, ActorID: w.users["alice"], Owner: "alice", Site: "demo", Exp: time.Now().Add(-time.Minute).Unix()})
+	var aliceKeyID string
+	if err := w.database.QueryRow(`SELECT id::text FROM api_keys WHERE user_id = $1 AND revoked_at IS NULL LIMIT 1`, w.users["alice"]).Scan(&aliceKeyID); err != nil {
+		t.Fatal(err)
+	}
+	expired, err := signSiteExport(w.keys, siteExportClaims{SiteID: id, ActorID: w.users["alice"], Owner: "alice", Site: "demo", Exp: time.Now().Add(-time.Minute).Unix(), CredKind: db.CredentialKey, CredID: aliceKeyID, Nonce: "x"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,4 +214,51 @@ func keysOf(m map[string]string) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// A link stops working when the key that asked for it is revoked; asking
+// for it is audited, and the download is recorded as the key's. Two links
+// asked for in the same second are two links.
+func TestSiteExportLinkFollowsItsCredential(t *testing.T) {
+	w := newAccessWorld(t)
+	w.deploy("alice", "/api/sites/demo")
+	id := w.siteID("alice", "demo")
+	_, first := w.exportLink("alice", "alice", "demo")
+	_, second := w.exportLink("alice", "alice", "demo")
+	if first == "" || first == second {
+		t.Fatalf("links = %q, %q: want two distinct links", first, second)
+	}
+	if n := w.count(`SELECT count(*) FROM audit_events WHERE action = 'site_export_link' AND site_id = $1 AND actor_kind = 'key' AND key_id IS NOT NULL`, id); n != 2 {
+		t.Errorf("site_export_link audit rows = %d, want 2", n)
+	}
+	if rec := w.fetchAnonymous(first); rec.Code != http.StatusOK {
+		t.Fatalf("download = %d %s", rec.Code, rec.Body)
+	}
+	if n := w.count(`SELECT count(*) FROM audit_events WHERE action = 'site_export' AND site_id = $1 AND actor_kind = 'key' AND key_id IS NOT NULL`, id); n != 1 {
+		t.Errorf("site_export rows as the key = %d, want 1", n)
+	}
+	if _, err := w.database.Exec(`UPDATE api_keys SET revoked_at = now() WHERE user_id = $1`, w.users["alice"]); err != nil {
+		t.Fatal(err)
+	}
+	if rec := w.fetchAnonymous(second); rec.Code != http.StatusNotFound {
+		t.Errorf("link after its key was revoked = %d, want 404", rec.Code)
+	}
+}
+
+// A used link whose marker is swept after it expires can never be used
+// again: an expired link is refused at the insert itself.
+func TestUseSiteExportLinkRefusesExpired(t *testing.T) {
+	w := newAccessWorld(t)
+	ctx := context.Background()
+	soon := time.Now().Add(2 * time.Second)
+	if ok, err := db.UseSiteExportLink(ctx, w.database, "sig-a", soon); err != nil || !ok {
+		t.Fatalf("first use = %v %v", ok, err)
+	}
+	if ok, _ := db.UseSiteExportLink(ctx, w.database, "sig-a", soon); ok {
+		t.Fatal("second use before expiry succeeded")
+	}
+	time.Sleep(3 * time.Second)
+	if ok, err := db.UseSiteExportLink(ctx, w.database, "sig-a", soon); err != nil || ok {
+		t.Fatalf("use after expiry (marker swept) = %v %v, want refused", ok, err)
+	}
 }

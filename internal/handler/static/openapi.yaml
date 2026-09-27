@@ -1693,7 +1693,7 @@ paths:
   /api/collaboration/sites/{owner}/{sitename}/export-link:
     post:
       summary: Get a download address for a whole site
-      description: For the site's owner or a member of the owning team. Returns an address that works once, within {{EXPORT_LINK_TTL}}, with no key or cookie and downloads one zip of the site. Full-scope key or session.
+      description: For the site's owner or a member of the owning team. Returns an address that works once, within {{EXPORT_LINK_TTL}}, with no key or cookie and downloads one zip of the site. The address stops working if the session, key or connected app that asked for it is revoked, signed out or disconnected first. Audited as `site_export_link`. Full-scope key or session.
       tags: [Sites]
       security:
         - apiKey: []
@@ -1727,7 +1727,7 @@ paths:
   /api/site-export/{token}:
     get:
       summary: Download a whole site
-      description: The address `export-link` returns. One zip of `site.json`, `saved-data.json`, `saved-data-history.json`, `versions.json`, `assets.json`, the live version's files under `files/` and each uploaded file under `assets/<id>`. No key or cookie; the person who asked for the link must still own the site or be in its team, and the site must be the same one. The link works once; the first download to start uses it up. HEAD answers the headers only (no zip, no audit, the link stays unused). Audited as `site_export`.
+      description: The address `export-link` returns. One zip of `site.json`, `saved-data.json`, `saved-data-history.json`, `versions.json`, `assets.json`, the live version's files under `files/` and each uploaded file under `assets/<id>`. No key or cookie; the person who asked for the link must still own the site or be in its team, the credential they asked with must still work, and the site must be the same one. The link works once; the first download to start uses it up. HEAD answers the headers only (no zip, no audit, the link stays unused). Audited as `site_export`.
       tags: [Sites]
       security: []
       parameters:

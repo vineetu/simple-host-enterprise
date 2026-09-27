@@ -25,6 +25,7 @@ const (
 	apiKeyIDContextKey
 	sessionHostContextKey
 	apiKeyScopeContextKey
+	oauthGrantIDContextKey
 )
 
 type errorResponse struct {
@@ -107,7 +108,7 @@ func Middleware(database *sql.DB, signingKeys []SigningKey, sessionIdle time.Dur
 					writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
 					return
 				}
-				user, _, err := db.GetUserByOAuthAccessToken(r.Context(), database, db.HashAPIKey(token))
+				user, grantID, err := db.GetUserByOAuthAccessToken(r.Context(), database, db.HashAPIKey(token))
 				if err != nil {
 					if errors.Is(err, sql.ErrNoRows) {
 						writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
@@ -117,7 +118,9 @@ func Middleware(database *sql.DB, signingKeys []SigningKey, sessionIdle time.Dur
 					return
 				}
 				reqlog.SetUser(r.Context(), user.ID)
-				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userContextKey, &user)))
+				ctx := context.WithValue(r.Context(), userContextKey, &user)
+				ctx = context.WithValue(ctx, oauthGrantIDContextKey, grantID)
+				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
 
@@ -303,6 +306,13 @@ func SessionID(ctx context.Context) string {
 // if it authenticated with a session cookie (or not at all).
 func APIKeyID(ctx context.Context) string {
 	id, _ := ctx.Value(apiKeyIDContextKey).(string)
+	return id
+}
+
+// OAuthGrantID returns the connected app (oauth_grants id) this request
+// authenticated with, or "" for a session or an API key.
+func OAuthGrantID(ctx context.Context) string {
+	id, _ := ctx.Value(oauthGrantIDContextKey).(string)
 	return id
 }
 
