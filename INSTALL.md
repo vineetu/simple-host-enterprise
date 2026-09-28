@@ -38,7 +38,8 @@ Done means all of these hold:
    `https://<base>/api/me`, opened in the same browser, shows
    `"is_admin": true`.
 3. `make smoke BASE=https://<base> KEY_FILE=...` (section 9) passes
-   against the real install, and the browser check after it works.
+   against the real install, and the browser check after it works. Its key
+   comes from HUMAN STEP D (section 8), the last thing a person does.
 4. The `simple-host-prune` CronJob can pull its image (section 9, last
    check).
 
@@ -220,6 +221,26 @@ A person who would rather answer questions can use the setup helper at
 https://simple-host.app/setup (choose Enterprise): it writes both files, with
 the secrets left blank, in their browser. `docs/advanced/` explains every
 setting by area.
+
+Where each key comes from:
+
+- **Started from `config.env.example`** (the command above): every row in
+  the table below is in the file. Fill the ones the table says to; leave
+  the rest as they are.
+- **Given a `config.env` from the setup helper:** use it as it is,
+  replacing the example copy. It lists only the keys whose value is chosen
+  for this install; any key it leaves out (`PORT`, `HTTPS_REDIRECT_PORT`,
+  `OIDC_SCOPES`, `DB_SSLMODE`, `BACKUP_SSE`, `BACKUP_STORAGE_PREFIX`,
+  `SESSION_TTL`, `SESSION_IDLE` and so on) takes the default in
+  `docs/configuration.md`, which is what the table's "leave as in the
+  example" rows mean. Do not copy the rest of `config.env.example` into
+  it. Fill only the blanks it leaves (the database port, for example).
+- **secrets.env**, either way: the generator command further down fills
+  `SESSION_SIGNING_KEY`, `BACKUP_ENVELOPE_KEY`, `DB_PASSWORD` and
+  `DB_APP_PASSWORD`; the hidden prompt takes what comes from a person or a
+  provider (`OIDC_CLIENT_SECRET`, a bucket key pair). A helper's
+  `secrets.env` template has the same keys, empty: save it as the file and
+  run the same two commands.
 
 | Variable | Value |
 |---|---|
@@ -416,7 +437,9 @@ the in-cluster Postgres component in any overlay but `local`.
 ## 6. HUMAN STEPS
 
 Stop here and give the human this checklist with every `<...>` filled in.
-Do not continue until they confirm A and B (and C, if it applies).
+Do not continue until they confirm A and B (and C, if it applies). HUMAN
+STEP D, the admin's first sign-in and the key for `make smoke`, comes after
+the apply, in section 8.
 
 ### A. Register the OIDC application
 
@@ -689,9 +712,11 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://install-check.<base>/healthz
 
 1. Sign in at `https://<base>/auth/login`, then open `https://<base>/api/me`
    in the same browser and confirm it shows `"is_admin": true`. The
-   `username` there may carry a suffix (`admin-2`): a reserved name
-   (`admin`, and the labels in `RESERVED_LABELS`) or one held by a renamed
-   or erased person is never given out again, so the next free form is used.
+   `username` there may be longer than the address's first part: a
+   reserved name (`admin`, and the labels in `RESERVED_LABELS`) becomes
+   `<name>-<organisation>` from the email's domain (`admin@acme.com` is
+   `admin-acme`), and a name another account holds or held (renamed or
+   erased) gets a number (`alice-2`), since it is never given out again.
 2. On `/dashboard`, mint an API key named `install-check` with scope
    **Full** (the dashboard defaults to Publish; `make smoke` deletes the
    site it creates, which a publish key cannot do, so it stops before
@@ -721,6 +746,22 @@ the site (its own host then refuses anyone it is not shared with), then deletes 
 failure too. Every line reads `ok` or `FAIL`; the exit status is the number
 of failures. Without `BASE`, `make smoke` is the local overlay's test; do
 not run that here.
+
+**Owner certificates from an internal CA** (`OWNER_CERT_ISSUER`, section 6):
+the machine that runs `make smoke` must trust that CA, as the company's
+devices do, or `curl` cannot check the site host's certificate. The run
+then stops at the first site-host check with "the certificate for
+`<site host>` is not trusted by this machine". Run it from a machine that
+trusts the CA, or point curl at a bundle holding the system's CAs and this
+one (the base host's certificate must still verify):
+
+```sh
+cat /etc/ssl/certs/ca-certificates.crt company-ca.crt > "$HOME/ca-bundle.pem" && CURL_CA_BUNDLE="$HOME/ca-bundle.pem" make smoke BASE=https://<base> KEY_FILE="$HOME/.simple-host-install-key"
+```
+
+`company-ca.crt` is the CA's certificate only (never its key): for a
+cert-manager CA issuer, `kubectl --context "$CTX" -n cert-manager get secret <its secretName> -o jsonpath='{.data.tls\.crt}' | base64 -d > company-ca.crt`.
+On macOS the system bundle is `/etc/ssl/cert.pem`.
 
 Then the browser check it prints at the end: the admin opens
 `https://<their label>.<base>/` and, after a few redirects, sees their own
@@ -766,6 +807,7 @@ against `https://<base>`.
 | Signed-in admin does not see `/admin` | Their address is not in `ADMIN_EMAILS` (compared lowercased), or the admin claim does not match. Takes effect at the next sign-in; removal from `ADMIN_EMAILS` also takes effect at the next server restart. |
 | Upload of a site fails with 413 | The ingress body-size limit. Section 5 step 3. |
 | Certificate never becomes ready | DNS-01 solver credential or zone. `kubectl describe` the `certificate`, `order`, and `challenge`. |
+| `make smoke`: "the certificate for `<site host>` is not trusted by this machine" | Owner certificates come from an internal CA this machine does not trust. Section 9, "Owner certificates from an internal CA". |
 | Sites stay at `<owner>.<base>/<site>/` | The owner's certificate is not ready. Read the `simple-host-owner-hosts` logs, check `OWNER_CERT_ISSUER` names a ClusterIssuer that exists, and `kubectl describe certificate sh-owner-<owner>-tls`. Section 6, "Site addresses". |
 | CronJob in `ImagePullBackOff` | Pull secret on the Deployment instead of the ServiceAccount. `docs/install.md` section 10. |
 | `429` or "gave no redirect" after many sign-ins | `/auth/*` is rate limited per address. Wait two to three minutes. |

@@ -222,10 +222,29 @@ expect 200 "read the site after the rollback" "$BASE" "/api/collaboration/sites/
 active="$(json 'd["active_version"]')"
 if [ "$active" = 1 ]; then ok "active version is 1 after the rollback"; else bad "active version is '$active' after the rollback (want 1)"; fi
 
+# site_tls probes the site host's certificate. One from an issuer this
+# machine does not trust (an internal CA for owner certificates,
+# OWNER_CERT_ISSUER) fails the run at once with how to fix it, rather than
+# waiting CERT_WAIT and reading as a server fault. Until the owner's
+# certificate exists the ingress presents its own self-signed or the base
+# certificate, which curl reports differently ("self-signed certificate"
+# alone, or a name mismatch), so those return non-zero and the caller waits.
+tls_err=""
+site_tls() {
+  local rc
+  tls_err="$(curl -sS -o /dev/null --max-time 20 "https://$site_host/healthz" 2>&1 >/dev/null)"; rc=$?
+  tls_err="${tls_err%%$'\n'*}"
+  if { [ "$rc" = 60 ] || [ "$rc" = 35 ]; } && printf '%s' "$tls_err" | grep -qiE 'local issuer|in certificate chain|verify the first certificate|unknown ca|unknown authority|not trusted'; then
+    bad "the certificate for $site_host is not trusted by this machine (internal CA?): run from a machine that trusts OWNER_CERT_ISSUER's CA, or set CURL_CA_BUNDLE to a bundle holding it (INSTALL.md section 9). ${tls_err}"
+    finish
+  fi
+  return "$rc"
+}
+
 echo "== the owner host $owner_host and the fallback"
 expect 401 "the owner index needs a signed-in session" "$owner_host" /
 expect 404 "the owner host serves no API" "$owner_host" /api/me
-if curl -sS -o /dev/null --max-time 20 "https://$site_host/healthz" 2>/dev/null; then
+if site_tls; then
   echo "  (*.$owner_host already has its certificate; the fallback cannot be observed on this run)"
 else
   expect 401 "until the certificate is ready the old address serves the site (needs a session, no redirect)" "$owner_host" "/$site/"
@@ -236,10 +255,10 @@ fi
 echo "== waiting up to ${CERT_WAIT}s for the certificate of *.$owner_host and the switch to the redirect"
 ready=""
 for _ in $(seq 1 $((CERT_WAIT / 5 + 1))); do
-  if curl -sS -o /dev/null --max-time 20 "https://$site_host/healthz" 2>/dev/null && [ "$(curl -sS -o /dev/null --max-time 20 -w '%{http_code}' "https://$owner_host/$site/" 2>/dev/null)" = "301" ]; then ready=1; sleep 20; break; fi
+  if site_tls && [ "$(curl -sS -o /dev/null --max-time 20 -w '%{http_code}' "https://$owner_host/$site/" 2>/dev/null)" = "301" ]; then ready=1; sleep 20; break; fi
   sleep 5
 done
-if [ -n "$ready" ]; then ok "$site_host presents a valid certificate and the old address redirects"; else bad "$site_host not ready after ${CERT_WAIT}s"; finish; fi
+if [ -n "$ready" ]; then ok "$site_host presents a valid certificate and the old address redirects"; else bad "$site_host not ready after ${CERT_WAIT}s${tls_err:+ (last error: $tls_err)}"; finish; fi
 
 echo "== the site host $site_host"
 expect 401 "hosted content needs a signed-in session" "$site_host" /

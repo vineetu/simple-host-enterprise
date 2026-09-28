@@ -19,6 +19,17 @@ release, commit and schema.
   For its first 3 minutes a database error logs one "waiting for the
   database schema and application role" line; only an error that outlasts
   that, or comes after the database has answered once, is logged as such.
+- `make smoke` against an install whose owner certificates come from an
+  internal CA the running machine does not trust stops at once with "the
+  certificate for `<site host>` is not trusted by this machine" and how to
+  fix it, instead of waiting 5 minutes and reporting the host "not ready".
+  A timeout now names curl's last error. INSTALL.md section 9 shows running
+  it with `CURL_CA_BUNDLE` (the system bundle plus the CA).
+- INSTALL.md section 4 says which `config.env` keys come from the example
+  file and which the setup helper leaves to their defaults (do not copy the
+  rest of the example into a helper's file), and which `secrets.env` keys the
+  generator fills. "Done" and the HUMAN STEPS point to HUMAN STEP D and
+  `make smoke` in sections 8 and 9.
 
 ## v1.8.1 — 2026-09-27
 
