@@ -22,8 +22,13 @@ release, commit and schema.
   cluster it uses a cert-manager or External Secrets already there (and
   stops with the fix when only their CRDs are left or they are too old;
   `scripts/test-detect.sh` checks this on a kind cluster), and never removes
-  the cluster's IAM OIDC provider. Docs: `docs/cloud/aws.md`, the module's
+  the cluster's IAM OIDC provider. `--destroy` removes everything it made,
+  its state bucket included. Docs: `docs/cloud/aws.md`, the module's
   README.
+
+### Fixed
+- Dashboard: the MCP address box (and the new-key box) had light text on a
+  light background; the text is dark now.
 
 ## v1.8.3 — 2026-09-28
 

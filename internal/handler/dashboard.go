@@ -282,7 +282,7 @@ const dashboardScript = `<script>
 
   function block(text) {
     var pre = document.createElement('pre');
-    pre.style.cssText = 'white-space:pre-wrap;word-break:break-all;background:var(--ps-blue-50);padding:12px;border-radius:4px';
+    pre.style.cssText = 'white-space:pre-wrap;word-break:break-all;background:var(--ps-blue-50);color:var(--ink);padding:12px;border-radius:4px';
     pre.textContent = text;
     return pre;
   }
@@ -477,7 +477,7 @@ const dashboardSitesScript = `<script>
     lead.textContent = 'No sites yet. Your sites come from your AI app: add this server to ChatGPT, Claude, Copilot, Cursor or Codex, sign in with your work account when it asks, then ask it to publish something.';
     var pre = document.createElement('pre');
     pre.className = 'mcp-address';
-    pre.style.cssText = 'white-space:pre-wrap;word-break:break-all;background:var(--ps-blue-50);padding:12px;border-radius:4px';
+    pre.style.cssText = 'white-space:pre-wrap;word-break:break-all;background:var(--ps-blue-50);color:var(--ink);padding:12px;border-radius:4px';
     pre.textContent = location.origin + '/mcp';
     var more = document.createElement('p');
     more.className = 'login-copy';

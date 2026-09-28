@@ -141,9 +141,11 @@ locals {
       apiVersion = "cert-manager.io/v1"
       kind       = "ClusterIssuer"
       metadata   = { name = "simple-host-letsencrypt" }
-      spec = { acme = {
+      # Let's Encrypt needs no contact address, and one it cannot accept (a
+      # .test or .internal domain) would stop every certificate: only a
+      # letsencrypt_email that was set is sent.
+      spec = { acme = merge(var.letsencrypt_email == "" ? {} : { email = var.letsencrypt_email }, {
         server              = "https://acme-v02.api.letsencrypt.org/directory"
-        email               = var.letsencrypt_email != "" ? var.letsencrypt_email : lower(trimspace(var.admin_emails[0]))
         privateKeySecretRef = { name = "simple-host-letsencrypt-account" }
         solvers = [{
           selector = { dnsZones = [var.base_domain] }
@@ -154,7 +156,7 @@ locals {
             auth         = { kubernetes = { serviceAccountRef = { name = "simple-host-dns" } } }
           } }
         }]
-      } }
+      }) }
     },
   ] : yamlencode(d)])
 

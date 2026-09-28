@@ -167,7 +167,7 @@ variable "dns_zone_id" {
 }
 
 variable "letsencrypt_email" {
-  description = "The Let's Encrypt account email. Empty uses the first admin email."
+  description = "An email address for Let's Encrypt's expiry notices (optional; it must be on a public domain). Empty registers without one."
   type        = string
   default     = ""
 }

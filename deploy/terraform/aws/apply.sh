@@ -44,7 +44,19 @@ done
 say() { printf '\n== %s\n' "$*"; }
 # Keys pressed while it worked (Enter to keep AWS CloudShell awake) must not
 # answer the next question: drop them first.
-drain() { while read -r -t 0.3 -n 1 _ </dev/tty 2>/dev/null; do :; done; }
+drain() {
+  python3 -c 'import termios; f=open("/dev/tty"); termios.tcflush(f, termios.TCIFLUSH)' 2>/dev/null ||
+    while read -r -t 0.1 -n 10000 _ </dev/tty 2>/dev/null; do :; done
+}
+# ask <prompt>: an answer typed at the terminal in $answer. Keys pressed
+# before the question are dropped; an empty answer asks again.
+ask() {
+  answer=''
+  while [ -z "$answer" ]; do
+    drain; printf '%s' "$1"
+    read -r answer </dev/tty || die "nothing typed"
+  done
+}
 die() { printf '\nStopped: %s\n' "$*" >&2; exit 1; }
 [ -n "$tfvars_b64" ] || die "--tfvars is required (copy the whole line from https://simple-host.app/setup)"
 [ -n "$src" ] || [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || die "--ref is the full 40-character commit id"
@@ -67,9 +79,6 @@ region=$(var region); base=$(var base_domain); create=$(var create_cluster); clu
 export AWS_REGION=$region AWS_DEFAULT_REGION=$region
 
 say "Simple Host Enterprise for $base"
-if [ -z "$plan$destroy" ]; then
-  echo "This takes about $([ "$create" = true ] && echo 25 || echo 15) minutes. Keep this tab open and press Enter every 10 minutes or so: AWS CloudShell closes after about 20 minutes without a key press, and closing stops the work. If it does close, open it again and paste the same line: it picks up where it stopped."
-fi
 command -v aws >/dev/null || die "the AWS CLI is missing (AWS CloudShell has it)"
 account=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || die "this shell is not signed in to AWS (aws sts get-caller-identity failed)"
 echo "AWS account $account, region $region"
@@ -83,7 +92,7 @@ if [ -z "$destroy" ] && [ "$(aws freetier get-account-plan-state --region us-eas
   [ "$create" = true ] && [ "$(aws ec2 describe-instance-types --instance-types "$node_size" --query 'InstanceTypes[0].FreeTierEligible' --output text 2>/dev/null)" != True ] && small=no
   case "$db_size" in db.t4g.micro|db.t3.micro) ;; *) small=no ;; esac
   [ "$(var db_backup_days)" = 1 ] || small=no
-  [ "$small" = yes ] || die "this AWS account is on the free plan, which cannot launch the cluster's nodes or the database at their sizes, or keep 7 days of database backups. Upgrade it to a paid plan (Billing and Cost Management, then Plans), then run the same line again."
+  [ "$small" = yes ] || die "this AWS account is on the free plan, which cannot launch the cluster's nodes or the database at their sizes, or keep 7 days of database backups. Upgrade it to a paid plan (Billing and Cost Management, then Plans), then run the same line again. Only to try it out on the free plan, put TF_VAR_node_size=t3.small TF_VAR_db_size=db.t4g.micro TF_VAR_db_backup_days=1 in front of bash (1 day of database backups is not enough for real use)."
 fi
 
 # Tools, under /tmp, each checked against its pinned checksum.
@@ -113,6 +122,7 @@ if [ -n "$src" ]; then
   mod="$(cd "$src" && pwd)/deploy/terraform/aws"
 else
   say "Fetching simple-host-enterprise at $ref"
+  [ -z "${SH_ENTERPRISE_REPO_URL:-}" ] || echo "(from $REPO, not GitHub: SH_ENTERPRISE_REPO_URL is set)"
   [ -d "$work/src/.git" ] || git -c init.defaultBranch=main init -q "$work/src"
   git -C "$work/src" fetch -q --depth 1 "$REPO" "$ref"
   git -C "$work/src" -c advice.detachedHead=false checkout -q --force FETCH_HEAD
@@ -123,7 +133,25 @@ export TF_DATA_DIR="$work/tfdata"
 printf '%s\n' "$tfvars" > "$mod/terraform.tfvars"
 rm -f "$mod/detected.auto.tfvars" "$mod/zz_recover.tf" "$mod/zz_plan_override.tf"
 # A copy of your answers where you will find it again (no secrets in it).
-mkdir -p "$HOME/simple-host"; cp "$mod/terraform.tfvars" "$HOME/simple-host/$base.tfvars"
+# A copy of your answers where you will find it again: the file, plus any
+# setting given as TF_VAR_<name> (never the client secret), as Terraform
+# will see them. A run that differs from the last one says how.
+mkdir -p "$HOME/simple-host"; saved="$HOME/simple-host/$base.tfvars"
+{
+  cat "$mod/terraform.tfvars"
+  over=$(env | sed -n 's/^TF_VAR_\([a-z_]*\)=.*/\1/p' | grep -vx oidc_client_secret | sort || true)
+  for v in $over; do
+    grep -q "^$v *=" "$mod/terraform.tfvars" && continue
+    val=$(printenv "TF_VAR_$v")
+    [[ "$val" =~ ^(true|false|[0-9]+|\[.*|\{.*)$ ]] || val="\"$val\""
+    printf '%s = %s  # from TF_VAR_%s\n' "$v" "$val" "$v"
+  done
+} > "$saved.new"
+if [ -f "$saved" ] && ! cmp -s "$saved" "$saved.new"; then
+  echo "Different from the last run from this shell ($saved):"
+  diff "$saved" "$saved.new" | sed -n 's/^< /  was: /p; s/^> /  now: /p' | sed '1,40!d' || true
+fi
+mv "$saved.new" "$saved"
 cd "$mod"
 
 # Terraform state: a bucket in this account. Its settings are applied on
@@ -173,6 +201,14 @@ else
 fi
 tfstate=$(terraform state list 2>/dev/null || true)
 db_addr='aws_db_instance.db'
+# What this run is: a new install, or a change to one that exists.
+if [ -z "$plan$destroy" ]; then
+  if grep -qxF terraform_data.install <<<"$tfstate"; then
+    say "This install exists: this run shows what changes and applies only that (usually a few minutes)"
+  else
+    echo "A new install$([ "$create" = true ] && echo ", with a new EKS cluster" || echo " on the cluster $cluster"): about $([ "$create" = true ] && echo 25 || echo 15) minutes. Keep this tab open and stay with it until it asks you to type yes, then press Enter every 10 minutes or so: AWS CloudShell closes after about 20 minutes without a key press, and closing stops the work. If it does close, open it again and paste the same line: it picks up where it stopped."
+  fi
+fi
 in_state() { grep -qxF "$1" <<<"$tfstate"; }
 
 # Runs Terraform so that closing the shell stops it cleanly: Terraform runs
@@ -316,12 +352,7 @@ if [ -n "$destroy" ]; then
   [ "$(var protect_data)" = false ] || die "the database and the bucket are protected (protect_data). To remove everything, take what you need first (docs/uninstall.md), then run the same line again with TF_VAR_protect_data=false in front of bash and --destroy at the end. See deploy/terraform/aws/README.md, Remove."
   say "Removing Simple Host from $base"
   if [ -z "$yes" ]; then
-    answer=''
-    for try in 1 2; do
-      drain; printf 'This deletes the database and every site. Type the address (%s) to go ahead: ' "$base"
-      read -r answer </dev/tty || die "nothing typed"
-      [ -n "$answer" ] && break
-    done
+    ask "This deletes the database and every site. Type the address ($base) to go ahead: "
     [ "$answer" = "$base" ] || die "not removed"
   fi
   # Deletion protection is lifted first (it is a setting of the database
@@ -338,6 +369,32 @@ if [ -n "$destroy" ]; then
     run_tf apply -input=false -auto-approve -var-file=terraform.tfvars $targets || die "lifting the deletion protection stopped; run the same command again"
   fi
   run_tf destroy -input=false -auto-approve -var-file=terraform.tfvars || die "the removal stopped; run the same command again"
+  # The state bucket goes too when it holds only this install's state (its
+  # old versions hold every secret the install had).
+  others=$(aws s3api list-object-versions --bucket "$state_bucket" --query '[Versions,DeleteMarkers][][].Key' --output text 2>/dev/null | tr '\t' '\n' | grep -v '^None$' | grep -v "^$base/" || true)
+  if [ -z "$others" ]; then
+    say "Deleting the Terraform state bucket s3://$state_bucket"
+    # Every version and delete marker, 500 at a time; a last heartbeat write
+    # still in flight can land meanwhile, so it tries a few times.
+    for try in 1 2 3 4 5; do
+      while :; do
+        v=$(aws s3api list-object-versions --bucket "$state_bucket" --max-keys 500 --output json |
+          python3 -c 'import json,sys; d=json.load(sys.stdin); o=[{"Key":x["Key"],"VersionId":x["VersionId"]} for x in (d.get("Versions") or [])+(d.get("DeleteMarkers") or [])][:500]; print(json.dumps({"Objects":o,"Quiet":True}) if o else "")')
+        [ -n "$v" ] || break
+        aws s3api delete-objects --bucket "$state_bucket" --delete "$v" >/dev/null
+      done
+      aws s3api delete-bucket --bucket "$state_bucket" 2>/dev/null && { echo "Deleted."; break; }
+      [ "$try" = 5 ] && die "the state bucket s3://$state_bucket could not be deleted; empty and delete it in the S3 console"
+      sleep 10
+    done
+    rm -rf "$TF_DATA_DIR"
+  else
+    say "The state bucket s3://$state_bucket also holds other installs' state, so it stays"
+  fi
+  say "Removed"
+  echo "Simple Host and everything it made in AWS are gone. Two things outside AWS are yours to remove:"
+  echo "  - the NS records for $base at your DNS provider (or its name servers at the registrar);"
+  echo "  - the web application registered for it at your sign-in provider (redirect URI https://$base/auth/callback)."
   exit 0
 fi
 
@@ -518,11 +575,14 @@ fi
 # disk. Later runs keep the stored one.
 if [ -z "${TF_VAR_oidc_client_secret:-}" ] && ! aws secretsmanager describe-secret --secret-id "$name/oidc" --query 'VersionIdsToStages' --output text 2>/dev/null | grep -q AWSCURRENT; then
   say "Your sign-in app's client secret"
-  drain; printf 'Client secret (not shown as you type): '
   trap 'stty echo 2>/dev/null' INT
-  if ! read -rs TF_VAR_oidc_client_secret </dev/tty; then trap - INT; echo; die "no client secret was typed"; fi
-  trap - INT; echo
-  [ -n "$TF_VAR_oidc_client_secret" ] || die "the client secret is empty"
+  TF_VAR_oidc_client_secret=''
+  while [ -z "$TF_VAR_oidc_client_secret" ]; do
+    drain; printf 'Client secret (not shown as you type): '
+    if ! read -rs TF_VAR_oidc_client_secret </dev/tty; then trap - INT; echo; die "no client secret was typed"; fi
+    echo
+  done
+  trap - INT
   export TF_VAR_oidc_client_secret
 fi
 
@@ -542,20 +602,11 @@ gone=$(grep -E '^  # .* (must be replaced|will be destroyed)' "$planlog" | grep 
 [ -z "$gone" ] || printf '\nNote: it will REMOVE or REPLACE these:\n%s\n' "$gone"
 if grep -qE '# (module\.eks\[0\]\.aws_eks_cluster\.this\[0\]|aws_db_instance\.db) (must be replaced|will be destroyed)' <<<"$gone"; then
   printf '\nThis would REPLACE the cluster or the database (a new database is an empty one).\n'
-  answer=''
-  for try in 1 2; do
-    drain; printf 'Type the address (%s) to go ahead anyway: ' "$base"
-    read -r answer </dev/tty || die "nothing typed; nothing was changed"
-    [ -n "$answer" ] && break
-  done
+  ask "Type the address ($base) to go ahead anyway: "
   [ "$answer" = "$base" ] || die "nothing was changed"
 elif [ -z "$yes" ]; then
-  answer=''
-  for try in 1 2; do
-    drain; printf '\nType yes to go ahead: '
-    read -r answer </dev/tty || die "nothing typed"
-    [ -n "$answer" ] && break
-  done
+  echo
+  ask "Type yes to go ahead: "
   [ "$answer" = yes ] || die "nothing was changed"
 fi
 stage1=''
@@ -599,6 +650,22 @@ fi
 if [ -n "$left" ]; then
   say "Tagged for this install but not part of it: left over from a run that was cut off. Check them in the AWS console and delete them there"
   printf '%s\n' "$left"
+fi
+# Certificates need the Let's Encrypt account: say so now if it was refused.
+if [ -f "$mod/.work/kubeconfig" ]; then
+  st=''
+  for _ in $(seq 1 24); do
+    st=$(kubectl --kubeconfig "$mod/.work/kubeconfig" get clusterissuer simple-host-letsencrypt -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+    [ "$st" = True ] && break
+    sleep 5
+  done
+  if [ "$st" != True ]; then
+    msg=$(kubectl --kubeconfig "$mod/.work/kubeconfig" get clusterissuer simple-host-letsencrypt -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}' 2>/dev/null || true)
+    say "Certificates cannot be issued yet: the Let's Encrypt account is not ready"
+    [ -n "$msg" ] || msg="no answer from Let's Encrypt in 2 minutes"
+    echo "  $msg"
+    echo "  If it names the contact email, set letsencrypt_email to an address on a public domain (or leave it out) and run the line again."
+  fi
 fi
 say "Next steps"
 terraform output -raw next_steps

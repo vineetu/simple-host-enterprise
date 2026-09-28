@@ -54,7 +54,8 @@ at a pinned commit, after checking its checksum:
    A copy of your answers goes to `~/simple-host/<address>.tfvars`;
 2. fetches this repository at that commit and writes `terraform.tfvars`;
 3. keeps the Terraform state in `s3://<name>-tfstate-<account>-<region>`
-   (versioning, encryption, TLS only, lockfile locking);
+   (versioning, encryption, public access blocked, TLS only, lockfile
+   locking);
 4. on an existing cluster, uses a cert-manager (1.15 or later) or External
    Secrets Operator (serving `external-secrets.io/v1`) already there, and
    stops with the exact fix when one is too old or only its CRDs are left
@@ -64,14 +65,19 @@ at a pinned commit, after checking its checksum:
 6. shows the plan and waits for `yes`, then works in two steps: the cluster and
    the database (the long part), then the rest.
 
-**Keep the tab open and press Enter every 10 minutes or so.** A new cluster
-takes about 25 minutes, yours about 15. AWS CloudShell ends a session after
+**Keep the tab open, stay with it until it asks you to type `yes`, then press
+Enter every 10 minutes or so.** A new install with a new cluster takes about
+25 minutes, on yours about 15; a run on an install that exists shows what
+changes and applies only that, and says so at the start. AWS CloudShell ends a session after
 about 20 minutes without a key press (output, and Shift alone, do not count), and then stops
 every process and empties `/tmp`. Closing the tab, Ctrl-C or a hang-up stops
 Terraform cleanly: it saves what is done and releases the lock. Paste the same
 line again, from any shell, and it picks up where it stopped (it fetches
 Terraform and the module again). Keys pressed while it works never answer its
-next question: it drops them first.
+next question: it drops them first, and an empty answer asks again.
+A copy of your answers, with any `TF_VAR_` settings you added (never the
+client secret), is kept in `~/simple-host/<address>.tfvars`; a run that
+differs from the last one from that shell lists the differences.
 
 What it recovers from:
 
@@ -94,7 +100,7 @@ What it recovers from:
 
 An AWS account on the free plan cannot launch the nodes or the database at
 their default sizes; `apply.sh` says so before it starts. Upgrade the account's
-plan first.
+plan first (only to try it out, it names the smaller sizes that fit).
 
 `--plan` shows the plan and changes nothing (it creates no state bucket);
 `--yes` skips the confirmation; `--destroy` removes what it made (see below).
@@ -156,7 +162,10 @@ from its Advanced step, `extra_config` (more `config.env` settings,
   narrow it to your network once the install is done),
 - `db_size`, `db_backup_days` (7),
 - `protect_data` (deletion protection on the database and the bucket; `true`),
-- `dns_zone_id`, `letsencrypt_email`, `tags`.
+- `letsencrypt_email` (an address for Let's Encrypt's notices; optional, and
+  it must be on a public domain: one it refuses stops every certificate, and
+  the line says so at the end),
+- `dns_zone_id`, `tags`.
 
 ## Certificates and Let's Encrypt's limits
 
@@ -198,20 +207,18 @@ The address's own certificate stays with Let's Encrypt.
   ```
 
   It lifts the deletion protection (and the secrets' recovery window), then
-  removes everything (it asks you to
-  type the address first). From a pipeline, set `protect_data = false` in
-  `terraform.tfvars` and apply once before `terraform destroy`; a value in
-  `terraform.tfvars` wins over `TF_VAR_protect_data`, as always in Terraform.
-  Delete the NS records at your DNS provider too.
+  removes everything it made in AWS (it asks you to type the address first),
+  including its Terraform state bucket, `<name>-tfstate-<account>-<region>`,
+  every version of it (the old versions hold every secret the install had).
+  A bucket that also holds another install's state stays. From a pipeline,
+  set `protect_data = false` in `terraform.tfvars` and apply once before
+  `terraform destroy`; a value in `terraform.tfvars` wins over
+  `TF_VAR_protect_data`, as always in Terraform. Then delete the state bucket
+  yourself.
 
-  The removal leaves the Terraform state bucket,
-  `<name>-tfstate-<account>-<region>`: it is versioned and its old versions
-  hold every secret the install ever had. Once you are sure you will not
-  need it, empty it (every version) and delete it in the S3 console, or:
-
-  ```sh
-  b=<name>-tfstate-<account>-<region>; aws s3api delete-objects --bucket "$b" --delete "$(aws s3api list-object-versions --bucket "$b" --query '{Objects: [Versions,DeleteMarkers][][].{Key:Key,VersionId:VersionId}}' --output json)" && aws s3api delete-bucket --bucket "$b"
-  ```
+  Two things outside AWS are yours to remove, and it reminds you: the NS
+  records for the address at your DNS provider, and the web application
+  registered for it at your sign-in provider.
 - **What removal leaves on a cluster of yours**: the IAM OIDC provider, the
   empty `cert-manager`, `external-secrets` and `simple-host-ingress`
   namespaces, and the cert-manager and External Secrets CRDs (Helm keeps
