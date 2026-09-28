@@ -543,7 +543,10 @@ func (h *ConnectorHandler) authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Referrer-Policy", "no-referrer")
+	// same-origin, not no-referrer: under no-referrer a browser posts the
+	// consent form with "Origin: null", which the same-origin check refuses,
+	// so Allow always failed. same-origin still sends nothing to other sites.
+	w.Header().Set("Referrer-Policy", "same-origin")
 	req, aerr := h.parseAuthorize(r.Context(), r.URL.Query())
 	if aerr != nil {
 		if aerr.redirect {
@@ -601,7 +604,7 @@ func (h *ConnectorHandler) authorize(w http.ResponseWriter, r *http.Request) {
 // is the only place an authorization code is minted.
 func (h *ConnectorHandler) decide(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("Referrer-Policy", "same-origin")
 	user := auth.GetUser(r.Context())
 	if user == nil {
 		writeConnectError(w, "Sign in again, then connect the app again.")

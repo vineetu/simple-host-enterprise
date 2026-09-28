@@ -4,6 +4,16 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## v1.8.3 — 2026-09-28
+
+### Fixed
+- Connecting an AI app (ChatGPT, Claude, Cursor and others) through the
+  browser works again. Clicking **Allow** on the consent screen returned
+  `{"error":"forbidden"}`: the page's `Referrer-Policy: no-referrer` made
+  the browser post the form with `Origin: null`, which the same-origin
+  check refuses. The consent screen now sends `same-origin`, which still
+  sends nothing to other sites.
+
 ## v1.8.2 — 2026-09-28
 
 ### Fixed

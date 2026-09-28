@@ -324,6 +324,12 @@ func (f *connectorFlow) authorize(clientID, redirect, challenge string) string {
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "to use Simple Host as alice?") {
 		f.t.Fatalf("consent page = %d %s", rec.Code, rec.Body.String())
 	}
+	// The POST below sets Origin by hand. A real browser sends only what the
+	// page's Referrer-Policy allows: under no-referrer, a form post carries
+	// "Origin: null" and Allow is refused.
+	if rp := rec.Header().Get("Referrer-Policy"); rp != "same-origin" {
+		f.t.Fatalf("consent page Referrer-Policy = %q, want same-origin so the form posts its real Origin", rp)
+	}
 
 	form := url.Values{"query": {q.Encode()}, "decision": {"allow"}}
 	r = httptest.NewRequest(http.MethodPost, connectorTestBase+"/oauth/authorize", strings.NewReader(form.Encode()))
