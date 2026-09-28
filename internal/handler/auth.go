@@ -539,23 +539,33 @@ func (h *AuthHandler) createUser(ctx context.Context, sub, email, usernameHint s
 	}
 
 	// A derived name may be unusable in two different ways: reserved (the
-	// rule is to append a short suffix and tell the person on collision — an
-	// admin's own address is very often "admin@...", which is exactly
+	// rule is to use another form and tell the person — an admin's own
+	// address is very often "admin@...", which is exactly
 	// reservedLabels["admin"]) or actually malformed (not a valid DNS label
 	// at all, which a numeric suffix cannot fix). Only the first is worth
-	// retrying; the loop below tries the bare name once and then only
-	// suffixed forms, and validates each before ever reaching the database.
-	username := base
-	notice := ""
+	// retrying. A reserved name first tries "<name>-<organisation>" from the
+	// email's domain ("admin@acme.com" becomes "admin-acme") rather than a
+	// bare "admin-2", which reads as if an "admin-1" existed; after that,
+	// and for a name another account holds, the numbered forms follow. Each
+	// is validated before ever reaching the database.
+	candidates := []string{base}
+	if errors.Is(validateOwnerName(base), errOwnerNameReserved) {
+		if org := emailOrgLabel(email); org != "" && validateOwnerName(base+"-"+org) == nil {
+			candidates = append(candidates, base+"-"+org)
+		}
+	}
+	for n := 2; len(candidates) < maxUsernameSuffixAttempts; n++ {
+		candidates = append(candidates, fmt.Sprintf("%s-%d", base, n)) // -2, -3, ...
+	}
 	attempted := false
-	for attempt := 0; attempt < maxUsernameSuffixAttempts; attempt++ {
-		if attempt > 0 {
-			username = fmt.Sprintf("%s-%d", base, attempt+1) // -2, -3, ...
+	for i, username := range candidates {
+		notice := ""
+		if i > 0 {
 			notice = "username_suffixed"
 		}
 		if err := validateOwnerName(username); err != nil {
 			if errors.Is(err, errOwnerNameReserved) {
-				continue // try the next suffix
+				continue // try the next form
 			}
 			if !attempted {
 				return db.User{}, "", fmt.Errorf("derived username %q is not usable: %w", username, err)
@@ -572,6 +582,18 @@ func (h *AuthHandler) createUser(ctx context.Context, sub, email, usernameHint s
 		}
 	}
 	return db.User{}, "", fmt.Errorf("could not find an available username derived from %q", base)
+}
+
+// emailOrgLabel is the first label of an email's domain, cleaned the way a
+// username is ("admin@acme-corp.example.com" gives "acme-corp"), or "" when
+// nothing usable is left.
+func emailOrgLabel(email string) string {
+	_, domain, ok := strings.Cut(strings.ToLower(email), "@")
+	if !ok {
+		return ""
+	}
+	first, _, _ := strings.Cut(domain, ".")
+	return strings.Trim(invalidUsernameChars.ReplaceAllString(first, ""), "-")
 }
 
 func (h *AuthHandler) logout(w http.ResponseWriter, r *http.Request) {

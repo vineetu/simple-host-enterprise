@@ -279,7 +279,10 @@ person's address rather than the ingress's (`docs/configuration.md`).
     is never printed. Revoke the key afterwards. Your own scripts and CI
     jobs that call the API with a key send `X-Simple-Host-Client: api`
     (an agent's skill sends `X-Skill-Version` instead); with neither header
-    a keyed call gets `400 skill_version_required` (`docs/ci.md`).
+    a keyed call gets `400 skill_version_required` (`docs/ci.md`). With owner
+    certificates from an internal CA, run it from a machine that trusts
+    that CA or with `CURL_CA_BUNDLE` set to a bundle holding it
+    (`INSTALL.md` section 9).
 
 `deploy/overlays/staging` and `deploy/overlays/production` are templates on
 top of the same `byo` shape, for a company that wants a separate
@@ -895,12 +898,13 @@ cluster, where the image is loaded into the node and never pulled at all.
   `kubectl port-forward` with `curl --resolve` so the `Host` header still
   matches the issuer. `deploy/components/dex/configmap.yaml` and
   `scripts/smoke.sh` show the exact mechanism this package uses for Dex.
-- **A person's account gets a `-2` (or higher) suffix on their username at
-  first sign-in.** Expected when their derived username collides with an
-  existing account or a reserved label (`admin`, `www`, and so on) —
-  common for an admin whose real address is literally
-  `admin@yourcompany.com`. The dashboard shows a one-time notice; this is
-  not an error.
+- **A person's account gets a longer username than their address at first
+  sign-in.** Expected when their derived username is a reserved label
+  (`admin`, `www`, and so on), which is common for an admin whose real
+  address is literally `admin@yourcompany.com`: they get
+  `admin-yourcompany`. A name another account holds, or held before a
+  rename or erasure, gets a `-2` (or higher) suffix instead. The dashboard
+  shows a one-time notice; this is not an error.
 - **`make smoke` or a manual pen-test run starts failing with `429`s, or
   "gave no redirect to the identity provider," after several back-to-back
   runs from the same machine in a short window.** Not a regression:

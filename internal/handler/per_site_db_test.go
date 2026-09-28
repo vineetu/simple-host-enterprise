@@ -117,6 +117,31 @@ func TestPersonHandleNeverTakesTheTeamPrefix(t *testing.T) {
 	}
 }
 
+// An admin whose address is admin@acme.com gets "admin-acme", not
+// "admin-2": the bare name is reserved, so the organisation's name is tried
+// before a number. A second person with the same local part at the same
+// organisation then gets a numbered form.
+func TestReservedUsernameTakesOrganisationForm(t *testing.T) {
+	database := connectorTestDB(t)
+	h := newTestAuthHandler(database, "example.com")
+	ctx := context.Background()
+	user, notice, err := h.createUser(ctx, "sub-admin", "admin@acme.com", "", true)
+	if err != nil || user.Username != "admin-acme" || notice != "username_suffixed" {
+		t.Fatalf("first admin = %q %q %v, want admin-acme with the notice", user.Username, notice, err)
+	}
+	user, _, err = h.createUser(ctx, "sub-admin-2", "admin@acme.co.uk", "", false)
+	if err != nil || user.Username != "admin-2" {
+		t.Errorf("second admin = %q %v, want admin-2", user.Username, err)
+	}
+	user, notice, err = h.createUser(ctx, "sub-alice", "alice@acme.com", "", false)
+	if err != nil || user.Username != "alice" || notice != "" {
+		t.Errorf("free name = %q %q %v, want alice with no notice", user.Username, notice, err)
+	}
+	if got := emailOrgLabel("ops@Acme_Corp.example.com"); got != "acmecorp" {
+		t.Errorf("emailOrgLabel = %q", got)
+	}
+}
+
 // A pre-v1.3 team address redirects to the renamed team's owner host, and a
 // v1.2 "<team>--<site>" address to the site, until somebody takes the old
 // name.

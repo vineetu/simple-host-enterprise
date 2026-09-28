@@ -29,7 +29,9 @@ Config names are documented in `docs/configuration.md`; schema in
 - **What.** People sign in only through the company's OIDC provider; an
   account is created at first sign-in (username/email from claims; the
   username is not refreshed from later claims: an admin renames it,
-  section 13). Admin is
+  section 13; a reserved name such as `admin` becomes
+  `<name>-<organisation>` from the email's domain, a held one `<name>-2`,
+  with a one-time dashboard notice). Admin is
   `ADMIN_EMAILS` or an OIDC claim. Revocable session rows, `__Host-` cookies
   signed with `SESSION_SIGNING_KEY`, idle and absolute limits
   (`SESSION_IDLE` 30m, `SESSION_TTL` 8h by default; capped at 8h and 24h,

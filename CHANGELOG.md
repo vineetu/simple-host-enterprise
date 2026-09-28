@@ -4,6 +4,16 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## Unreleased
+
+### Fixed
+- A person whose address is a reserved name, most often an admin at
+  `admin@acme.com`, signs in as `admin-acme` (the name plus the first part
+  of the email's domain) instead of `admin-2`, which read as if an
+  `admin-1` existed. A name another account holds or held still gets a
+  number. The dashboard notice now says the usual name is reserved or
+  taken.
+
 ## v1.8.1 — 2026-09-27
 
 ### Fixed

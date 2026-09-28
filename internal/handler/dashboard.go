@@ -98,7 +98,7 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 </section>`
 	} else if r.URL.Query().Get("notice") == "username_suffixed" {
 		notice = `<section class="roadmap-block"><span class="roadmap-tag">Note</span>
-  <span class="roadmap-text">Your usual username was already taken, so your account and site address use a suffixed version instead.</span>
+  <span class="roadmap-text">Your usual username is reserved or already taken, so your account and site address use a longer version of it instead.</span>
 </section>`
 	}
 
