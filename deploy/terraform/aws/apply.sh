@@ -81,7 +81,7 @@ has() { local env="TF_VAR_$1"; grep -qE "^$1 *=" <<<"$tfvars" || [ -n "${!env:-}
 hcl_str() { printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\${/$${/g' -e 's/%{/%%{/g')"; }
 # words: an answer split on commas, semicolons and spaces into $words, with
 # no globbing (*@example.com stays as typed).
-words() { local IFS=$' \t,;'; read -ra words <<<"$1"; }
+words() { local IFS=$' \t,;' w; local -a all; read -ra all <<<"$1"; words=(); for w in "${all[@]}"; do [ -n "$w" ] && words+=("$w"); done; }
 # hcl_list: a comma- or space-separated answer as a Terraform list of strings.
 hcl_list() { local out='' x; words "$1"; for x in "${words[@]}"; do out+="${out:+, }$(hcl_str "$x")"; done; printf '[%s]' "$out"; }
 lower() { tr '[:upper:]' '[:lower:]' <<<"$1"; }
