@@ -16,3 +16,10 @@ deploy/overlays/production/config.env
 
 # Editor / OS noise
 .DS_Store
+
+# Terraform quick setup (deploy/terraform/<cloud>): providers, local state and
+# the generated overlay stay on the machine that ran it
+deploy/terraform/*/.terraform/
+deploy/terraform/*/.work/
+deploy/terraform/*/*.tfvars
+deploy/terraform/*/*.tfstate*

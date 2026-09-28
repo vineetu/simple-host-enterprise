@@ -1043,6 +1043,20 @@ Config names are documented in `docs/configuration.md`; schema in
   `OWNER_CERTS` (`auto` or `manual`, refused otherwise); all of
   the above. Full list: `docs/configuration.md`.
 
+- **Quick setup with Terraform.** `deploy/terraform/aws` is one root module
+  (one per cloud as more are added): a new cluster
+  (`create_cluster = true`) or an existing one, managed Postgres, the bucket,
+  generated secrets in the cloud's secret store synced into
+  `simple-host-secrets` by External Secrets, workload identity instead of
+  keys, cert-manager and Traefik with a DNS zone for the address and Let's
+  Encrypt certificates (owner certificates automatic), and the application at
+  a pinned digest, applied as the `byo` overlay's shape. `apply.sh` runs it
+  from the cloud's browser shell: pinned Terraform and kubectl checksums, the
+  module fetched at a pinned commit, remote state in the account (re-running
+  continues), existing cert-manager/External Secrets/OIDC provider detected,
+  the client secret typed once, hidden. The setup page writes its
+  `terraform.tfvars`.
+
 ## 19. Owner hosts: per-owner certificates
 
 - **What.** A TLS wildcard covers one label, so `<site>.<owner>.<base>` needs

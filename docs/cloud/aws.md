@@ -4,6 +4,15 @@ Verified end to end on this cloud: no.
 
 Fills the sections in [README.md](README.md).
 
+**Quick path.** https://simple-host.app/setup (Enterprise → AWS) gives one line
+for AWS CloudShell that runs the Terraform module in
+[`deploy/terraform/aws`](../../deploy/terraform/aws/README.md): a new EKS
+cluster or yours, RDS, S3, Secrets Manager, IRSA, cert-manager, Traefik behind
+an NLB, a Route 53 zone with Let's Encrypt certificates (owner certificates
+included), and Simple Host. It follows sections 3 to 6 below. For the ingress
+it uses Traefik instead of the ALB, so owner certificates stay automatic
+(section 2). The sections below are for doing it by hand.
+
 ## 1. Cluster & ingress
 
 Use the AWS Load Balancer Controller (ALB). In `ingress-patch.yaml`, set

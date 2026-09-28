@@ -45,6 +45,12 @@ Done means all of these hold:
 
 ## Step 0. Ask the human
 
+**On AWS, prefer the quick path.** https://simple-host.app/setup
+(Enterprise → AWS) gives one line that runs the Terraform module in
+`deploy/terraform/aws` (its `README.md` says what it builds) and ends at
+the DNS records and `/readyz`; the handoff block there is written for an agent.
+This runbook is for every other cluster, or doing it by hand.
+
 Ask these in one message. Do not ask anything else up front.
 
 1. **Where does it run?** An existing Kubernetes cluster on AWS (EKS),

@@ -4,6 +4,17 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## Unreleased
+
+### Added
+- Terraform quick setup for AWS: `deploy/terraform/aws` sets up a new EKS
+  cluster (or installs into yours), RDS for PostgreSQL, the S3 bucket,
+  generated secrets in AWS Secrets Manager synced by External Secrets, IAM
+  roles for service accounts, cert-manager and Traefik behind an NLB, a
+  Route 53 zone with Let's Encrypt certificates for the address and every
+  owner, and Simple Host at the pinned release. `apply.sh` runs it from AWS
+  CloudShell with remote state in the account; https://simple-host.app/setup
+  gives the one line. Docs: `docs/cloud/aws.md`, the module's README.
 ## v1.8.3 — 2026-09-28
 
 ### Fixed

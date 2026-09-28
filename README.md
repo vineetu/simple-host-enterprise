@@ -76,8 +76,12 @@ Read INSTALL.md in this repository and install Simple Host on our Kubernetes clu
 
 Every setting, grouped by area and explained with recipes (stricter sign-in, shorter retention,
 bigger uploads): [docs/advanced/](docs/advanced/README.md). The setup helper at
-https://simple-host.app/setup?product=enterprise asks a few questions, or every one in Advanced
-mode, and writes `config.env`, a `secrets.env` template and the apply commands. It runs in your
+https://simple-host.app/setup?product=enterprise asks where it runs. On AWS it gives one
+command for AWS CloudShell that runs the Terraform module in
+[`deploy/terraform/aws`](deploy/terraform/aws/README.md) and sets up everything in your account,
+a cluster included if you have none. Anywhere else it asks a few
+questions, or every one in Advanced mode, and writes `config.env`, a `secrets.env` template and
+the apply commands. It runs in your
 browser and never asks for a secret; an optional check of your choices, just before the files,
 sends only the names and values of the numbers, durations, switches and rates you changed.
 
