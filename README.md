@@ -3,6 +3,7 @@
 Every person in a company gets a place for what their AI agent builds, at `<site>.<person>.<internal-domain>`, behind the company's sign-in.
 
 **Try it in your organization → https://simple-host.app/setup?product=enterprise**
+- **What it costs:** https://simple-host.app/costs — about 3.5–5 cents per person per month for 2,000 people on a Kubernetes cluster you already run.
 
 - **Overview:** https://simple-host.app/enterprise
 - **Brief:** https://simple-host.app/enterprise/brief
