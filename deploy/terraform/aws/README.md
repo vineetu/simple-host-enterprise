@@ -62,11 +62,13 @@ at a pinned commit, after checking its checksum:
 6. shows the plan and waits for `yes`, then works in two steps: the cluster and
    the database (the long part), then the rest.
 
-**Keep the tab open.** A new cluster takes about 25 minutes, yours about 15.
-AWS CloudShell ends a session after 20 to 30 minutes without a key press,
-which can land in the middle. Closing the tab, Ctrl-C or a hang-up stops
+**Keep the tab open and press a key every 10 minutes or so.** A new cluster
+takes about 25 minutes, yours about 15. AWS CloudShell ends a session after
+about 20 minutes without a key press (output does not count), and then stops
+every process and empties `/tmp`. Closing the tab, Ctrl-C or a hang-up stops
 Terraform cleanly: it saves what is done and releases the lock. Paste the same
-line again, from any shell, and it picks up where it stopped:
+line again, from any shell, and it picks up where it stopped (it fetches
+Terraform and the module again):
 
 - a run cut off with no chance to stop leaves its lock; every run keeps a
   heartbeat next to the state, and a lock with no heartbeat for 3 minutes is

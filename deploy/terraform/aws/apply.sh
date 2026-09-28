@@ -65,7 +65,7 @@ export AWS_REGION=$region AWS_DEFAULT_REGION=$region
 
 say "Simple Host Enterprise for $base"
 if [ -z "$plan$destroy" ]; then
-  echo "Keep this tab open: it takes about $([ "$create" = true ] && echo 25 || echo 15) minutes. If it closes, open AWS CloudShell again and paste the same line: it picks up where it stopped."
+  echo "This takes about $([ "$create" = true ] && echo 25 || echo 15) minutes. Keep this tab open and press a key (Shift is fine) every 10 minutes or so: AWS CloudShell closes after about 20 minutes without one, and closing stops the work. If it does close, open it again and paste the same line: it picks up where it stopped."
 fi
 command -v aws >/dev/null || die "the AWS CLI is missing (AWS CloudShell has it)"
 account=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || die "this shell is not signed in to AWS (aws sts get-caller-identity failed)"
@@ -110,7 +110,7 @@ if [ -n "$src" ]; then
   mod="$(cd "$src" && pwd)/deploy/terraform/aws"
 else
   say "Fetching simple-host-enterprise at $ref"
-  [ -d "$work/src/.git" ] || git init -q "$work/src"
+  [ -d "$work/src/.git" ] || git -c init.defaultBranch=main init -q "$work/src"
   git -C "$work/src" fetch -q --depth 1 "$REPO" "$ref"
   git -C "$work/src" -c advice.detachedHead=false checkout -q --force FETCH_HEAD
   [ "$(git -C "$work/src" rev-parse HEAD)" = "$ref" ] || die "the fetched commit is not $ref"
@@ -186,7 +186,8 @@ run_tf() {
   from=$(( $(wc -l < "$log") + 1 ))
   setsid terraform "$@" -no-color >> "$log" 2>&1 < /dev/null &
   tf_pid=$!
-  ( while kill -0 "$tf_pid" 2>/dev/null; do aws s3api put-object --bucket "$state_bucket" --key "$state_key.alive" --body /dev/null >/dev/null 2>&1 || true; sleep 60; done ) &
+  : > "$work/heartbeat"
+  ( while kill -0 "$tf_pid" 2>/dev/null; do aws s3api put-object --bucket "$state_bucket" --key "$state_key.alive" --body "$work/heartbeat" >/dev/null 2>&1 || true; sleep 60; done ) &
   beat_pid=$!
   tail -n +"$from" -f "$log" --pid="$tf_pid" 2>/dev/null &
   tail_pid=$!
