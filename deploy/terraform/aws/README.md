@@ -195,7 +195,8 @@ The address's own certificate stays with Let's Encrypt.
   f=$(mktemp) && curl … && TF_VAR_protect_data=false bash "$f" --ref … --tfvars … --destroy
   ```
 
-  It lifts the deletion protection, then removes everything (it asks you to
+  It lifts the deletion protection (and the secrets' recovery window), then
+  removes everything (it asks you to
   type the address first). From a pipeline, set `protect_data = false` in
   `terraform.tfvars` and apply once before `terraform destroy`; a value in
   `terraform.tfvars` wins over `TF_VAR_protect_data`, as always in Terraform.

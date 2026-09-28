@@ -317,8 +317,10 @@ if [ -n "$destroy" ]; then
   fi
   # Deletion protection is lifted first (it is a setting of the database
   # and the bucket, and destroy cannot change settings).
+  # The secrets' recovery window goes to 0 the same way, so nothing named
+  # after this install is left scheduled for deletion.
   if in_state "$db_addr" || in_state aws_s3_bucket.sites; then
-    run_tf apply -input=false -auto-approve -var-file=terraform.tfvars -target=aws_db_instance.db -target=aws_s3_bucket.sites || die "lifting the deletion protection stopped; run the same command again"
+    run_tf apply -input=false -auto-approve -var-file=terraform.tfvars -target=aws_db_instance.db -target=aws_s3_bucket.sites -target=aws_secretsmanager_secret.app -target=aws_secretsmanager_secret.oidc || die "lifting the deletion protection stopped; run the same command again"
   fi
   run_tf destroy -input=false -auto-approve -var-file=terraform.tfvars || die "the removal stopped; run the same command again"
   exit 0
