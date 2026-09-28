@@ -54,7 +54,13 @@ at a pinned commit, after checking its checksum:
    Everything big (Terraform, its providers, about 1 GB, and the checkout) goes
    under `/tmp/simple-host`: CloudShell keeps only 1 GB in your home directory.
    A copy of your answers goes to `~/simple-host/<address>.tfvars`;
-2. fetches this repository at that commit and writes `terraform.tfvars`;
+2. asks for any answer the page left empty (the address, admin emails,
+   issuer, client ID, company email domains with Google, your cluster's name),
+   in order, with the default in brackets where there is one, and adds it to
+   `terraform.tfvars`. With no terminal to ask at (an AI agent) or with
+   `--yes` it stops and lists them: give them as `TF_VAR_<name>` in front of
+   `bash` (a list as `'["a@example.com"]'`). Then it fetches this repository
+   at that commit and writes `terraform.tfvars`;
 3. keeps the Terraform state in `s3://<name>-tfstate-<account>-<region>`
    (versioning, encryption, public access blocked, TLS only, lockfile
    locking);

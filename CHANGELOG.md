@@ -4,6 +4,18 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## Unreleased
+
+### Changed
+- AWS quick setup: every question on the setup page can be left empty.
+  `apply.sh` asks for what the line does not have (address, admin emails,
+  issuer, client ID, company email domains with Google, an existing
+  cluster's name) in the shell, in order, and adds the answers to
+  `terraform.tfvars` and its saved copy; with no terminal or with `--yes` it
+  stops and lists them. `admin_emails` accepts an internal domain without a
+  dot (`platform@corp`). `scripts/test-ask.sh` runs the questions at a
+  pseudo-terminal.
+
 ## v1.9.0 — 2026-09-28
 
 ### Added

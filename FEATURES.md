@@ -1055,7 +1055,11 @@ Config names are documented in `docs/configuration.md`; schema in
   module fetched at a pinned commit, remote state in the account (re-running
   continues), existing cert-manager/External Secrets/OIDC provider detected,
   the client secret typed once, hidden. The setup page writes its
-  `terraform.tfvars`.
+  `terraform.tfvars`; whatever the page left empty (address, admins,
+  issuer, client ID, email domains with Google, an existing cluster's name)
+  `apply.sh` asks for in the shell, in order, and adds to the file. With no
+  terminal (an AI agent) or `--yes` it stops and lists them instead
+  (`scripts/test-ask.sh` checks the questions at a pseudo-terminal).
 
 ## 19. Owner hosts: per-owner certificates
 
