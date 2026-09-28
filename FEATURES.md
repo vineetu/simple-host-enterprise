@@ -1070,7 +1070,10 @@ Config names are documented in `docs/configuration.md`; schema in
   credential; the reconciler's ServiceAccount is the one token in the
   install (namespaced Role: ingresses get/list/create/patch/delete,
   `certificates.cert-manager.io` get; no Secrets). It connects to Postgres
-  as the application role. Readiness is visible without kubectl: /admin's
+  as the application role; for the first 3 minutes after start a database
+  error (the migration still creating the schema or setting that role's
+  password) logs one "waiting for the database" line, then the error.
+  Readiness is visible without kubectl: /admin's
   "This instance" card counts ready and waiting owners and lists each
   waiting one with how long (`db.OwnerHostReadiness`), and
   `simplehost_owner_hosts_not_ready` counts them.

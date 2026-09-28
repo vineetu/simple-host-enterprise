@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeKube struct {
@@ -288,6 +289,39 @@ func TestOnceFailsWhenItCannotLearnWhatToDo(t *testing.T) {
 	kube.listErr = errors.New("forbidden")
 	if err := r.Once(context.Background()); err == nil {
 		t.Error("list error: want an error")
+	}
+}
+
+// While the migration runs, the first passes cannot sign in to the database;
+// that logs one waiting line, not the authentication error, until the grace
+// runs out or the database has once answered.
+func TestStartupLogWaitsOutTheMigration(t *testing.T) {
+	_, store, r := newFixture("alice")
+	store.ownerErr = errors.New(`pq: password authentication failed for user "simplehost_app"`)
+	dbErr := r.Once(context.Background())
+	start := time.Now()
+	s := startupLog{start: start}
+	if got := s.line(dbErr, start); !strings.HasPrefix(got, "waiting for the database") {
+		t.Errorf("first failure logged %q", got)
+	}
+	if got := s.line(dbErr, start.Add(time.Minute)); got != "" {
+		t.Errorf("second failure logged %q, want nothing", got)
+	}
+	if got := s.line(dbErr, start.Add(startupGrace)); !strings.Contains(got, "password authentication failed") {
+		t.Errorf("after the grace logged %q, want the error", got)
+	}
+
+	s = startupLog{start: start}
+	if got := s.line(nil, start); got != "" {
+		t.Errorf("success logged %q", got)
+	}
+	if got := s.line(dbErr, start.Add(time.Second)); !strings.Contains(got, "password authentication failed") {
+		t.Errorf("failure after a good pass logged %q, want the error", got)
+	}
+
+	s = startupLog{start: start}
+	if got := s.line(errors.New("read template ingress: forbidden"), start); !strings.Contains(got, "forbidden") {
+		t.Errorf("kube failure logged %q, want the error at once", got)
 	}
 }
 

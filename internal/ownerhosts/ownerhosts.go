@@ -89,7 +89,7 @@ type Reconciler struct {
 func (r Reconciler) Once(ctx context.Context) error {
 	owners, err := r.Store.OwnerLabelsWithSites(ctx)
 	if err != nil {
-		return fmt.Errorf("list owners: %w", err)
+		return fmt.Errorf("list owners: %w: %w", errStore, err)
 	}
 	template, err := r.Kube.GetIngress(ctx, r.Template)
 	if err != nil {
@@ -141,11 +141,53 @@ func (r Reconciler) Once(ctx context.Context) error {
 	return nil
 }
 
+// errStore marks a pass that could not read the database at all.
+var errStore = errors.New("database")
+
+// startupGrace is how long after start a database error is taken as the
+// migration still running: the reconciler starts alongside the server, whose
+// migrate step creates the schema and sets the application role's password,
+// so the first passes can fail to sign in or find no tables. Those are
+// waited out with one line, not reported as a wrong password.
+const startupGrace = 3 * time.Minute
+
+// startupLog decides what a pass's outcome logs.
+type startupLog struct {
+	start   time.Time
+	ok      bool // a pass has read the database
+	waiting bool // the waiting line has been logged
+	gaveUp  bool // the grace ran out and the error was logged
+}
+
+func (s *startupLog) line(err error, now time.Time) string {
+	if err == nil {
+		s.ok = true
+		return ""
+	}
+	if !errors.Is(err, errStore) {
+		s.ok = true // the database answered; this failure is elsewhere
+		return err.Error()
+	}
+	if s.ok || s.gaveUp {
+		return err.Error()
+	}
+	if now.Sub(s.start) < startupGrace {
+		if s.waiting {
+			return ""
+		}
+		s.waiting = true
+		return "waiting for the database schema and application role (the migration may still be running)"
+	}
+	s.gaveUp = true
+	return fmt.Sprintf("database still unavailable %s after start: %v", startupGrace, err)
+}
+
 // Run passes every interval until ctx ends.
 func (r Reconciler) Run(ctx context.Context, interval time.Duration) {
+	status := startupLog{start: time.Now()}
 	for {
-		if err := r.Once(ctx); err != nil {
-			log.Printf("owner hosts: %v", err)
+		if line := status.line(r.Once(ctx), time.Now()); line != "" {
+			log.Printf("owner hosts: %s", line)
 		}
 		select {
 		case <-ctx.Done():

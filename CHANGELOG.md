@@ -13,6 +13,12 @@ release, commit and schema.
   `admin-1` existed. A name another account holds or held still gets a
   number. The dashboard notice now says the usual name is reserved or
   taken.
+- The owner-hosts reconciler no longer logs
+  `list owners: pq: password authentication failed for user "simplehost_app"`
+  while it starts alongside the migration that sets that role's password.
+  For its first 3 minutes a database error logs one "waiting for the
+  database schema and application role" line; only an error that outlasts
+  that, or comes after the database has answered once, is logged as such.
 
 ## v1.8.1 — 2026-09-27
 
