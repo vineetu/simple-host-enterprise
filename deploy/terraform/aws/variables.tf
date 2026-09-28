@@ -101,9 +101,9 @@ variable "image" {
 }
 
 variable "image_digest" {
-  description = "The release to run, pinned by digest (INSTALL.md section 3). The default is v1.8.2."
+  description = "The release to run, pinned by digest (INSTALL.md section 3). The default is v1.8.3."
   type        = string
-  default     = "sha256:54511acabd7e8e19b9a2ec7a0a714f59457e4ac0b77fad433df9ad7cd2ad3c88"
+  default     = "sha256:d06bed4a1a5c22f6c2df429c642329063ef1f6479b99366913d1cf6d5fef3f57"
   validation {
     condition     = can(regex("^sha256:[0-9a-f]{64}$", var.image_digest))
     error_message = "image_digest is sha256:<64 hex>."

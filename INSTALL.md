@@ -349,8 +349,9 @@ When you create the database yourself, do not put the owner password on
 the command line: a command-line argument is visible to every user of the
 machine (`ps`) and can land in the CLI's debug logs. Prefer the provider's
 managed-password option and copy the generated value into `DB_PASSWORD`
-with the hidden prompt below (AWS RDS: `--manage-master-user-password`,
-then read it from Secrets Manager). Otherwise create the database with a
+with the hidden prompt below, but only where the provider does not rotate it
+(AWS RDS's `--manage-master-user-password` rotates every 7 days, which breaks
+the copied value: see section 3 of `docs/cloud/aws.md`). Otherwise create the database with a
 throwaway password and set the real one from a `psql` session with
 `\password <owner role>`, which prompts for it and sends only a SCRAM
 hash to the server.
@@ -540,7 +541,9 @@ Every site is served at the root of its own host, `<site>.<owner>.<base>`
 (for example `todo.alice.<base>`), so each site is its own browser origin.
 
 - **DNS: nothing more.** The `*.<base>` record from step B already matches
-  names at any depth, including `todo.alice.<base>`.
+  names at any depth, including `todo.alice.<base>` (except with per-owner ACM
+  certificates on an AWS ALB, whose validation records need two more records
+  per owner: section 2 of `docs/cloud/aws.md`).
 - **TLS: one certificate per owner.** A TLS wildcard covers exactly one
   label: the base certificate covers `alice.<base>` but not
   `todo.alice.<base>`. Each owner needs `*.<owner>.<base>`. With

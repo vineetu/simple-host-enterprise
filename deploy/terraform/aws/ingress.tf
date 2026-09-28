@@ -123,6 +123,18 @@ locals {
   zone_id = var.dns_zone_id != "" ? var.dns_zone_id : aws_route53_zone.base[0].zone_id
 }
 
+# Only Let's Encrypt issues for the address. A CAA record here also stops
+# the lookup at the address, so CAA records on a parent domain that leave
+# out Let's Encrypt do not block the certificates.
+resource "aws_route53_record" "caa" {
+  count   = var.dns_zone_id == "" ? 1 : 0
+  zone_id = local.zone_id
+  name    = var.base_domain
+  type    = "CAA"
+  ttl     = 3600
+  records = ["0 issue \"letsencrypt.org\"", "0 issuewild \"letsencrypt.org\""]
+}
+
 data "aws_route53_zone" "existing" {
   count   = var.dns_zone_id != "" ? 1 : 0
   zone_id = var.dns_zone_id

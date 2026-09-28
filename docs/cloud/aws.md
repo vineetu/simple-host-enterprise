@@ -1,6 +1,8 @@
 # AWS (EKS)
 
-Verified end to end on this cloud: no.
+Verified end to end on this cloud: yes, 2026-09-28. By hand with the ALB and ACM
+(`make smoke` 46/46), and with the Terraform quick path below (Traefik, Route 53 and
+Let's Encrypt: `/readyz`, the base certificate and an owner certificate).
 
 Fills the sections in [README.md](README.md).
 
@@ -15,8 +17,42 @@ it uses Traefik instead of the ALB, so owner certificates stay automatic
 
 ## 1. Cluster & ingress
 
-Use the AWS Load Balancer Controller (ALB). In `ingress-patch.yaml`, set
-`spec.ingressClassName: alb`, delete the ingress-nginx and cert-manager lines, and use:
+Pick the ingress by how owner certificates are issued (section 2): every person
+or team that publishes gets its own `*.<owner>.<base>` certificate.
+
+**Recommended: an in-cluster controller behind a Network Load Balancer.** Owner
+certificates are then automatic (cert-manager writes them into Secrets and the
+controller serves them), whatever the number of owners. This is what the quick
+path installs: Traefik (Helm chart `traefik/traefik`) with its own IngressClass,
+its Service of type `LoadBalancer` annotated
+`service.beta.kubernetes.io/aws-load-balancer-type: nlb` and
+`externalTrafficPolicy: Local` (the NLB keeps each person's address), the
+`websecure` entry point's read and write timeouts at 300 s, and `web` redirected
+to `websecure`. Traefik has no body-size cap. In `ingress-patch.yaml` set
+`spec.ingressClassName` to that class and delete the ingress-nginx lines.
+ingress-nginx is retired upstream (maintenance ended March 2026).
+
+**The ALB (AWS Load Balancer Controller) with ACM** works for the base address,
+but owner certificates are then a manual job per person (section 2): an ACM
+certificate, its validation record, two DNS records and an ingress edit, before
+that person's first publish, with a default limit of 25 certificates per ALB
+listener. Use it only for a handful of owners. Install the controller with its
+IAM role (eksctl), then its chart:
+
+```sh
+eksctl create iamserviceaccount --cluster <cluster> --region <region> --namespace kube-system --name aws-load-balancer-controller --role-name <cluster>-alb-controller --attach-policy-arn arn:aws:iam::<account>:policy/AWSLoadBalancerControllerIAMPolicy --approve
+```
+
+(the policy document is the controller release's `docs/install/iam_policy.json`;
+with an eksctl config file, `wellKnownPolicies: {awsLoadBalancerController: true}`
+on the service account does the same), then
+
+```sh
+helm install aws-load-balancer-controller aws-load-balancer-controller --repo https://aws.github.io/eks-charts -n kube-system --set clusterName=<cluster> --set serviceAccount.create=false --set serviceAccount.name=aws-load-balancer-controller --set region=<region> --set vpcId=<vpc-id>
+```
+
+In `ingress-patch.yaml`, set `spec.ingressClassName: alb`, delete the ingress-nginx
+and cert-manager lines, and use:
 
 ```yaml
 alb.ingress.kubernetes.io/scheme: internal   # or internet-facing
@@ -32,20 +68,23 @@ alb.ingress.kubernetes.io/ssl-redirect: "443"
   `internet-facing` when people sign in from anywhere. Pick it on purpose: the
   controller defaults to `internal`.
 - An ALB does not cap the request body, so there is no body-size setting.
-- Alternative: an ingress controller behind an NLB. ingress-nginx is retired upstream
-  (maintenance ended March 2026), so prefer the ALB. With the ALB, owner certificates
-  are manual; an in-cluster controller makes them automatic (section 2).
+- The ALB path needs no cert-manager and no DNS-01 issuer: skip those rows of
+  INSTALL.md section 1 and HUMAN STEP C. `make install` still installs cert-manager
+  when it is missing; it does no harm, but it takes 3 pods (count them on small nodes).
+
+**`TRUSTED_PROXY_CIDRS`.** It names the addresses that connect to the pods and may
+pass on the client's address. With the ALB there are no proxy pods: the ALB's own
+addresses in the VPC connect, so use the VPC CIDR (or the ALB subnets' CIDRs). With
+Traefik on the VPC CNI its pods have VPC addresses, so the VPC CIDR is right there too.
 
 ## 2. DNS & wildcard certificate
 
-**ACM (recommended with the ALB):** request one ACM certificate for `<base>` with
-`*.<base>` as a second name, validate it by DNS, and put its ARN in `certificate-arn`.
-You do not need cert-manager.
-
-Route 53: alias `A`/`AAAA` records for `<base>` and `*.<base>` pointing at the ALB.
-
-**cert-manager instead** (for example, behind an NLB): Route 53 DNS-01, with credentials from IRSA
-or EKS Pod Identity on the cert-manager ServiceAccount.
+**With an in-cluster controller (recommended): cert-manager, Route 53 DNS-01 and
+Let's Encrypt.** Put `<base>` in a Route 53 hosted zone of its own and delegate it
+from wherever the parent domain lives (NS records at that DNS provider, or the
+domain's name servers at the registrar). Alias `A` records for `<base>` and `*.<base>`
+point at the NLB. One ClusterIssuer then signs the base certificate and every
+owner's, with nothing to do per person:
 
 ```yaml
 apiVersion: cert-manager.io/v1
@@ -58,25 +97,60 @@ spec:
     privateKeySecretRef: {name: letsencrypt-dns-account-key}
     solvers:
       - dns01:
-          route53: {region: <region>, hostedZoneID: <zone-id>}
+          route53:
+            region: <region>
+            hostedZoneID: <zone-id>
+            role: <role-arn>
+            auth: {kubernetes: {serviceAccountRef: {name: <service-account>}}}
 ```
 
-IAM policy for that role: `route53:GetChange` on `arn:aws:route53:::change/*`;
+The role trusts that ServiceAccount through IRSA (or put the role on the
+cert-manager ServiceAccount itself and drop `role` and `auth`). cert-manager needs
+the right to request its token: a Role in cert-manager's namespace allowing `create`
+on `serviceaccounts/token` for that name, bound to cert-manager's ServiceAccount.
+IAM policy: `route53:GetChange` on `arn:aws:route53:::change/*`;
 `route53:ChangeResourceRecordSets` and `route53:ListResourceRecordSets` on
 `arn:aws:route53:::hostedzone/<zone-id>`; `route53:ListHostedZonesByName` on `*`.
+Set `OWNER_CERT_ISSUER` to the issuer's name.
 
-**Owner certificates (`*.<owner>.<base>`).** The ALB takes certificates from ACM
-only, never from the Secrets cert-manager writes, and an Ingress without a shared
-`alb.ingress.kubernetes.io/group.name` gets its own ALB. So the reconciler's
-automatic mode does not fit the ALB. Pick one:
+- **CAA.** If `<base>` or a parent domain has CAA records, the issuing CA must be
+  in them. A CAA record in the `<base>` zone itself (`0 issue "letsencrypt.org"`
+  and `0 issuewild "letsencrypt.org"`) ends the lookup there, so a parent's CAA no
+  longer matters.
+- **Keep the records in Route 53.** While cert-manager proves an owner's
+  certificate, a record sits at `_acme-challenge.<owner>.<base>`. Route 53 still
+  answers the `*.<base>` wildcard for `<owner>.<base>` and the names below it
+  (checked 2026-09-28); many other DNS services do not, and the owner's addresses
+  stop resolving for that minute and the negative-cache time after it.
 
-- Serve through an in-cluster ingress controller behind an NLB, with the cert-manager
-  issuer above (or an internal CA issuer) in `OWNER_CERT_ISSUER`. Owner certificates
-  are then automatic.
-- Keep the ALB, set `OWNER_CERTS=manual`, leave out the owner-hosts component, and
-  for each owner put an ACM certificate for `*.<owner>.<base>` on the ALB and a host
-  rule for it, before that owner's first site. An ALB holds a limited number of
-  certificates (a service quota); check it against the number of owners.
+**With the ALB: ACM.** Request one ACM certificate for `<base>` with `*.<base>` as
+a second name, validate it by DNS, and put its ARN in `certificate-arn`.
+
+- **CAA.** If `dig CAA <base>` (or its parent) returns records, add
+  `0 issue "amazon.com"` and `0 issuewild "amazon.com"` first. A certificate that
+  failed on CAA cannot be retried: delete it and request a new one, after the
+  negative-cache time has passed.
+- **DNS.** Route 53: alias `A`/`AAAA` records for `<base>` and `*.<base>` pointing
+  at the ALB. At another DNS provider, `<base>` needs its ALIAS, ANAME or CNAME
+  flattening (a CNAME cannot sit at a name that also has CAA or NS records); `*.<base>`
+  is a plain CNAME to the ALB's name.
+- **Owner certificates (`*.<owner>.<base>`).** The ALB takes certificates from ACM
+  only, never from the Secrets cert-manager writes, and an Ingress without a shared
+  `alb.ingress.kubernetes.io/group.name` gets its own ALB, so the reconciler's
+  automatic mode does not fit. Set `OWNER_CERTS=manual`, leave out the owner-hosts
+  component, and for each owner, **before** that owner's first site:
+  1. add DNS records for `<owner>.<base>` and `*.<owner>.<base>` pointing at the ALB
+     (as for `<base>`). The next step's validation record puts a name under
+     `<owner>.<base>`, and from then on the `*.<base>` record no longer answers for
+     `<owner>.<base>` or anything below it; without these two records the owner's
+     addresses do not resolve (and a resolver may remember that for the zone's
+     negative TTL);
+  2. request an ACM certificate for `*.<owner>.<base>` and add its validation record
+     (keep it: renewal needs it);
+  3. add the certificate's ARN to `certificate-arn` (comma-separated).
+  The owner's username is known only after their first sign-in. With
+  `OWNER_CERTS=manual` every owner counts as ready, so someone who publishes before
+  this is done gets an address that does not resolve.
 
 ## 3. Postgres
 
@@ -84,11 +158,23 @@ RDS for PostgreSQL 16.
 
 - TLS: `rds.force_ssl` defaults to `1` on PostgreSQL 15 and later; keep it on.
 - CA bundle: `curl -fsSo deploy/overlays/byo/db-ca.crt https://truststore.pki.rds.amazonaws.com/<region>/<region>-bundle.pem`
-- PITR: automated backups on, backup retention 7+ days.
+- PITR: automated backups on, backup retention 7+ days. An account on AWS's free
+  plan refuses more than 1 day (`FreeTierRestrictionError`); upgrade its plan for a
+  real install.
 - Encryption at rest: create the instance with `--storage-encrypted` (optionally
   `--kms-key-id <key>`); `aws rds create-db-instance` leaves it off by default and it
-  cannot be turned on later without a snapshot copy and restore. Owner password: use
-  `--manage-master-user-password` rather than passing one on the command line.
+  cannot be turned on later without a snapshot copy and restore.
+- **Owner password: do not use `--manage-master-user-password`** for the role the
+  install connects as. It turns on rotation every 7 days, and `DB_PASSWORD` in
+  `secrets.env` is copied once, so within a week the migrate init container (every
+  pod start) and the prune job fail to sign in. Create the instance with a throwaway
+  master password (`--master-user-password` from a file or prompt, never typed on a
+  shared machine's command line), then set the real one from `psql` with
+  `\password simplehost`, which sends only a hash; that is the generated
+  `DB_PASSWORD` (INSTALL.md section 4). If you do use a managed master password,
+  turn its rotation off (`aws secretsmanager cancel-rotate-secret --secret-id <arn>`)
+  or have External Secrets sync it into the Secret. The quick path generates the
+  password with Terraform, keeps it in Secrets Manager without rotation, and syncs it.
 
 ```
 DB_HOST=<instance>.<id>.<region>.rds.amazonaws.com
@@ -97,7 +183,9 @@ DB_SSL_ROOT_CERT=/etc/simple-host/db-ca/ca.crt
 ```
 
 Use the instance (or cluster) endpoint as `DB_HOST`; a CNAME of your own fails
-`verify-full`.
+`verify-full`. When the database lives in the cluster's VPC, delete its security
+group and subnet group before the cluster at removal time, or they hold up the
+VPC's deletion.
 
 ## 4. Bucket
 

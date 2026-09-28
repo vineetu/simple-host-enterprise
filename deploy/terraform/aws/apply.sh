@@ -62,7 +62,8 @@ if [ "$(aws freetier get-account-plan-state --region us-east-1 --query accountPl
   small=yes
   [ "$create" = true ] && [ "$(aws ec2 describe-instance-types --instance-types "$node_size" --query 'InstanceTypes[0].FreeTierEligible' --output text 2>/dev/null)" != True ] && small=no
   case "$db_size" in db.t4g.micro|db.t3.micro) ;; *) small=no ;; esac
-  [ "$small" = yes ] || die "this AWS account is on the free plan, which cannot launch the cluster's nodes or the database at their sizes. Upgrade it to a paid plan (Billing and Cost Management, then Plans), then run the same line again."
+  [ "$(var db_backup_days)" = 1 ] || small=no
+  [ "$small" = yes ] || die "this AWS account is on the free plan, which cannot launch the cluster's nodes or the database at their sizes, or keep 7 days of database backups. Upgrade it to a paid plan (Billing and Cost Management, then Plans), then run the same line again."
 fi
 
 # Tools: Terraform and kubectl, each checked against its pinned checksum.
@@ -133,8 +134,8 @@ if [ "$create" = false ]; then
   if k get crd certificates.cert-manager.io >/dev/null 2>&1; then
     ns=$(k get deploy -A -l app.kubernetes.io/name=cert-manager,app.kubernetes.io/component=controller -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || true)
     dep=$(k get deploy -A -l app.kubernetes.io/name=cert-manager,app.kubernetes.io/component=controller -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-    [ -n "$ns" ] || die "cert-manager's CRDs are installed but its controller was not found"
-    if [ "$(release_of -n "$ns" deploy "$dep")" != simple-host-cert-manager ]; then
+    # CRDs left behind with no controller (an earlier removal keeps them): install ours.
+    if [ -n "$ns" ] && [ "$(release_of -n "$ns" deploy "$dep")" != simple-host-cert-manager ]; then
       sa=$(k -n "$ns" get deploy "$dep" -o jsonpath='{.spec.template.spec.serviceAccountName}')
       printf 'install_cert_manager = false\ncert_manager_namespace = "%s"\ncert_manager_service_account = "%s"\n' "$ns" "${sa:-cert-manager}" >> "$detected"
       echo "Using the cert-manager already in namespace $ns"

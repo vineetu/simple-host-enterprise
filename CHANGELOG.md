@@ -15,6 +15,7 @@ release, commit and schema.
   owner, and Simple Host at the pinned release. `apply.sh` runs it from AWS
   CloudShell with remote state in the account; https://simple-host.app/setup
   gives the one line. Docs: `docs/cloud/aws.md`, the module's README.
+
 ## v1.8.3 — 2026-09-28
 
 ### Fixed
