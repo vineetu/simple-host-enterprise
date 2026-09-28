@@ -4,7 +4,7 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
-## Unreleased
+## v1.9.1 — 2026-09-28
 
 ### Changed
 - AWS quick setup: every question on the setup page can be left empty.
