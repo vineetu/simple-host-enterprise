@@ -496,7 +496,10 @@ if [ -z "$yes" ]; then
   planlog="$work/plan.log"
   terraform plan -input=false -no-color -var-file=terraform.tfvars -compact-warnings > "$planlog" 2>&1 & plan_pid=$!; heartbeat "$plan_pid"; wait "$plan_pid" || { cat "$planlog"; die "the plan failed (above). Nothing was changed."; }
   sed -n '/Terraform will perform/,$p' "$planlog" | grep -v '^$' | tail -n 60
-  grep -E '^Plan:' "$planlog" | grep -qv ' 0 to destroy' && printf '\nNote: it will REMOVE or REPLACE something (see "must be replaced" / "will be destroyed" above).\n'
+  # Replacing the generated files and the install step is routine; anything
+  # else removed or replaced is worth a second look.
+  gone=$(grep -E '^  # .* (must be replaced|will be destroyed)' "$planlog" | grep -vE '# (local_file|terraform_data)\.' || true)
+  [ -z "$gone" ] || printf '\nNote: it will REMOVE or REPLACE these:\n%s\n' "$gone"
   answer=''
   for try in 1 2; do
     drain; printf '\nType yes to go ahead: '
