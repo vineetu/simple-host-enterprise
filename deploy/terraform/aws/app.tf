@@ -227,6 +227,7 @@ resource "terraform_data" "uninstall" {
     command     = <<-EOT
       kc=$(mktemp)
       aws eks update-kubeconfig --name '${self.input.cluster}' --region '${self.input.region}' --kubeconfig "$kc" >/dev/null || exit 0
+      set -e
       k() { kubectl --kubeconfig "$kc" "$@"; }
       k delete namespace simple-host --ignore-not-found --wait=true --timeout=600s
       k delete clusterissuer simple-host-letsencrypt --ignore-not-found

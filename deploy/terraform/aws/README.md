@@ -27,6 +27,8 @@ One Terraform root module that sets up everything in your AWS account:
 
 `<name>` is `sh-` and 8 characters of the address's hash (set `name` to
 choose it), so two installs in one account and region never share a name.
+If you set `name` yourself, give every install its own: the name is also
+the ownership tag a re-run uses to recognise what an interrupted run made.
 
 Why Traefik and not the ALB (`docs/cloud/aws.md` section 1): every owner gets
 a certificate of their own from cert-manager on an Ingress of its own, and the
@@ -201,6 +203,15 @@ The address's own certificate stays with Let's Encrypt.
   `terraform.tfvars` and apply once before `terraform destroy`; a value in
   `terraform.tfvars` wins over `TF_VAR_protect_data`, as always in Terraform.
   Delete the NS records at your DNS provider too.
+
+  The removal leaves the Terraform state bucket,
+  `<name>-tfstate-<account>-<region>`: it is versioned and its old versions
+  hold every secret the install ever had. Once you are sure you will not
+  need it, empty it (every version) and delete it in the S3 console, or:
+
+  ```sh
+  b=<name>-tfstate-<account>-<region>; aws s3api delete-objects --bucket "$b" --delete "$(aws s3api list-object-versions --bucket "$b" --query '{Objects: [Versions,DeleteMarkers][][].{Key:Key,VersionId:VersionId}}' --output json)" && aws s3api delete-bucket --bucket "$b"
+  ```
 - **What removal leaves on a cluster of yours**: the IAM OIDC provider, the
   empty `cert-manager`, `external-secrets` and `simple-host-ingress`
   namespaces, and the cert-manager and External Secrets CRDs (Helm keeps

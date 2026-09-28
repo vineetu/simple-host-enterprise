@@ -161,7 +161,9 @@ else
     beat=$(aws s3api head-object --bucket "$state_bucket" --key "$state_key.alive" --query LastModified --output text 2>/dev/null || true)
     held() { die "the install is locked by $lock_who since $lock_at ($1). If you are sure nothing is running on it, clear the lock from $mod with: TF_DATA_DIR=$TF_DATA_DIR terraform force-unlock $lock_id"; }
     [ -n "$beat" ] && [ "$beat" != None ] || held "not by a run of this line"
-    beat_s=$(date -d "$beat" +%s); lock_s=$(date -d "${lock_at:-now}" +%s 2>/dev/null || date +%s)
+    beat_s=$(date -d "$beat" +%s 2>/dev/null) || held "its heartbeat's time ($beat) cannot be read"
+    [ -n "$lock_at" ] || held "the lock has no time"
+    lock_s=$(date -d "$lock_at" +%s 2>/dev/null) || held "the lock's time cannot be read"
     [ "$beat_s" -ge "$lock_s" ] || held "not by a run of this line"
     age=$(( $(date +%s) - beat_s ))
     [ "$age" -ge 180 ] || die "another run is working on this install right now (its heartbeat is ${age}s old). Wait for it to finish, or close that shell, and run the same line again."
@@ -303,6 +305,13 @@ if [ -n "$zone" ] && [ "$zone" != None ] && ! in_state 'aws_route53_zone.base[0]
   fi
 fi
 
+if [ -n "$plan" ] && [ -n "$destroy" ]; then
+  say "terraform plan -destroy (nothing is changed)"
+  terraform plan -destroy -input=false -var-file=terraform.tfvars
+  rm -f zz_plan_override.tf
+  exit 0
+fi
+
 if [ -n "$destroy" ]; then
   [ "$(var protect_data)" = false ] || die "the database and the bucket are protected (protect_data). To remove everything, take what you need first (docs/uninstall.md), then run the same line again with TF_VAR_protect_data=false in front of bash and --destroy at the end. See deploy/terraform/aws/README.md, Remove."
   say "Removing Simple Host from $base"
@@ -319,8 +328,14 @@ if [ -n "$destroy" ]; then
   # and the bucket, and destroy cannot change settings).
   # The secrets' recovery window goes to 0 the same way, so nothing named
   # after this install is left scheduled for deletion.
-  if in_state "$db_addr" || in_state aws_s3_bucket.sites; then
-    run_tf apply -input=false -auto-approve -var-file=terraform.tfvars -target=aws_db_instance.db -target=aws_s3_bucket.sites -target=aws_secretsmanager_secret.app -target=aws_secretsmanager_secret.oidc || die "lifting the deletion protection stopped; run the same command again"
+  # Only what the state holds is targeted (a target it lacks would be created).
+  targets=''
+  for t in "$db_addr" aws_s3_bucket.sites aws_secretsmanager_secret.app aws_secretsmanager_secret.oidc; do
+    in_state "$t" && targets+=" -target=$t"
+  done
+  if [ -n "$targets" ]; then
+    # shellcheck disable=SC2086
+    run_tf apply -input=false -auto-approve -var-file=terraform.tfvars $targets || die "lifting the deletion protection stopped; run the same command again"
   fi
   run_tf destroy -input=false -auto-approve -var-file=terraform.tfvars || die "the removal stopped; run the same command again"
   exit 0
@@ -336,7 +351,8 @@ fi
 # Picking up after a run that stopped halfway.
 # Secrets scheduled for deletion by an earlier removal come back.
 for s in app oidc; do
-  if aws secretsmanager describe-secret --secret-id "$name/$s" --query DeletedDate --output text 2>/dev/null | grep -q '[0-9]'; then
+  if aws secretsmanager describe-secret --secret-id "$name/$s" --query DeletedDate --output text 2>/dev/null | grep -q '[0-9]' &&
+    [ "$(aws secretsmanager describe-secret --secret-id "$name/$s" --query 'Tags[?Key==`simple-host`].Value | [0]' --output text 2>/dev/null)" = "$name" ]; then
     aws secretsmanager restore-secret --secret-id "$name/$s" >/dev/null && echo "Restored the secret $name/$s"
   fi
 done
@@ -393,6 +409,11 @@ if [ "$create" = true ] && ! in_state "$eks_addr" && aws eks describe-cluster --
   until_status "aws eks describe-cluster --name $cluster --query cluster.status --output text" ACTIVE FAILED 1200 || die "the cluster $cluster an earlier run started did not become active; delete it in the EKS console and run the same line again"
   import_block "$eks_addr" "$cluster"
 fi
+# The cluster's own role: a new one would force a new cluster.
+if [ "$create" = true ] && ! in_state 'module.eks[0].aws_iam_role.this[0]'; then
+  crole=$(q eks describe-cluster --name "$cluster" --query cluster.roleArn); crole=${crole##*/}
+  [ -n "$crole" ] && adopt 'module.eks[0].aws_iam_role.this[0]' "$crole" "the cluster's IAM role $crole" "$(q iam list-role-tags --role-name "$crole" --query 'Tags[?Key==`simple-host`].Value | [0]')"
+fi
 if [ "$create" = true ] && ! in_state "$ng_addr" && aws eks describe-cluster --name "$cluster" >/dev/null 2>&1; then
   ng=$(q eks list-nodegroups --cluster-name "$cluster" --query 'nodegroups[?starts_with(@, `default-`)] | [0]')
   if [ -n "$ng" ] && [ "$(q eks describe-nodegroup --cluster-name "$cluster" --nodegroup-name "$ng" --query 'nodegroup.tags."simple-host"')" = "$name" ]; then
@@ -436,7 +457,17 @@ if aws s3api head-bucket --bucket "$bucket" >/dev/null 2>&1; then
 fi
 for sn in app oidc; do
   arn=$(q secretsmanager describe-secret --secret-id "$name/$sn" --query ARN)
-  [ -n "$arn" ] && adopt "aws_secretsmanager_secret.$sn" "$arn" "the secret $name/$sn" "$(q secretsmanager describe-secret --secret-id "$name/$sn" --query 'Tags[?Key==`simple-host`].Value | [0]')"
+  [ -n "$arn" ] || continue
+  adopt "aws_secretsmanager_secret.$sn" "$arn" "the secret $name/$sn" "$(q secretsmanager describe-secret --secret-id "$name/$sn" --query 'Tags[?Key==`simple-host`].Value | [0]')"
+  # A value already stored is never replaced by one this run makes up.
+  in_state "aws_secretsmanager_secret_version.$sn" && continue
+  vid=$(q secretsmanager list-secret-version-ids --secret-id "$name/$sn" --query 'Versions[?contains(VersionStages, `AWSCURRENT`)].VersionId | [0]')
+  [ -n "$vid" ] || continue
+  if [ "$sn" = app ] && ! in_state random_bytes.backup_envelope_key; then
+    die "the secret $name/app already holds keys this run does not know, among them the envelope key every site is encrypted with. Nothing was changed. If the Terraform state was lost, restore it (the state bucket keeps old versions); if nothing was ever published, delete the secret: aws secretsmanager delete-secret --secret-id $name/app --force-delete-without-recovery"
+  fi
+  echo "Keeping the value stored in $name/$sn"
+  import_block "aws_secretsmanager_secret_version.$sn" "$arn|$vid"
 done
 for r in app secrets dns; do
   role="$name-$r-$region"
@@ -496,16 +527,28 @@ if [ -z "${TF_VAR_oidc_client_secret:-}" ] && ! aws secretsmanager describe-secr
 fi
 
 # One confirmation, on the whole plan, then the work in two steps: the
-# cluster and the database first (the long part), then the rest.
-if [ -z "$yes" ]; then
-  say "What it will do"
-  planlog="$work/plan.log"
-  terraform plan -input=false -no-color -var-file=terraform.tfvars -compact-warnings > "$planlog" 2>&1 & plan_pid=$!; heartbeat "$plan_pid"; wait "$plan_pid" || { cat "$planlog"; die "the plan failed (above). Nothing was changed."; }
-  sed -n '/Terraform will perform/,$p' "$planlog" | grep -v '^$' | tail -n 60
-  # Replacing the generated files and the install step is routine; anything
-  # else removed or replaced is worth a second look.
-  gone=$(grep -E '^  # .* (must be replaced|will be destroyed)' "$planlog" | grep -vE '# (local_file|terraform_data)\.' || true)
-  [ -z "$gone" ] || printf '\nNote: it will REMOVE or REPLACE these:\n%s\n' "$gone"
+# cluster and the database first (the long part), then the rest. The plan
+# is made with --yes too: what it would remove or replace is always shown,
+# and replacing the cluster or the database always needs the address typed.
+say "What it will do"
+planlog="$work/plan.log"
+terraform plan -input=false -no-color -var-file=terraform.tfvars -compact-warnings > "$planlog" 2>&1 & plan_pid=$!; heartbeat "$plan_pid"; wait "$plan_pid" || { cat "$planlog"; die "the plan failed (above). Nothing was changed."; }
+[ -n "$yes" ] || sed -n '/Terraform will perform/,$p' "$planlog" | grep -v '^$' | tail -n 60
+grep -E '^Plan:' "$planlog" || true
+# Replacing the generated files and the install step is routine; anything
+# else removed or replaced is worth a second look.
+gone=$(grep -E '^  # .* (must be replaced|will be destroyed)' "$planlog" | grep -vE '# (local_file|terraform_data)\.' || true)
+[ -z "$gone" ] || printf '\nNote: it will REMOVE or REPLACE these:\n%s\n' "$gone"
+if grep -qE '# (module\.eks\[0\]\.aws_eks_cluster\.this\[0\]|aws_db_instance\.db) (must be replaced|will be destroyed)' <<<"$gone"; then
+  printf '\nThis would REPLACE the cluster or the database (a new database is an empty one).\n'
+  answer=''
+  for try in 1 2; do
+    drain; printf 'Type the address (%s) to go ahead anyway: ' "$base"
+    read -r answer </dev/tty || die "nothing typed; nothing was changed"
+    [ -n "$answer" ] && break
+  done
+  [ "$answer" = "$base" ] || die "nothing was changed"
+elif [ -z "$yes" ]; then
   answer=''
   for try in 1 2; do
     drain; printf '\nType yes to go ahead: '
@@ -540,11 +583,18 @@ def walk(m):
       if isinstance(v.get(k),str): print(v[k])
   for c in m.get("child_modules",[]): walk(c)
 walk(json.load(sys.stdin).get("values",{}).get("root_module",{}))' 2>/dev/null || true)
-left=$(aws resourcegroupstaggingapi get-resources --tag-filters "Key=simple-host,Values=$name" --resource-type-filters ec2:vpc ec2:natgateway ec2:elastic-ip ec2:internet-gateway rds:db secretsmanager:secret --query 'ResourceTagMappingList[].ResourceARN' --output text 2>/dev/null | tr '\t' '\n' | while read -r a; do
-  [ -z "$a" ] && continue
-  grep -qxF "$a" <<<"$known" || grep -qxF "${a##*/}" <<<"$known" || grep -qxF "${a##*:}" <<<"$known" && continue
-  echo "$a"
-done)
+if tagged=$(aws resourcegroupstaggingapi get-resources --tag-filters "Key=simple-host,Values=$name" --resource-type-filters ec2:vpc ec2:natgateway ec2:elastic-ip ec2:internet-gateway ec2:security-group rds:db secretsmanager:secret iam:role iam:policy kms:key logs:log-group --query 'ResourceTagMappingList[].ResourceARN' --output text 2>&1); then
+  left=$(tr '\t' '\n' <<<"$tagged" | while read -r a; do
+    [ -z "$a" ] && continue
+    grep -qxF "$a" <<<"$known" || grep -qxF "${a##*/}" <<<"$known" || grep -qxF "${a##*:}" <<<"$known" && continue
+    # A key waiting out its deletion window is already on its way.
+    case "$a" in *:kms:*) [ "$(aws kms describe-key --key-id "$a" --query KeyMetadata.KeyState --output text 2>/dev/null)" = PendingDeletion ] && continue ;; esac
+    echo "$a"
+  done || true)
+else
+  left=''
+  printf '\n(Could not look for leftovers of a cut-off run: %s)\n' "$tagged"
+fi
 if [ -n "$left" ]; then
   say "Tagged for this install but not part of it: left over from a run that was cut off. Check them in the AWS console and delete them there"
   printf '%s\n' "$left"
