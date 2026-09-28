@@ -35,7 +35,7 @@ data "aws_iam_policy_document" "trust" {
 
 resource "aws_iam_role" "sa" {
   for_each           = local.service_accounts
-  name               = "${var.name}-${each.key}-${var.region}"
+  name               = "${local.name}-${each.key}-${var.region}"
   assume_role_policy = data.aws_iam_policy_document.trust[each.key].json
 }
 
@@ -65,10 +65,6 @@ data "aws_iam_policy_document" "dns" {
   statement {
     actions   = ["route53:ChangeResourceRecordSets", "route53:ListResourceRecordSets"]
     resources = ["arn:aws:route53:::hostedzone/${local.zone_id}"]
-  }
-  statement {
-    actions   = ["route53:ListHostedZonesByName"]
-    resources = ["*"]
   }
 }
 

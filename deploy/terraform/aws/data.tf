@@ -12,21 +12,21 @@ resource "random_password" "db_app" {
 }
 
 resource "aws_db_subnet_group" "db" {
-  name       = var.name
+  name       = local.name
   subnet_ids = local.db_subnet_ids
 }
 
 resource "aws_security_group" "db" {
-  name_prefix = "${var.name}-db-"
+  name_prefix = "${local.name}-db-"
   description = "Postgres for Simple Host, from inside the cluster VPC"
   vpc_id      = local.vpc_id
 
   ingress {
-    description = "Postgres from the VPC"
+    description = "Postgres from the VPC ranges"
     from_port   = 5432
     to_port     = 5432
     protocol    = "tcp"
-    cidr_blocks = [local.vpc_cidr]
+    cidr_blocks = local.vpc_cidrs
   }
 
   lifecycle {
@@ -35,7 +35,7 @@ resource "aws_security_group" "db" {
 }
 
 resource "aws_db_instance" "db" {
-  identifier     = var.name
+  identifier     = local.name
   engine         = "postgres"
   engine_version = "16"
   instance_class = var.db_size
@@ -63,7 +63,7 @@ resource "aws_db_instance" "db" {
 
   deletion_protection       = var.protect_data
   skip_final_snapshot       = !var.protect_data
-  final_snapshot_identifier = var.protect_data ? "${var.name}-final" : null
+  final_snapshot_identifier = var.protect_data ? "${local.name}-final" : null
 }
 
 # The CA bundle for sslmode=verify-full.
@@ -78,7 +78,7 @@ data "http" "rds_ca" {
 }
 
 resource "aws_s3_bucket" "sites" {
-  bucket        = "${var.name}-sites-${data.aws_caller_identity.current.account_id}-${var.region}"
+  bucket        = "${local.name}-sites-${data.aws_caller_identity.current.account_id}-${var.region}"
   force_destroy = !var.protect_data
 }
 

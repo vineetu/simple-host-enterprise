@@ -23,7 +23,7 @@ terraform {
 provider "aws" {
   region = var.region
   default_tags {
-    tags = merge({ "simple-host" = var.name }, var.tags)
+    tags = merge({ "simple-host" = local.name }, var.tags)
   }
 }
 

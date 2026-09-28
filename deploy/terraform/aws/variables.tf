@@ -79,13 +79,19 @@ variable "extra_config" {
 # Everything below has a default the setup page keeps.
 
 variable "name" {
-  description = "Prefix for the AWS resources this creates, and the new cluster's name."
+  description = "Prefix for the AWS resources this creates, and a new cluster's name. Empty means sh- and 8 characters of the address's hash, so two installs in one account and region never share a name."
   type        = string
-  default     = "simple-host"
+  default     = ""
   validation {
-    condition     = can(regex("^[a-z][a-z0-9-]{1,22}[a-z0-9]$", var.name))
+    condition     = var.name == "" || can(regex("^[a-z][a-z0-9-]{1,22}[a-z0-9]$", var.name))
     error_message = "name is 3 to 24 lowercase letters, digits and -."
   }
+}
+
+variable "api_access_cidrs" {
+  description = "For a new cluster: the addresses allowed to reach the Kubernetes API over the internet (it always needs a signed-in AWS identity as well). AWS CloudShell has no fixed address, so the default is everywhere; narrow it to your network once the install is done."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
 }
 
 variable "tags" {
@@ -189,8 +195,3 @@ variable "install_external_secrets" {
   default     = true
 }
 
-variable "create_oidc_provider" {
-  description = "For an existing cluster: create its IAM OIDC provider (for IAM roles for service accounts). false when it exists already."
-  type        = bool
-  default     = true
-}

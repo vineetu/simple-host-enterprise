@@ -12,7 +12,7 @@ locals {
       SECURE_MODE       = "true"
       OWNER_CERT_ISSUER = "simple-host-letsencrypt"
       # Traefik's pods have addresses in the VPC (the VPC CNI).
-      TRUSTED_PROXY_CIDRS     = local.vpc_cidr
+      TRUSTED_PROXY_CIDRS     = join(",", local.vpc_cidrs)
       OIDC_ISSUER             = var.oidc_issuer
       OIDC_CLIENT_ID          = var.oidc_client_id
       ADMIN_EMAILS            = join(",", [for e in var.admin_emails : lower(trimspace(e))])
@@ -182,18 +182,21 @@ resource "local_file" "work" {
   file_permission = "0600"
 }
 
-# kubectl apply is idempotent: this runs again whenever any file changes,
-# and a failed run is picked up by the next apply.
+# Install and change: kubectl apply is idempotent, so this runs again
+# whenever any file changes (a new image digest, a setting) and Kubernetes
+# rolls the pods; the namespace, its certificates and owner Ingresses stay.
+# A failed run is picked up by the next apply.
 resource "terraform_data" "install" {
   triggers_replace = [for k in sort(keys(local.files)) : sha256(local.files[k])]
-  # What the removal below needs, since it may run from another shell.
-  input = { cluster = local.cluster_name, region = var.region, cert_manager_namespace = var.cert_manager_namespace }
 
   provisioner "local-exec" {
     interpreter = ["/bin/bash", "-c"]
     command     = <<-EOT
       set -euo pipefail
       k() { kubectl --kubeconfig '${local.work}/kubeconfig' "$@"; }
+      # A namespace still being removed (an earlier removal that stopped
+      # halfway) cannot take new objects: wait for it to go.
+      k wait --for=delete namespace/simple-host --timeout=300s 2>/dev/null || true
       k apply -f '${local.work}/issuer.yaml'
       k apply -k '${local.work}/overlay'
       k -n simple-host wait --for=condition=Ready externalsecret/simple-host-secrets --timeout=180s
@@ -202,8 +205,17 @@ resource "terraform_data" "install" {
     EOT
   }
 
-  # terraform destroy: take Simple Host off the cluster (it may be yours and
-  # stay). The namespace takes the Ingresses, certificates and secrets with it.
+  depends_on = [terraform_data.uninstall]
+}
+
+# Removal, apart from install: it runs only on terraform destroy, never when
+# the install above is replaced by a change. It takes Simple Host off the
+# cluster (which may be yours and stay); the namespace takes the Ingresses,
+# certificates and secrets with it.
+resource "terraform_data" "uninstall" {
+  # What the removal needs, since it may run from another shell.
+  input = { cluster = local.cluster_name, region = var.region, cert_manager_namespace = var.cert_manager_namespace }
+
   provisioner "local-exec" {
     when        = destroy
     interpreter = ["/bin/bash", "-c"]
@@ -211,9 +223,9 @@ resource "terraform_data" "install" {
       kc=$(mktemp)
       aws eks update-kubeconfig --name '${self.input.cluster}' --region '${self.input.region}' --kubeconfig "$kc" >/dev/null || exit 0
       k() { kubectl --kubeconfig "$kc" "$@"; }
-      k delete namespace simple-host --ignore-not-found --wait=true --timeout=300s || true
-      k delete clusterissuer simple-host-letsencrypt --ignore-not-found || true
-      k -n '${self.input.cert_manager_namespace}' delete serviceaccount/simple-host-dns role/simple-host-dns-token rolebinding/simple-host-dns-token --ignore-not-found || true
+      k delete namespace simple-host --ignore-not-found --wait=true --timeout=600s
+      k delete clusterissuer simple-host-letsencrypt --ignore-not-found
+      k -n '${self.input.cert_manager_namespace}' delete serviceaccount/simple-host-dns role/simple-host-dns-token rolebinding/simple-host-dns-token --ignore-not-found
       rm -f "$kc"
     EOT
   }

@@ -1,8 +1,12 @@
 # AWS (EKS)
 
-Verified end to end on this cloud: yes, 2026-09-28. By hand with the ALB and ACM
-(`make smoke` 46/46), and with the Terraform quick path below (Traefik, Route 53 and
-Let's Encrypt: `/readyz`, the base certificate and an owner certificate).
+Verified end to end on this cloud, 2026-09-28:
+- **By hand, with the ALB and ACM:** a real sign-in, publishing, sharing and `make smoke`
+  (46 of 46).
+- **The Terraform quick path below:** a new cluster and an existing one, from AWS CloudShell
+  and from a Linux shell, to `/readyz` over a Let's Encrypt certificate, the sign-in redirect,
+  an owner certificate, an upgrade and a settings change rolling the pods, and runs stopped
+  halfway and picked up again. Not with a real sign-in, publish or `make smoke`.
 
 Fills the sections in [README.md](README.md).
 
@@ -11,7 +15,9 @@ for AWS CloudShell that runs the Terraform module in
 [`deploy/terraform/aws`](../../deploy/terraform/aws/README.md): a new EKS
 cluster or yours, RDS, S3, Secrets Manager, IRSA, cert-manager, Traefik behind
 an NLB, a Route 53 zone with Let's Encrypt certificates (owner certificates
-included), and Simple Host. It follows sections 3 to 6 below. For the ingress
+included), and Simple Host. It follows sections 3 to 6 below. A new cluster's VPC has
+one NAT gateway (private nodes), about $33 a month plus $0.045 per GB it carries
+(us-east-2 list prices). For the ingress
 it uses Traefik instead of the ALB, so owner certificates stay automatic
 (section 2). The sections below are for doing it by hand.
 
@@ -112,6 +118,15 @@ IAM policy: `route53:GetChange` on `arn:aws:route53:::change/*`;
 `route53:ChangeResourceRecordSets` and `route53:ListResourceRecordSets` on
 `arn:aws:route53:::hostedzone/<zone-id>`; `route53:ListHostedZonesByName` on `*`.
 Set `OWNER_CERT_ISSUER` to the issuer's name.
+
+- **Let's Encrypt's limits.** At most 50 new certificates per registered domain
+  per week (shared with anything else on that domain that uses Let's Encrypt), and
+  there is one per owner. With more than about 50 people publishing in the first
+  week, the rest are served at `<owner>.<base>/<site>/` until theirs arrives. For a
+  big rollout, sign owner certificates with your own CA: a cert-manager CA
+  ClusterIssuer (INSTALL.md, "Site addresses") named in `OWNER_CERT_ISSUER` (in the
+  quick path, `extra_config = { OWNER_CERT_ISSUER = "<issuer>" }`), and keep Let's
+  Encrypt for the base address.
 
 - **CAA.** If `<base>` or a parent domain has CAA records, the issuing CA must be
   in them. A CAA record in the `<base>` zone itself (`0 issue "letsencrypt.org"`

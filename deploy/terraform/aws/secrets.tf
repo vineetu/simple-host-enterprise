@@ -13,7 +13,7 @@ resource "random_bytes" "backup_envelope_key" {
 }
 
 resource "aws_secretsmanager_secret" "app" {
-  name                    = "${var.name}/app"
+  name                    = "${local.name}/app"
   description             = "Simple Host: signing and envelope keys, database passwords"
   recovery_window_in_days = var.protect_data ? 30 : 0
 }
@@ -32,7 +32,7 @@ resource "aws_secretsmanager_secret_version" "app" {
 # aws secretsmanager put-secret-value --secret-id <name>/oidc --secret-string file:///dev/stdin
 # (paste {"OIDC_CLIENT_SECRET":"..."} and press Ctrl-D), then restart the pods.
 resource "aws_secretsmanager_secret" "oidc" {
-  name                    = "${var.name}/oidc"
+  name                    = "${local.name}/oidc"
   description             = "Simple Host: the sign-in app's client secret"
   recovery_window_in_days = var.protect_data ? 30 : 0
 }

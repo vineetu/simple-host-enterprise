@@ -80,7 +80,7 @@ resource "helm_release" "traefik" {
     service = {
       annotations = {
         "service.beta.kubernetes.io/aws-load-balancer-type"                     = "nlb"
-        "service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags" = join(",", [for k, v in merge({ "simple-host" = var.name }, var.tags) : "${k}=${v}"])
+        "service.beta.kubernetes.io/aws-load-balancer-additional-resource-tags" = join(",", [for k, v in merge({ "simple-host" = local.name }, var.tags) : "${k}=${v}"])
       }
       # The NLB keeps each person's address; Traefik passes it on in
       # X-Forwarded-For, which the server trusts from the VPC range only.

@@ -11,7 +11,8 @@ data "aws_availability_zones" "available" {
 }
 
 locals {
-  new_cluster_name = var.cluster_name != "" ? var.cluster_name : var.name
+  name             = var.name != "" ? var.name : "sh-${substr(sha1(var.base_domain), 0, 8)}"
+  new_cluster_name = var.cluster_name != "" ? var.cluster_name : local.name
 }
 
 # EKS's current default version, unless kubernetes_version names one.
@@ -23,9 +24,9 @@ data "aws_eks_cluster_versions" "default" {
 module "vpc" {
   count   = var.create_cluster ? 1 : 0
   source  = "terraform-aws-modules/vpc/aws"
-  version = "~> 6.7"
+  version = "6.7.3"
 
-  name = var.name
+  name = local.name
   cidr = "10.42.0.0/16"
   azs  = slice(data.aws_availability_zones.available.names, 0, 2)
 
@@ -43,7 +44,7 @@ module "vpc" {
 module "eks" {
   count   = var.create_cluster ? 1 : 0
   source  = "terraform-aws-modules/eks/aws"
-  version = "~> 21.0"
+  version = "21.26.0"
 
   name               = local.new_cluster_name
   kubernetes_version = var.kubernetes_version != null ? var.kubernetes_version : data.aws_eks_cluster_versions.default[0].cluster_versions[0].cluster_version
@@ -51,10 +52,15 @@ module "eks" {
   # CloudShell (or your pipeline) reaches the API over the internet; whoever
   # runs this becomes the cluster's admin.
   endpoint_public_access                   = true
+  endpoint_public_access_cidrs             = var.api_access_cidrs
   enable_cluster_creator_admin_permissions = true
 
-  vpc_id     = module.vpc[0].vpc_id
-  subnet_ids = module.vpc[0].private_subnets
+  vpc_id = module.vpc[0].vpc_id
+  # The nodes reach the internet through the NAT gateway and join the
+  # cluster only through it: naming it here makes the cluster wait for it.
+  # (A module-level depends_on would defer the module's data sources and
+  # show changes on every run.)
+  subnet_ids = length(module.vpc[0].natgw_ids) > 0 ? module.vpc[0].private_subnets : []
 
   addons = {
     coredns    = {}
@@ -91,14 +97,11 @@ data "aws_vpc" "existing" {
 }
 
 # IAM roles for service accounts need the cluster's OIDC provider in IAM.
-resource "aws_iam_openid_connect_provider" "existing" {
-  count          = !var.create_cluster && var.create_oidc_provider ? 1 : 0
-  url            = data.aws_eks_cluster.existing[0].identity[0].oidc[0].issuer
-  client_id_list = ["sts.amazonaws.com"]
-}
-
+# On a cluster you already have, apply.sh creates it when it is missing,
+# outside Terraform, so removing Simple Host never removes it from under
+# roles of your own.
 data "aws_iam_openid_connect_provider" "existing" {
-  count = !var.create_cluster && !var.create_oidc_provider ? 1 : 0
+  count = var.create_cluster ? 0 : 1
   url   = data.aws_eks_cluster.existing[0].identity[0].oidc[0].issuer
 }
 
@@ -107,13 +110,13 @@ locals {
   cluster_endpoint = var.create_cluster ? module.eks[0].cluster_endpoint : data.aws_eks_cluster.existing[0].endpoint
   cluster_ca       = var.create_cluster ? module.eks[0].cluster_certificate_authority_data : data.aws_eks_cluster.existing[0].certificate_authority[0].data
 
-  oidc_provider_arn = (var.create_cluster ? module.eks[0].oidc_provider_arn
-    : var.create_oidc_provider ? aws_iam_openid_connect_provider.existing[0].arn
-  : data.aws_iam_openid_connect_provider.existing[0].arn)
-  oidc_issuer_host = replace(var.create_cluster ? module.eks[0].cluster_oidc_issuer_url : data.aws_eks_cluster.existing[0].identity[0].oidc[0].issuer, "https://", "")
+  oidc_provider_arn = var.create_cluster ? module.eks[0].oidc_provider_arn : data.aws_iam_openid_connect_provider.existing[0].arn
+  oidc_issuer_host  = replace(var.create_cluster ? module.eks[0].cluster_oidc_issuer_url : data.aws_eks_cluster.existing[0].identity[0].oidc[0].issuer, "https://", "")
 
-  vpc_id   = var.create_cluster ? module.vpc[0].vpc_id : data.aws_vpc.existing[0].id
-  vpc_cidr = var.create_cluster ? module.vpc[0].vpc_cidr_block : data.aws_vpc.existing[0].cidr_block
+  vpc_id = var.create_cluster ? module.vpc[0].vpc_id : data.aws_vpc.existing[0].id
+  # Every range of the VPC: pods can have addresses in a secondary one
+  # (VPC CNI custom networking).
+  vpc_cidrs = var.create_cluster ? [module.vpc[0].vpc_cidr_block] : [for a in data.aws_vpc.existing[0].cidr_block_associations : a.cidr_block]
   # The database goes in the cluster's own subnets (private ones for a new cluster).
   db_subnet_ids = var.create_cluster ? module.vpc[0].private_subnets : tolist(data.aws_eks_cluster.existing[0].vpc_config[0].subnet_ids)
 }

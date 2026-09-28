@@ -35,10 +35,13 @@ output "next_steps" {
   value = join("\n", concat(
     ["", "Simple Host is installed on ${local.cluster_name}.", ""],
     length(local.dns_records) > 0 ? concat(
-      ["1. At the DNS provider for ${var.base_domain}, add these NS records (name ${var.base_domain}):", ""],
+      ["1. DNS: add these ${length(local.dns_records[0].values)} NS records for ${var.base_domain}:", ""],
       [for ns in local.dns_records[0].values : "   ${var.base_domain}  NS  ${ns}"],
-      ["", "   If ${var.base_domain} is a domain of its own, set these as its name servers at the registrar instead.", ""],
-    ) : ["1. DNS: ${var.base_domain} is already served by Route 53 zone ${var.dns_zone_id}; nothing to add.", ""],
+      ["",
+        "   If ${var.base_domain} is under a domain you already manage (sites.example.com under example.com),",
+        "   add them in that domain's DNS zone. If it is a domain of its own, set them as its name servers",
+      "   at your registrar instead.", ""],
+    ) : ["1. DNS: ${var.base_domain} is already a Route 53 zone in this account (${var.dns_zone_id}); nothing to add.", ""],
     [
       "2. Certificates are issued by themselves once the names resolve (a few minutes). Then check:",
       "",
