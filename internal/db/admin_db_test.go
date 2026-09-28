@@ -37,4 +37,14 @@ func TestLastAdminCannotBeDisabledAndAdminEmailsSync(t *testing.T) {
 	if n, err := SyncAdminEmails(ctx, database, []string{"alice@example.com"}); err != nil || n != 0 {
 		t.Fatalf("second sync changed %d rows (%v), want 0", n, err)
 	}
+	// A blank ADMIN_EMAILS (nil or empty) demotes nobody.
+	for _, empty := range [][]string{nil, {}} {
+		if n, err := SyncAdminEmails(ctx, database, empty); err != nil || n != 0 {
+			t.Fatalf("sync with %#v changed %d rows (%v), want 0", empty, n, err)
+		}
+	}
+	database.QueryRowContext(ctx, `SELECT is_admin FROM users WHERE id = $1`, alice.ID).Scan(&aliceAdmin)
+	if !aliceAdmin {
+		t.Fatal("an empty ADMIN_EMAILS demoted alice")
+	}
 }

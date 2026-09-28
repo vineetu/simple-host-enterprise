@@ -427,3 +427,29 @@ func TestDashboardMintKeepsTheKeyOnScreen(t *testing.T) {
 		}
 	}
 }
+
+// With no admin source (ADMIN_EMAILS blank and no OIDC_ADMIN_CLAIM), a
+// sign-in leaves is_admin as it is; with one, it follows the source.
+func TestSignInKeepsAdminWithoutAdminSource(t *testing.T) {
+	database := connectorTestDB(t)
+	ctx := context.Background()
+	alice, err := db.CreateOIDCUser(ctx, database, "alice", "sub-alice", "alice@corp.example", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	isAdmin := func() bool {
+		var a bool
+		if err := database.QueryRow(`SELECT is_admin FROM users WHERE id = $1`, alice.ID).Scan(&a); err != nil {
+			t.Fatal(err)
+		}
+		return a
+	}
+	h := &AuthHandler{database: database, audit: audit.NewDBRecorder(database)}
+	if user, _, err := h.resolveUser(ctx, "sub-alice", "alice@corp.example", "", false); err != nil || !user.IsAdmin || !isAdmin() {
+		t.Fatalf("no admin source: resolve = %+v, %v; stored admin %v; want admin kept", user, err, isAdmin())
+	}
+	h.claims = OIDCClaimConfig{AdminEmails: []string{"someone@corp.example"}}
+	if user, _, err := h.resolveUser(ctx, "sub-alice", "alice@corp.example", "", false); err != nil || user.IsAdmin || isAdmin() {
+		t.Fatalf("ADMIN_EMAILS without alice: resolve = %+v, %v; stored admin %v; want demoted", user, err, isAdmin())
+	}
+}

@@ -172,7 +172,9 @@ func run() (runErr error) {
 	// it demotes them on the next deploy, not at their next sign-in. With
 	// OIDC_ADMIN_CLAIM also in use the claim can only be read at sign-in,
 	// so there the sign-in refresh (and SESSION_TTL) is the bound.
-	if cfg.OIDC.AdminClaim == "" {
+	if cfg.OIDC.AdminClaim == "" && len(cfg.OIDC.AdminEmails) == 0 {
+		log.Print("WARNING: ADMIN_EMAILS is empty: existing admins keep their admin status; set ADMIN_EMAILS to change who is admin")
+	} else if cfg.OIDC.AdminClaim == "" {
 		changed, err := dbstore.SyncAdminEmails(context.Background(), database, cfg.OIDC.AdminEmails)
 		if err != nil {
 			return fmt.Errorf("apply ADMIN_EMAILS: %w", err)

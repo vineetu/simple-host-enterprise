@@ -49,6 +49,13 @@ type OIDCClaimConfig struct {
 	HintDomain          string
 }
 
+// adminSourceConfigured reports whether ADMIN_EMAILS or OIDC_ADMIN_CLAIM
+// names admins. With neither, sign-in leaves is_admin as it is: a blank
+// ADMIN_EMAILS must not demote the admins an install already has.
+func (c OIDCClaimConfig) adminSourceConfigured() bool {
+	return len(c.AdminEmails) > 0 || c.AdminClaim != ""
+}
+
 func (c OIDCClaimConfig) isAdminEmail(email string) bool {
 	email = strings.ToLower(strings.TrimSpace(email))
 	for _, admin := range c.AdminEmails {
@@ -500,10 +507,12 @@ func (h *AuthHandler) finishResolve(ctx context.Context, user db.User, email str
 	if disabled {
 		return db.User{}, "", db.ErrAccountDisabled
 	}
-	if err := db.RefreshAdminStatus(ctx, h.database, user.ID, isAdmin); err != nil {
-		return db.User{}, "", err
+	if h.claims.adminSourceConfigured() {
+		if err := db.RefreshAdminStatus(ctx, h.database, user.ID, isAdmin); err != nil {
+			return db.User{}, "", err
+		}
+		user.IsAdmin = isAdmin
 	}
-	user.IsAdmin = isAdmin
 	refresh, err := db.RefreshUserEmail(ctx, h.database, user.ID, email)
 	if err != nil {
 		return db.User{}, "", err
