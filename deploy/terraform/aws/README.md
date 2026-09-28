@@ -1,5 +1,7 @@
 # Simple Host Enterprise on AWS with Terraform
 
+![What this module creates: a VPC with one NAT gateway and an EKS cluster, only when there is no cluster of yours; Traefik behind a Network Load Balancer; the Simple Host pods; cert-manager with Let's Encrypt over DNS-01 in a Route 53 zone; External Secrets reading Secrets Manager; RDS Postgres; an S3 bucket for sites; IAM roles for service accounts; Terraform state in a private S3 bucket; run from AWS CloudShell](https://simple-host.app/diagrams/enterprise-aws.svg)
+
 One Terraform root module that sets up everything in your AWS account:
 
 - **A cluster**: a new EKS cluster (2 × `t3.medium` in private subnets of a

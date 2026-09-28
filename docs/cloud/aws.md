@@ -1,5 +1,7 @@
 # AWS (EKS)
 
+![Simple Host Enterprise on AWS: what deploy/terraform/aws creates in your account, from one line in AWS CloudShell. A VPC with one NAT gateway and an EKS cluster, created only when there is no cluster of yours; Traefik behind a Network Load Balancer; the Simple Host pods; cert-manager with Let's Encrypt over DNS-01 in a Route 53 zone; External Secrets reading Secrets Manager; RDS Postgres; an S3 bucket for sites; IAM roles for service accounts; people sign in with your OIDC provider and your DNS delegates the address to the zone](https://simple-host.app/diagrams/enterprise-aws.svg)
+
 Verified end to end on this cloud, 2026-09-28:
 - **By hand, with the ALB and ACM:** a real sign-in, publishing, sharing and `make smoke`
   (46 of 46).
