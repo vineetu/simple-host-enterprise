@@ -4,7 +4,7 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
-## Unreleased
+## v1.8.2 — 2026-09-28
 
 ### Fixed
 - A person whose address is a reserved name, most often an admin at
