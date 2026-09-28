@@ -42,6 +42,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 say() { printf '\n== %s\n' "$*"; }
+# Keys pressed while it worked (Enter to keep AWS CloudShell awake) must not
+# answer the next question: drop them first.
+drain() { while read -r -t 0.3 -n 1 _ </dev/tty 2>/dev/null; do :; done; }
 die() { printf '\nStopped: %s\n' "$*" >&2; exit 1; }
 [ -n "$tfvars_b64" ] || die "--tfvars is required (copy the whole line from https://simple-host.app/setup)"
 [ -n "$src" ] || [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || die "--ref is the full 40-character commit id"
@@ -65,7 +68,7 @@ export AWS_REGION=$region AWS_DEFAULT_REGION=$region
 
 say "Simple Host Enterprise for $base"
 if [ -z "$plan$destroy" ]; then
-  echo "This takes about $([ "$create" = true ] && echo 25 || echo 15) minutes. Keep this tab open and press a key (Shift is fine) every 10 minutes or so: AWS CloudShell closes after about 20 minutes without one, and closing stops the work. If it does close, open it again and paste the same line: it picks up where it stopped."
+  echo "This takes about $([ "$create" = true ] && echo 25 || echo 15) minutes. Keep this tab open and press Enter every 10 minutes or so: AWS CloudShell closes after about 20 minutes without a key press, and closing stops the work. If it does close, open it again and paste the same line: it picks up where it stopped."
 fi
 command -v aws >/dev/null || die "the AWS CLI is missing (AWS CloudShell has it)"
 account=$(aws sts get-caller-identity --query Account --output text 2>/dev/null) || die "this shell is not signed in to AWS (aws sts get-caller-identity failed)"
@@ -280,7 +283,7 @@ if [ -n "$destroy" ]; then
   [ "$(var protect_data)" = false ] || die "the database and the bucket are protected (protect_data). To remove everything, take what you need first (docs/uninstall.md), add protect_data = false to terraform.tfvars, run the line once without --destroy, then with it. See deploy/terraform/aws/README.md."
   say "Removing Simple Host from $base"
   if [ -z "$yes" ]; then
-    printf 'This deletes the database and every site. Type the address (%s) to go ahead: ' "$base"
+    drain; printf 'This deletes the database and every site. Type the address (%s) to go ahead: ' "$base"
     read -r answer </dev/tty || die "nothing typed"
     [ "$answer" = "$base" ] || die "not removed"
   fi
@@ -417,7 +420,7 @@ fi
 # disk. Later runs keep the stored one.
 if [ -z "${TF_VAR_oidc_client_secret:-}" ] && ! aws secretsmanager describe-secret --secret-id "$name/oidc" --query 'VersionIdsToStages' --output text 2>/dev/null | grep -q AWSCURRENT; then
   say "Your sign-in app's client secret"
-  printf 'Client secret (not shown as you type): '
+  drain; printf 'Client secret (not shown as you type): '
   trap 'stty echo 2>/dev/null' INT
   if ! read -rs TF_VAR_oidc_client_secret </dev/tty; then trap - INT; echo; die "no client secret was typed"; fi
   trap - INT; echo
@@ -430,7 +433,7 @@ fi
 if [ -z "$yes" ]; then
   say "What it will do"
   terraform plan -input=false -var-file=terraform.tfvars -compact-warnings | sed -n '/Terraform will perform/,$p' | grep -v '^$' | tail -n 60
-  printf '\nType yes to go ahead: '
+  drain; printf '\nType yes to go ahead: '
   read -r answer </dev/tty || die "nothing typed"
   [ "$answer" = yes ] || die "nothing was changed"
 fi
