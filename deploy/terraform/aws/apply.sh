@@ -7,7 +7,8 @@
 #
 # It fetches this repository at <commit>, writes terraform.tfvars, keeps the
 # Terraform state in an S3 bucket of your own, asks once for the sign-in
-# app's client secret (hidden), and runs Terraform. Running the same line
+# app's client secret (hidden), and runs Terraform. Anything the page left
+# empty (the address, admins, sign-in app) it asks for first. Running the same line
 # again, from any shell, picks up where it stopped: after an error, after
 # Ctrl-C, or after the shell closed.
 #
@@ -69,6 +70,103 @@ var() {
   v=$(printf '%s\n' "$tfvars" | sed -n "s/^$1 *= *\"\{0,1\}\([^\"]*\)\"\{0,1\} *$/\1/p" | head -n1)
   if [ -n "$v" ]; then printf '%s' "$v"; else printf '%s' "${!env:-}"; fi
 }
+
+# <ask>
+# What the setup page left empty is asked for here, in order, and added to
+# terraform.tfvars (the saved copy of your answers has it too). A value in
+# the file or in TF_VAR_<name> is never asked for. With no terminal to ask
+# at (an AI agent) or with --yes, it stops with the list instead.
+has() { local env="TF_VAR_$1"; grep -qE "^$1 *=" <<<"$tfvars" || [ -n "${!env:-}" ]; }
+# hcl_str: a Terraform string, with its template sequences written literally.
+hcl_str() { printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\${/$${/g' -e 's/%{/%%{/g')"; }
+# hcl_list: a comma- or space-separated answer as a Terraform list of strings.
+hcl_list() { local out='' x; for x in $(tr ',' ' ' <<<"$1"); do out+="${out:+, }$(hcl_str "$x")"; done; printf '[%s]' "$out"; }
+lower() { tr '[:upper:]' '[:lower:]' <<<"$1"; }
+# ask_for <name> <question> <default>: asks until check_<name> accepts the
+# answer (it sets $value, the Terraform value, or prints why not).
+ask_for() {
+  local name=$1 q=$2 def=${3:-}
+  while :; do
+    drain; printf '%s%s: ' "$q" "${def:+ [$def]}"
+    read -r answer </dev/tty || die "nothing typed"
+    answer=$(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' <<<"$answer")
+    [ -n "$answer" ] || answer=$def
+    [ -n "$answer" ] || continue
+    "check_$name" "$answer" && break
+  done
+  tfvars=$(printf '%s\n%s = %s' "$tfvars" "$name" "$value")
+}
+check_create_cluster() {
+  case "$(lower "$1")" in y|yes|true) value=true ;; n|no|false) value=false ;; *) echo "  yes or no."; return 1 ;; esac
+}
+check_region() {
+  [[ "$1" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]$ ]] || { echo "  An AWS region, like us-east-1."; return 1; }
+  value=$(hcl_str "$1")
+}
+check_base_domain() {
+  local v; v=$(lower "$1"); v=${v#http://}; v=${v#https://}; v=${v%%/*}; v=${v%.}
+  [[ "$v" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$ ]] || { echo "  A hostname, like sites.example.com."; return 1; }
+  value=$(hcl_str "$v")
+}
+re_email='^[^@"\\]+@[^@"\\]+$'
+check_admin_emails() {
+  local x v; v=$(lower "$1" | tr ',;' '  ')
+  for x in $v; do [[ "$x" =~ $re_email ]] || { echo "  \"$x\" is not an email address."; return 1; }; done
+  value=$(hcl_list "$v")
+}
+re_issuer='^https://[^[:space:]/"\\?#@]+(/[^[:space:]"\\?#]*)?$'
+check_oidc_issuer() {
+  local v=$1 rest host path=''
+  [[ "$v" == *://* ]] || v="https://$v"
+  while [[ "$v" == */ ]]; do v=${v%/}; done
+  [[ "$v" =~ $re_issuer ]] && [ ${#v} -le 2048 ] || { echo "  An https:// URL, like https://your-org.okta.com."; return 1; }
+  rest=${v#https://}; host=$(lower "${rest%%/*}"); host=${host%:443}; host=${host%.}
+  [[ "$rest" != */* ]] || path="/${rest#*/}"
+  if [ "${host%:*}" = accounts.google.com ] || [ "$host" = accounts.google.com ]; then
+    [ "$host$path" = accounts.google.com ] || { echo "  Google's issuer is exactly https://accounts.google.com."; return 1; }
+  fi
+  value=$(hcl_str "https://$host$path")
+}
+check_allowed_email_domains() {
+  local x v; v=$(lower "$1" | tr ',;' '  ')
+  for x in $v; do [[ "${x#@}" =~ ^[a-z0-9_]([a-z0-9_.-]*[a-z0-9_])?$ ]] || { echo "  \"$x\" is not a domain, like example.com."; return 1; }; done
+  value=$(hcl_list "$(sed 's/\(^\| \)@/\1/g' <<<"$v")")
+}
+re_client_id='^[^[:space:]"\\]{1,512}$'
+check_oidc_client_id() {
+  [[ "$1" =~ $re_client_id ]] || { echo "  The client ID as your identity provider shows it."; return 1; }
+  value=$(hcl_str "$1")
+}
+check_cluster_name() {
+  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$ ]] || { echo "  An EKS cluster name: letters, digits, - and _."; return 1; }
+  value=$(hcl_str "$1")
+}
+# The questions, in order: name, question, default. Company email domains
+# are asked only with Google, and the cluster's name only for one you have.
+questions() {
+  printf '%s\n' "create_cluster|Create a new EKS cluster for it (yes), or use one you have (no)|yes" \
+    "region|AWS region|us-east-1" "base_domain|Address, like sites.example.com|" \
+    "admin_emails|Admin emails, separated by commas|" "oidc_issuer|Sign-in issuer URL, like https://your-org.okta.com|"
+  [[ "$(lower "$(var oidc_issuer)")" =~ ^https://accounts\.google\.com\.?(:443)?/*$ ]] && echo "allowed_email_domains|Company email domains (required with Google), like example.com|"
+  echo "oidc_client_id|Client ID|"
+  [ "$(var create_cluster)" != false ] || echo "cluster_name|Your EKS cluster's name (aws eks list-clusters shows it)|"
+}
+missing() { questions | while IFS='|' read -r n q d; do has "$n" || echo "$n"; done; }
+if [ -n "$(missing)" ]; then
+  if [ -n "$yes" ] || ! { : </dev/tty; } 2>/dev/null; then
+    die "these values are not in the line: $(missing | paste -sd, - | sed "s/,/, /g")
+Run the line in a terminal to be asked for them, or put them in front of bash, like:
+  TF_VAR_base_domain=sites.example.com TF_VAR_admin_emails='[\"you@example.com\"]' TF_VAR_oidc_issuer=https://your-org.okta.com TF_VAR_oidc_client_id=0oa123 bash \"\$f\" ...
+(a list is written '[\"a@example.com\", \"b@example.com\"]'; with Google also TF_VAR_allowed_email_domains='[\"example.com\"]', and for your own cluster TF_VAR_cluster_name=<its name>)"
+  fi
+  say "A few answers the setup page did not have"
+  # One at a time: an answer can add a question (Google, your own cluster).
+  while n=$(missing | sed -n 1p) && [ -n "$n" ]; do
+    IFS='|' read -r _ q d < <(questions | grep "^$n|")
+    ask_for "$n" "$q" "$d"
+  done
+fi
+# </ask>
 region=$(var region); base=$(var base_domain); create=$(var create_cluster); cluster=$(var cluster_name); name=$(var name)
 [ -n "$region" ] && [ -n "$base" ] && [ -n "$create" ] || die "terraform.tfvars needs region, base_domain and create_cluster"
 [[ "$region" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]$ ]] || die "region \"$region\" is not an AWS region"

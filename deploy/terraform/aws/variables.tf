@@ -34,7 +34,7 @@ variable "admin_emails" {
   description = "The people who get admin rights."
   type        = list(string)
   validation {
-    condition     = length(var.admin_emails) > 0 && alltrue([for e in var.admin_emails : can(regex("^[^@\\s,]+@[^@\\s,]+\\.[^@\\s,]+$", e))])
+    condition     = length(var.admin_emails) > 0 && alltrue([for e in var.admin_emails : can(regex("^[^@\\s,\"\\\\]+@[^@\\s,\"\\\\]+$", e))])
     error_message = "admin_emails needs at least one email address."
   }
 }
