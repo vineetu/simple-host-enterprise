@@ -307,8 +307,12 @@ if [ -n "$destroy" ]; then
   [ "$(var protect_data)" = false ] || die "the database and the bucket are protected (protect_data). To remove everything, take what you need first (docs/uninstall.md), then run the same line again with TF_VAR_protect_data=false in front of bash and --destroy at the end. See deploy/terraform/aws/README.md, Remove."
   say "Removing Simple Host from $base"
   if [ -z "$yes" ]; then
-    drain; printf 'This deletes the database and every site. Type the address (%s) to go ahead: ' "$base"
-    read -r answer </dev/tty || die "nothing typed"
+    answer=''
+    for try in 1 2; do
+      drain; printf 'This deletes the database and every site. Type the address (%s) to go ahead: ' "$base"
+      read -r answer </dev/tty || die "nothing typed"
+      [ -n "$answer" ] && break
+    done
     [ "$answer" = "$base" ] || die "not removed"
   fi
   # Deletion protection is lifted first (it is a setting of the database
