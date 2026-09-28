@@ -205,8 +205,8 @@ to the range your ingress controller's pods take their addresses from
 person's address rather than the ingress's (`docs/configuration.md`).
 
 1. Pick the image. The recommended one is the published release,
-   `ghcr.io/vineetu/simple-host-enterprise:v1.8.2`, pinned by its digest
-   `sha256:54511acabd7e8e19b9a2ec7a0a714f59457e4ac0b77fad433df9ad7cd2ad3c88`.
+   `ghcr.io/vineetu/simple-host-enterprise:v1.8.3`, pinned by its digest
+   `sha256:d06bed4a1a5c22f6c2df429c642329063ef1f6479b99366913d1cf6d5fef3f57`.
    Or push the image you built (`make image`, or your own CI build of the
    same `Dockerfile`) to a registry your cluster can pull from, scan it,
    and resolve its immutable digest. Verify a release image's signature and
@@ -767,7 +767,7 @@ verify its digest, update the overlay's `images:` entry (or your CI's
 equivalent), `kubectl apply` the rendered overlay, and watch the rollout.
 `kubectl -n simple-host exec deploy/simple-host -- /simple-host version`
 prints the running release, commit and schema
-(`simple-host v1.8.2 (commit <sha>, schema 0058)`); the server logs the
+(`simple-host v1.8.3 (commit <sha>, schema 0058)`); the server logs the
 same line at startup.
 
 **From v1.0.x**, sites move from the volume to the bucket: follow
