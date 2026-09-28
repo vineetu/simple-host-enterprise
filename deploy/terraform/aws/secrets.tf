@@ -26,6 +26,11 @@ resource "aws_secretsmanager_secret_version" "app" {
     DB_PASSWORD         = random_password.db_owner.result
     DB_APP_PASSWORD     = random_password.db_app.result
   })
+  # Generated once. Every site is encrypted with BACKUP_ENVELOPE_KEY, so the
+  # stored value is never rewritten by a later run.
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
 }
 
 # The sign-in app's client secret comes from you, once. To change it later:

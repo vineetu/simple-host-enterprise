@@ -533,7 +533,8 @@ fi
 say "What it will do"
 planlog="$work/plan.log"
 terraform plan -input=false -no-color -var-file=terraform.tfvars -compact-warnings > "$planlog" 2>&1 & plan_pid=$!; heartbeat "$plan_pid"; wait "$plan_pid" || { cat "$planlog"; die "the plan failed (above). Nothing was changed."; }
-[ -n "$yes" ] || sed -n '/Terraform will perform/,$p' "$planlog" | grep -v '^$' | tail -n 60
+# "No changes" has no such section: grep then finds nothing, which must not stop the run.
+[ -n "$yes" ] || { sed -n '/Terraform will perform/,$p' "$planlog" | grep -v '^$' | tail -n 60 || true; }
 grep -E '^Plan:' "$planlog" || true
 # Replacing the generated files and the install step is routine; anything
 # else removed or replaced is worth a second look.

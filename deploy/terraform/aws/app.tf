@@ -230,7 +230,10 @@ resource "terraform_data" "uninstall" {
       set -e
       k() { kubectl --kubeconfig "$kc" "$@"; }
       k delete namespace simple-host --ignore-not-found --wait=true --timeout=600s
-      k delete clusterissuer simple-host-letsencrypt --ignore-not-found
+      # A cluster whose cert-manager is already gone has no ClusterIssuer type.
+      if k api-resources --api-group=cert-manager.io -o name | grep -qx clusterissuers.cert-manager.io; then
+        k delete clusterissuer simple-host-letsencrypt --ignore-not-found
+      fi
       k -n '${self.input.cert_manager_namespace}' delete serviceaccount/simple-host-dns role/simple-host-dns-token rolebinding/simple-host-dns-token --ignore-not-found
       rm -f "$kc"
     EOT
