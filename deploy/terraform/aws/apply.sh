@@ -371,17 +371,25 @@ if [ -n "$destroy" ]; then
   run_tf destroy -input=false -auto-approve -var-file=terraform.tfvars || die "the removal stopped; run the same command again"
   # The state bucket goes too when it holds only this install's state (its
   # old versions hold every secret the install had).
-  others=$(aws s3api list-object-versions --bucket "$state_bucket" --query '[Versions,DeleteMarkers][][].Key' --output text 2>/dev/null | tr '\t' '\n' | grep -v '^None$' | grep -v "^$base/" || true)
+  # A failed listing keeps the bucket: never guess that it holds only ours.
+  keys=$(aws s3api list-object-versions --bucket "$state_bucket" --query '[Versions,DeleteMarkers][][].Key' --output text) ||
+    die "could not list s3://$state_bucket to check it holds only this install's state; it stays. Delete it in the S3 console if it does"
+  # Keys that do not start with "$base/" (a literal prefix, not a pattern) belong to another install.
+  others=$(printf '%s\n' "$keys" | tr '\t' '\n' | grep -v -e '^None$' -e '^$' | while IFS= read -r k; do [ "${k#"$base/"}" != "$k" ] || printf '%s\n' "$k"; done || true)
   if [ -z "$others" ]; then
     say "Deleting the Terraform state bucket s3://$state_bucket"
     # Every version and delete marker, 500 at a time; a last heartbeat write
     # still in flight can land meanwhile, so it tries a few times.
     for try in 1 2 3 4 5; do
+      rounds=0
       while :; do
+        rounds=$((rounds + 1))
+        [ "$rounds" -le 200 ] || die "the state bucket s3://$state_bucket is not emptying (a delete is refused); empty and delete it in the S3 console"
         v=$(aws s3api list-object-versions --bucket "$state_bucket" --max-keys 500 --output json |
           python3 -c 'import json,sys; d=json.load(sys.stdin); o=[{"Key":x["Key"],"VersionId":x["VersionId"]} for x in (d.get("Versions") or [])+(d.get("DeleteMarkers") or [])][:500]; print(json.dumps({"Objects":o,"Quiet":True}) if o else "")')
         [ -n "$v" ] || break
-        aws s3api delete-objects --bucket "$state_bucket" --delete "$v" >/dev/null
+        err=$(aws s3api delete-objects --bucket "$state_bucket" --delete "$v" --query 'Errors[0].[Code,Message]' --output text)
+        [ -z "$err" ] || [ "$err" = None ] || die "S3 refused to delete part of s3://$state_bucket ($err); empty and delete it in the S3 console"
       done
       aws s3api delete-bucket --bucket "$state_bucket" 2>/dev/null && { echo "Deleted."; break; }
       [ "$try" = 5 ] && die "the state bucket s3://$state_bucket could not be deleted; empty and delete it in the S3 console"
