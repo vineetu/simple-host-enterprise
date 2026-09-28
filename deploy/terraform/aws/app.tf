@@ -186,6 +186,8 @@ resource "local_file" "work" {
 # and a failed run is picked up by the next apply.
 resource "terraform_data" "install" {
   triggers_replace = [for k in sort(keys(local.files)) : sha256(local.files[k])]
+  # What the removal below needs, since it may run from another shell.
+  input = { cluster = local.cluster_name, region = var.region, cert_manager_namespace = var.cert_manager_namespace }
 
   provisioner "local-exec" {
     interpreter = ["/bin/bash", "-c"]
@@ -197,6 +199,22 @@ resource "terraform_data" "install" {
       k -n simple-host wait --for=condition=Ready externalsecret/simple-host-secrets --timeout=180s
       k -n simple-host rollout status deploy/simple-host --timeout=600s
       k -n simple-host rollout status deploy/simple-host-owner-hosts --timeout=300s
+    EOT
+  }
+
+  # terraform destroy: take Simple Host off the cluster (it may be yours and
+  # stay). The namespace takes the Ingresses, certificates and secrets with it.
+  provisioner "local-exec" {
+    when        = destroy
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<-EOT
+      kc=$(mktemp)
+      aws eks update-kubeconfig --name '${self.input.cluster}' --region '${self.input.region}' --kubeconfig "$kc" >/dev/null || exit 0
+      k() { kubectl --kubeconfig "$kc" "$@"; }
+      k delete namespace simple-host --ignore-not-found --wait=true --timeout=300s || true
+      k delete clusterissuer simple-host-letsencrypt --ignore-not-found || true
+      k -n '${self.input.cert_manager_namespace}' delete serviceaccount/simple-host-dns role/simple-host-dns-token rolebinding/simple-host-dns-token --ignore-not-found || true
+      rm -f "$kc"
     EOT
   }
 

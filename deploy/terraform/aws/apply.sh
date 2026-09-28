@@ -107,6 +107,7 @@ if ! aws s3api head-bucket --bucket "$state_bucket" 2>/dev/null; then
   if [ "$region" = us-east-1 ]; then aws s3api create-bucket --bucket "$state_bucket" >/dev/null
   else aws s3api create-bucket --bucket "$state_bucket" --create-bucket-configuration "LocationConstraint=$region" >/dev/null; fi
   aws s3api put-public-access-block --bucket "$state_bucket" --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+  aws s3api put-bucket-tagging --bucket "$state_bucket" --tagging "TagSet=[{Key=simple-host,Value=$name}]"
   aws s3api put-bucket-versioning --bucket "$state_bucket" --versioning-configuration Status=Enabled
   aws s3api put-bucket-encryption --bucket "$state_bucket" --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
   aws s3api put-bucket-policy --bucket "$state_bucket" --policy "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"TLSOnly\",\"Effect\":\"Deny\",\"Principal\":\"*\",\"Action\":\"s3:*\",\"Resource\":[\"arn:aws:s3:::$state_bucket\",\"arn:aws:s3:::$state_bucket/*\"],\"Condition\":{\"Bool\":{\"aws:SecureTransport\":\"false\"}}}]}"
