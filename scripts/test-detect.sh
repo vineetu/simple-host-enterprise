@@ -7,7 +7,9 @@
 #   3. only cert-manager's CRDs left, not ours    -> stop with the delete command
 #   4. External Secrets under another release     -> use it
 #   5. External Secrets CRDs left, no controller (the other release's deployments gone) -> stop
-#   6. cert-manager older than 1.14 running        -> stop, asking for an upgrade
+#   6. cert-manager 1.14 running (older than 1.15) -> stop, asking for an upgrade
+#   7. namespace simple-host with this install's label -> carry on (a cut-off install)
+#   8. namespace simple-host without it                -> stop
 # Needs docker, kind, kubectl and helm. Usage: bash scripts/test-detect.sh
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -22,7 +24,7 @@ detect() {
   ( set -euo pipefail
     k() { kubectl --kubeconfig "$kc" "$@"; }
     die() { printf 'Stopped: %s\n' "$*"; exit 1; }
-    detected=$(mktemp)
+    detected=$(mktemp) name=sh-test cluster=kind
     eval "$block"
     cat "$detected"; rm -f "$detected" ) 2>&1 || true
 }
@@ -52,8 +54,15 @@ k -n eso delete deploy --all >/dev/null
 expect "5 External Secrets CRDs left, no controller: stop with the delete command" 'Stopped: .*installed by eso.*kubectl delete customresourcedefinition'
 k get crd -o name | grep external-secrets.io | xargs -r kubectl --kubeconfig "$kc" delete >/dev/null
 
-k apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.6/cert-manager.yaml >/dev/null
+k apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.7/cert-manager.yaml >/dev/null
 k -n cert-manager rollout status deploy/cert-manager --timeout=180s >/dev/null
-expect "6 cert-manager 1.13: stop, asking for an upgrade" 'Stopped: .*older than 1.14'
+expect "6 cert-manager 1.14: stop, asking for an upgrade" 'Stopped: .*older than 1.15'
+
+k delete -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.7/cert-manager.yaml --ignore-not-found >/dev/null 2>&1 || true
+k create namespace simple-host >/dev/null
+k label namespace simple-host simple-host.app/install=sh-test >/dev/null
+expect "7 namespace simple-host with this install's label: carry on" '^$'
+k label namespace simple-host simple-host.app/install=someone-else --overwrite >/dev/null
+expect "8 namespace simple-host of another install: stop" 'Stopped: namespace simple-host already exists in kind and was not made by this install'
 
 exit $fail

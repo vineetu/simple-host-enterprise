@@ -44,7 +44,7 @@ variable "allowed_email_domains" {
   type        = list(string)
   default     = []
   validation {
-    condition     = var.oidc_issuer != "https://accounts.google.com" || length(var.allowed_email_domains) > 0
+    condition     = !can(regex("^https://accounts\\.google\\.com\\.?([:/].*)?$", lower(var.oidc_issuer))) || length(var.allowed_email_domains) > 0
     error_message = "With Google sign-in, allowed_email_domains is required: otherwise any Google account could sign in."
   }
 }
@@ -53,8 +53,12 @@ variable "oidc_issuer" {
   description = "The sign-in provider's issuer URL."
   type        = string
   validation {
-    condition     = can(regex("^https://[^\\s/]+", var.oidc_issuer)) && !endswith(var.oidc_issuer, "/")
-    error_message = "oidc_issuer is an https:// URL without a trailing slash."
+    condition     = can(regex("^https://[^\\s/\"\\\\?#@]+(/[^\\s\"\\\\?#]*)?$", var.oidc_issuer)) && !endswith(var.oidc_issuer, "/") && length(var.oidc_issuer) <= 2048
+    error_message = "oidc_issuer is an https:// URL without a trailing slash, spaces, quotes, a query or user:password@."
+  }
+  validation {
+    condition     = !can(regex("^https://accounts\\.google\\.com\\.?([:/].*)?$", lower(var.oidc_issuer))) || var.oidc_issuer == "https://accounts.google.com"
+    error_message = "Google's issuer is exactly https://accounts.google.com."
   }
 }
 
@@ -123,9 +127,9 @@ variable "protect_data" {
 }
 
 variable "kubernetes_version" {
-  description = "For a new cluster: the Kubernetes version. null takes EKS's current default."
+  description = "For a new cluster: the Kubernetes version. Pinned like every other version and raised on purpose: upgrading the control plane replaces every node, so it is never done by a routine re-run."
   type        = string
-  default     = null
+  default     = "1.36"
 }
 
 variable "node_size" {
@@ -172,7 +176,7 @@ variable "letsencrypt_email" {
 # installed twice.
 
 variable "install_cert_manager" {
-  description = "Install cert-manager. false when the cluster already runs one (it must be v1.14 or later)."
+  description = "Install cert-manager. false when the cluster already runs one (it must be v1.15 or later)."
   type        = bool
   default     = true
 }

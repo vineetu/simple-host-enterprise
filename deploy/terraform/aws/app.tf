@@ -97,6 +97,9 @@ locals {
     images             = [{ name = "ghcr.io/vineetu/simple-host-enterprise", newName = var.image, digest = var.image_digest }]
     patches = concat(
       [{ path = "ingress-patch.yaml" }],
+      # Marks the namespace as this install's, so a run cut off during the
+      # install can tell it from another Simple Host (apply.sh).
+      [{ patch = yamlencode({ apiVersion = "v1", kind = "Namespace", metadata = { name = "simple-host", labels = { "simple-host.app/install" = local.name } } }) }],
       [{
         target = { kind = "ServiceAccount", name = "simple-host" }
         patch  = yamlencode([{ op = "add", path = "/metadata/annotations", value = { "eks.amazonaws.com/role-arn" = aws_iam_role.sa["app"].arn } }])
@@ -196,7 +199,9 @@ resource "terraform_data" "install" {
       k() { kubectl --kubeconfig '${local.work}/kubeconfig' "$@"; }
       # A namespace still being removed (an earlier removal that stopped
       # halfway) cannot take new objects: wait for it to go.
-      k wait --for=delete namespace/simple-host --timeout=300s 2>/dev/null || true
+      if [ "$(k get namespace simple-host -o jsonpath='{.status.phase}' 2>/dev/null)" = Terminating ]; then
+        k wait --for=delete namespace/simple-host --timeout=300s
+      fi
       k apply -f '${local.work}/issuer.yaml'
       k apply -k '${local.work}/overlay'
       k -n simple-host wait --for=condition=Ready externalsecret/simple-host-secrets --timeout=180s

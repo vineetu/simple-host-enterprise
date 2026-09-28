@@ -15,12 +15,6 @@ locals {
   new_cluster_name = var.cluster_name != "" ? var.cluster_name : local.name
 }
 
-# EKS's current default version, unless kubernetes_version names one.
-data "aws_eks_cluster_versions" "default" {
-  count        = var.create_cluster && var.kubernetes_version == null ? 1 : 0
-  default_only = true
-}
-
 module "vpc" {
   count   = var.create_cluster ? 1 : 0
   source  = "terraform-aws-modules/vpc/aws"
@@ -47,7 +41,7 @@ module "eks" {
   version = "21.26.0"
 
   name               = local.new_cluster_name
-  kubernetes_version = var.kubernetes_version != null ? var.kubernetes_version : data.aws_eks_cluster_versions.default[0].cluster_versions[0].cluster_version
+  kubernetes_version = var.kubernetes_version
 
   # CloudShell (or your pipeline) reaches the API over the internet; whoever
   # runs this becomes the cluster's admin.

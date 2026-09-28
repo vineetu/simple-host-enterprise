@@ -53,7 +53,7 @@ at a pinned commit, after checking its checksum:
 2. fetches this repository at that commit and writes `terraform.tfvars`;
 3. keeps the Terraform state in `s3://<name>-tfstate-<account>-<region>`
    (versioning, encryption, TLS only, lockfile locking);
-4. on an existing cluster, uses a cert-manager (1.14 or later) or External
+4. on an existing cluster, uses a cert-manager (1.15 or later) or External
    Secrets Operator (serving `external-secrets.io/v1`) already there, and
    stops with the exact fix when one is too old or only its CRDs are left
    behind. It adds the cluster's IAM OIDC provider when it is missing, outside
@@ -73,12 +73,21 @@ next question: it drops them first.
 
 What it recovers from:
 
-- a run cut off with no chance to stop leaves its lock; every run keeps a
-  heartbeat next to the state, and a lock with no heartbeat for 3 minutes is
-  cleared (a run that is still going is left alone, and the line says so);
+- a run cut off with no chance to stop leaves its lock. While it runs
+  Terraform, `apply.sh` keeps a heartbeat next to the state; a lock is cleared
+  only when the heartbeat was written after the lock was taken (so the lock is
+  this line's) and has been silent for 3 minutes. Any other lock, such as a
+  pipeline's or a run that is still going, is left alone, and the line says who
+  holds it and the `terraform force-unlock` command to use if you are sure;
 - a cluster, node group or database whose creation was cut short is waited
-  for and kept (or adopted, if the state never heard of it), so the long parts
-  are not made twice;
+  for and kept, so the long parts are not made twice;
+- something a run made but never recorded (the shell was killed outright) is
+  adopted only when it carries this install's tag `simple-host = <name>`,
+  which everything the module makes has from the moment it is created.
+  Anything else by that name (a cluster, database, bucket, secret, role, key)
+  is someone else's: the run stops, names it and changes nothing;
+- on a cluster of yours, the `simple-host` namespace a cut-off install left
+  is recognised by its label `simple-host.app/install = <name>`;
 - a Helm install cut short is cleared and made again.
 
 An AWS account on the free plan cannot launch the nodes or the database at
@@ -136,6 +145,8 @@ from its Advanced step, `extra_config` (more `config.env` settings,
 
 - `name` (the resource prefix, derived from the address),
 - `image_digest` (the pinned release),
+- `kubernetes_version` (a new cluster's version, `1.36`; raise it on
+  purpose, since an upgrade replaces every node),
 - `node_size` and `node_count` (used when the cluster is created; scale it
   later in EKS),
 - `api_access_cidrs` (who may reach a new cluster's Kubernetes API over the
@@ -177,10 +188,18 @@ The address's own certificate stays with Let's Encrypt.
 - **A setting**: add it to `extra_config` and apply. The pods roll over.
 - **Remove**: `--destroy` refuses while `protect_data` is `true` (the
   default), so a slip cannot delete the database and every site. Take the data
-  you need first (`docs/uninstall.md`), add `protect_data = false` to
-  `terraform.tfvars`, run the line once as it is, then again with `--destroy`
-  (it asks you to type the address). Delete the NS records at your DNS
-  provider too.
+  you need first (`docs/uninstall.md`), then paste the setup line with
+  `TF_VAR_protect_data=false` in front of `bash` and ` --destroy` at the end:
+
+  ```sh
+  f=$(mktemp) && curl … && TF_VAR_protect_data=false bash "$f" --ref … --tfvars … --destroy
+  ```
+
+  It lifts the deletion protection, then removes everything (it asks you to
+  type the address first). From a pipeline, set `protect_data = false` in
+  `terraform.tfvars` and apply once before `terraform destroy`; a value in
+  `terraform.tfvars` wins over `TF_VAR_protect_data`, as always in Terraform.
+  Delete the NS records at your DNS provider too.
 - **What removal leaves on a cluster of yours**: the IAM OIDC provider, the
   empty `cert-manager`, `external-secrets` and `simple-host-ingress`
   namespaces, and the cert-manager and External Secrets CRDs (Helm keeps

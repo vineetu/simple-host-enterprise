@@ -50,12 +50,12 @@ die() { printf '\nStopped: %s\n' "$*" >&2; exit 1; }
 [ -n "$src" ] || [[ "$ref" =~ ^[0-9a-f]{40}$ ]] || die "--ref is the full 40-character commit id"
 
 tfvars=$(printf '%s' "$tfvars_b64" | base64 -d 2>/dev/null) || die "--tfvars is not base64"
-# One value: TF_VAR_<name> from the environment wins (as it does in
-# Terraform), else terraform.tfvars (a string, a bool or a number).
+# One value, as Terraform sees it: terraform.tfvars wins, then
+# TF_VAR_<name> from the environment (a string, a bool or a number).
 var() {
-  local env="TF_VAR_$1"
-  if [ -n "${!env:-}" ]; then printf '%s' "${!env}"; return; fi
-  printf '%s\n' "$tfvars" | sed -n "s/^$1 *= *\"\{0,1\}\([^\"]*\)\"\{0,1\} *$/\1/p" | head -n1
+  local env="TF_VAR_$1" v
+  v=$(printf '%s\n' "$tfvars" | sed -n "s/^$1 *= *\"\{0,1\}\([^\"]*\)\"\{0,1\} *$/\1/p" | head -n1)
+  if [ -n "$v" ]; then printf '%s' "$v"; else printf '%s' "${!env:-}"; fi
 }
 region=$(var region); base=$(var base_domain); create=$(var create_cluster); cluster=$(var cluster_name); name=$(var name)
 [ -n "$region" ] && [ -n "$base" ] && [ -n "$create" ] || die "terraform.tfvars needs region, base_domain and create_cluster"
@@ -149,21 +149,28 @@ else
   terraform init -input=false -reconfigure -backend-config="bucket=$state_bucket" -backend-config="key=$state_key" -backend-config="region=$region" -backend-config="use_lockfile=true" >/dev/null
 
   # A run that was cut off without a chance to stop (the shell was killed)
-  # leaves its lock behind. Every run keeps a heartbeat next to the state
-  # while Terraform works; a lock with no heartbeat for 3 minutes is stale.
+  # leaves its lock behind. While apply.sh runs Terraform it keeps a
+  # heartbeat next to the state. A lock is cleared only when that heartbeat
+  # was written after the lock was taken (so the lock is apply.sh's) and has
+  # been silent for 3 minutes. Any other lock (a pipeline, a laptop, a run
+  # still going) is left alone.
   if lock=$(aws s3 cp "s3://$state_bucket/$state_key.tflock" - 2>/dev/null); then
-    beat=$(aws s3api head-object --bucket "$state_bucket" --key "$state_key.alive" --query LastModified --output text 2>/dev/null || true)
-    age=999999
-    [ -n "$beat" ] && [ "$beat" != None ] && age=$(( $(date +%s) - $(date -d "$beat" +%s) ))
     lock_id=$(printf '%s' "$lock" | sed -n 's/.*"ID": *"\([^"]*\)".*/\1/p')
-    if [ "$age" -lt 180 ]; then
-      die "another run is working on this install right now (its heartbeat is ${age}s old). Wait for it to finish, or close that shell, and run the same line again."
-    fi
+    lock_who=$(printf '%s' "$lock" | sed -n 's/.*"Who": *"\([^"]*\)".*/\1/p')
+    lock_at=$(printf '%s' "$lock" | sed -n 's/.*"Created": *"\([^"]*\)".*/\1/p')
+    beat=$(aws s3api head-object --bucket "$state_bucket" --key "$state_key.alive" --query LastModified --output text 2>/dev/null || true)
+    held() { die "the install is locked by $lock_who since $lock_at ($1). If you are sure nothing is running on it, clear the lock from $mod with: TF_DATA_DIR=$TF_DATA_DIR terraform force-unlock $lock_id"; }
+    [ -n "$beat" ] && [ "$beat" != None ] || held "not by a run of this line"
+    beat_s=$(date -d "$beat" +%s); lock_s=$(date -d "${lock_at:-now}" +%s 2>/dev/null || date +%s)
+    [ "$beat_s" -ge "$lock_s" ] || held "not by a run of this line"
+    age=$(( $(date +%s) - beat_s ))
+    [ "$age" -ge 180 ] || die "another run is working on this install right now (its heartbeat is ${age}s old). Wait for it to finish, or close that shell, and run the same line again."
     say "Clearing the lock a stopped run left"
     terraform force-unlock -force "$lock_id" >/dev/null
   fi
 fi
 tfstate=$(terraform state list 2>/dev/null || true)
+db_addr='aws_db_instance.db'
 in_state() { grep -qxF "$1" <<<"$tfstate"; }
 
 # Runs Terraform so that closing the shell stops it cleanly: Terraform runs
@@ -173,6 +180,13 @@ in_state() { grep -qxF "$1" <<<"$tfstate"; }
 # the lock. A heartbeat next to the state tells a later run whether this one
 # is still alive.
 tf_pid='' tail_pid='' beat_pid=''
+# heartbeat <pid>: next to the state every 60 s while <pid> lives, in a
+# session of its own so a hang-up does not stop it while Terraform winds down.
+heartbeat() {
+  : > "$work/heartbeat"
+  setsid bash -c 'while kill -0 "$1" 2>/dev/null; do aws s3api put-object --bucket "$2" --key "$3" --body "$4" >/dev/null 2>&1 || true; sleep 60; done' _ "$1" "$state_bucket" "$state_key.alive" "$work/heartbeat" </dev/null >/dev/null 2>&1 &
+  beat_pid=$!
+}
 stop_tf() {
   trap '' HUP INT TERM
   printf '\nStopping cleanly, keeping what is done (this can take a minute)...\n' 2>/dev/null || true
@@ -189,9 +203,7 @@ run_tf() {
   from=$(( $(wc -l < "$log") + 1 ))
   setsid terraform "$@" -no-color >> "$log" 2>&1 < /dev/null &
   tf_pid=$!
-  : > "$work/heartbeat"
-  ( while kill -0 "$tf_pid" 2>/dev/null; do aws s3api put-object --bucket "$state_bucket" --key "$state_key.alive" --body "$work/heartbeat" >/dev/null 2>&1 || true; sleep 60; done ) &
-  beat_pid=$!
+  heartbeat "$tf_pid"
   tail -n +"$from" -f "$log" --pid="$tf_pid" 2>/dev/null &
   tail_pid=$!
   trap stop_tf HUP INT TERM
@@ -226,8 +238,8 @@ if [ "$create" = false ]; then
         img=$(k -n "$ns" get deploy "$dep" -o jsonpath='{.spec.template.spec.containers[0].image}')
         v=$(sed -n 's/.*:v\([0-9]*\)\.\([0-9]*\).*/\1 \2/p' <<<"$img")
         read -r maj min <<<"${v:-0 0}"
-        if [ "$maj" -lt 1 ] || { [ "$maj" -eq 1 ] && [ "$min" -lt 14 ]; }; then
-          die "the cert-manager in namespace $ns ($img) is older than 1.14, which Simple Host needs (DNS-01 with a ServiceAccount token). Upgrade it, then run the same line again."
+        if [ "$maj" -lt 1 ] || { [ "$maj" -eq 1 ] && [ "$min" -lt 15 ]; }; then
+          die "the cert-manager in namespace $ns ($img) is older than 1.15, which Simple Host needs (Route 53 DNS-01 with a ServiceAccount token). Upgrade it, then run the same line again."
         fi
         sa=$(k -n "$ns" get deploy "$dep" -o jsonpath='{.spec.template.spec.serviceAccountName}')
         printf 'install_cert_manager = false\ncert_manager_namespace = "%s"\ncert_manager_service_account = "%s"\n' "$ns" "${sa:-cert-manager}" >> "$detected"
@@ -254,10 +266,13 @@ if [ "$create" = false ]; then
     fi
   fi
 
-  # </detect>
-  if ns_owner=$(k get namespace simple-host -o jsonpath='{.metadata.name}' 2>/dev/null) && [ -n "$ns_owner" ] && ! in_state terraform_data.install; then
-    die "namespace simple-host already exists in $cluster and this install did not make it. Is another Simple Host installed there?"
+  # A namespace simple-host is this install's when it carries its label
+  # (a run cut off during the install left it); otherwise it is another one.
+  if k get namespace simple-host >/dev/null 2>&1; then
+    ns_owner=$(k get namespace simple-host -o jsonpath='{.metadata.labels.simple-host\.app/install}' 2>/dev/null || true)
+    [ "$ns_owner" = "$name" ] || die "namespace simple-host already exists in $cluster and was not made by this install (its label simple-host.app/install is \"${ns_owner:-missing}\", not \"$name\"). Is another Simple Host installed there? Remove it first (kubectl delete namespace simple-host) if it is a leftover."
   fi
+  # </detect>
 
   # IAM roles for service accounts need the cluster's OIDC provider. Made
   # here, outside Terraform, when missing, so a later removal never takes it
@@ -273,19 +288,31 @@ if [ "$create" = false ]; then
   fi
   rm -f "$kc"
 fi
-# A public Route 53 zone for the address already in the account is used as it is.
+# A public Route 53 zone for the address: one this install made (its tag)
+# but lost track of is adopted; any other is yours and used as it is.
 zone=$(aws route53 list-hosted-zones-by-name --dns-name "$base." --max-items 1 --query "HostedZones[?Name=='$base.' && !Config.PrivateZone].Id | [0]" --output text 2>/dev/null || true)
 if [ -n "$zone" ] && [ "$zone" != None ] && ! in_state 'aws_route53_zone.base[0]'; then
-  printf 'dns_zone_id = "%s"\n' "${zone#/hostedzone/}" >> "$detected"
+  zone=${zone#/hostedzone/}
+  if [ "$(aws route53 list-tags-for-resource --resource-type hostedzone --resource-id "$zone" --query 'ResourceTagSet.Tags[?Key==`simple-host`].Value | [0]' --output text 2>/dev/null)" = "$name" ]; then
+    echo "Adopting the DNS zone $zone, which an earlier run made"
+    printf 'import {\n  to = aws_route53_zone.base[0]\n  id = "%s"\n}\n' "$zone" > zz_recover.tf
+  else
+    printf 'dns_zone_id = "%s"\n' "$zone" >> "$detected"
+  fi
 fi
 
 if [ -n "$destroy" ]; then
-  [ "$(var protect_data)" = false ] || die "the database and the bucket are protected (protect_data). To remove everything, take what you need first (docs/uninstall.md), add protect_data = false to terraform.tfvars, run the line once without --destroy, then with it. See deploy/terraform/aws/README.md."
+  [ "$(var protect_data)" = false ] || die "the database and the bucket are protected (protect_data). To remove everything, take what you need first (docs/uninstall.md), then run the same line again with TF_VAR_protect_data=false in front of bash and --destroy at the end. See deploy/terraform/aws/README.md, Remove."
   say "Removing Simple Host from $base"
   if [ -z "$yes" ]; then
     drain; printf 'This deletes the database and every site. Type the address (%s) to go ahead: ' "$base"
     read -r answer </dev/tty || die "nothing typed"
     [ "$answer" = "$base" ] || die "not removed"
+  fi
+  # Deletion protection is lifted first (it is a setting of the database
+  # and the bucket, and destroy cannot change settings).
+  if in_state "$db_addr" || in_state aws_s3_bucket.sites; then
+    run_tf apply -input=false -auto-approve -var-file=terraform.tfvars -target=aws_db_instance.db -target=aws_s3_bucket.sites || die "lifting the deletion protection stopped; run the same command again"
   fi
   run_tf destroy -input=false -auto-approve -var-file=terraform.tfvars || die "the removal stopped; run the same command again"
   exit 0
@@ -325,8 +352,12 @@ fi
 eks_addr='module.eks[0].aws_eks_cluster.this[0]'
 ng_addr='module.eks[0].module.eks_managed_node_group["default"].aws_eks_node_group.this[0]'
 db_addr='aws_db_instance.db'
-# until_status <command printing a status> <wanted> <"failed states"> <seconds>
-until_status() {
+# <adopt> (scripts/test-adopt.sh runs this block against a stand-in aws)
+# Things a run cut off outright made but never recorded in the state. They
+# are adopted only when they carry this install's tag, simple-host=<name>
+# (every resource this module makes has it from the moment it is created);
+# anything else by that name is someone else's, and the run stops.
+until_status() { # <command printing a status> <wanted> <"failed states"> <seconds>
   local end=$((SECONDS + $4)) st
   while [ $SECONDS -lt $end ]; do
     st=$(eval "$1" 2>/dev/null || true)
@@ -336,69 +367,97 @@ until_status() {
   done
   return 1
 }
+import_block() { recover+=$'import {\n  to = '"$1"$'\n  id = "'"$2"$'"\n}\n'; }
+q() { local v; v=$(aws "$@" --output text 2>/dev/null) || return 0; [ "$v" = None ] || printf '%s' "$v"; }
+not_ours() { die "$1 already exists in this AWS account and was not made by this install (it has no simple-host=$name tag). Nothing was changed. Choose another name (name = \"...\" in terraform.tfvars), or remove $1 if it is left from something else."; }
+# adopt <address> <import id> <what> <tag of the existing thing, or "absent">
+adopt() {
+  in_state "$1" && return 0
+  [ "$4" = absent ] && return 0
+  [ "$4" = "$name" ] || not_ours "$3"
+  echo "Adopting $3, which an earlier run made"
+  import_block "$1" "$2"
+}
+if [ "$create" = true ] && ! in_state "$eks_addr" && aws eks describe-cluster --name "$cluster" >/dev/null 2>&1; then
+  t=$(q eks describe-cluster --name "$cluster" --query 'cluster.tags."simple-host"')
+  [ "$t" = "$name" ] || not_ours "the EKS cluster $cluster"
+  echo "Waiting for the cluster an earlier run started, to adopt it"
+  until_status "aws eks describe-cluster --name $cluster --query cluster.status --output text" ACTIVE FAILED 1200 || die "the cluster $cluster an earlier run started did not become active; delete it in the EKS console and run the same line again"
+  import_block "$eks_addr" "$cluster"
+fi
+if [ "$create" = true ] && ! in_state "$ng_addr" && aws eks describe-cluster --name "$cluster" >/dev/null 2>&1; then
+  ng=$(q eks list-nodegroups --cluster-name "$cluster" --query 'nodegroups[?starts_with(@, `default-`)] | [0]')
+  if [ -n "$ng" ] && [ "$(q eks describe-nodegroup --cluster-name "$cluster" --nodegroup-name "$ng" --query 'nodegroup.tags."simple-host"')" = "$name" ]; then
+    echo "Waiting for the nodes an earlier run started, to adopt them"
+    if until_status "aws eks describe-nodegroup --cluster-name $cluster --nodegroup-name $ng --query nodegroup.status --output text" ACTIVE 'CREATE_FAILED DEGRADED DELETING' 600; then
+      import_block "$ng_addr" "$cluster:$ng"
+    else
+      # Nodes that never joined: remove them, and new ones are made.
+      echo "Those nodes did not start; removing them to make new ones"
+      aws eks delete-nodegroup --cluster-name "$cluster" --nodegroup-name "$ng" >/dev/null
+      aws eks wait nodegroup-deleted --cluster-name "$cluster" --nodegroup-name "$ng"
+    fi
+  fi
+fi
+if ! in_state "$db_addr" && aws rds describe-db-instances --db-instance-identifier "$name" >/dev/null 2>&1; then
+  t=$(q rds describe-db-instances --db-instance-identifier "$name" --query 'DBInstances[0].TagList[?Key==`simple-host`].Value | [0]')
+  [ "$t" = "$name" ] || not_ours "the RDS database $name"
+  echo "Waiting for the database an earlier run started, to adopt it"
+  until_status "aws rds describe-db-instances --db-instance-identifier $name --query DBInstances[0].DBInstanceStatus --output text" available 'failed incompatible-parameters incompatible-network storage-full' 1800 || die "the database $name an earlier run started did not become available; see the RDS console"
+  import_block "$db_addr" "$name"
+fi
+if [ "$create" = true ]; then
+  kms_key=$(q kms describe-key --key-id "alias/eks/$cluster" --query KeyMetadata.KeyId)
+  if [ -n "$kms_key" ]; then
+    t=$(q kms list-resource-tags --key-id "$kms_key" --query 'Tags[?TagKey==`simple-host`].TagValue | [0]')
+    adopt 'module.eks[0].module.kms.aws_kms_key.this[0]' "$kms_key" "the KMS key behind alias/eks/$cluster" "$t"
+    # An alias carries no tags: it is ours when the key it names is.
+    adopt 'module.eks[0].module.kms.aws_kms_alias.this["cluster"]' "alias/eks/$cluster" "the KMS alias alias/eks/$cluster" "$t"
+  fi
+  if [ -n "$(q logs describe-log-groups --log-group-name-prefix "/aws/eks/$cluster/cluster" --query 'logGroups[?logGroupName==`'"/aws/eks/$cluster/cluster"'`].logGroupName | [0]')" ]; then
+    adopt 'module.eks[0].aws_cloudwatch_log_group.this[0]' "/aws/eks/$cluster/cluster" "the log group /aws/eks/$cluster/cluster" "$(q logs list-tags-log-group --log-group-name "/aws/eks/$cluster/cluster" --query 'tags."simple-host"')"
+  fi
+fi
+sgarn=$(q rds describe-db-subnet-groups --db-subnet-group-name "$name" --query 'DBSubnetGroups[0].DBSubnetGroupArn')
+[ -n "$sgarn" ] && adopt 'aws_db_subnet_group.db' "$name" "the DB subnet group $name" "$(q rds list-tags-for-resource --resource-name "$sgarn" --query 'TagList[?Key==`simple-host`].Value | [0]')"
+dbsg=$(q ec2 describe-security-groups --filters "Name=tag:simple-host,Values=$name" "Name=group-name,Values=$name-db-*" --query 'SecurityGroups[0].GroupId')
+[ -n "$dbsg" ] && adopt 'aws_security_group.db' "$dbsg" "the database security group $dbsg" "$name"
+bucket="$name-sites-$account-$region"
+if aws s3api head-bucket --bucket "$bucket" >/dev/null 2>&1; then
+  adopt 'aws_s3_bucket.sites' "$bucket" "the S3 bucket $bucket" "$(q s3api get-bucket-tagging --bucket "$bucket" --query 'TagSet[?Key==`simple-host`].Value | [0]')"
+fi
+for sn in app oidc; do
+  arn=$(q secretsmanager describe-secret --secret-id "$name/$sn" --query ARN)
+  [ -n "$arn" ] && adopt "aws_secretsmanager_secret.$sn" "$arn" "the secret $name/$sn" "$(q secretsmanager describe-secret --secret-id "$name/$sn" --query 'Tags[?Key==`simple-host`].Value | [0]')"
+done
+for r in app secrets dns; do
+  role="$name-$r-$region"
+  if aws iam get-role --role-name "$role" >/dev/null 2>&1; then
+    adopt "aws_iam_role.sa[\"$r\"]" "$role" "the IAM role $role" "$(q iam list-role-tags --role-name "$role" --query 'Tags[?Key==`simple-host`].Value | [0]')"
+    # Its inline policy is ours when the role is (a policy has no tags).
+    aws iam get-role-policy --role-name "$role" --policy-name simple-host >/dev/null 2>&1 && adopt "aws_iam_role_policy.sa[\"$r\"]" "$role:simple-host" "the policy of $role" "$name"
+  fi
+done
+# </adopt>
 keep() {
   echo "Waiting for $2 that an earlier run started, to keep it"
   if eval "$3"; then terraform untaint "$1" >/dev/null && echo "Kept $2"; else echo "$2 did not finish; it will be made again"; fi
 }
+# A tainted entry in this install's own state is this install's: keep it.
 if [ "$create" = true ]; then
-  if grep -qxF "$eks_addr" <<<"$tainted"; then keep "$eks_addr" "the cluster" "until_status 'aws eks describe-cluster --name $cluster --query cluster.status --output text' ACTIVE FAILED 1200"
-  elif ! in_state "$eks_addr" && aws eks describe-cluster --name "$cluster" >/dev/null 2>&1; then
-    echo "Waiting for the cluster an earlier run started, to adopt it"
-    until_status "aws eks describe-cluster --name $cluster --query cluster.status --output text" ACTIVE FAILED 1200 || die "the cluster $cluster an earlier run started did not become active; delete it in the EKS console and run the same line again"
-    recover+=$'import {\n  to = '"$eks_addr"$'\n  id = "'"$cluster"$'"\n}\n'
-  fi
+  if grep -qxF "$eks_addr" <<<"$tainted"; then keep "$eks_addr" "the cluster" "until_status 'aws eks describe-cluster --name $cluster --query cluster.status --output text' ACTIVE FAILED 1200"; fi
   if grep -qxF "$ng_addr" <<<"$tainted"; then
     ng=$(terraform state show -no-color "$ng_addr" 2>/dev/null | sed -n 's/^ *node_group_name *= *"\(.*\)"/\1/p' | head -n1)
     # Nodes that cannot join never finish: give them 10 minutes, then make them again.
     keep "$ng_addr" "the nodes" "until_status 'aws eks describe-nodegroup --cluster-name $cluster --nodegroup-name $ng --query nodegroup.status --output text' ACTIVE 'CREATE_FAILED DEGRADED DELETING' 600"
-  elif ! in_state "$ng_addr" && aws eks describe-cluster --name "$cluster" >/dev/null 2>&1; then
-    ng=$(aws eks list-nodegroups --cluster-name "$cluster" --query 'nodegroups[?starts_with(@, `default-`)] | [0]' --output text 2>/dev/null || true)
-    if [ -n "$ng" ] && [ "$ng" != None ] && [ "$(aws eks describe-nodegroup --cluster-name "$cluster" --nodegroup-name "$ng" --query 'nodegroup.tags."simple-host"' --output text 2>/dev/null)" = "$name" ]; then
-      echo "Waiting for the nodes an earlier run started, to adopt them"
-      if until_status "aws eks describe-nodegroup --cluster-name $cluster --nodegroup-name $ng --query nodegroup.status --output text" ACTIVE 'CREATE_FAILED DEGRADED DELETING' 600; then
-        recover+=$'import {\n  to = '"$ng_addr"$'\n  id = "'"$cluster:$ng"$'"\n}\n'
-      else
-        # Nodes that never joined: remove them, and new ones are made.
-        echo "Those nodes did not start; removing them to make new ones"
-        aws eks delete-nodegroup --cluster-name "$cluster" --nodegroup-name "$ng" >/dev/null
-        aws eks wait nodegroup-deleted --cluster-name "$cluster" --nodegroup-name "$ng"
-      fi
-    fi
   fi
 fi
 # The zone is usable as soon as it exists (only waiting for Route 53 to
 # spread it was cut short); making it again would change its name servers.
 if grep -qxF 'aws_route53_zone.base[0]' <<<"$tainted"; then terraform untaint 'aws_route53_zone.base[0]' >/dev/null && echo "Kept the DNS zone"; fi
-if grep -qxF "$db_addr" <<<"$tainted"; then keep "$db_addr" "the database" "until_status 'aws rds describe-db-instances --db-instance-identifier $name --query DBInstances[0].DBInstanceStatus --output text' available 'failed incompatible-parameters incompatible-network storage-full' 1800"
-elif ! in_state "$db_addr" && aws rds describe-db-instances --db-instance-identifier "$name" >/dev/null 2>&1; then
-  echo "Waiting for the database an earlier run started, to adopt it"
-  until_status "aws rds describe-db-instances --db-instance-identifier $name --query DBInstances[0].DBInstanceStatus --output text" available 'failed incompatible-parameters incompatible-network storage-full' 1800 || die "the database $name an earlier run started did not become available; see the RDS console"
-  recover+=$'import {\n  to = '"$db_addr"$'\n  id = "'"$name"$'"\n}\n'
-fi
-# Quick creations with fixed names that a run cut off outright made but never
-# recorded: adopt them, or the next run fails with "already exists".
-adopt() { # <address> <import id> <check command> <what>
-  in_state "$1" && return 0
-  eval "$3" >/dev/null 2>&1 || return 0
-  echo "Adopting $4 an earlier run made"
-  recover+=$'import {\n  to = '"$1"$'\n  id = "'"$2"$'"\n}\n'
-}
-if [ "$create" = true ]; then
-  kms_key=$(aws kms describe-key --key-id "alias/eks/$cluster" --query KeyMetadata.KeyId --output text 2>/dev/null || true)
-  [ -n "$kms_key" ] && adopt 'module.eks[0].module.kms.aws_kms_key.this[0]' "$kms_key" true "the cluster's encryption key"
-  adopt 'module.eks[0].module.kms.aws_kms_alias.this["cluster"]' "alias/eks/$cluster" "aws kms describe-key --key-id alias/eks/$cluster" "the cluster's key alias"
-  adopt 'module.eks[0].aws_cloudwatch_log_group.this[0]' "/aws/eks/$cluster/cluster" "aws logs describe-log-groups --log-group-name-prefix /aws/eks/$cluster/cluster --query logGroups[0].logGroupName --output text | grep -q /aws/eks" "the cluster's log group"
-fi
-adopt 'aws_db_subnet_group.db' "$name" "aws rds describe-db-subnet-groups --db-subnet-group-name $name" "the database's subnet group"
-adopt 'aws_s3_bucket.sites' "$name-sites-$account-$region" "aws s3api head-bucket --bucket $name-sites-$account-$region" "the bucket"
-for sn in app oidc; do
-  arn=$(aws secretsmanager describe-secret --secret-id "$name/$sn" --query ARN --output text 2>/dev/null || true)
-  [ -n "$arn" ] && adopt "aws_secretsmanager_secret.$sn" "$arn" true "the secret $name/$sn"
-done
-for r in app secrets dns; do
-  adopt "aws_iam_role.sa[\"$r\"]" "$name-$r-$region" "aws iam get-role --role-name $name-$r-$region" "the role $name-$r-$region"
-done
-[ -n "$recover" ] && printf '%s' "$recover" > zz_recover.tf
+if grep -qxF "$db_addr" <<<"$tainted"; then keep "$db_addr" "the database" "until_status 'aws rds describe-db-instances --db-instance-identifier $name --query DBInstances[0].DBInstanceStatus --output text' available 'failed incompatible-parameters incompatible-network storage-full' 1800"; fi
+
+[ -n "$recover" ] && printf '%s' "$recover" >> zz_recover.tf
 
 # A Helm install cut short leaves its release pending, and the next install
 # of that name would refuse: forget such a release. Its objects stay and the
@@ -432,9 +491,16 @@ fi
 # cluster and the database first (the long part), then the rest.
 if [ -z "$yes" ]; then
   say "What it will do"
-  terraform plan -input=false -var-file=terraform.tfvars -compact-warnings | sed -n '/Terraform will perform/,$p' | grep -v '^$' | tail -n 60
-  drain; printf '\nType yes to go ahead: '
-  read -r answer </dev/tty || die "nothing typed"
+  planlog="$work/plan.log"
+  terraform plan -input=false -no-color -var-file=terraform.tfvars -compact-warnings > "$planlog" 2>&1 & plan_pid=$!; heartbeat "$plan_pid"; wait "$plan_pid" || { cat "$planlog"; die "the plan failed (above). Nothing was changed."; }
+  sed -n '/Terraform will perform/,$p' "$planlog" | grep -v '^$' | tail -n 60
+  grep -E '^Plan:' "$planlog" | grep -qv ' 0 to destroy' && printf '\nNote: it will REMOVE or REPLACE something (see "must be replaced" / "will be destroyed" above).\n'
+  answer=''
+  for try in 1 2; do
+    drain; printf '\nType yes to go ahead: '
+    read -r answer </dev/tty || die "nothing typed"
+    [ -n "$answer" ] && break
+  done
   [ "$answer" = yes ] || die "nothing was changed"
 fi
 stage1=''
