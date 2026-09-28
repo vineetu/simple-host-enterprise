@@ -57,7 +57,10 @@ at a pinned commit, after checking its checksum:
    in order, with the default in brackets where there is one, and adds it to
    `terraform.tfvars`. With no terminal to ask at (an AI agent) or with
    `--yes` it stops and lists them: give them as `TF_VAR_<name>` in front of
-   `bash` (a list as `'["a@example.com"]'`). Then it fetches this repository
+   `bash` (a list as `'["a@example.com"]'`). Your answers are remembered in
+   `~/simple-host/last-answers.tfvars`: pasting the line again (after
+   CloudShell closed, say) offers each one as the default, so Enter keeps it.
+   Then it fetches this repository
    at that commit and writes `terraform.tfvars`;
 3. keeps the Terraform state in `s3://<name>-tfstate-<account>-<region>`
    (versioning, encryption, public access blocked, TLS only, lockfile

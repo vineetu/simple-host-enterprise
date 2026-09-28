@@ -79,22 +79,65 @@ var() {
 has() { local env="TF_VAR_$1"; grep -qE "^$1 *=" <<<"$tfvars" || [ -n "${!env:-}" ]; }
 # hcl_str: a Terraform string, with its template sequences written literally.
 hcl_str() { printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\${/$${/g' -e 's/%{/%%{/g')"; }
+# words: an answer split on commas, semicolons and spaces into $words, with
+# no globbing (*@example.com stays as typed).
+words() { local IFS=$' \t,;'; read -ra words <<<"$1"; }
 # hcl_list: a comma- or space-separated answer as a Terraform list of strings.
-hcl_list() { local out='' x; for x in $(tr ',' ' ' <<<"$1"); do out+="${out:+, }$(hcl_str "$x")"; done; printf '[%s]' "$out"; }
+hcl_list() { local out='' x; words "$1"; for x in "${words[@]}"; do out+="${out:+, }$(hcl_str "$x")"; done; printf '[%s]' "$out"; }
 lower() { tr '[:upper:]' '[:lower:]' <<<"$1"; }
+# invisible: the answer holds a control character or an invisible one (zero
+# width, direction marks, byte order mark, any Unicode format character).
+invisible() {
+  [[ "$1" == *[[:cntrl:]]* ]] && return 0
+  printf '%s' "$1" | LC_ALL=C grep -q $'\xe2\x80[\x8b-\x8f\xaa-\xae]\|\xe2\x81[\xa0-\xa4\xa6-\xaf]\|\xef\xbb\xbf\|\xef\xbf[\xb9-\xbb]\|\xc2\xad\|\xd8[\x80-\x85\x9c]\|\xe1\xa0\x8e' && return 0
+  printf '%s' "$1" | LC_ALL=C.UTF-8 grep -qP '\p{Cf}' 2>/dev/null
+}
+# Answers are remembered, so a run that stopped (CloudShell closed) is picked
+# up again with Enter alone: the last answers from this shell, or the saved
+# copy for the address once it is known, are each question's [default].
+answers_dir="$HOME/simple-host"; last_answers="$answers_dir/last-answers.tfvars"
+remembered() {
+  local f v base_now; base_now=$(var base_domain)
+  for f in ${base_now:+"$answers_dir/$base_now.tfvars"} "$last_answers"; do
+    [ -f "$f" ] || continue
+    v=$(sed -n "s/^$1 *= *\(.*\)\$/\1/p" "$f" | head -n1 | sed 's/  # from TF_VAR_.*$//')
+    [ -n "$v" ] || continue
+    # As typed: a list as a, b; a string without its quotes or escapes.
+    v=${v#[}; v=${v%]}
+    printf '%s' "$v" | sed -e 's/", *"/, /g' -e 's/^"//' -e 's/"$//' -e 's/\$\$[{]/${/g' -e 's/%%[{]/%{/g' -e 's/\\"/"/g' -e 's/\\\\/\\/g'
+    return
+  done
+}
 # ask_for <name> <question> <default>: asks until check_<name> accepts the
 # answer (it sets $value, the Terraform value, or prints why not).
 ask_for() {
-  local name=$1 q=$2 def=${3:-}
+  local name=$1 q=$2 def=${3:-} r
+  r=$(remembered "$name"); [ -z "$r" ] || def=$r
   while :; do
     drain; printf '%s%s: ' "$q" "${def:+ [$def]}"
     read -r answer </dev/tty || die "nothing typed"
     answer=$(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' <<<"$answer")
     [ -n "$answer" ] || answer=$def
     [ -n "$answer" ] || continue
+    if invisible "$answer"; then echo "  It has an invisible or control character in it (pasted with it, maybe). Type it again."; continue; fi
     "check_$name" "$answer" && break
   done
   tfvars=$(printf '%s\n%s = %s' "$tfvars" "$name" "$value")
+  remember_answers
+}
+# remember_answers keeps this run's answers, and any earlier one this run
+# has not reached yet, in last-answers.tfvars.
+remember_answers() {
+  local l n old=''
+  [ -f "$last_answers" ] && old=$(cat "$last_answers")
+  mkdir -p "$answers_dir"
+  { printf '%s\n' "$tfvars"
+    while IFS= read -r l; do
+      n=${l%%[ =]*}
+      if [[ "$n" =~ ^[a-z_]+$ ]] && ! has "$n"; then printf '%s\n' "$l"; fi
+    done <<<"$old"
+  } > "$last_answers.new"
+  mv "$last_answers.new" "$last_answers"
 }
 check_create_cluster() {
   case "$(lower "$1")" in y|yes|true) value=true ;; n|no|false) value=false ;; *) echo "  yes or no."; return 1 ;; esac
@@ -110,14 +153,15 @@ check_base_domain() {
 }
 re_email='^[^@"\\]+@[^@"\\]+$'
 check_admin_emails() {
-  local x v; v=$(lower "$1" | tr ',;' '  ')
-  for x in $v; do [[ "$x" =~ $re_email ]] || { echo "  \"$x\" is not an email address."; return 1; }; done
-  value=$(hcl_list "$v")
+  local x; words "$(lower "$1")"
+  [ ${#words[@]} -gt 0 ] || return 1
+  for x in "${words[@]}"; do [[ "$x" =~ $re_email ]] && [[ "$x" != *[*?]* ]] || { echo "  \"$x\" is not an email address."; return 1; }; done
+  value=$(hcl_list "${words[*]}")
 }
 re_issuer='^https://[^[:space:]/"\\?#@]+(/[^[:space:]"\\?#]*)?$'
 check_oidc_issuer() {
   local v=$1 rest host path=''
-  [[ "$v" == *://* ]] || v="https://$v"
+  if [[ "$v" == *://* ]]; then v="$(lower "${v%%://*}")://${v#*://}"; else v="https://$v"; fi
   while [[ "$v" == */ ]]; do v=${v%/}; done
   [[ "$v" =~ $re_issuer ]] && [ ${#v} -le 2048 ] || { echo "  An https:// URL, like https://your-org.okta.com."; return 1; }
   rest=${v#https://}; host=$(lower "${rest%%/*}"); host=${host%:443}; host=${host%.}
@@ -128,9 +172,10 @@ check_oidc_issuer() {
   value=$(hcl_str "https://$host$path")
 }
 check_allowed_email_domains() {
-  local x v; v=$(lower "$1" | tr ',;' '  ')
-  for x in $v; do [[ "${x#@}" =~ ^[a-z0-9_]([a-z0-9_.-]*[a-z0-9_])?$ ]] || { echo "  \"$x\" is not a domain, like example.com."; return 1; }; done
-  value=$(hcl_list "$(sed 's/\(^\| \)@/\1/g' <<<"$v")")
+  local x out=(); words "$(lower "$1")"
+  [ ${#words[@]} -gt 0 ] || return 1
+  for x in "${words[@]}"; do x=${x#@}; [[ "$x" =~ ^[a-z0-9_]([a-z0-9_.-]*[a-z0-9_])?$ ]] || { echo "  \"$x\" is not a domain, like example.com."; return 1; }; out+=("$x"); done
+  value=$(hcl_list "${out[*]}")
 }
 re_client_id='^[^[:space:]"\\]{1,512}$'
 check_oidc_client_id() {
@@ -144,8 +189,8 @@ check_cluster_name() {
 # The questions, in order: name, question, default. Company email domains
 # are asked only with Google, and the cluster's name only for one you have.
 questions() {
-  printf '%s\n' "create_cluster|Create a new EKS cluster for it (yes), or use one you have (no)|yes" \
-    "region|AWS region|us-east-1" "base_domain|Address, like sites.example.com|" \
+  printf '%s\n' "base_domain|Address, like sites.example.com|" \
+    "create_cluster|Create a new EKS cluster for it (yes), or use one you have (no)|yes" "region|AWS region|us-east-1" \
     "admin_emails|Admin emails, separated by commas|" "oidc_issuer|Sign-in issuer URL, like https://your-org.okta.com|"
   [[ "$(lower "$(var oidc_issuer)")" =~ ^https://accounts\.google\.com\.?(:443)?/*$ ]] && echo "allowed_email_domains|Company email domains (required with Google), like example.com|"
   echo "oidc_client_id|Client ID|"

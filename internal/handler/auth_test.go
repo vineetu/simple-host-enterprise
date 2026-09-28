@@ -113,3 +113,19 @@ func TestSessionsPageRefusesAPIKey(t *testing.T) {
 		t.Fatalf("GET /auth/sessions with a key = %d, want 403", response.Code)
 	}
 }
+
+func TestAdminSourceConfigured(t *testing.T) {
+	for _, c := range []struct {
+		cfg  OIDCClaimConfig
+		want bool
+	}{
+		{OIDCClaimConfig{}, false},
+		{OIDCClaimConfig{AdminEmails: []string{}}, false},
+		{OIDCClaimConfig{AdminEmails: []string{"a@corp"}}, true},
+		{OIDCClaimConfig{AdminClaim: "groups", AdminValue: "admins"}, true},
+	} {
+		if got := c.cfg.adminSourceConfigured(); got != c.want {
+			t.Errorf("%+v: adminSourceConfigured = %v, want %v", c.cfg, got, c.want)
+		}
+	}
+}

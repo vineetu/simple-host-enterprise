@@ -1059,7 +1059,10 @@ Config names are documented in `docs/configuration.md`; schema in
   issuer, client ID, email domains with Google, an existing cluster's name)
   `apply.sh` asks for in the shell, in order, and adds to the file. With no
   terminal (an AI agent) or `--yes` it stops and lists them instead
-  (`scripts/test-ask.sh` checks the questions at a pseudo-terminal).
+  (`scripts/test-ask.sh` checks the questions at a pseudo-terminal). Answers
+  are remembered (`~/simple-host/last-answers.tfvars`), so a re-run after
+  CloudShell closed needs only Enter; answers with invisible or control
+  characters are refused.
 
 ## 19. Owner hosts: per-owner certificates
 

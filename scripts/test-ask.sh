@@ -10,6 +10,10 @@
 #   7. no terminal                                -> stops with the list
 #   8. --yes                                      -> stops with the list
 #   9. a value in TF_VAR_<name>                    -> not asked
+#  10. an answer with * in it                      -> taken as typed, never matched against files
+#  11. a run stopped halfway, then Enter alone     -> the earlier answers come back as [defaults]
+#  12. an invisible character (zero width, bidi)  -> refused, asked again
+#  13. HTTPS://Acme.Okta.COM/                      -> https://acme.okta.com
 # Needs bash and python3. Usage: bash scripts/test-ask.sh
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -34,7 +38,7 @@ EOF
 # run <tfvars> <answer>...: the block at a pty, each answer typed when a
 # question (a line ending in ": ") is waiting; prints everything it wrote.
 run() {
-  ASK_TFVARS=$1 HARNESS=$harness python3 - "${@:2}" <<'PY'
+  HOME=${ASK_HOME:-$(mktemp -d)} ASK_TFVARS=$1 HARNESS=$harness python3 - "${@:2}" <<'PY'
 import os, pty, sys, time, select
 answers = sys.argv[1:]
 pid, fd = pty.fork()
@@ -56,6 +60,10 @@ while time.time() < deadline:
     elif answers and out.rstrip(b' ').endswith(b':') and out.count(b': ') > seen:
         seen = out.count(b': ')
         os.write(fd, answers.pop(0).encode() + b'\r')
+try:
+    os.kill(pid, 9)
+except OSError:
+    pass
 os.waitpid(pid, 0)
 sys.stdout.write(out.decode(errors='replace').replace('\r', ''))
 PY
@@ -93,8 +101,9 @@ got=$(run 'region = "eu-west-1"
 create_cluster = false' 's.acme.com' 'a@acme.com' 'https://acme.okta.com' 'cid' 'prod;id' 'prod-eks')
 expect "5 your own cluster: its name asked, checked" "Your EKS cluster's name.*An EKS cluster name.*cluster_name = \"prod-eks\"" "$got"
 
-got=$(run '' '' '' 's.acme.com' 'a@acme.com' 'https://acme.okta.com' 'cid')
-expect "6 defaults in brackets, empty takes them" 'Create a new EKS cluster.*\[yes\]: .*AWS region \[us-east-1\]: .*create_cluster = true
+got=$(run '' 's.acme.com' '' '' 'a@acme.com' 'https://acme.okta.com' 'cid')
+expect "6 defaults in brackets, empty takes them" 'Create a new EKS cluster.*\[yes\]: .*AWS region \[us-east-1\]: .*base_domain = "s.acme.com"
+create_cluster = true
 region = "us-east-1"' "$got"
 
 got=$(setsid bash -c 'ASK_TFVARS="$1" bash "$2" </dev/null 2>&1' _ "$min" "$harness" || true)
@@ -106,4 +115,31 @@ expect "8 --yes: stops with the list" 'Stopped: these values are not in the line
 got=$(TF_VAR_base_domain=sites.acme.com TF_VAR_admin_emails='["a@acme.com"]' run "$min" 'https://acme.okta.com' 'cid')
 expect "9 TF_VAR_ values are not asked" 'Sign-in issuer URL.*Client ID: ' "$got"
 if grep -q 'Address, like' <<<"$got"; then echo "FAIL 9: asked for the address given in TF_VAR_base_domain"; fail=1; fi
+
+# 10: a file named like a match sits in the working directory.
+globdir=$(mktemp -d); touch "$globdir/evil@acme.com"
+got=$(cd "$globdir" && run "$min" 's.acme.com' '*@acme.com' 'a@acme.com' 'https://acme.okta.com' 'cid')
+expect "10 * is taken as typed, not matched against files" '"\*@acme.com" is not an email address.*admin_emails = \["a@acme.com"\]' "$got"
+if grep -q 'evil@acme.com' <<<"$got"; then echo "FAIL 10: the answer was matched against the files here"; fail=1; fi
+rm -rf "$globdir"
+
+# 11: the first run stops (Ctrl-C) after two answers; the next takes them with Enter.
+home=$(mktemp -d)
+got=$(ASK_HOME=$home run "$min" 'sites.acme.com' 'a@acme.com, b@corp' $'\x03')
+got=$(ASK_HOME=$home run "$min" '' '' 'https://acme.okta.com' 'cid')
+expect "11 a stopped run's answers are the defaults" 'Address, like sites.example.com \[sites.acme.com\]: .*Admin emails, separated by commas \[a@acme.com, b@corp\]: .*base_domain = "sites.acme.com"
+admin_emails = \["a@acme.com", "b@corp"\]' "$got"
+got=$(ASK_HOME=$home run "$min" '' '' '' '')
+expect "11 a finished run's answers all come back with Enter" 'oidc_issuer = "https://acme.okta.com"
+oidc_client_id = "cid"' "$got"
+rm -rf "$home"
+
+got=$(run "$min" $'sites.acme.com\u200b' $'sites.acme\u202e.com' 'sites.acme.com' $'a@acme.com\ufeff' 'a@acme.com' 'https://acme.okta.com' $'c\u2060id' 'cid')
+expect "12 invisible characters are refused" 'invisible or control character.*invisible or control character.*invisible or control character.*invisible or control character.*base_domain = "sites.acme.com"
+admin_emails = \["a@acme.com"\]
+oidc_issuer = "https://acme.okta.com"
+oidc_client_id = "cid"' "$got"
+
+got=$(run "$min" 's.acme.com' 'a@acme.com' 'HTTPS://Acme.Okta.COM/' 'cid')
+expect "13 the issuer's scheme and host in any case" 'oidc_issuer = "https://acme.okta.com"' "$got"
 exit $fail

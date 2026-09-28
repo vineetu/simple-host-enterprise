@@ -146,16 +146,19 @@ var ErrLastAdmin = errors.New("cannot disable the last enabled admin")
 // adminEmails (lowercased). Run at startup so removing someone from
 // ADMIN_EMAILS takes effect on the next deploy rather than on their next
 // sign-in; only valid when ADMIN_EMAILS is the sole source of admin status.
+// An empty list changes nothing: an install whose ADMIN_EMAILS was left
+// blank (or lost) keeps the admins it has instead of demoting every one of
+// them, and the caller warns that no admin source is configured.
 func SyncAdminEmails(ctx context.Context, db *sql.DB, adminEmails []string) (changed int64, err error) {
+	if len(adminEmails) == 0 {
+		return 0, nil
+	}
 	const query = `
 		UPDATE users
 		SET is_admin = COALESCE(lower(email) = ANY($1), false)
 		WHERE kind = 'person'
 		  AND is_admin IS DISTINCT FROM COALESCE(lower(email) = ANY($1), false)
 	`
-	if adminEmails == nil {
-		adminEmails = []string{}
-	}
 	result, err := db.ExecContext(ctx, query, pq.Array(adminEmails))
 	if err != nil {
 		return 0, err

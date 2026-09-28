@@ -14,7 +14,19 @@ release, commit and schema.
   `terraform.tfvars` and its saved copy; with no terminal or with `--yes` it
   stops and lists them. `admin_emails` accepts an internal domain without a
   dot (`platform@corp`). `scripts/test-ask.sh` runs the questions at a
-  pseudo-terminal.
+  pseudo-terminal. Answers are remembered in
+  `~/simple-host/last-answers.tfvars` (and the saved copy for the address),
+  so pasting the line again after CloudShell closed needs only Enter: each
+  earlier answer is the question's default. Answers are split without
+  globbing (`*@example.com` is never matched against files), and an answer
+  with an invisible character (zero-width, direction marks, byte order
+  mark, any Unicode format character) or a control character is refused.
+
+### Fixed
+- A blank `ADMIN_EMAILS` (with no `OIDC_ADMIN_CLAIM`) no longer demotes every
+  admin of an install that has them: the startup sync and the sign-in refresh
+  leave admin status unchanged and the server logs a warning. Before, an
+  empty list set `is_admin = false` for everyone at the next start.
 
 ## v1.9.0 — 2026-09-28
 
