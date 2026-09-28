@@ -190,10 +190,12 @@ heartbeat() {
 stop_tf() {
   trap '' HUP INT TERM
   printf '\nStopping cleanly, keeping what is done (this can take a minute)...\n' 2>/dev/null || true
-  [ -n "$tf_pid" ] && kill -INT "$tf_pid" 2>/dev/null
-  [ -n "$tf_pid" ] && while kill -0 "$tf_pid" 2>/dev/null; do sleep 1; done
-  [ -n "$beat_pid" ] && kill "$beat_pid" 2>/dev/null
-  [ -n "$tail_pid" ] && kill "$tail_pid" 2>/dev/null
+  if [ -n "$tf_pid" ]; then
+    kill -INT "$tf_pid" 2>/dev/null || true
+    while kill -0 "$tf_pid" 2>/dev/null; do sleep 1; done
+  fi
+  [ -z "$beat_pid" ] || kill "$beat_pid" 2>/dev/null || true
+  [ -z "$tail_pid" ] || kill "$tail_pid" 2>/dev/null || true
   printf 'Stopped. Paste the same line again to pick up where it stopped.\n' 2>/dev/null || true
   exit 130
 }
