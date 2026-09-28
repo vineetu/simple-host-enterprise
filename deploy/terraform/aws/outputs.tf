@@ -32,6 +32,9 @@ output "secrets_location" {
 }
 
 output "next_steps" {
+  # Marked sensitive only so the apply summary does not print it a first
+  # time: apply.sh prints it once, at the end (terraform output -raw).
+  sensitive = true
   value = join("\n", concat(
     ["", "Simple Host is installed on ${local.cluster_name}.", ""],
     length(local.dns_records) > 0 ? concat(

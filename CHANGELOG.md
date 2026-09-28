@@ -14,7 +14,16 @@ release, commit and schema.
   Route 53 zone with Let's Encrypt certificates for the address and every
   owner, and Simple Host at the pinned release. `apply.sh` runs it from AWS
   CloudShell with remote state in the account; https://simple-host.app/setup
-  gives the one line. Docs: `docs/cloud/aws.md`, the module's README.
+  gives the one line. Running the line again picks up where a stopped run
+  left off (CloudShell closes after about 20 minutes without a key press):
+  it stops Terraform cleanly on a hang-up, clears a stale lock, and keeps or
+  adopts what a cut-off run made. A new image digest or setting rolls the
+  pods without touching the namespace or certificates. On an existing
+  cluster it uses a cert-manager or External Secrets already there (and
+  stops with the fix when only their CRDs are left or they are too old;
+  `scripts/test-detect.sh` checks this on a kind cluster), and never removes
+  the cluster's IAM OIDC provider. Docs: `docs/cloud/aws.md`, the module's
+  README.
 
 ## v1.8.3 — 2026-09-28
 
