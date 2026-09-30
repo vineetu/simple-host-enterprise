@@ -4,7 +4,7 @@ Simple Host Enterprise on any Kubernetes cluster, with defaults for DigitalOcean
 Kubernetes. Needs cert-manager and an ingress controller in the cluster.
 
 ```sh
-helm install simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.1.0 -n simple-host --create-namespace -f my-values.yaml
+helm install simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.1.1 -n simple-host --create-namespace -f my-values.yaml
 ```
 
 - Every value, with its default and what it does: [values.yaml](values.yaml).

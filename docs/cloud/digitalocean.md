@@ -16,7 +16,7 @@ starts, and Simple Host waits for the values below. Without the 1-Click, install
 cert-manager and a controller, then:
 
 ```sh
-helm install simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.1.0 -n simple-host --create-namespace -f my-values.yaml
+helm install simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.1.1 -n simple-host --create-namespace -f my-values.yaml
 ```
 
 The values sections 2 to 6 below give you, in `my-values.yaml` (keep it out of git: it
@@ -45,7 +45,7 @@ certificates:
 After the 1-Click, apply them with:
 
 ```sh
-helm upgrade simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.1.0 -n simple-host --reset-then-reuse-values -f my-values.yaml
+helm upgrade simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.1.1 -n simple-host --reset-then-reuse-values -f my-values.yaml
 ```
 
 The chart generates the session key, the database passwords and the envelope key on
