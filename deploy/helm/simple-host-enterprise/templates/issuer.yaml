@@ -1,0 +1,36 @@
+{{- if and (include "sh.configured" .) .Values.certificates.createIssuer }}
+{{- $acme := .Values.certificates.acme }}
+{{- if not $acme.email }}{{ fail "certificates.acme.email is required with certificates.createIssuer" }}{{ end }}
+{{- if not (or $acme.digitaloceanToken $acme.digitaloceanTokenSecret) }}{{ fail "certificates.acme.digitaloceanToken (or digitaloceanTokenSecret) is required with certificates.createIssuer: a wildcard certificate needs DNS-01" }}{{ end }}
+{{- $tokenSecret := $acme.digitaloceanTokenSecret | default (printf "%s-digitalocean-dns" .Values.certificates.issuer) }}
+{{- if $acme.digitaloceanToken }}
+apiVersion: v1
+kind: Secret
+metadata:
+  # ClusterIssuers read their Secrets from cert-manager's own namespace.
+  name: {{ $tokenSecret }}
+  namespace: {{ .Values.certificates.certManagerNamespace }}
+  labels: {{- include "sh.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  access-token: {{ $acme.digitaloceanToken | quote }}
+---
+{{- end }}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.certificates.issuer }}
+  labels: {{- include "sh.labels" . | nindent 4 }}
+spec:
+  acme:
+    email: {{ $acme.email | quote }}
+    server: {{ $acme.server | quote }}
+    privateKeySecretRef:
+      name: {{ printf "%s-account" .Values.certificates.issuer }}
+    solvers:
+      - dns01:
+          digitalocean:
+            tokenSecretRef:
+              name: {{ $tokenSecret }}
+              key: access-token
+{{- end }}

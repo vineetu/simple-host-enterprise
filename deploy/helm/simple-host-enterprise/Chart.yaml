@@ -1,0 +1,17 @@
+apiVersion: v2
+name: simple-host-enterprise
+description: Simple Host Enterprise on any Kubernetes cluster, with defaults for DigitalOcean Kubernetes.
+type: application
+# The chart's own version. appVersion is the release the pinned image digest
+# in values.yaml belongs to.
+version: 0.1.0
+appVersion: "v1.9.1"
+kubeVersion: ">=1.30.0-0"
+home: https://github.com/vineetu/simple-host-enterprise
+sources:
+  - https://github.com/vineetu/simple-host-enterprise
+license: Apache-2.0
+keywords: [hosting, static-sites, oidc]
+maintainers:
+  - name: Simple Host
+    email: support@simple-host.app

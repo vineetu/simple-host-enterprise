@@ -1,0 +1,146 @@
+# Simple Host Enterprise. Every value below has a default; the ones marked
+# "set this" have to be filled in before the server starts. Until `host`,
+# `oidc.issuer`, `oidc.clientId` and `storage.bucket` are set the chart
+# installs only the database and the generated secrets, and its notes say
+# what to set next.
+
+# The dashboard's hostname (set this), e.g. sites.example.com. Every person
+# gets <name>.<host> and every site <site>.<name>.<host>. Use a domain of its
+# own, never a subdomain of the company's main one (docs/install.md section 5).
+host: ""
+
+image:
+  repository: ghcr.io/vineetu/simple-host-enterprise
+  # The v1.9.1 release. Pulled by digest only; a tag is never used.
+  digest: sha256:b8bd4af7684af8b129d050370a81e323d79c874a5d43f84fbf5e477ded213e2b
+  pullPolicy: IfNotPresent
+  # Names of docker-registry Secrets in this namespace, for a private mirror.
+  pullSecrets: []
+
+replicas: 2
+
+# Sign-in through the company's OIDC provider (docs/install.md section 6).
+oidc:
+  issuer: ""            # set this, e.g. https://accounts.google.com
+  clientId: ""          # set this
+  clientSecret: ""      # set this, or put OIDC_CLIENT_SECRET in secrets.existingSecret
+  scopes: "openid email profile"
+  # Who is an admin (comma-separated emails).
+  adminEmails: ""
+  # Who may sign in (comma-separated domains). Required with Google.
+  allowedEmailDomains: ""
+  sessionTTL: 8h
+  sessionIdle: 30m
+
+postgres:
+  # incluster: one Postgres in this namespace with TLS from cert-manager, for
+  # trying it out (nothing backs it up; the server warns at every start).
+  # external: DigitalOcean Managed PostgreSQL or any Postgres 16 over TLS.
+  mode: incluster
+  database: simplehost
+  # The owning role migrations run as. The server itself connects as the
+  # separate least-privilege role simplehost_app.
+  user: simplehost
+  # Generated on first install and kept across upgrades when empty.
+  password: ""
+  appPassword: ""
+  incluster:
+    image: postgres:16.11@sha256:468e1f126ca5af849799cda06ac9b03d8090aae9fa5163408b3e8da44fad0702
+    size: 5Gi
+    storageClass: ""    # the cluster default (do-block-storage on DOKS)
+    resources:
+      requests: { cpu: 250m, memory: 512Mi }
+      limits: { cpu: "1", memory: 1Gi }
+  external:
+    # DigitalOcean: the private host and port from the database's
+    # Connection details, user doadmin.
+    host: ""
+    port: 25060
+    sslmode: verify-full
+    # The provider's CA certificate (PEM). On DigitalOcean: Connection
+    # details, Download CA certificate.
+    caCert: ""
+
+# The S3-compatible bucket that stores every site (docs/storage.md). The
+# defaults are DigitalOcean Spaces; for another store change endpoint, region
+# and sse.
+storage:
+  endpoint: https://nyc3.digitaloceanspaces.com
+  region: nyc3
+  bucket: ""            # set this; turn on versioning for it
+  prefix: backups/
+  accessKeyId: ""       # set this (a Spaces access key limited to the bucket)
+  secretAccessKey: ""   # set this
+  # Spaces has no SSE-S3, so no header is sent and every object is encrypted
+  # in the pod instead with the envelope key below. On AWS use AES256.
+  sse: none
+  # Encrypts every object before it leaves the pod. Generated on first
+  # install and kept across upgrades; back it up (see the notes), since every
+  # site is unreadable without it. Set "-" to turn it off.
+  envelopeKey: ""
+
+# TLS. The dashboard needs <host> and *.<host>; each person needs
+# *.<name>.<host>, which the owner-hosts reconciler requests one by one. A
+# wildcard needs DNS-01.
+certificates:
+  # Create a Let's Encrypt ClusterIssuer that solves DNS-01 in DigitalOcean
+  # DNS (the domain's DNS has to be hosted there). Set false and name your
+  # own ClusterIssuer in `issuer` to use anything else, e.g. an internal CA.
+  createIssuer: true
+  issuer: simple-host-letsencrypt
+  acme:
+    email: ""           # set this with createIssuer: expiry notices go here
+    server: https://acme-v02.api.letsencrypt.org/directory
+    # A DigitalOcean API token with read and write on Domains. Stored in
+    # the namespace cert-manager runs in, as ClusterIssuers require.
+    digitaloceanToken: ""
+    # Or the name of an existing Secret there holding it under key "access-token".
+    digitaloceanTokenSecret: ""
+  certManagerNamespace: cert-manager
+  # auto: the reconciler requests owner certificates. manual: you issue
+  # *.<name>.<host> yourself and the reconciler is not installed.
+  ownerCerts: auto
+  ownerHostsInterval: 15s
+
+ingress:
+  className: nginx
+  # Uploads are archives up to MAX_ARCHIVE_BYTES (100 MiB by default); keep
+  # the body cap above it.
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 128m
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  tlsSecret: simple-host-tls
+
+# The ingress controller's pod range, so the client address is read from
+# X-Forwarded-For. Empty uses the built-in private ranges.
+trustedProxyCIDRs: ""
+
+# Any other setting from docs/configuration.md, as NAME: value. Secrets go in
+# extraSecrets. Every limit and time there has a default; set only what you
+# change, e.g. MAX_ARCHIVE_BYTES: "209715200".
+extraConfig: {}
+extraSecrets: {}
+
+secrets:
+  # Use a Secret you manage instead of the generated simple-host-secrets. It
+  # must hold the keys secrets.env.example lists.
+  existingSecret: ""
+
+prune:
+  schedule: "30 3 * * *"
+
+resources:
+  requests: { cpu: 250m, memory: 512Mi }
+  limits: { cpu: "1", memory: 2Gi }
+cacheSize: 3Gi
+tmpSize: 1Gi
+
+# Only pods of this release may reach the in-cluster database.
+networkPolicy:
+  enabled: true
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

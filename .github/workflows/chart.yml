@@ -1,0 +1,43 @@
+# Publish the Helm chart in deploy/helm as an OCI artifact at
+# oci://ghcr.io/<owner>/charts/simple-host-enterprise. A tag chart-v<version>
+# publishes the chart whose Chart.yaml carries that version.
+name: chart
+
+on:
+  push:
+    tags: ["chart-v*"]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  HELM_VERSION: v3.19.0
+  HELM_SHA256: a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496
+  CHART_DIR: deploy/helm/simple-host-enterprise
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install Helm
+        run: |
+          curl -fsSLo helm.tgz "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  helm.tgz" | sha256sum -c -
+          tar -xzf helm.tgz linux-amd64/helm && sudo mv linux-amd64/helm /usr/local/bin/helm
+      - name: Tag matches Chart.yaml
+        run: |
+          version="$(awk '/^version:/{print $2}' "$CHART_DIR/Chart.yaml")"
+          test "chart-v${version}" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} does not match chart version ${version}"; exit 1; }
+      - run: helm lint "$CHART_DIR"
+      - run: helm package "$CHART_DIR" -d dist
+      - name: Push
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$TOKEN" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          helm push dist/*.tgz "oci://ghcr.io/${owner}/charts" 2>&1 | tee push.log
+          echo "Install: \`helm install simple-host oci://ghcr.io/${owner}/charts/simple-host-enterprise --version ${GITHUB_REF_NAME#chart-v} -n simple-host --create-namespace\`" >> "$GITHUB_STEP_SUMMARY"
+          grep -i digest push.log >> "$GITHUB_STEP_SUMMARY"

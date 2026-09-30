@@ -10,10 +10,16 @@ what must be true; each cloud file says how on that cloud.
 | Azure (AKS) | [azure.md](azure.md) |
 | Oracle Cloud (OKE) | [oci.md](oci.md) |
 | UpCloud (UKS) | [upcloud.md](upcloud.md) |
+| DigitalOcean (DOKS) | [digitalocean.md](digitalocean.md) |
 
 On AWS there is also a quick path: https://simple-host.app/setup gives one
 command for AWS CloudShell that runs the Terraform module in
 `deploy/terraform/aws` and sets up all seven sections.
+
+On DigitalOcean there is a Kubernetes 1-Click, and a Helm chart
+(`deploy/helm/simple-host-enterprise`, published at
+`oci://ghcr.io/vineetu/charts/simple-host-enterprise`) that works on any cluster;
+`digitalocean.md` uses it.
 
 Values go in `deploy/overlays/byo/config.env` / `secrets.env`; the ingress block
 goes in `deploy/overlays/byo/ingress-patch.yaml`.

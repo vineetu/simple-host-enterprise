@@ -70,7 +70,8 @@ Read INSTALL.md in this repository and install Simple Host on our Kubernetes clu
 - Backups and a tested restore drill (`simple-host restore`, `simple-host verify-storage`).
 - Settings are environment variables. Nothing that identifies an install has a default, and the server refuses to start on an unsafe value.
 - Health, readiness and metrics endpoints; rate limits shared across replicas.
-- Per-cloud checklists in [docs/cloud/](docs/cloud/) (AWS, GCP, Azure, Oracle Cloud, UpCloud).
+- Per-cloud checklists in [docs/cloud/](docs/cloud/) (AWS, GCP, Azure, Oracle Cloud, UpCloud, DigitalOcean).
+- A Helm chart in [deploy/helm/simple-host-enterprise](deploy/helm/simple-host-enterprise/), also on the DigitalOcean Kubernetes Marketplace as a 1-Click.
 
 ## Advanced settings
 

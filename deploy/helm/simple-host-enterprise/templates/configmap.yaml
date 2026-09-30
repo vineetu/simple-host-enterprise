@@ -1,0 +1,54 @@
+{{- if not (has .Values.postgres.mode (list "incluster" "external")) }}{{ fail "postgres.mode must be incluster or external" }}{{ end }}
+{{- if not (has .Values.certificates.ownerCerts (list "auto" "manual")) }}{{ fail "certificates.ownerCerts must be auto or manual" }}{{ end }}
+{{- if and (eq .Values.postgres.mode "external") (not .Values.postgres.external.host) (include "sh.configured" .) }}{{ fail "postgres.external.host is required with postgres.mode=external" }}{{ end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: simple-host-config
+  labels: {{- include "sh.labels" . | nindent 4 }}
+data:
+  PUBLIC_BASE_URL: {{ printf "https://%s" .Values.host | quote }}
+  SECURE_MODE: "true"
+  PORT: "8080"
+  HTTPS_REDIRECT_PORT: "8081"
+  {{- with .Values.trustedProxyCIDRs }}
+  TRUSTED_PROXY_CIDRS: {{ . | quote }}
+  {{- end }}
+  OWNER_CERTS: {{ .Values.certificates.ownerCerts | quote }}
+  {{- if eq .Values.certificates.ownerCerts "auto" }}
+  OWNER_CERT_ISSUER: {{ .Values.certificates.issuer | quote }}
+  OWNER_HOSTS_INTERVAL: {{ .Values.certificates.ownerHostsInterval | quote }}
+  {{- end }}
+  OIDC_ISSUER: {{ .Values.oidc.issuer | quote }}
+  OIDC_CLIENT_ID: {{ .Values.oidc.clientId | quote }}
+  OIDC_SCOPES: {{ .Values.oidc.scopes | quote }}
+  {{- with .Values.oidc.adminEmails }}
+  ADMIN_EMAILS: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.oidc.allowedEmailDomains }}
+  ALLOWED_EMAIL_DOMAINS: {{ . | quote }}
+  {{- end }}
+  SESSION_TTL: {{ .Values.oidc.sessionTTL | quote }}
+  SESSION_IDLE: {{ .Values.oidc.sessionIdle | quote }}
+  {{- if eq .Values.postgres.mode "incluster" }}
+  DB_HOST: {{ printf "postgres.%s.svc.cluster.local" .Release.Namespace | quote }}
+  DB_PORT: "5432"
+  DB_INCLUSTER_EVALUATION: "true"
+  {{- else }}
+  DB_HOST: {{ .Values.postgres.external.host | quote }}
+  DB_PORT: {{ .Values.postgres.external.port | quote }}
+  {{- end }}
+  DB_NAME: {{ .Values.postgres.database | quote }}
+  DB_USER: {{ .Values.postgres.user | quote }}
+  DB_SSLMODE: {{ ternary .Values.postgres.external.sslmode "verify-full" (eq .Values.postgres.mode "external") | quote }}
+  {{- if include "sh.dbCASecret" . }}
+  DB_SSL_ROOT_CERT: /etc/simple-host/db-ca/ca.crt
+  {{- end }}
+  BACKUP_STORAGE_ENDPOINT: {{ .Values.storage.endpoint | quote }}
+  BACKUP_STORAGE_REGION: {{ .Values.storage.region | quote }}
+  BACKUP_STORAGE_BUCKET: {{ .Values.storage.bucket | quote }}
+  BACKUP_STORAGE_PREFIX: {{ .Values.storage.prefix | quote }}
+  BACKUP_SSE: {{ .Values.storage.sse | quote }}
+  {{- range $k, $v := .Values.extraConfig }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}

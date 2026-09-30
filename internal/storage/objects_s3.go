@@ -150,6 +150,10 @@ func parseSSE(value string) (types.ServerSideEncryption, error) {
 		return types.ServerSideEncryptionAes256, nil
 	case string(types.ServerSideEncryptionAwsKms):
 		return types.ServerSideEncryptionAwsKms, nil
+	case "none":
+		// No header at all: the SDK omits an empty value. Config allows this
+		// only with the client-side envelope on.
+		return "", nil
 	default:
 		return "", fmt.Errorf("unsupported server-side-encryption mode %q", value)
 	}

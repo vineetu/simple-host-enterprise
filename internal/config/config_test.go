@@ -628,6 +628,23 @@ func TestLoadValidatesBackupSSE(t *testing.T) {
 		}
 	})
 
+	t.Run("none needs the envelope", func(t *testing.T) {
+		completeEnv(t)
+		t.Setenv("BACKUP_SSE", "none")
+		_, err := Load()
+		if err == nil || !strings.Contains(err.Error(), "BACKUP_ENVELOPE_KEY") {
+			t.Fatalf("Load() error = %v, want none without an envelope refused", err)
+		}
+		t.Setenv("BACKUP_ENVELOPE_KEY", "k1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Backup.SSE != "none" {
+			t.Fatalf("Backup.SSE = %q, want none", cfg.Backup.SSE)
+		}
+	})
+
 	t.Run("an unrecognised mode is refused", func(t *testing.T) {
 		completeEnv(t)
 		t.Setenv("BACKUP_SSE", "SSE-C")

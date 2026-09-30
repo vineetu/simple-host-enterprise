@@ -1,0 +1,22 @@
+# Placeholder values that render every template (CI only; not real secrets).
+host: sites.example.com
+oidc:
+  issuer: https://accounts.google.com
+  clientId: placeholder.apps.googleusercontent.com
+  clientSecret: placeholder
+  adminEmails: admin@example.com
+  allowedEmailDomains: example.com
+postgres:
+  mode: external
+  password: placeholder-owner
+  external:
+    host: private-db.example.com
+    caCert: placeholder
+storage:
+  bucket: simple-host-sites
+  accessKeyId: placeholder
+  secretAccessKey: placeholder
+certificates:
+  acme:
+    email: admin@example.com
+    digitaloceanToken: placeholder

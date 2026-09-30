@@ -1111,7 +1111,8 @@
       "default": "AES256",
       "allowed": [
         "AES256",
-        "aws:kms"
+        "aws:kms",
+        "none"
       ],
       "security_sensitive": true,
       "required": false,

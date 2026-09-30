@@ -58,3 +58,10 @@ jobs:
             echo "== $name"
             ./kustomize build "$o" > /dev/null || { echo "FAILED to render $name"; exit 1; }
           done
+      - name: Render the Helm chart
+        run: |
+          # helm is preinstalled on the runner. Unconfigured (what the
+          # DigitalOcean 1-Click installs) and fully configured.
+          helm lint deploy/helm/simple-host-enterprise
+          helm template t deploy/helm/simple-host-enterprise > /dev/null
+          helm template t deploy/helm/simple-host-enterprise -f deploy/helm/simple-host-enterprise/ci/digitalocean-values.yaml > /dev/null

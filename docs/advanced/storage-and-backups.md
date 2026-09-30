@@ -30,7 +30,7 @@
 | `BACKUP_STORAGE_ACCESS_KEY_ID` | none | secret | The bucket's access key. Leave both keys out when a workload identity supplies credentials. **Security-sensitive.** |
 | `BACKUP_STORAGE_SECRET_ACCESS_KEY` | none | secret | The bucket's secret key. **Security-sensitive.** |
 | `BACKUP_STORAGE_INSECURE_ALLOWED` | `false` | `true` / `false` | Allows a plain-HTTP bucket endpoint. Local evaluation only. **Security-sensitive.** |
-| `BACKUP_SSE` | `AES256` | `AES256` / `aws:kms` | Server-side encryption on every stored object. **Security-sensitive.** |
+| `BACKUP_SSE` | `AES256` | `AES256` / `aws:kms` / `none` | Server-side encryption on every stored object. **Security-sensitive.** |
 | `BACKUP_SSE_KEY_ID` | none | text | The KMS key, with BACKUP_SSE=aws:kms. **Security-sensitive.** |
 | `BACKUP_ENVELOPE_KEY` | none | secret | Optional encryption of every object before it leaves the pod: <id>:<base64 32-byte key> entries. Escrow it: sites are unreadable without it. **Security-sensitive.** |
 | `BACKUP_ENVELOPE_PLAINTEXT_ALLOWED` | `false` | `true` / `false` | Keeps reading objects written before the envelope key was added, until reencrypt has covered them. **Security-sensitive.** |

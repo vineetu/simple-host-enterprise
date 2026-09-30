@@ -36,6 +36,11 @@ const (
 
 	sseAES256 = "AES256"
 	sseKMS    = "aws:kms"
+	// sseNone sends no server-side-encryption header, for stores that refuse
+	// SSE-S3 (DigitalOcean Spaces supports SSE-C only). Allowed only with the
+	// client-side envelope, so every object is still encrypted before it
+	// leaves the pod.
+	sseNone = "none"
 
 	// envelopeKeyLength is the fixed size of a BACKUP_ENVELOPE_KEY entry's
 	// key material: 32 random bytes, used directly as an AES-256 key.
@@ -579,9 +584,6 @@ func Load() (Config, error) {
 	if (cfg.Backup.AccessKeyID == "") != (cfg.Backup.SecretAccessKey == "") {
 		return Config{}, errors.New("BACKUP_STORAGE_ACCESS_KEY_ID and BACKUP_STORAGE_SECRET_ACCESS_KEY must be set together")
 	}
-	if err := validateBackupSSE(cfg.Backup); err != nil {
-		return Config{}, fmt.Errorf("BACKUP_SSE: %w", err)
-	}
 	envelopeKeys, err := parseEnvelopeKeys(secretOrEmpty("BACKUP_ENVELOPE_KEY", &secretErr))
 	if err != nil {
 		return Config{}, fmt.Errorf("BACKUP_ENVELOPE_KEY: %w", err)
@@ -592,6 +594,9 @@ func Load() (Config, error) {
 		return Config{}, secretErr
 	}
 	cfg.Backup.EnvelopeKeys = envelopeKeys
+	if err := validateBackupSSE(cfg.Backup); err != nil {
+		return Config{}, fmt.Errorf("BACKUP_SSE: %w", err)
+	}
 	if err := validateDatabaseSSL(cfg.DBDSN, dbInsecureAllowed); err != nil {
 		return Config{}, fmt.Errorf("database TLS: %w", err)
 	}
@@ -955,8 +960,8 @@ func validateDatabaseSSL(dsn string, insecureAllowed bool) error {
 }
 
 // validateBackupSSE checks the server-side-encryption mode against the two
-// values S3-compatible stores understand, and that the KMS key id is present
-// exactly when the mode needs one.
+// values S3-compatible stores understand (or none, with the envelope on), and
+// that the KMS key id is present exactly when the mode needs one.
 func validateBackupSSE(b BackupConfig) error {
 	switch b.SSE {
 	case sseAES256:
@@ -969,8 +974,16 @@ func validateBackupSSE(b BackupConfig) error {
 			return errors.New(`BACKUP_SSE_KEY_ID is required when BACKUP_SSE=aws:kms`)
 		}
 		return nil
+	case sseNone:
+		if b.SSEKMSKeyID != "" {
+			return errors.New(`BACKUP_SSE_KEY_ID is only valid with BACKUP_SSE=aws:kms`)
+		}
+		if len(b.EnvelopeKeys) == 0 {
+			return errors.New(`BACKUP_SSE=none requires BACKUP_ENVELOPE_KEY, so every object is still encrypted`)
+		}
+		return nil
 	default:
-		return fmt.Errorf("must be %q or %q, got %q", sseAES256, sseKMS, b.SSE)
+		return fmt.Errorf("must be %q, %q or %q, got %q", sseAES256, sseKMS, sseNone, b.SSE)
 	}
 }
 

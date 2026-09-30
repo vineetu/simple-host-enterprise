@@ -57,7 +57,8 @@ the default two replicas. A small managed plan can be lower than that
 ## Bucket requirements
 
 - The S3 API. AWS S3, MinIO, Google Cloud Storage (XML API with HMAC keys)
-  and OCI Object Storage (S3 Compatibility API) work; see `docs/cloud/`.
+  OCI Object Storage (S3 Compatibility API) and DigitalOcean Spaces
+  (`BACKUP_SSE=none` with the envelope) work; see `docs/cloud/`.
 - On AWS S3, leave `BACKUP_STORAGE_ACCESS_KEY_ID`/`BACKUP_STORAGE_SECRET_ACCESS_KEY`
   unset to use IRSA or EKS Pod Identity through the SDK's default credential
   chain. `BACKUP_SSE=AES256` (SSE-S3) and `BACKUP_SSE=aws:kms` with
@@ -134,7 +135,9 @@ rule expires them. A team's deletion removes its sites at once.
 ## Encryption
 
 Every write carries the server-side-encryption header (`BACKUP_SSE`,
-`BACKUP_SSE_KEY_ID`). `BACKUP_ENVELOPE_KEY` adds a client-side envelope, so
+`BACKUP_SSE_KEY_ID`), except with `BACKUP_SSE=none`, for stores without
+SSE-S3 such as DigitalOcean Spaces, which the server accepts only with
+`BACKUP_ENVELOPE_KEY` set. `BACKUP_ENVELOPE_KEY` adds a client-side envelope, so
 the bucket alone cannot read the objects. **Escrow the key in your
 organisation's secret store before first use:** the bucket is the only copy
 of every site, every object in it (and every noncurrent version) is

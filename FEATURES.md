@@ -988,7 +988,8 @@ Config names are documented in `docs/configuration.md`; schema in
   bucket endpoint (unless `BACKUP_STORAGE_INSECURE_ALLOWED`); a multi-tenant
   Entra ID issuer; a non-https `PUBLIC_BASE_URL` in secure mode;
   `OIDC_ADMIN_CLAIM`/`OIDC_ADMIN_VALUE` set alone; bucket keys set alone;
-  `BACKUP_SSE_KEY_ID` without `BACKUP_SSE=aws:kms` (or the reverse); malformed
+  `BACKUP_SSE_KEY_ID` without `BACKUP_SSE=aws:kms` (or the reverse);
+  `BACKUP_SSE=none` without `BACKUP_ENVELOPE_KEY`; malformed
   `SESSION_SIGNING_KEY`, `BACKUP_ENVELOPE_KEY` or `TRUSTED_PROXY_CIDRS`;
   `API_KEY_MAX_DAYS` outside 1–365; `SESSION_TTL` over 24h, `SESSION_IDLE`
   over 8h or over `SESSION_TTL`, `OAUTH_ACCESS_TTL` over 24h or over
@@ -1063,6 +1064,17 @@ Config names are documented in `docs/configuration.md`; schema in
   are remembered (`~/simple-host/last-answers.tfvars`), so a re-run after
   CloudShell closed needs only Enter; answers with invisible or control
   characters are refused.
+
+- **Helm chart.** `deploy/helm/simple-host-enterprise`, published as
+  `oci://ghcr.io/vineetu/charts/simple-host-enterprise` by a `chart-v*` tag
+  (`.github/workflows/chart.yml`), the same workloads as the `byo` overlay
+  plus the owner-hosts reconciler, with defaults for DigitalOcean: Postgres in
+  the cluster or managed, Spaces with `BACKUP_SSE=none` and the envelope, a
+  Let's Encrypt DNS-01 ClusterIssuer on DigitalOcean DNS. Session key,
+  database passwords and envelope key are generated once and kept across
+  upgrades and uninstall. Until the domain, OIDC client and bucket are set it
+  installs only the database, which is what the DigitalOcean Kubernetes
+  1-Click deploys (`docs/cloud/digitalocean.md`). CI lints and renders it.
 
 ## 19. Owner hosts: per-owner certificates
 

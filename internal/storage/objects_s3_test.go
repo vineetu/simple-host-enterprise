@@ -215,6 +215,7 @@ func TestS3ObjectsPutAppliesSSE(t *testing.T) {
 		{name: "aes256 ignores kms key", sse: "AES256", kmsKey: "ignored", wantSSE: types.ServerSideEncryptionAes256},
 		{name: "kms with key", sse: "aws:kms", kmsKey: "arn:aws:kms:k", wantSSE: types.ServerSideEncryptionAwsKms, wantKMSKey: "arn:aws:kms:k"},
 		{name: "kms default key", sse: "aws:kms", wantSSE: types.ServerSideEncryptionAwsKms},
+		{name: "none sends no header", sse: "none"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -7,7 +7,9 @@ invocation that exists in this repository today.
 
 Sections 1-2 (Docker Desktop) have been followed start to finish from a
 clean teardown. `docs/cloud/` records which managed-cloud guides have been
-verified by a real install.
+verified by a real install. A Helm chart, `deploy/helm/simple-host-enterprise`,
+installs the same workloads without kustomize; `docs/cloud/digitalocean.md`
+walks through it.
 
 ## 1. Before you start
 

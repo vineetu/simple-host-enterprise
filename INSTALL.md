@@ -49,6 +49,11 @@ Done means all of these hold:
 (Enterprise → AWS) gives one line that runs the Terraform module in
 `deploy/terraform/aws` (its `README.md` says what it builds) and ends at
 the DNS records and `/readyz`; the handoff block there is written for an agent.
+**On DigitalOcean, use the Helm chart.** `docs/cloud/digitalocean.md` installs
+`deploy/helm/simple-host-enterprise` (or the Kubernetes 1-Click, which installs
+the same chart) with one values file in place of this runbook's overlay files.
+Ask the same Step 0 questions; section 4's rule on secrets holds for the values
+file too.
 This runbook is for every other cluster, or doing it by hand.
 
 Ask these in one message. Do not ask anything else up front.
@@ -261,7 +266,7 @@ Where each key comes from:
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` | From section 2 |
 | `DB_SSLMODE`, `DB_SSL_ROOT_CERT` | Leave as `verify-full` and `/etc/simple-host/db-ca/ca.crt` |
 | `BACKUP_STORAGE_ENDPOINT`, `BACKUP_STORAGE_REGION`, `BACKUP_STORAGE_BUCKET`, `BACKUP_STORAGE_PREFIX` | From section 3 and section 4 (Bucket) of `docs/cloud/<cloud>.md` |
-| `BACKUP_SSE` | `AES256`, or `aws:kms` plus `BACKUP_SSE_KEY_ID` on AWS with a customer key |
+| `BACKUP_SSE` | `AES256`, or `aws:kms` plus `BACKUP_SSE_KEY_ID` on AWS with a customer key, or `none` (with `BACKUP_ENVELOPE_KEY`) on a store without SSE-S3 such as DigitalOcean Spaces |
 
 Never set `DB_INSECURE_ALLOWED`, `BACKUP_STORAGE_INSECURE_ALLOWED` or
 `OIDC_INSECURE_ALLOWED` on a real install.

@@ -284,7 +284,7 @@ func Settings() []Setting {
 			Description: "The bucket's secret key."},
 		{Name: "BACKUP_STORAGE_INSECURE_ALLOWED", Group: "storage", Type: "bool", Default: "false", Allowed: []string{"true", "false"}, Security: true,
 			Description: "Allows a plain-HTTP bucket endpoint. Local evaluation only."},
-		{Name: "BACKUP_SSE", Group: "storage", Type: "enum", Default: defaultBackupSSE, Allowed: []string{defaultBackupSSE, sseKMS}, Security: true,
+		{Name: "BACKUP_SSE", Group: "storage", Type: "enum", Default: defaultBackupSSE, Allowed: []string{defaultBackupSSE, sseKMS, sseNone}, Security: true,
 			Description: "Server-side encryption on every stored object."},
 		{Name: "BACKUP_SSE_KEY_ID", Group: "storage", Type: "string", Security: true,
 			Description: "The KMS key, with BACKUP_SSE=aws:kms."},

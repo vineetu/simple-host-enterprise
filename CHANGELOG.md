@@ -4,6 +4,20 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## Unreleased
+
+### Added
+- Helm chart, `deploy/helm/simple-host-enterprise`, published as
+  `oci://ghcr.io/vineetu/charts/simple-host-enterprise`, with defaults for
+  DigitalOcean Kubernetes (`docs/cloud/digitalocean.md`): Postgres in the
+  cluster or DigitalOcean Managed PostgreSQL, Spaces for sites, a Let's
+  Encrypt DNS-01 issuer on DigitalOcean DNS for the dashboard and owner
+  certificates, the image pinned by digest. It is also the DigitalOcean
+  Kubernetes 1-Click.
+- `BACKUP_SSE=none`: no server-side-encryption header, for stores without
+  SSE-S3 such as DigitalOcean Spaces. Refused without `BACKUP_ENVELOPE_KEY`,
+  so every object is still encrypted before it leaves the pod.
+
 ## v1.9.1 — 2026-09-28
 
 ### Changed

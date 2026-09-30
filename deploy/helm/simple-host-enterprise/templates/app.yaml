@@ -1,0 +1,253 @@
+{{- if include "sh.configured" . }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: simple-host
+  labels: {{- include "sh.labels" . | nindent 4 }}
+# The server never talks to the Kubernetes API.
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simple-host
+  labels:
+    app: simple-host
+    {{- include "sh.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: simple-host
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: simple-host
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: simple-host
+      automountServiceAccountToken: false
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          nodeTaintsPolicy: Honor
+          matchLabelKeys: ["pod-template-hash"]
+          labelSelector:
+            matchLabels:
+              app: simple-host
+      terminationGracePeriodSeconds: 40
+      securityContext: {{- include "sh.podSecurity" . | nindent 8 }}
+      {{- include "sh.scheduling" . | nindent 6 }}
+      initContainers:
+        # Applies pending migrations as the owning role, then exits.
+        - name: migrate
+          image: {{ include "sh.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["migrate"]
+          envFrom:
+            - configMapRef:
+                name: simple-host-config
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ include "sh.secretName" . }}, key: DB_PASSWORD, optional: true }
+            - name: DB_DSN
+              valueFrom:
+                secretKeyRef: { name: {{ include "sh.secretName" . }}, key: DB_DSN, optional: true }
+            - name: DB_APP_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ include "sh.secretName" . }}, key: DB_APP_PASSWORD }
+          volumeMounts:
+            - name: db-ca
+              mountPath: /etc/simple-host/db-ca
+              readOnly: true
+          securityContext: {{- include "sh.containerSecurity" . | nindent 12 }}
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 250m, memory: 128Mi }
+      containers:
+        - name: simple-host
+          image: {{ include "sh.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: application
+              containerPort: 8080
+            - name: redirect
+              containerPort: 8081
+            # Prometheus /metrics; not in the Service, so not reachable
+            # through the Ingress.
+            - name: metrics
+              containerPort: 9090
+          envFrom:
+            - configMapRef:
+                name: simple-host-config
+            - secretRef:
+                name: {{ include "sh.secretName" . }}
+          env:
+            # The least-privilege application role; the owning role's
+            # password is blanked out of this container.
+            - name: DB_APP_USER
+              value: simplehost_app
+            - name: DB_PASSWORD
+              value: ""
+          volumeMounts:
+            - name: cache
+              mountPath: /var/cache/simple-host
+            - name: tmp
+              mountPath: /tmp
+            - name: db-ca
+              mountPath: /etc/simple-host/db-ca
+              readOnly: true
+          securityContext: {{- include "sh.containerSecurity" . | nindent 12 }}
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 10
+          startupProbe:
+            httpGet: { path: /healthz, port: application }
+            periodSeconds: 3
+            timeoutSeconds: 2
+            failureThreshold: 40
+          livenessProbe:
+            httpGet: { path: /healthz, port: application }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /readyz, port: application }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: cache
+          emptyDir:
+            sizeLimit: {{ .Values.cacheSize }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.tmpSize }}
+        {{- include "sh.dbCAVolume" . | nindent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: simple-host
+  labels: {{- include "sh.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: simple-host
+  ports:
+    - name: http
+      port: 80
+      targetPort: application
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: simple-host
+  labels: {{- include "sh.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: simple-host
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  # The owner-hosts reconciler copies this Ingress's class and annotations
+  # (OWNER_INGRESS_TEMPLATE), so keep the name.
+  name: simple-host
+  labels: {{- include "sh.labels" . | nindent 4 }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ .Values.certificates.issuer | quote }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  tls:
+    - hosts:
+        - {{ .Values.host | quote }}
+        - {{ printf "*.%s" .Values.host | quote }}
+      secretName: {{ .Values.ingress.tlsSecret }}
+  rules:
+    {{- range (list .Values.host (printf "*.%s" .Values.host)) }}
+    - host: {{ . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: simple-host
+                port:
+                  name: http
+    {{- end }}
+---
+# Drops expired audit and access-log partitions. Runs as the owning role:
+# the application role cannot drop them.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: simple-host-prune
+  labels: {{- include "sh.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.prune.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: simple-host-prune
+        spec:
+          serviceAccountName: simple-host
+          automountServiceAccountToken: false
+          restartPolicy: OnFailure
+          securityContext: {{- include "sh.podSecurity" . | nindent 12 }}
+          {{- include "sh.scheduling" . | nindent 10 }}
+          containers:
+            - name: prune
+              image: {{ include "sh.image" . }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args: ["prune"]
+              envFrom:
+                - configMapRef:
+                    name: simple-host-config
+              env:
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: {{ include "sh.secretName" . }}, key: DB_PASSWORD, optional: true }
+                - name: DB_DSN
+                  valueFrom:
+                    secretKeyRef: { name: {{ include "sh.secretName" . }}, key: DB_DSN, optional: true }
+              volumeMounts:
+                - name: db-ca
+                  mountPath: /etc/simple-host/db-ca
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              securityContext: {{- include "sh.containerSecurity" . | nindent 16 }}
+              resources:
+                requests: { cpu: 50m, memory: 64Mi }
+                limits: { cpu: 250m, memory: 256Mi }
+          volumes:
+            {{- include "sh.dbCAVolume" . | nindent 12 }}
+            - name: tmp
+              emptyDir: {}
+{{- end }}
