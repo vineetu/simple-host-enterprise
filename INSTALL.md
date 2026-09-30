@@ -177,7 +177,12 @@ a different build, list the published tags:
 curl -s -H "Authorization: Bearer $(curl -s 'https://ghcr.io/token?scope=repository:vineetu/simple-host-enterprise:pull' | python3 -c 'import json,sys;print(json.load(sys.stdin)["token"])')" https://ghcr.io/v2/vineetu/simple-host-enterprise/tags/list
 ```
 
-Prefer the newest `v*` tag. Otherwise use the tag for the commit you have
+Prefer the release GitHub marks Latest
+(`gh release view -R vineetu/simple-host-enterprise --json tagName -q .tagName`,
+or https://github.com/vineetu/simple-host-enterprise/releases/latest), not
+the highest-numbered tag: releases up to v1.9.1 were numbered 1.x, and
+numbering restarted at v0.9.2 (`CHANGELOG.md`), so v0.9.2 and later are
+newer than every v1.x tag. Otherwise use the tag for the commit you have
 checked out (`sha-$(git rev-parse HEAD)`) if it exists, or build and push your own from this commit (`make image`, then tag
 and push to a registry the cluster can pull from). The image's migrations
 must be at least as new as any database it has touched, unless every newer

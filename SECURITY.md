@@ -13,7 +13,8 @@ reproduce, and what an attacker gains.
 
 ## Supported versions
 
-Only the latest release is supported. Fixes are made on `main` and shipped in
+Only the latest release is supported (the one GitHub marks Latest; numbering
+restarted at v0.9.2, so it is newer than every v1.x release). Fixes are made on `main` and shipped in
 a new release; older releases are not patched. Build from a release tag, or
 pin the release image by digest, and upgrade to take a fix. Security fixes
 are listed under "Security" in `CHANGELOG.md`; a fix that ships as a

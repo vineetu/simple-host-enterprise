@@ -4,7 +4,13 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
-## Unreleased
+## v0.9.2 — 2026-09-30
+
+Numbering restarts at 0.x: Enterprise has not yet been proven in
+production, so it is not called 1.0. This release follows v1.9.1 and
+contains everything in it; the v1.x tags and images stay published. No
+schema change (still 0058), so moving between v1.9.1 and v0.9.2 in either
+direction is safe. Versions stay 0.x until 1.0 is declared.
 
 ### Added
 - Helm chart, `deploy/helm/simple-host-enterprise`, published as

@@ -764,7 +764,9 @@ for their owner or team until the access level is set again.
 
 ## 10. Upgrade
 
-A deploy is: pick the release (`CHANGELOG.md` lists them), resolve and
+A deploy is: pick the release (`CHANGELOG.md` lists them, newest first;
+numbering restarted at v0.9.2, which follows v1.9.1, so go by the
+changelog or GitHub's Latest release, not by the highest number), resolve and
 verify its digest, update the overlay's `images:` entry (or your CI's
 equivalent), `kubectl apply` the rendered overlay, and watch the rollout.
 `kubectl -n simple-host exec deploy/simple-host -- /simple-host version`
