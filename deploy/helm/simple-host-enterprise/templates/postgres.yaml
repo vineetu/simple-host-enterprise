@@ -5,7 +5,21 @@ replicas and no backups: the server logs a warning at every start while it is
 in use. Use postgres.mode=external for anything real.
 */ -}}
 {{- if eq .Values.postgres.mode "incluster" }}
+{{- if not (regexMatch "@sha256:[a-f0-9]{64}$" .Values.postgres.incluster.image) }}{{ fail "postgres.incluster.image must be pinned by digest" }}{{ end }}
 {{- $ns := .Release.Namespace }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-hba
+  labels: {{- include "sh.labels" . | nindent 4 }}
+data:
+  # TLS or nothing over the network; the socket inside the pod is for the
+  # image's own init and health check.
+  pg_hba.conf: |
+    local   all  all                trust
+    hostssl all  all  0.0.0.0/0     scram-sha-256
+    hostssl all  all  ::/0          scram-sha-256
+---
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
@@ -107,7 +121,7 @@ spec:
       containers:
         - name: postgres
           image: {{ .Values.postgres.incluster.image }}
-          args: ["-c", "ssl=on", "-c", "ssl_cert_file=/certs/tls.crt", "-c", "ssl_key_file=/certs/tls.key", "-c", "ssl_min_protocol_version=TLSv1.2"]
+          args: ["-c", "ssl=on", "-c", "ssl_cert_file=/certs/tls.crt", "-c", "ssl_key_file=/certs/tls.key", "-c", "ssl_min_protocol_version=TLSv1.2", "-c", "hba_file=/etc/postgresql-hba/pg_hba.conf"]
           env:
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
@@ -129,6 +143,9 @@ spec:
               readOnly: true
             - name: run
               mountPath: /var/run/postgresql
+            - name: hba
+              mountPath: /etc/postgresql-hba
+              readOnly: true
           securityContext: {{- include "sh.containerSecurity" . | nindent 12 }}
           readinessProbe:
             exec:
@@ -143,6 +160,9 @@ spec:
             defaultMode: 0640
         - name: run
           emptyDir: {}
+        - name: hba
+          configMap:
+            name: postgres-hba
   volumeClaimTemplates:
     - metadata:
         name: data
@@ -169,6 +189,8 @@ spec:
   ingress:
     - from:
         - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
             matchExpressions:
               - key: app
                 operator: In

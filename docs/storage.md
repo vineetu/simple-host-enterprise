@@ -56,7 +56,7 @@ the default two replicas. A small managed plan can be lower than that
 
 ## Bucket requirements
 
-- The S3 API. AWS S3, MinIO, Google Cloud Storage (XML API with HMAC keys)
+- The S3 API. AWS S3, MinIO, Google Cloud Storage (XML API with HMAC keys),
   OCI Object Storage (S3 Compatibility API) and DigitalOcean Spaces
   (`BACKUP_SSE=none` with the envelope) work; see `docs/cloud/`.
 - On AWS S3, leave `BACKUP_STORAGE_ACCESS_KEY_ID`/`BACKUP_STORAGE_SECRET_ACCESS_KEY`

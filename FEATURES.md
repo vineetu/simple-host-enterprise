@@ -1067,14 +1067,17 @@ Config names are documented in `docs/configuration.md`; schema in
 
 - **Helm chart.** `deploy/helm/simple-host-enterprise`, published as
   `oci://ghcr.io/vineetu/charts/simple-host-enterprise` by a `chart-v*` tag
-  (`.github/workflows/chart.yml`), the same workloads as the `byo` overlay
-  plus the owner-hosts reconciler, with defaults for DigitalOcean: Postgres in
-  the cluster or managed, Spaces with `BACKUP_SSE=none` and the envelope, a
-  Let's Encrypt DNS-01 ClusterIssuer on DigitalOcean DNS. Session key,
-  database passwords and envelope key are generated once and kept across
-  upgrades and uninstall. Until the domain, OIDC client and bucket are set it
+  (`.github/workflows/chart.yml`, signed, a version never replaced), the same
+  workloads as the `byo` overlay, with defaults for DigitalOcean: Postgres in
+  the cluster (TLS only) or managed, Spaces with `BACKUP_SSE=none` and the
+  envelope, a Let's Encrypt DNS-01 ClusterIssuer on DigitalOcean DNS limited
+  to the host's zone, NetworkPolicies for the database and the server. Session
+  key, database passwords and envelope key are generated once and kept across
+  upgrades and `helm uninstall`; the chart refuses a value that would drop the
+  envelope key in use. Until the domain, OIDC client and bucket are set it
   installs only the database, which is what the DigitalOcean Kubernetes
-  1-Click deploys (`docs/cloud/digitalocean.md`). CI lints and renders it.
+  1-Click deploys, with Traefik and cert-manager (`docs/cloud/digitalocean.md`).
+  CI lints and renders it.
 
 ## 19. Owner hosts: per-owner certificates
 

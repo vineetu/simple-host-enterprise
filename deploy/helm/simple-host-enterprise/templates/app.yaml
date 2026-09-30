@@ -29,8 +29,10 @@ spec:
     metadata:
       labels:
         app: simple-host
+        app.kubernetes.io/instance: {{ .Release.Name }}
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
     spec:
       serviceAccountName: simple-host
       automountServiceAccountToken: false
@@ -149,6 +151,7 @@ spec:
     - name: http
       port: 80
       targetPort: application
+{{- if gt (int .Values.replicas) 1 }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -160,6 +163,38 @@ spec:
   selector:
     matchLabels:
       app: simple-host
+{{- end }}
+{{- if and .Values.networkPolicy.enabled .Values.networkPolicy.ingressNamespace }}
+---
+# Only the ingress controller reaches the server; /metrics (9090) only from
+# networkPolicy.metricsNamespace. Anything else in the cluster could
+# otherwise set X-Forwarded-For itself.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: simple-host
+  labels: {{- include "sh.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: simple-host
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressNamespace }}
+      ports:
+        - port: 8080
+    {{- with .Values.networkPolicy.metricsNamespace }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+      ports:
+        - port: 9090
+    {{- end }}
+{{- end }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -215,6 +250,7 @@ spec:
         metadata:
           labels:
             app: simple-host-prune
+            app.kubernetes.io/instance: {{ .Release.Name }}
         spec:
           serviceAccountName: simple-host
           automountServiceAccountToken: false

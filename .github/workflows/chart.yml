@@ -1,6 +1,8 @@
 # Publish the Helm chart in deploy/helm as an OCI artifact at
 # oci://ghcr.io/<owner>/charts/simple-host-enterprise. A tag chart-v<version>
-# publishes the chart whose Chart.yaml carries that version.
+# on a commit in main publishes the chart whose Chart.yaml carries that
+# version, once: a version already published is never replaced. The chart is
+# signed like the image (verify with cosign, as INSTALL.md section 3 does).
 name: chart
 
 on:
@@ -10,6 +12,7 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write
 
 env:
   HELM_VERSION: v3.19.0
@@ -21,6 +24,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Tag is on main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "${GITHUB_REF_NAME} is not on main"; exit 1; }
       - name: Install Helm
         run: |
           curl -fsSLo helm.tgz "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
@@ -32,12 +40,27 @@ jobs:
           test "chart-v${version}" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} does not match chart version ${version}"; exit 1; }
       - run: helm lint "$CHART_DIR"
       - run: helm package "$CHART_DIR" -d dist
-      - name: Push
+      - uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+      - name: Push and sign
         env:
           TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
         run: |
-          echo "$TOKEN" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
-          owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          set -euo pipefail
+          owner="$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          ref="ghcr.io/${owner}/charts/simple-host-enterprise"
+          version="${GITHUB_REF_NAME#chart-v}"
+          echo "$TOKEN" | helm registry login ghcr.io -u "$ACTOR" --password-stdin
+          echo "$TOKEN" | cosign login ghcr.io -u "$ACTOR" --password-stdin
+          if helm show chart "oci://${ref}" --version "$version" > /dev/null 2>&1; then
+            echo "chart ${version} is already published; bump version in Chart.yaml"; exit 1
+          fi
           helm push dist/*.tgz "oci://ghcr.io/${owner}/charts" 2>&1 | tee push.log
-          echo "Install: \`helm install simple-host oci://ghcr.io/${owner}/charts/simple-host-enterprise --version ${GITHUB_REF_NAME#chart-v} -n simple-host --create-namespace\`" >> "$GITHUB_STEP_SUMMARY"
-          grep -i digest push.log >> "$GITHUB_STEP_SUMMARY"
+          digest="$(awk '/^Digest:/{print $2}' push.log)"
+          test -n "$digest"
+          cosign sign --yes "${ref}@${digest}"
+          {
+            echo "Chart ${version}: \`${ref}@${digest}\`"
+            echo "Install: \`helm install simple-host oci://${ref} --version ${version} -n simple-host --create-namespace\`"
+          } >> "$GITHUB_STEP_SUMMARY"

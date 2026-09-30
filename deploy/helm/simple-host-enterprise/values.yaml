@@ -4,9 +4,10 @@
 # installs only the database and the generated secrets, and its notes say
 # what to set next.
 
-# The dashboard's hostname (set this), e.g. sites.example.com. Every person
-# gets <name>.<host> and every site <site>.<name>.<host>. Use a domain of its
-# own, never a subdomain of the company's main one (docs/install.md section 5).
+# The dashboard's hostname (set this): a domain of its own such as
+# corp-sites.com, never a subdomain of the company's main domain
+# (docs/install.md section 5). Every person gets <name>.<host> and every site
+# <site>.<name>.<host>.
 host: ""
 
 image:
@@ -19,7 +20,7 @@ image:
 
 replicas: 2
 
-# Sign-in through the company's OIDC provider (docs/install.md section 6).
+# Sign-in through the company's OIDC provider (INSTALL.md section 6).
 oidc:
   issuer: ""            # set this, e.g. https://accounts.google.com
   clientId: ""          # set this
@@ -57,8 +58,8 @@ postgres:
     host: ""
     port: 25060
     sslmode: verify-full
-    # The provider's CA certificate (PEM). On DigitalOcean: Connection
-    # details, Download CA certificate.
+    # The provider's CA certificate (PEM), required with verify-full. On
+    # DigitalOcean: Connection details, Download CA certificate.
     caCert: ""
 
 # The S3-compatible bucket that stores every site (docs/storage.md). The
@@ -76,7 +77,9 @@ storage:
   sse: none
   # Encrypts every object before it leaves the pod. Generated on first
   # install and kept across upgrades; back it up (see the notes), since every
-  # site is unreadable without it. Set "-" to turn it off.
+  # site is unreadable without it. Set "-" to turn it off (only with sse
+  # AES256 or aws:kms, and only before the first install). To rotate, set
+  # "<new>,<current>"; the chart refuses a value that drops the current key.
   envelopeKey: ""
 
 # TLS. The dashboard needs <host> and *.<host>; each person needs
@@ -92,7 +95,9 @@ certificates:
     email: ""           # set this with createIssuer: expiry notices go here
     server: https://acme-v02.api.letsencrypt.org/directory
     # A DigitalOcean API token with read and write on Domains. Stored in
-    # the namespace cert-manager runs in, as ClusterIssuers require.
+    # the namespace cert-manager runs in, as ClusterIssuers require, and
+    # kept in Helm's release history like every value; digitaloceanTokenSecret
+    # keeps it out of both.
     digitaloceanToken: ""
     # Or the name of an existing Secret there holding it under key "access-token".
     digitaloceanTokenSecret: ""
@@ -103,9 +108,12 @@ certificates:
   ownerHostsInterval: 15s
 
 ingress:
-  className: nginx
-  # Uploads are archives up to MAX_ARCHIVE_BYTES (100 MiB by default); keep
-  # the body cap above it.
+  # The IngressClass the 1-Click's Traefik serves. Set your controller's
+  # class to use another one.
+  className: simple-host
+  # Uploads are archives up to MAX_ARCHIVE_BYTES (100 MiB by default). Traefik
+  # has no body cap; these set ingress-nginx's above it and are ignored by
+  # other controllers.
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: 128m
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
@@ -125,7 +133,9 @@ extraSecrets: {}
 
 secrets:
   # Use a Secret you manage instead of the generated simple-host-secrets. It
-  # must hold the keys secrets.env.example lists.
+  # must hold the keys deploy/overlays/byo/secrets.env.example lists. Needed
+  # when the chart is rendered without cluster access (helm template, Argo
+  # CD): generated values cannot be read back there and would change.
   existingSecret: ""
 
 prune:
@@ -137,9 +147,14 @@ resources:
 cacheSize: 3Gi
 tmpSize: 1Gi
 
-# Only pods of this release may reach the in-cluster database.
+# Only this release's pods reach the in-cluster database, and only the
+# ingress controller's namespace reaches the server. Empty ingressNamespace
+# leaves the server open to the whole cluster.
 networkPolicy:
   enabled: true
+  ingressNamespace: simple-host-ingress
+  # The namespace of the Prometheus that scrapes :9090, if any.
+  metricsNamespace: ""
 
 nodeSelector: {}
 tolerations: []

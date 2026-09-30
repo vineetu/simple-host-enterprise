@@ -56,8 +56,10 @@ spec:
     metadata:
       labels:
         app: simple-host-owner-hosts
+        app.kubernetes.io/instance: {{ .Release.Name }}
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
     spec:
       serviceAccountName: simple-host-owner-hosts
       automountServiceAccountToken: true

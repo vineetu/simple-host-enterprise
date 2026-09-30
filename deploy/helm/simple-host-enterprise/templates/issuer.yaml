@@ -28,7 +28,12 @@ spec:
     privateKeySecretRef:
       name: {{ printf "%s-account" .Values.certificates.issuer }}
     solvers:
-      - dns01:
+      # Only names under the host, so a Certificate elsewhere in the cluster
+      # cannot use this token for another zone.
+      - selector:
+          dnsZones:
+            - {{ .Values.host | quote }}
+        dns01:
           digitalocean:
             tokenSecretRef:
               name: {{ $tokenSecret }}

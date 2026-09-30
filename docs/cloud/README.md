@@ -21,8 +21,9 @@ On DigitalOcean there is a Kubernetes 1-Click, and a Helm chart
 `oci://ghcr.io/vineetu/charts/simple-host-enterprise`) that works on any cluster;
 `digitalocean.md` uses it.
 
-Values go in `deploy/overlays/byo/config.env` / `secrets.env`; the ingress block
-goes in `deploy/overlays/byo/ingress-patch.yaml`.
+Values go in `deploy/overlays/byo/config.env` / `secrets.env` (on DigitalOcean, in
+the chart's values file); the ingress block goes in
+`deploy/overlays/byo/ingress-patch.yaml`.
 
 ## The sections
 

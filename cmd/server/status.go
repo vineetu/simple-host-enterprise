@@ -43,6 +43,9 @@ func instanceLimits(cfg config.Config) []handler.InstanceLimit {
 	envelope := "off (server-side encryption " + orNone(cfg.Backup.SSE) + " only)"
 	if n := len(cfg.Backup.EnvelopeKeys); n > 0 {
 		envelope = fmt.Sprintf("on (%d key(s)), plus server-side encryption %s", n, orNone(cfg.Backup.SSE))
+		if cfg.Backup.SSE == "none" {
+			envelope = fmt.Sprintf("on (%d key(s)); no server-side encryption", n)
+		}
 	}
 	return []handler.InstanceLimit{
 		{Name: "Sites per owner", Value: limitOrNone(cfg.Quota.MaxSites, fmt.Sprint(cfg.Quota.MaxSites))},

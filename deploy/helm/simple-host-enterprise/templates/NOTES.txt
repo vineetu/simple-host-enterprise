@@ -1,21 +1,22 @@
 {{- if not (include "sh.configured" .) }}
 Simple Host Enterprise is installed but not started: it needs a domain, your
 company's sign-in and a bucket first.
-{{- if eq .Values.postgres.mode "incluster" }} The database is running.{{ end }}
+{{- if eq .Values.postgres.mode "incluster" }} The database is starting.{{ end }}
 
 Set host, oidc.issuer, oidc.clientId, oidc.clientSecret, oidc.adminEmails,
-storage.bucket, storage.accessKeyId, storage.secretAccessKey,
-certificates.acme.email and certificates.acme.digitaloceanToken in a values
-file, then:
+oidc.allowedEmailDomains (required with Google), storage.bucket,
+storage.accessKeyId, storage.secretAccessKey, and with
+certificates.createIssuer, certificates.acme.email and
+certificates.acme.digitaloceanToken, in a values file, then:
 
-  helm upgrade {{ .Release.Name }} oci://ghcr.io/vineetu/charts/simple-host-enterprise -n {{ .Release.Namespace }} --reuse-values -f my-values.yaml
+  helm upgrade {{ .Release.Name }} oci://ghcr.io/vineetu/charts/simple-host-enterprise --version {{ .Chart.Version }} -n {{ .Release.Namespace }} --reset-then-reuse-values -f my-values.yaml
 
 Guide: https://github.com/vineetu/simple-host-enterprise/blob/main/docs/cloud/digitalocean.md
 {{- else }}
 Simple Host Enterprise is starting at https://{{ .Values.host }}
 
-1. Point {{ .Values.host }} and *.{{ .Values.host }} at the ingress load balancer:
-     kubectl get svc -A -l app.kubernetes.io/name=ingress-nginx
+1. Point {{ .Values.host }} and *.{{ .Values.host }} at the ingress load balancer's IP:
+     kubectl get svc -A -l app.kubernetes.io/name=traefik
 2. Register https://{{ .Values.host }}/auth/callback as the redirect URI at your identity provider.
 3. Watch it come up:
      kubectl -n {{ .Release.Namespace }} rollout status deploy/simple-host
@@ -23,7 +24,7 @@ Simple Host Enterprise is starting at https://{{ .Values.host }}
 {{- if ne .Values.storage.envelopeKey "-" }}
 
 Back up the envelope key now. Every site in the bucket is unreadable without it:
-  kubectl -n {{ .Release.Namespace }} get secret simple-host-secrets -o jsonpath='{.data.BACKUP_ENVELOPE_KEY}' | base64 -d > envelope-key.txt
+  (umask 077; kubectl -n {{ .Release.Namespace }} get secret simple-host-secrets -o jsonpath='{.data.BACKUP_ENVELOPE_KEY}' | base64 -d > envelope-key.txt)
 {{- end }}
 {{- end }}
 {{- if eq .Values.postgres.mode "incluster" }}
