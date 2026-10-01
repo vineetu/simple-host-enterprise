@@ -104,6 +104,7 @@ that should get it). Last derived from both `FEATURES.md` files and code on 2026
 
 | Date | Fixed in | Fix | Other side |
 |---|---|---|---|
+| 2026-10-01 | hosted | In hosted Hack mode, the Caddy certificate gate checks actual event/team/site records before permitting on-demand certificates; ordinary Host allowlist is unchanged | enterprise uses configured ingress/cert-manager certificates and has no Caddy ask endpoint: n/a |
 | 2026-10-01 | hosted | Reviewed organiser connector scopes: explicit `sites events` versus `sites team:<uuid>`, malformed/mixed grants refused for use and refresh, event-role checks retained, team/personal publishing boundaries tested | enterprise has no hosted-event roles or team grant markers; its OAuth inventory and permissions are unchanged |
 | 2026-09-26 | hosted | API keys stored only as SHA-256 | enterprise already hashes keys: n/a |
 | 2026-09-26 | hosted | visitor Google sign-in bound to the starting browser (login CSRF) | enterprise hand-off already nonce-bound: n/a |
