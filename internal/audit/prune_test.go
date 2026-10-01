@@ -160,9 +160,16 @@ func TestPruneDropsExpiredPartitionsAndKeepsCurrentOnes(t *testing.T) {
 		t.Error("audit_events_p2020_01 still exists after Prune")
 	}
 
-	// Prune's own audit_ensure_partitions bootstrap must have kept the
-	// current month and the months after it rolling forward.
-	for _, name := range []string{"audit_events_p2026_09", "audit_events_p2026_10", "audit_events_p2026_11"} {
+	// audit_ensure_partitions uses the database's current UTC month;
+	// PruneOptions.Now only controls the retention cutoff. Fixed partition
+	// names made this test fail when the calendar passed September 2026.
+	var monthStart time.Time
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT date_trunc('month', timezone('UTC', now())) AT TIME ZONE 'UTC'`).Scan(&monthStart); err != nil {
+		t.Fatal(err)
+	}
+	for offset := 0; offset < 3; offset++ {
+		name := "audit_events_p" + monthStart.UTC().AddDate(0, offset, 0).Format("2006_01")
 		if !partitionExists(t, db, name) {
 			t.Errorf("expected rolling partition %s to exist after Prune", name)
 		}
