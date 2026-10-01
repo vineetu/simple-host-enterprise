@@ -36,8 +36,8 @@ const (
 
 	sseAES256 = "AES256"
 	sseKMS    = "aws:kms"
-	// sseNone sends no server-side-encryption header, for stores that refuse
-	// SSE-S3 (DigitalOcean Spaces supports SSE-C only). Allowed only with the
+	// sseNone sends no server-side-encryption header, for stores without
+	// SSE-S3 (DigitalOcean Spaces accepts the header and ignores it). Allowed only with the
 	// client-side envelope, so every object is still encrypted before it
 	// leaves the pod.
 	sseNone = "none"

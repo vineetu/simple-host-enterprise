@@ -1,10 +1,15 @@
 # DigitalOcean (DOKS)
 
-Tested: the chart (`deploy/helm/simple-host-enterprise` 0.1.0, with an image built from
-`main` for `BACKUP_SSE=none`), installed by the 1-Click's `deploy.sh` on a local
-two-node kind cluster, passed `make smoke` 104 of 105 through Traefik, 2026-09-30. The
-one difference: Traefik collapses `//` in a path, which the smoke test expects kept. Not
-yet run on a DigitalOcean account.
+Verified 2026-10-01 on DigitalOcean (nyc3): DOKS 1.35 (two `s-2vcpu-4gb` nodes), the
+1-Click's `deploy.sh` (1 m 46 s to a load balancer IP), Managed PostgreSQL 16 over its
+VPC host with `verify-full` as `doadmin`, a Spaces bucket with a bucket-limited key, and
+certificates for the base host and each person's wildcard from Let's Encrypt (staging)
+by DNS-01 in DigitalOcean DNS. The chart was 0.1.0 with an image built from `main`
+(`BACKUP_SSE=none` is newer than v1.9.1). `make smoke` passed 101 of 102; the one
+difference is Traefik collapsing `//` in a path, which the smoke test expects kept.
+Visitors' own addresses reached the server through the load balancer's PROXY protocol,
+every object in the bucket carried the envelope, and `upgrade.sh` and `uninstall.sh`
+worked.
 
 Fills the sections in [README.md](README.md). On DigitalOcean a Helm chart replaces the
 kustomize overlay: values go in one values file, not `config.env` / `secrets.env`.
@@ -82,11 +87,19 @@ and removing.
   `ns1.digitalocean.com`, `ns2.digitalocean.com` and `ns3.digitalocean.com`.
 - The token needs read and write on Domains. A DigitalOcean token reaches every domain
   in its team, so keep Simple Host's domain in a team of its own. Pass the token as a
-  Secret you create in cert-manager's namespace (key `access-token`) with
+  Secret you create in cert-manager's namespace with
   `certificates.acme.digitaloceanTokenSecret`, rather than as a value, to keep it out
-  of Helm's release history.
+  of Helm's release history. The file holds the token with no trailing newline:
+
+  ```sh
+  kubectl -n cert-manager create secret generic simple-host-do-dns --from-file=access-token=do-token.txt
+  ```
 - **Owner certificates.** Each person with sites gets `*.<name>.<host>` from the same
-  issuer. Let's Encrypt allows 50 new certificates per registered domain per week, so an
+  issuer; the run above had each one Ready about two minutes after the person's first
+  site. While a DNS-01 challenge is open, its TXT record hides the `*.<host>` record for
+  that person's names, and a resolver can cache the empty answer for up to the zone's
+  negative TTL (30 minutes at DigitalOcean). Simple Host only links to those names once
+  the certificate is Ready. Let's Encrypt allows 50 new certificates per registered domain per week, so an
   organisation that onboards more people than that in a week uses its own CA:
   `certificates.createIssuer: false` and `certificates.issuer: <your ClusterIssuer>`.
 
@@ -136,14 +149,17 @@ PostgreSQL 16:
   ```
 
 - A lifecycle rule that expires noncurrent versions after your retention window (30
-  days here):
+  days here). Spaces stores the rule as given, but then reports an expiry date on
+  current objects too (`x-amz-expiration`), a known fault in how Ceph, which Spaces runs
+  on, computes that header; the stored rule only touches noncurrent versions:
 
   ```sh
   aws s3api put-bucket-lifecycle-configuration --endpoint-url https://nyc3.digitaloceanspaces.com --bucket <bucket> --lifecycle-configuration '{"Rules":[{"ID":"simple-host","Status":"Enabled","Filter":{},"NoncurrentVersionExpiration":{"NoncurrentDays":30},"AbortIncompleteMultipartUpload":{"DaysAfterInitiation":7},"Expiration":{"ExpiredObjectDeleteMarker":true}}]}'
   ```
 
-- Spaces does not support SSE-S3, so the chart sets `BACKUP_SSE=none` and turns the
-  envelope on instead: every object is encrypted in the pod before it is sent. The
+- Spaces accepts the SSE-S3 header but does not apply it (the stored object reports no
+  server-side encryption), so the chart sets `BACKUP_SSE=none` and turns the envelope on
+  instead: every object is encrypted in the pod before it is sent. The
   server refuses `none` without an envelope key. **Back the key up** (the chart's notes
   print the command): every site is unreadable without it.
 
