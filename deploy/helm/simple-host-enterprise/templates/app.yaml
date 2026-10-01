@@ -4,7 +4,12 @@ kind: ServiceAccount
 metadata:
   name: simple-host
   labels: {{- include "sh.labels" . | nindent 4 }}
-# The server never talks to the Kubernetes API.
+  {{- with .Values.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+# The server never talks to the Kubernetes API. An existing platform-managed
+# identity is serviceAccount.annotations; the token they inject is theirs.
 automountServiceAccountToken: false
 ---
 apiVersion: apps/v1
@@ -28,9 +33,15 @@ spec:
   template:
     metadata:
       labels:
+        {{- with (omit .Values.podLabels "app" "app.kubernetes.io/instance") }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         app: simple-host
         app.kubernetes.io/instance: {{ .Release.Name }}
       annotations:
+        {{- with (omit .Values.podAnnotations "checksum/config" "checksum/secret") }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
     spec:
@@ -204,7 +215,9 @@ metadata:
   name: simple-host
   labels: {{- include "sh.labels" . | nindent 4 }}
   annotations:
-    cert-manager.io/cluster-issuer: {{ .Values.certificates.issuer | quote }}
+    {{- with .Values.certificates.issuer }}
+    cert-manager.io/cluster-issuer: {{ . | quote }}
+    {{- end }}
     {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}

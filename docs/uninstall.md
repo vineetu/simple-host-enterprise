@@ -65,6 +65,10 @@ kustomize build deploy/overlays/byo | kubectl --context "$CTX" delete --ignore-n
 kubectl --context "$CTX" delete namespace simple-host --ignore-not-found
 ```
 
+A Helm install is `helm uninstall simple-host-enterprise -n simple-host`
+([install-kubernetes.md](install-kubernetes.md)): that keeps `simple-host-secrets`
+and the in-cluster database volume until the namespace is deleted.
+
 (Use your own overlay's path.) This removes the server, its Service and
 Ingress, the owner-hosts reconciler (`simple-host-owner-hosts`: its
 Deployment, ServiceAccount, Role and RoleBinding), the prune CronJob, the

@@ -1,0 +1,32 @@
+# DigitalOcean Kubernetes (DOKS) preset. Restores the Spaces endpoint, Traefik
+# IngressClass, NetworkPolicy namespace, Let's Encrypt DNS-01 issuer on
+# DigitalOcean DNS, and BACKUP_SSE=none that chart 0.1.x used as defaults.
+#
+#   helm install simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise \
+#     --version 0.2.0 -n simple-host --create-namespace \
+#     -f deploy/helm/simple-host-enterprise/values-digitalocean.yaml -f my-values.yaml
+#
+# Marketplace 1-Clicks that still want those defaults with no extra file can
+# pin --version 0.1.1. Walkthrough: docs/cloud/digitalocean.md.
+
+postgres:
+  external:
+    # DigitalOcean Managed PostgreSQL's VPC host listens here; 5432 is the
+    # chart default for every other Postgres.
+    port: 25060
+
+storage:
+  endpoint: https://nyc3.digitaloceanspaces.com
+  region: nyc3
+  # Spaces accepts the SSE-S3 header but does not apply it.
+  sse: none
+
+certificates:
+  createIssuer: true
+  issuer: simple-host-letsencrypt
+
+ingress:
+  className: simple-host
+
+networkPolicy:
+  ingressNamespace: simple-host-ingress

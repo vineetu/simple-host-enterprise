@@ -1,8 +1,14 @@
-# Simple Host Enterprise. Every value below has a default; the ones marked
-# "set this" have to be filled in before the server starts. Until `host`,
-# `oidc.issuer`, `oidc.clientId` and `storage.bucket` are set the chart
-# installs only the database and the generated secrets, and its notes say
-# what to set next.
+# Simple Host Enterprise on an existing Kubernetes cluster. Every value below
+# has a default; the ones marked "set this" have to be filled in before the
+# server starts. Until `host`, `oidc.issuer`, `oidc.clientId` and
+# `storage.bucket` are set the chart installs only the in-cluster database
+# (when postgres.mode is incluster) and the generated secrets, and its notes
+# say what to set next.
+#
+# Defaults are provider-neutral: an existing ClusterIssuer, the cluster's
+# default IngressClass, PostgreSQL 5432, and no bucket endpoint. DigitalOcean
+# Spaces, Traefik class `simple-host`, and a Let's Encrypt DNS-01 issuer on
+# DigitalOcean DNS are values-digitalocean.yaml.
 
 # The dashboard's hostname (set this): a domain of its own such as
 # corp-sites.com, never a subdomain of the company's main domain
@@ -21,6 +27,7 @@ image:
 replicas: 2
 
 # Sign-in through the company's OIDC provider (INSTALL.md section 6).
+# Redirect URI: https://<host>/auth/callback
 oidc:
   issuer: ""            # set this, e.g. https://accounts.google.com
   clientId: ""          # set this
@@ -36,45 +43,43 @@ oidc:
 postgres:
   # incluster: one Postgres in this namespace with TLS from cert-manager, for
   # trying it out (nothing backs it up; the server warns at every start).
-  # external: DigitalOcean Managed PostgreSQL or any Postgres 16 over TLS.
+  # external: an existing Postgres 16 over TLS (the standard install).
   mode: incluster
   database: simplehost
   # The owning role migrations run as. The server itself connects as the
   # separate least-privilege role simplehost_app.
   user: simplehost
-  # Generated on first install and kept across upgrades when empty.
+  # external: the existing owning role's password (required when the chart
+  # owns the Secret). Never generated. incluster: generated on first install
+  # and kept across upgrades when empty.
   password: ""
   appPassword: ""
   incluster:
     image: postgres:16.11@sha256:468e1f126ca5af849799cda06ac9b03d8090aae9fa5163408b3e8da44fad0702
     size: 5Gi
-    storageClass: ""    # the cluster default (do-block-storage on DOKS)
+    storageClass: ""    # the cluster default
     resources:
       requests: { cpu: 250m, memory: 512Mi }
       limits: { cpu: "1", memory: 1Gi }
   external:
-    # DigitalOcean: the private host and port from the database's
-    # Connection details, user doadmin.
-    host: ""
-    port: 25060
+    host: ""            # set this with mode=external
+    port: 5432
     sslmode: verify-full
-    # The provider's CA certificate (PEM), required with verify-full. On
-    # DigitalOcean: Connection details, Download CA certificate.
+    # The provider's CA certificate (PEM), required with verify-full.
     caCert: ""
 
-# The S3-compatible bucket that stores every site (docs/storage.md). The
-# defaults are DigitalOcean Spaces; for another store change endpoint, region
-# and sse.
+# The S3-compatible bucket that stores every site (docs/storage.md).
 storage:
-  endpoint: https://nyc3.digitaloceanspaces.com
-  region: nyc3
+  endpoint: ""          # set this, https://... (http:// only with extraConfig.BACKUP_STORAGE_INSECURE_ALLOWED=true)
+  region: ""            # set this
   bucket: ""            # set this; turn on versioning for it
   prefix: backups/
-  accessKeyId: ""       # set this (a Spaces access key limited to the bucket)
-  secretAccessKey: ""   # set this
-  # Spaces has no SSE-S3, so no header is sent and every object is encrypted
-  # in the pod instead with the envelope key below. On AWS use AES256.
-  sse: none
+  accessKeyId: ""       # set this, or leave empty when an existing AWS-compatible identity supplies credentials
+  secretAccessKey: ""   # set this together with accessKeyId
+  # AES256 is SSE-S3. aws:kms needs sseKeyId. none sends no header (stores
+  # without SSE-S3) and requires the envelope key.
+  sse: AES256
+  sseKeyId: ""
   # Encrypts every object before it leaves the pod. Generated on first
   # install and kept across upgrades; back it up (see the notes), since every
   # site is unreadable without it. Set "-" to turn it off (only with sse
@@ -86,34 +91,36 @@ storage:
 # *.<name>.<host>, which the owner-hosts reconciler requests one by one. A
 # wildcard needs DNS-01.
 certificates:
-  # Create a Let's Encrypt ClusterIssuer that solves DNS-01 in DigitalOcean
-  # DNS (the domain's DNS has to be hosted there). Set false and name your
-  # own ClusterIssuer in `issuer` to use anything else, e.g. an internal CA.
-  createIssuer: true
-  issuer: simple-host-letsencrypt
+  # Use a ClusterIssuer already in the cluster (set `issuer` to its name).
+  # Set true to create a Let's Encrypt issuer that solves DNS-01 in
+  # DigitalOcean DNS (the domain's DNS has to be hosted there); then
+  # `issuer` is the name that issuer is created under.
+  createIssuer: false
+  issuer: ""            # required with ownerCerts=auto: an existing ClusterIssuer, or the name to create. Empty with ownerCerts=manual omits the cert-manager annotation so ingress.tlsSecret is used as-is.
   acme:
     email: ""           # set this with createIssuer: expiry notices go here
     server: https://acme-v02.api.letsencrypt.org/directory
     # A DigitalOcean API token with read and write on Domains. Stored in
     # the namespace cert-manager runs in, as ClusterIssuers require, and
     # kept in Helm's release history like every value; digitaloceanTokenSecret
-    # keeps it out of both.
+    # keeps it out of both. Only used with createIssuer.
     digitaloceanToken: ""
     # Or the name of an existing Secret there holding it under key "access-token".
     digitaloceanTokenSecret: ""
   certManagerNamespace: cert-manager
-  # auto: the reconciler requests owner certificates. manual: you issue
-  # *.<name>.<host> yourself and the reconciler is not installed.
+  # auto: the reconciler requests owner certificates (issuer required).
+  # manual: you issue *.<name>.<host> yourself and the reconciler is not
+  # installed; issuer may be empty.
   ownerCerts: auto
   ownerHostsInterval: 15s
 
 ingress:
-  # The IngressClass the 1-Click's Traefik serves. Set your controller's
-  # class to use another one.
-  className: simple-host
-  # Uploads are archives up to MAX_ARCHIVE_BYTES (100 MiB by default). Traefik
-  # has no body cap; these set ingress-nginx's above it and are ignored by
-  # other controllers.
+  # Empty uses the cluster's default IngressClass. Set a name when the
+  # cluster has several classes, or none is the default.
+  className: ""
+  # Uploads are archives up to MAX_ARCHIVE_BYTES (100 MiB by default). These
+  # set ingress-nginx's body cap and timeouts above that; other controllers
+  # ignore them. Add your controller's equivalent under extra annotations.
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: 128m
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
@@ -125,9 +132,12 @@ ingress:
 # X-Forwarded-For. Empty uses the built-in private ranges.
 trustedProxyCIDRs: ""
 
-# Any other setting from docs/configuration.md, as NAME: value. Secrets go in
-# extraSecrets. Every limit and time there has a default; set only what you
-# change, e.g. MAX_ARCHIVE_BYTES: "209715200".
+# Leftover application settings from docs/configuration.md that this chart
+# does not already own as typed values (MAX_ARCHIVE_BYTES, OIDC_EMAIL_CLAIM,
+# BACKUP_STORAGE_INSECURE_ALLOWED=true for an http:// storage.endpoint).
+# Secrets go in extraSecrets, or in secrets.existingSecret when that is set.
+# Certificate lifecycle is certificates.* (ownerCerts, issuer, createIssuer),
+# not extraConfig. extraSecrets cannot be used with secrets.existingSecret.
 extraConfig: {}
 extraSecrets: {}
 
@@ -152,9 +162,24 @@ tmpSize: 1Gi
 # leaves the server open to the whole cluster.
 networkPolicy:
   enabled: true
-  ingressNamespace: simple-host-ingress
+  ingressNamespace: ""
   # The namespace of the Prometheus that scrapes :9090, if any.
   metricsNamespace: ""
+
+# Annotations on the simple-host ServiceAccount for an EXISTING
+# platform-managed identity. The chart does not create IAM roles or cloud
+# identity bindings. The default AWS SDK credential chain supports
+# AWS-compatible mechanisms (IRSA, EKS Pod Identity, env keys), not Azure
+# Workload Identity or GCS Workload Identity. Other S3-compatible providers
+# use their static S3/HMAC keys. The API token stays unmounted
+# (automountServiceAccountToken: false); the platform injects its own
+# credential. Owner-hosts has no storage access and does not receive these.
+serviceAccount:
+  annotations: {}
+
+# Extra annotations and labels on the application pod only (not owner-hosts).
+podAnnotations: {}
+podLabels: {}
 
 nodeSelector: {}
 tolerations: []

@@ -17,15 +17,20 @@ kustomize overlay: values go in one values file, not `config.env` / `secrets.env
 The Kubernetes 1-Click installs Traefik (its own IngressClass, `simple-host`, in
 `simple-host-ingress`, so a controller the cluster already runs is left alone),
 cert-manager if the cluster has none, and the chart with no settings: the database
-starts, and Simple Host waits for the values below. Without the 1-Click, install
+starts, and Simple Host waits for the values below. Chart 0.1.1 still has those
+DigitalOcean defaults; 0.2.0 is provider-neutral and needs the preset
+(`deploy/helm/simple-host-enterprise/values-digitalocean.yaml`) for Spaces, the
+Traefik class, NetworkPolicy, and a Let's Encrypt DNS-01 issuer on DigitalOcean
+DNS. Marketplace workflows can pin `--version 0.1.1`. Without the 1-Click, install
 cert-manager and a controller, then:
 
 ```sh
-helm install simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.1.1 -n simple-host --create-namespace -f my-values.yaml
+helm install simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.2.0 -n simple-host --create-namespace -f deploy/helm/simple-host-enterprise/values-digitalocean.yaml -f my-values.yaml
 ```
 
 The values sections 2 to 6 below give you, in `my-values.yaml` (keep it out of git: it
-holds secrets):
+holds secrets). Pass the preset first so Spaces, the Traefik class and the
+DigitalOcean issuer stay set:
 
 ```yaml
 host: corp-sites.com
@@ -41,23 +46,31 @@ storage:
   bucket: <bucket>
   accessKeyId: <Spaces key>
   secretAccessKey: <Spaces secret>
+  sse: none
 certificates:
+  createIssuer: true
+  issuer: simple-host-letsencrypt
   acme:
     email: you@example.com
     digitaloceanToken: <token with Domains read and write>
+ingress:
+  className: simple-host
+networkPolicy:
+  ingressNamespace: simple-host-ingress
 ```
 
 After the 1-Click, apply them with:
 
 ```sh
-helm upgrade simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.1.1 -n simple-host --reset-then-reuse-values -f my-values.yaml
+helm upgrade simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.2.0 -n simple-host --reset-then-reuse-values -f deploy/helm/simple-host-enterprise/values-digitalocean.yaml -f my-values.yaml
 ```
 
-The chart generates the session key, the database passwords and the envelope key on
-first install and keeps them across upgrades. Every value, with its default, is in the
-chart's `values.yaml`. Any setting from `docs/configuration.md` goes under
-`extraConfig` (secrets under `extraSecrets`). The chart's `README.md` covers upgrading
-and removing.
+The chart generates the session key, the application-role password and the envelope
+key on first install and keeps them across upgrades. External `postgres.password` is
+the existing owning role's password. Every value, with its default, is in the
+chart's `values.yaml`. Leftover application settings the chart does not already own
+go under `extraConfig` (secrets under `extraSecrets`; certificate lifecycle is
+`certificates.*`). The chart's `README.md` covers upgrading and removing.
 
 ## 1. Cluster & ingress
 
@@ -80,10 +93,12 @@ and removing.
   kubectl -n simple-host-ingress get svc traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
   ```
 
-- The certificates need DNS-01. The chart creates a Let's Encrypt ClusterIssuer
-  (`simple-host-letsencrypt`) that answers DNS-01 in DigitalOcean DNS, limited to names
-  under `<host>`. The domain's DNS has to be hosted at DigitalOcean (Networking,
-  Domains): if it is registered elsewhere, set its nameservers at the registrar to
+- The certificates need DNS-01. With the DigitalOcean preset (`createIssuer: true`)
+  the chart creates a Let's Encrypt ClusterIssuer (`simple-host-letsencrypt`) that
+  answers DNS-01 in DigitalOcean DNS, limited to names under `<host>`. Chart 0.2.0
+  without the preset uses a ClusterIssuer already in the cluster instead. The
+  domain's DNS has to be hosted at DigitalOcean (Networking, Domains): if it is
+  registered elsewhere, set its nameservers at the registrar to
   `ns1.digitalocean.com`, `ns2.digitalocean.com` and `ns3.digitalocean.com`.
 - The token needs read and write on Domains. A DigitalOcean token reaches every domain
   in its team, so keep Simple Host's domain in a team of its own. Pass the token as a

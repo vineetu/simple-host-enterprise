@@ -8,8 +8,10 @@ invocation that exists in this repository today.
 Sections 1-2 (Docker Desktop) have been followed start to finish from a
 clean teardown. `docs/cloud/` records which managed-cloud guides have been
 verified by a real install. A Helm chart, `deploy/helm/simple-host-enterprise`,
-installs the same workloads without kustomize; `docs/cloud/digitalocean.md`
-walks through it.
+installs the same workloads into an existing cluster without kustomize;
+[install-kubernetes.md](install-kubernetes.md) is the generic walkthrough.
+DigitalOcean-specific values are the chart's `values-digitalocean.yaml`
+([cloud/digitalocean.md](cloud/digitalocean.md)).
 
 ## 1. Before you start
 

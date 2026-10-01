@@ -167,3 +167,13 @@ artifact.
 - **2026-09-27 — Every operational time and limit is an env setting,** with today's value as the
   default and a range check at startup. Reason: operators tune an install without a rebuild,
   and a typo cannot switch a safeguard off.
+- **2026-10-01 — Enterprise installs into an already existing Kubernetes cluster.** The
+  product does not create EKS, AKS, a cluster, a VPC, or other platform infrastructure.
+  Helm chart values are the tunable configuration. Postgres is an existing database or
+  an optional chart-managed evaluation instance. Object storage is an existing
+  S3-compatible bucket. Sign-in is the company's OIDC. Ingress, TLS and cert-manager
+  issuers are the cluster's. The chart is generic by default; DigitalOcean-specific
+  behaviour is an explicit values preset. Existing cloud Terraform modules remain as
+  historical/advanced paths, not the default install. Reason: a company already has a
+  cluster, identity, database and bucket; the install must fit those, not invent a
+  second platform.

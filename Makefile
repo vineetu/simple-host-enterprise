@@ -1,7 +1,8 @@
 # Simple Host: build, test, and run the package on a local cluster.
 #
-#   make test          go test ./..., scripts/check-features.sh, check-parity.sh
-#                      and settings_docs.py --check (docs/advanced follows the code)
+#   make test          go test ./..., scripts/check-features.sh, check-parity.sh,
+#                      settings_docs.py --check (docs/advanced follows the code),
+#                      and scripts/test-chart.sh when helm is on PATH
 #   make test-db       go test ./... against a throwaway Postgres in Docker
 #   make vuln          govulncheck
 #   make image         docker build -t simple-host:local
@@ -30,7 +31,7 @@ KUBECTL         := kubectl --context $(CLUSTER_CONTEXT)
 INGRESS_NGINX_URL := https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.14.1/deploy/static/provider/cloud/deploy.yaml
 CERT_MANAGER_URL  := https://github.com/cert-manager/cert-manager/releases/download/v1.19.2/cert-manager.yaml
 
-.PHONY: build test test-db vuln image local local-tools local-third-party local-certs local-secrets local-image-load local-up local-down smoke pentest render
+.PHONY: build test test-db test-chart vuln image local local-tools local-third-party local-certs local-secrets local-image-load local-up local-down smoke pentest render
 
 # Stamped into the binary; `simple-host version` and the first log line show it.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -44,6 +45,10 @@ test:
 	./scripts/check-features.sh
 	./scripts/check-parity.sh
 	python3 scripts/settings_docs.py --check
+	@if command -v helm >/dev/null; then ./scripts/test-chart.sh; else echo "skip test-chart (helm not on PATH)"; fi
+
+test-chart:
+	./scripts/test-chart.sh
 
 # The whole suite against a throwaway Postgres in Docker, so the tests gated
 # on MIGRATE_TEST_DSN run instead of skipping — the same set CI runs. Fails

@@ -1044,7 +1044,7 @@ Config names are documented in `docs/configuration.md`; schema in
   `OWNER_CERTS` (`auto` or `manual`, refused otherwise); all of
   the above. Full list: `docs/configuration.md`.
 
-- **Quick setup with Terraform.** `deploy/terraform/aws` is one root module
+- **Quick setup with Terraform (advanced).** `deploy/terraform/aws` is one root module
   (one per cloud as more are added): a new cluster
   (`create_cluster = true`) or an existing one, managed Postgres, the bucket,
   generated secrets in the cloud's secret store synced into
@@ -1065,19 +1065,38 @@ Config names are documented in `docs/configuration.md`; schema in
   CloudShell closed needs only Enter; answers with invisible or control
   characters are refused.
 
-- **Helm chart.** `deploy/helm/simple-host-enterprise`, published as
+- **Helm chart.** `deploy/helm/simple-host-enterprise` (chart 0.2.0), published as
   `oci://ghcr.io/vineetu/charts/simple-host-enterprise` by a `chart-v*` tag
   (`.github/workflows/chart.yml`, signed, a version never replaced), the same
-  workloads as the `byo` overlay, with defaults for DigitalOcean: Postgres in
-  the cluster (TLS only) or managed, Spaces with `BACKUP_SSE=none` and the
-  envelope, a Let's Encrypt DNS-01 ClusterIssuer on DigitalOcean DNS limited
-  to the host's zone, NetworkPolicies for the database and the server. Session
-  key, database passwords and envelope key are generated once and kept across
-  upgrades and `helm uninstall`; the chart refuses a value that would drop the
-  envelope key in use. Until the domain, OIDC client and bucket are set it
-  installs only the database, which is what the DigitalOcean Kubernetes
-  1-Click deploys, with Traefik and cert-manager (`docs/cloud/digitalocean.md`).
-  CI lints and renders it.
+  workloads as the `byo` overlay, provider-neutral by default: an existing
+  ClusterIssuer (`certificates.createIssuer: false`), the cluster's default
+  IngressClass, PostgreSQL 5432, S3 endpoint/region/SSE set by the installer.
+  DigitalOcean Spaces, Traefik class `simple-host`, NetworkPolicy namespace
+  `simple-host-ingress`, and a Let's Encrypt DNS-01 ClusterIssuer on
+  DigitalOcean DNS are the explicit preset `values-digitalocean.yaml`
+  (`docs/cloud/digitalocean.md`; marketplace workflows may pin chart 0.1.1).
+  Postgres in the cluster (TLS only, evaluation, `DB_INCLUSTER_EVALUATION`,
+  needs cert-manager) or existing (`postgres.mode: external`;
+  `postgres.password` / Secret `DB_PASSWORD` is the existing owning role's
+  password, never generated). `certificates.ownerCerts: auto` requires
+  `certificates.issuer` and annotates Ingress; `manual` may leave `issuer`
+  empty so an existing `ingress.tlsSecret` is used without cert-manager
+  requesting a replacement (each owner still needs `*.<name>.<host>`).
+  `extraConfig.BACKUP_STORAGE_INSECURE_ALLOWED=true` is the documented
+  evaluation opt-in that permits an `http://` `storage.endpoint`; production
+  stays https. `serviceAccount.annotations`, `podAnnotations` and `podLabels`
+  attach an existing platform-managed identity to the app ServiceAccount and
+  pod (AWS SDK chain: AWS-compatible mechanisms only; other S3 providers use
+  HMAC keys); owner-hosts does not receive them; the API token stays
+  unmounted. Session key, application-role password and envelope key are
+  generated once and kept across upgrades and `helm uninstall`;
+  `secrets.existingSecret` is required for `helm template` / Argo so keys do
+  not rotate, and `extraSecrets` cannot be combined with it. The chart refuses
+  a value that would drop the envelope key in use. Until the domain, OIDC
+  client and bucket are set it installs only the generated secrets and, with
+  `postgres.mode: incluster`, the evaluation database. Generic walkthrough:
+  `docs/install-kubernetes.md`. `scripts/test-chart.sh` lints and asserts
+  rendered resources (in `make test` when helm is on PATH, and in CI).
 
 ## 19. Owner hosts: per-owner certificates
 

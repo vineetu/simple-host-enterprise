@@ -45,16 +45,17 @@ Done means all of these hold:
 
 ## Step 0. Ask the human
 
-**On AWS, prefer the quick path.** https://simple-host.app/setup
-(Enterprise → AWS) gives one line that runs the Terraform module in
-`deploy/terraform/aws` (its `README.md` says what it builds) and ends at
-the DNS records and `/readyz`; the handoff block there is written for an agent.
-**On DigitalOcean, use the Helm chart.** `docs/cloud/digitalocean.md` installs
-`deploy/helm/simple-host-enterprise` (or the Kubernetes 1-Click, which installs
-the same chart) with one values file in place of this runbook's overlay files.
-Ask the same Step 0 questions; section 4's rule on secrets holds for the values
-file too.
-This runbook is for every other cluster, or doing it by hand.
+**On an existing Kubernetes cluster, use the Helm chart.**
+`docs/install-kubernetes.md` installs `deploy/helm/simple-host-enterprise`
+into the cluster you already run, with your Postgres, S3-compatible bucket,
+OIDC and cert-manager issuer. Values are the chart's; it does not create a
+cluster or other platform infrastructure. DigitalOcean settings are
+`values-digitalocean.yaml` (`docs/cloud/digitalocean.md`); the Kubernetes
+1-Click can pin chart 0.1.1. Ask the same Step 0 questions; section 4's rule
+on secrets holds for the values file too.
+
+**AWS Terraform that can create a cluster** (`deploy/terraform/aws`) is an
+advanced path. This runbook is the kustomize overlay path.
 
 Ask these in one message. Do not ask anything else up front.
 

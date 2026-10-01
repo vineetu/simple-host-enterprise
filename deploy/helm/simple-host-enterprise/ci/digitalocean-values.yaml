@@ -1,4 +1,6 @@
-# Placeholder values that render every template (CI only; not real secrets).
+# Placeholder values that render the DigitalOcean preset (CI only; not real secrets).
+# Compose with values-digitalocean.yaml so the issuer, Spaces endpoint and Traefik
+# class are the ones the preset sets.
 host: sites.example.com
 oidc:
   issuer: https://accounts.google.com

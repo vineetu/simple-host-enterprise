@@ -8,17 +8,19 @@ Every person in a company gets a place for what their AI agent builds, at `<site
 - **Overview:** https://simple-host.app/enterprise
 - **Brief:** https://simple-host.app/enterprise/brief
 - **Architecture:** https://simple-host.app/enterprise/architecture
-- **Install:** [INSTALL.md](INSTALL.md) (runbook for an agent) · [docs/install.md](docs/install.md) (full guide) · [docs/](docs/)
+- **Install:** [docs/install-kubernetes.md](docs/install-kubernetes.md) (existing cluster, Helm) · [INSTALL.md](INSTALL.md) (runbook for an agent) · [docs/install.md](docs/install.md) (full guide) · [docs/](docs/)
 - **Security:** [SECURITY.md](SECURITY.md) · [docs/security-review.md](docs/security-review.md)
 - **Releases:** [CHANGELOG.md](CHANGELOG.md) · latest [v0.9.2](https://github.com/vineetu/simple-host-enterprise/releases/tag/v0.9.2) (numbering restarted at 0.x; v1.x releases came before it). Pin the image by digest; the current digest is in [INSTALL.md](INSTALL.md).
 - **Hosted edition** (for individuals): https://simple-host.app/ · [github.com/vineetu/simple-host](https://github.com/vineetu/simple-host)
 
 ## Install
 
-`INSTALL.md` is a runbook written for a coding agent. Point the agent at a clone of this repository with access to your cluster. It provisions the database and bucket, writes the configuration, stops for the steps only a person can do (registering the sign-in app, the DNS records), applies the manifests and checks the result. It never prints a secret.
+On a Kubernetes cluster you already run, with existing Postgres, an S3-compatible bucket, the company's OIDC and an ingress/issuer: [docs/install-kubernetes.md](docs/install-kubernetes.md) (Helm chart values; no cluster is created). DigitalOcean settings are the chart's `values-digitalocean.yaml`.
+
+`INSTALL.md` is a kustomize runbook written for a coding agent. Point the agent at a clone of this repository with access to your cluster. It writes the configuration, stops for the steps only a person can do (registering the sign-in app, the DNS records), applies the manifests and checks the result. It never prints a secret.
 
 ```text
-Read INSTALL.md in this repository and install Simple Host on our Kubernetes cluster; ask me only what you cannot find out yourself.
+Read docs/install-kubernetes.md in this repository and install Simple Host into our existing Kubernetes cluster with Helm; ask me only what you cannot find out yourself.
 ```
 
 ## Features
@@ -71,20 +73,21 @@ Read INSTALL.md in this repository and install Simple Host on our Kubernetes clu
 - Settings are environment variables. Nothing that identifies an install has a default, and the server refuses to start on an unsafe value.
 - Health, readiness and metrics endpoints; rate limits shared across replicas.
 - Per-cloud checklists in [docs/cloud/](docs/cloud/) (AWS, GCP, Azure, Oracle Cloud, UpCloud, DigitalOcean).
-- A Helm chart in [deploy/helm/simple-host-enterprise](deploy/helm/simple-host-enterprise/), which the DigitalOcean Kubernetes 1-Click installs.
+- A Helm chart in [deploy/helm/simple-host-enterprise](deploy/helm/simple-host-enterprise/) for an existing cluster ([docs/install-kubernetes.md](docs/install-kubernetes.md)). DigitalOcean-specific settings are an explicit preset; the Kubernetes 1-Click can pin chart 0.1.1.
 
 ## Advanced settings
 
 Every setting, grouped by area and explained with recipes (stricter sign-in, shorter retention,
 bigger uploads): [docs/advanced/](docs/advanced/README.md). The setup helper at
-https://simple-host.app/setup?product=enterprise asks where it runs. On AWS it gives one
-command for AWS CloudShell that runs the Terraform module in
-[`deploy/terraform/aws`](deploy/terraform/aws/README.md) and sets up everything in your account,
-a cluster included if you have none. Anywhere else it asks a few
-questions, or every one in Advanced mode, and writes `config.env`, a `secrets.env` template and
-the apply commands. It runs in your
-browser and never asks for a secret; an optional check of your choices, just before the files,
-sends only the names and values of the numbers, durations, switches and rates you changed.
+https://simple-host.app/setup?product=enterprise asks where it runs and should
+target the Helm values in `deploy/helm/simple-host-enterprise/values.yaml` for
+an existing cluster ([docs/install-kubernetes.md](docs/install-kubernetes.md)).
+Anywhere else it asks a few questions, or every one in Advanced mode, and writes
+`config.env`, a `secrets.env` template and the apply commands. Cloud Terraform
+that can create a cluster (`deploy/terraform/aws`) is an advanced path. The helper
+runs in your browser and never asks for a secret; an optional check of your choices,
+just before the files, sends only the names and values of the numbers, durations,
+switches and rates you changed.
 
 ## Run it locally
 

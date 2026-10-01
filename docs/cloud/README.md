@@ -16,13 +16,15 @@ On AWS there is also a quick path: https://simple-host.app/setup gives one
 command for AWS CloudShell that runs the Terraform module in
 `deploy/terraform/aws` and sets up all seven sections.
 
-On DigitalOcean there is a Kubernetes 1-Click, and a Helm chart
-(`deploy/helm/simple-host-enterprise`, published at
-`oci://ghcr.io/vineetu/charts/simple-host-enterprise`) that works on any cluster;
-`digitalocean.md` uses it.
+The Helm chart (`deploy/helm/simple-host-enterprise`, published at
+`oci://ghcr.io/vineetu/charts/simple-host-enterprise`) installs into an existing
+cluster on any provider; [install-kubernetes.md](../install-kubernetes.md) is
+the walkthrough. DigitalOcean-specific values are the chart's
+`values-digitalocean.yaml`; `digitalocean.md` uses it. The Kubernetes 1-Click
+can pin chart 0.1.1, which still has those as defaults.
 
-Values go in `deploy/overlays/byo/config.env` / `secrets.env` (on DigitalOcean, in
-the chart's values file); the ingress block goes in
+Values go in the chart's values file, or in `deploy/overlays/byo/config.env` /
+`secrets.env` for the kustomize path; the kustomize ingress block goes in
 `deploy/overlays/byo/ingress-patch.yaml`.
 
 ## The sections

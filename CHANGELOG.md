@@ -4,6 +4,22 @@ Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.
 
+## Unreleased
+
+### Changed
+- Helm chart 0.2.0 (unpublished until cluster validation): provider-neutral
+  defaults for an existing Kubernetes cluster. Existing ClusterIssuer, cluster
+  default IngressClass, PostgreSQL 5432, no Spaces endpoint. DigitalOcean
+  settings are `values-digitalocean.yaml`; marketplace workflows can pin
+  chart 0.1.1. Generic install: `docs/install-kubernetes.md`. App image remains
+  v0.9.2 by digest. `extraConfig.BACKUP_STORAGE_INSECURE_ALLOWED=true` permits
+  an `http://` `storage.endpoint` (evaluation only). `certificates.ownerCerts:
+  manual` may omit `issuer` and the cert-manager Ingress annotation.
+  `serviceAccount.annotations` / `podAnnotations` / `podLabels` attach an
+  existing platform-managed identity to the app (AWS-compatible SDK chain;
+  other S3 providers use HMAC keys). External `postgres.password` is the
+  existing owning role's password, never generated.
+
 ## v0.9.2 — 2026-09-30
 
 Numbering restarts at 0.x: Enterprise has not yet been proven in

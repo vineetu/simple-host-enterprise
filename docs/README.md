@@ -1,6 +1,8 @@
 # Documentation
 
 - `install.md` — installing on a local cluster, then on a real one.
+- `install-kubernetes.md` — Helm chart into an existing Kubernetes cluster
+  (existing Postgres, bucket, OIDC, issuer; no cluster is created).
 - `cloud/` — per-cloud notes for managed Kubernetes, Postgres and buckets.
 - `advanced/` — every setting by area, in product terms, with recipes; the
   tables are generated from `advanced/settings.json` (`simple-host settings

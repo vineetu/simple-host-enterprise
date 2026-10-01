@@ -1,10 +1,25 @@
 {{- if not (has .Values.postgres.mode (list "incluster" "external")) }}{{ fail "postgres.mode must be incluster or external" }}{{ end }}
 {{- if not (has .Values.certificates.ownerCerts (list "auto" "manual")) }}{{ fail "certificates.ownerCerts must be auto or manual" }}{{ end }}
+{{- if not (has .Values.storage.sse (list "AES256" "aws:kms" "none")) }}{{ fail "storage.sse must be AES256, aws:kms or none" }}{{ end }}
+{{- if and (eq .Values.storage.sse "aws:kms") (not .Values.storage.sseKeyId) }}{{ fail "storage.sseKeyId is required with storage.sse=aws:kms" }}{{ end }}
+{{- if and .Values.storage.sseKeyId (ne .Values.storage.sse "aws:kms") }}{{ fail "storage.sseKeyId is only used with storage.sse=aws:kms" }}{{ end }}
+{{- if and .Values.secrets.existingSecret .Values.extraSecrets }}{{ fail "extraSecrets cannot be used with secrets.existingSecret: put those keys in the existing Secret" }}{{ end }}
 {{- if and (eq .Values.postgres.mode "external") (include "sh.configured" .) }}
 {{- if not .Values.postgres.external.host }}{{ fail "postgres.external.host is required with postgres.mode=external" }}{{ end }}
 {{- if and (not .Values.postgres.external.caCert) (eq .Values.postgres.external.sslmode "verify-full") }}{{ fail "postgres.external.caCert is required: the server verifies the database certificate against it" }}{{ end }}
 {{- end }}
-{{- $chartKeys := list "PUBLIC_BASE_URL" "SECURE_MODE" "PORT" "HTTPS_REDIRECT_PORT" "TRUSTED_PROXY_CIDRS" "OWNER_CERTS" "OWNER_CERT_ISSUER" "OWNER_HOSTS_INTERVAL" "OIDC_ISSUER" "OIDC_CLIENT_ID" "OIDC_SCOPES" "ADMIN_EMAILS" "ALLOWED_EMAIL_DOMAINS" "SESSION_TTL" "SESSION_IDLE" "DB_HOST" "DB_PORT" "DB_INCLUSTER_EVALUATION" "DB_NAME" "DB_USER" "DB_SSLMODE" "DB_SSL_ROOT_CERT" "BACKUP_STORAGE_ENDPOINT" "BACKUP_STORAGE_REGION" "BACKUP_STORAGE_BUCKET" "BACKUP_STORAGE_PREFIX" "BACKUP_SSE" }}
+{{- if include "sh.configured" . }}
+{{- if not .Values.storage.endpoint }}{{ fail "storage.endpoint is required (an S3-compatible URL)" }}{{ end }}
+{{- $extra := .Values.extraConfig | default dict }}
+{{- $allowInsecureStorage := eq (lower (toString (index $extra "BACKUP_STORAGE_INSECURE_ALLOWED"))) "true" }}
+{{- if hasPrefix "https://" .Values.storage.endpoint }}
+{{- else if and $allowInsecureStorage (hasPrefix "http://" .Values.storage.endpoint) }}
+{{- else }}{{ fail "storage.endpoint must be an https URL (http:// is allowed only with extraConfig.BACKUP_STORAGE_INSECURE_ALLOWED=true)" }}{{ end }}
+{{- if not .Values.storage.region }}{{ fail "storage.region is required" }}{{ end }}
+{{- if and (eq .Values.certificates.ownerCerts "auto") (not .Values.certificates.issuer) }}{{ fail "certificates.issuer is required with certificates.ownerCerts=auto: the name of a ClusterIssuer already in the cluster (or set certificates.createIssuer to create a DigitalOcean DNS-01 issuer)" }}{{ end }}
+{{- if and (contains "accounts.google.com" .Values.oidc.issuer) (not .Values.oidc.allowedEmailDomains) }}{{ fail "oidc.allowedEmailDomains is required with Google: without it any Google account can sign in" }}{{ end }}
+{{- end }}
+{{- $chartKeys := list "PUBLIC_BASE_URL" "SECURE_MODE" "PORT" "HTTPS_REDIRECT_PORT" "TRUSTED_PROXY_CIDRS" "OWNER_CERTS" "OWNER_CERT_ISSUER" "OWNER_HOSTS_INTERVAL" "OIDC_ISSUER" "OIDC_CLIENT_ID" "OIDC_SCOPES" "ADMIN_EMAILS" "ALLOWED_EMAIL_DOMAINS" "SESSION_TTL" "SESSION_IDLE" "DB_HOST" "DB_PORT" "DB_INCLUSTER_EVALUATION" "DB_NAME" "DB_USER" "DB_SSLMODE" "DB_SSL_ROOT_CERT" "BACKUP_STORAGE_ENDPOINT" "BACKUP_STORAGE_REGION" "BACKUP_STORAGE_BUCKET" "BACKUP_STORAGE_PREFIX" "BACKUP_SSE" "BACKUP_SSE_KEY_ID" }}
 {{- range $k, $v := .Values.extraConfig }}
 {{- if has $k $chartKeys }}{{ fail (printf "extraConfig.%s: set it through the chart's own value instead" $k) }}{{ end }}
 {{- if regexMatch "(SECRET|PASSWORD|_KEY$|_KEY_ID$|DSN|TOKEN|SMTP_URL)" $k }}{{ fail (printf "extraConfig.%s looks like a secret; put it in extraSecrets" $k) }}{{ end }}
@@ -57,6 +72,9 @@ data:
   BACKUP_STORAGE_BUCKET: {{ .Values.storage.bucket | quote }}
   BACKUP_STORAGE_PREFIX: {{ .Values.storage.prefix | quote }}
   BACKUP_SSE: {{ .Values.storage.sse | quote }}
+  {{- with .Values.storage.sseKeyId }}
+  BACKUP_SSE_KEY_ID: {{ . | quote }}
+  {{- end }}
   {{- range $k, $v := .Values.extraConfig }}
   {{ $k }}: {{ $v | quote }}
   {{- end }}

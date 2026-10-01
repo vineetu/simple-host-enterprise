@@ -1,22 +1,23 @@
 {{- if not (include "sh.configured" .) }}
 Simple Host Enterprise is installed but not started: it needs a domain, your
 company's sign-in and a bucket first.
-{{- if eq .Values.postgres.mode "incluster" }} The database is starting.{{ end }}
+{{- if eq .Values.postgres.mode "incluster" }} The in-cluster database is starting; nothing backs it up.{{ end }}
 
 Set host, oidc.issuer, oidc.clientId, oidc.clientSecret, oidc.adminEmails,
-oidc.allowedEmailDomains (required with Google), storage.bucket,
-storage.accessKeyId, storage.secretAccessKey, and with
-certificates.createIssuer, certificates.acme.email and
-certificates.acme.digitaloceanToken, in a values file, then:
+oidc.allowedEmailDomains (required with Google), storage.endpoint,
+storage.region, storage.bucket
+{{- if eq .Values.certificates.ownerCerts "auto" }} and certificates.issuer{{ end }}
+{{- if .Values.certificates.createIssuer }} (and certificates.acme.email and certificates.acme.digitaloceanToken){{ end }}
+in a values file, then:
 
   helm upgrade {{ .Release.Name }} oci://ghcr.io/vineetu/charts/simple-host-enterprise --version {{ .Chart.Version }} -n {{ .Release.Namespace }} --reset-then-reuse-values -f my-values.yaml
 
-Guide: https://github.com/vineetu/simple-host-enterprise/blob/main/docs/cloud/digitalocean.md
+Guide: https://github.com/vineetu/simple-host-enterprise/blob/main/docs/install-kubernetes.md
 {{- else }}
 Simple Host Enterprise is starting at https://{{ .Values.host }}
 
-1. Point {{ .Values.host }} and *.{{ .Values.host }} at the ingress load balancer's IP:
-     kubectl get svc -A -l app.kubernetes.io/name=traefik
+1. Point {{ .Values.host }} and *.{{ .Values.host }} at the ingress load balancer:
+     kubectl get svc -A --field-selector spec.type=LoadBalancer
 2. Register https://{{ .Values.host }}/auth/callback as the redirect URI at your identity provider.
 3. Watch it come up:
      kubectl -n {{ .Release.Namespace }} rollout status deploy/simple-host
@@ -31,5 +32,11 @@ Back up the envelope key now. Every site in the bucket is unreadable without it:
 
 The database runs in the cluster and nothing backs it up. For real use, move
 to a managed database (postgres.mode=external).
+{{- end }}
+{{- if eq .Values.certificates.ownerCerts "manual" }}
+
+certificates.ownerCerts is manual: issue *.<name>.{{ .Values.host }} (certificate
+and Ingress to simple-host) for each owner before they publish. The dashboard
+uses ingress.tlsSecret{{ if not .Values.certificates.issuer }} with no cert-manager cluster-issuer annotation{{ end }}.
 {{- end }}
 {{- end }}

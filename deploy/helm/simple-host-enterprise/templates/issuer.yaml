@@ -1,7 +1,8 @@
 {{- if and (include "sh.configured" .) .Values.certificates.createIssuer }}
 {{- $acme := .Values.certificates.acme }}
+{{- if not .Values.certificates.issuer }}{{ fail "certificates.issuer is required with certificates.createIssuer (the name of the ClusterIssuer to create)" }}{{ end }}
 {{- if not $acme.email }}{{ fail "certificates.acme.email is required with certificates.createIssuer" }}{{ end }}
-{{- if not (or $acme.digitaloceanToken $acme.digitaloceanTokenSecret) }}{{ fail "certificates.acme.digitaloceanToken (or digitaloceanTokenSecret) is required with certificates.createIssuer: a wildcard certificate needs DNS-01" }}{{ end }}
+{{- if not (or $acme.digitaloceanToken $acme.digitaloceanTokenSecret) }}{{ fail "certificates.acme.digitaloceanToken (or digitaloceanTokenSecret) is required with certificates.createIssuer: the created issuer solves DNS-01 in DigitalOcean DNS" }}{{ end }}
 {{- $tokenSecret := $acme.digitaloceanTokenSecret | default (printf "%s-digitalocean-dns" .Values.certificates.issuer) }}
 {{- if $acme.digitaloceanToken }}
 apiVersion: v1

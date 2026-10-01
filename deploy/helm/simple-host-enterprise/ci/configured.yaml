@@ -1,0 +1,30 @@
+# Placeholder values that render a generic configured install (CI only).
+host: sites.example.com
+oidc:
+  issuer: https://login.example.com
+  clientId: placeholder-client
+  clientSecret: placeholder
+  adminEmails: admin@example.com
+  allowedEmailDomains: example.com
+postgres:
+  mode: external
+  password: placeholder-owner
+  appPassword: placeholder-app
+  external:
+    host: postgres.example.com
+    port: 5432
+    caCert: |
+      -----BEGIN CERTIFICATE-----
+      placeholder
+      -----END CERTIFICATE-----
+storage:
+  endpoint: https://s3.example.com
+  region: eu-west-1
+  bucket: simple-host-sites
+  accessKeyId: placeholder
+  secretAccessKey: placeholder
+  sse: AES256
+certificates:
+  issuer: company-ca
+ingress:
+  className: nginx
