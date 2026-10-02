@@ -9,6 +9,8 @@ release, commit and schema.
 - **Enterprise setup offers an inspectable Helm download.** The hosted helper packages a wrapper Chart.yaml, selected values under enterprise:, the pinned published dependency and a README for lint/render/dry-run/install/upgrade. The Kubernetes guide distinguishes wrapper and direct-chart values; install.sh is optional.
 
 ### Changed
+- Go 1.27.1 is the source-build toolchain and the digest-pinned Docker build
+  stage on both amd64 and arm64. The Enterprise storage architecture is unchanged.
 - Helm chart 0.2.0 (unpublished until cluster validation): provider-neutral
   defaults for an existing Kubernetes cluster. Existing ClusterIssuer, cluster
   default IngressClass, PostgreSQL 5432, no Spaces endpoint. DigitalOcean

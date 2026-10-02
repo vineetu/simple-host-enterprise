@@ -21,7 +21,7 @@ You need, on the machine that will run the install:
   `make local-tools`.
 - Docker Desktop with Kubernetes enabled (the primary target), or minikube
   with the `docker` driver (the alternate — see the callout in step 3).
-- Go 1.25, only if you intend to build the binary yourself rather than use
+- Go 1.27.1, only if you intend to build the binary yourself rather than use
   a pre-built image; `make build` and `make image` both do this for you.
 
 You do **not** need a cloud account, a domain you control, or an existing
