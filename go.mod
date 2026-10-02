@@ -8,7 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.18.18
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.101.0
 	github.com/lib/pq v1.10.9
-	golang.org/x/net v0.57.0
+	golang.org/x/net v0.59.0
 )
 
 require (
