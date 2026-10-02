@@ -39,10 +39,31 @@ Terraform that provisions a cluster is an advanced path (`deploy/terraform/`,
 The image is `ghcr.io/vineetu/simple-host-enterprise:v0.9.2`, pinned by digest
 in the chart. Pin the chart version; 0.2.0 is this release.
 
+## Review the configured chart download
+
+The [Enterprise setup helper](https://simple-host.app/setup?product=enterprise)
+downloads a normal Helm chart directory as one ZIP. Its `Chart.yaml` depends on
+this published chart under alias `enterprise`; `values.yaml` contains the selected
+configuration under `enterprise:`. The published dependency archive is bundled
+under `charts/`, so reviewers can inspect its templates and defaults before
+installing and do not need to fetch a dependency just to use the download.
+
+Read the included README for checksum verification, template inspection,
+`helm lint`, `helm template`, install dry-run, `helm install` and `helm upgrade`
+against the local directory. Client dry-run does not apply resources; select
+your intended Kubernetes context. `install.sh` is an optional convenience.
+The existing Secret is supplied separately; `.helmignore` excludes filled
+`secrets.env`, the CA file and review/render output from chart files. External
+Postgres passes its CA as `--set-file enterprise.postgres.external.caCert=db-ca.crt`.
+
+The direct-chart examples below use the upstream values layout. With the setup
+helper's wrapper, put those keys under `enterprise:` and use the downloaded
+README's local-chart commands instead.
+
 ## Values
 
 Keep the values file out of git: it can hold secrets. The setup helper at
-https://simple-host.app/setup (Enterprise) should write the same keys.
+https://simple-host.app/setup (Enterprise) writes these keys under the wrapper's `enterprise:` alias.
 
 ```yaml
 host: corp-sites.com

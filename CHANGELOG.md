@@ -6,6 +6,8 @@ release, commit and schema.
 
 ## Unreleased
 
+- **Enterprise setup offers an inspectable Helm download.** The hosted helper packages a wrapper Chart.yaml, selected values under enterprise:, the pinned published dependency and a README for lint/render/dry-run/install/upgrade. The Kubernetes guide distinguishes wrapper and direct-chart values; install.sh is optional.
+
 ### Changed
 - Helm chart 0.2.0 (unpublished until cluster validation): provider-neutral
   defaults for an existing Kubernetes cluster. Existing ClusterIssuer, cluster

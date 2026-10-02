@@ -1096,7 +1096,11 @@ Config names are documented in `docs/configuration.md`; schema in
   client and bucket are set it installs only the generated secrets and, with
   `postgres.mode: incluster`, the evaluation database. Generic walkthrough:
   `docs/install-kubernetes.md`. `scripts/test-chart.sh` lints and asserts
-  rendered resources (in `make test` when helm is on PATH, and in CI).
+  rendered resources (in `make test` when helm is on PATH, and in CI). The hosted setup helper also
+  downloads a wrapper `Chart.yaml` with this dependency bundled and values under
+  `enterprise:`; its README leads with inspection, lint, render, dry-run and
+  standard local-chart install/upgrade commands. The install script is optional
+  (`docs/install-kubernetes.md`, 2026-10-02).
 
 ## 19. Owner hosts: per-owner certificates
 
