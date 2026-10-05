@@ -18,3 +18,9 @@ for t in $titles; do
 done
 [ $missing -eq 0 ] || { echo "Add a '| $REPO | <section> | <rows> |' line (and the feature row) to PARITY.md, and copy PARITY.md to the other repo."; exit 1; }
 echo "check-parity: $(echo "$titles" | wc -l | tr -d ' ') FEATURES.md sections, all in PARITY.md"
+
+# Order history is intentionally hosted / small box only, not Enterprise.
+python3 scripts/parity_compare.py --self-test
+if [ -n "${PARITY_OTHER:-}" ]; then
+    python3 scripts/parity_compare.py PARITY.md "$PARITY_OTHER"
+fi
