@@ -210,7 +210,7 @@ person's address rather than the ingress's (`docs/configuration.md`).
 
 1. Pick the image. The recommended one is the published release,
    `ghcr.io/vineetu/simple-host-enterprise:v0.9.2`, pinned by its digest
-   `sha256:bef57c4ea6247f0165d1796078e288cf8fef719bfc234e238caf9816f523647a`.
+   `sha256:e7b6defaa967a58c549c8cf7694bac7be68a15c7e3b419f85d9c1ca3d00e9d9a`.
    Or push the image you built (`make image`, or your own CI build of the
    same `Dockerfile`) to a registry your cluster can pull from, scan it,
    and resolve its immutable digest. Verify a release image's signature and

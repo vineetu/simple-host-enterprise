@@ -1,5 +1,10 @@
 # Changelog
 
+## Chart 0.2.1 — 2026-10-05
+
+- Pins the published 0.9.3 image digest; the existing-cluster and Kubernetes
+  1-Click installs include personal home and showcase controls.
+
 ## v0.9.3 — 2026-10-05
 
 - Personal home selection opens an owned site at its existing address after

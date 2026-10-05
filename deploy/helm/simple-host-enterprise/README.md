@@ -8,7 +8,7 @@ and `postgres.mode: incluster`. With `ownerCerts: manual` and an existing
 It does not create a cluster, VPC, or cloud account resources.
 
 ```sh
-helm install simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.2.0 -n simple-host --create-namespace -f my-values.yaml
+helm install simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.2.1 -n simple-host --create-namespace -f my-values.yaml
 ```
 
 - Every value, with its default and what it does: [values.yaml](values.yaml).
@@ -63,3 +63,8 @@ key up first.
 
 Push a tag `chart-v<version>` matching `Chart.yaml`, on a commit in `main`
 (`.github/workflows/chart.yml`). A published version is never replaced.
+
+Chart 0.2.1 pins release 0.9.3: personal home selection, signed-in showcase
+feed, bio, pins and manual order. Site access and origins remain in force. Set
+`extraConfig.SHOWCASE_BIO_MAX_LENGTH` to change the default 280-character bio
+limit. [Home-page behavior](../../../docs/your-home-page.md).

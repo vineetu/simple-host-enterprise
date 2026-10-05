@@ -18,8 +18,8 @@ host: ""
 
 image:
   repository: ghcr.io/vineetu/simple-host-enterprise
-  # The v0.9.2 release. Pulled by digest only; a tag is never used.
-  digest: sha256:bef57c4ea6247f0165d1796078e288cf8fef719bfc234e238caf9816f523647a
+  # The v0.9.3 release. Pulled by digest only; a tag is never used.
+  digest: sha256:e7b6defaa967a58c549c8cf7694bac7be68a15c7e3b419f85d9c1ca3d00e9d9a
   pullPolicy: IfNotPresent
   # Names of docker-registry Secrets in this namespace, for a private mirror.
   pullSecrets: []
@@ -138,6 +138,8 @@ trustedProxyCIDRs: ""
 # Secrets go in extraSecrets, or in secrets.existingSecret when that is set.
 # Certificate lifecycle is certificates.* (ownerCerts, issuer, createIssuer),
 # not extraConfig. extraSecrets cannot be used with secrets.existingSecret.
+# Personal showcase bio: SHOWCASE_BIO_MAX_LENGTH defaults to 280 (1–2000).
+# Home, pins and order are per-person dashboard/connector preferences.
 extraConfig: {}
 extraSecrets: {}
 

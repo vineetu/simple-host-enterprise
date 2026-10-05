@@ -36,7 +36,7 @@ secretGenerator:
 # is for reading; the digest is what is pulled):
 #   ghcr.io/vineetu/simple-host-enterprise:v0.9.2
 #     newName: ghcr.io/vineetu/simple-host-enterprise
-#     digest: sha256:bef57c4ea6247f0165d1796078e288cf8fef719bfc234e238caf9816f523647a
+#     digest: sha256:e7b6defaa967a58c549c8cf7694bac7be68a15c7e3b419f85d9c1ca3d00e9d9a
 # Verify it first (INSTALL.md, section 3). `name` matches the base;
 # change `newName` (and the digest) to your own scanned mirror if images must
 # come from a private registry (see the pull-secret note at the end of this

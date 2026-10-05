@@ -36,8 +36,8 @@ Terraform that provisions a cluster is an advanced path (`deploy/terraform/`,
   with `extraConfig.BACKUP_STORAGE_INSECURE_ALLOWED: "true"`.
 - The company's OIDC provider, reachable from the pods.
 
-The image is `ghcr.io/vineetu/simple-host-enterprise:v0.9.2`, pinned by digest
-in the chart. Pin the chart version; 0.2.0 is this release.
+The image is `ghcr.io/vineetu/simple-host-enterprise:v0.9.3`, pinned by digest
+in the chart. Pin the chart version; 0.2.1 is this release.
 
 ## Review the configured chart download
 
@@ -123,7 +123,7 @@ kubectl label ns simple-host pod-security.kubernetes.io/enforce=restricted --ove
 ```
 
 ```sh
-helm install simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.2.0 -n simple-host --create-namespace -f my-values.yaml
+helm install simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.2.1 -n simple-host --create-namespace -f my-values.yaml
 ```
 
 From this repository instead of the published chart:
@@ -137,7 +137,7 @@ chart installs only the generated secrets and, with `postgres.mode: incluster`,
 the evaluation database. Apply the rest with:
 
 ```sh
-helm upgrade simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.2.0 -n simple-host --reset-then-reuse-values -f my-values.yaml
+helm upgrade simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.2.1 -n simple-host --reset-then-reuse-values -f my-values.yaml
 ```
 
 Watch the migrate init container, then the rollout:

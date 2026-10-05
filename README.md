@@ -73,7 +73,7 @@ Read docs/install-kubernetes.md in this repository and install Simple Host into 
 - Settings are environment variables. Nothing that identifies an install has a default, and the server refuses to start on an unsafe value.
 - Health, readiness and metrics endpoints; rate limits shared across replicas.
 - Per-cloud checklists in [docs/cloud/](docs/cloud/) (AWS, GCP, Azure, Oracle Cloud, UpCloud, DigitalOcean).
-- A Helm chart in [deploy/helm/simple-host-enterprise](deploy/helm/simple-host-enterprise/) for an existing cluster ([docs/install-kubernetes.md](docs/install-kubernetes.md)). DigitalOcean-specific settings are an explicit preset; the Kubernetes 1-Click can pin chart 0.1.1.
+- A Helm chart in [deploy/helm/simple-host-enterprise](deploy/helm/simple-host-enterprise/) for an existing cluster ([docs/install-kubernetes.md](docs/install-kubernetes.md)). DigitalOcean-specific settings are an explicit preset; the Kubernetes 1-Click can pin chart 0.2.1 (release 0.9.3).
 
 ## Advanced settings
 
