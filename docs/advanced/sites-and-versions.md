@@ -18,6 +18,7 @@ the pod's memory with `UPLOAD_CONCURRENCY`: each upload holds its archive and fi
 <!-- settings:group=sites -->
 | Setting | Default | Allowed | What it does |
 |---|---|---|---|
+| `SHOWCASE_BIO_MAX_LENGTH` | `280` | 1–2000 characters | Maximum plain-text bio length on a personal showcase. |
 | `MAX_ARCHIVE_BYTES` | `104857600` | 1048576–524288000 bytes | The largest archive one deploy may send. Raise the ingress body-size limit with it. |
 | `MAX_FILES_PER_SITE` | `50000` | 1–100000 files | Files one deploy may hold. |
 | `UPLOAD_CONCURRENCY` | `2` | 1–64 uploads | Uploads (and, separately, downloads) one replica processes at once. Raise the pod's memory with it. |
@@ -44,3 +45,7 @@ the pod's memory with `UPLOAD_CONCURRENCY`: each upload holds its archive and fi
 `nginx.ingress.kubernetes.io/proxy-body-size: 250m`, and more pod memory.
 
 **Scan every upload.** Run clamd as a sidecar and set `CLAMD_ADDR=127.0.0.1:3310`.
+
+Your person address can open a selected home site; its showcase has a signed-in
+feed, bio, pins and manual order. Access and site origins stay in force. See
+[Your home page](../your-home-page.md).

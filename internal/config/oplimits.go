@@ -83,6 +83,7 @@ func loadOpLimits(apiKeyMaxDays int64) (oplimits.Values, error) {
 	v.APIKeyExpiryWarningDays = intIn("API_KEY_EXPIRY_WARNING_DAYS", v.APIKeyExpiryWarningDays, 1, maxAPIKeyExpiryWarningDays)
 	v.MaxTeamsPerPerson = intIn("MAX_TEAMS_PER_PERSON", v.MaxTeamsPerPerson, 1, maxTeamsPerPerson)
 	v.MaxTeamMembers = intIn("MAX_TEAM_MEMBERS", v.MaxTeamMembers, 1, maxTeamMembers)
+	v.ShowcaseBioMaxLength = intIn("SHOWCASE_BIO_MAX_LENGTH", v.ShowcaseBioMaxLength, 1, 2000)
 	v.MaxSiteViewers = intIn("MAX_SITE_VIEWERS", v.MaxSiteViewers, 1, maxSiteViewers)
 	v.MaxFilesPerSite = intIn("MAX_FILES_PER_SITE", v.MaxFilesPerSite, 1, maxFilesPerSite)
 	v.UploadConcurrency = intIn("UPLOAD_CONCURRENCY", v.UploadConcurrency, 1, maxUploadConcurrency)

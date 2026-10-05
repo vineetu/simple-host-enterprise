@@ -390,3 +390,7 @@ kubectl -n simple-host rollout restart deploy/simple-host
 Resources, `nodeSelector`, `tolerations`, `affinity` and `image.pullSecrets`
 are chart values and land on the pods. `replicas`, `prune.schedule`,
 `trustedProxyCIDRs` and `networkPolicy` are the rest of the install shape.
+
+Your person address can open a selected home site; its showcase has a signed-in
+feed, bio, pins and manual order. Access and site origins stay in force. See
+[Your home page](your-home-page.md).

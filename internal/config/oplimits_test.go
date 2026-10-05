@@ -12,7 +12,7 @@ import (
 var opLimitKeys = []string{
 	"DELETED_RETENTION_DAYS", "IDLE_CLEANUP_GRACE_DAYS", "IDLE_CLEANUP_MAX_EMAILS",
 	"PREVIEW_LINK_TTL", "EXPORT_LINK_TTL", "API_KEY_DEFAULT_DAYS", "API_KEY_EXPIRY_WARNING_DAYS",
-	"MAX_TEAMS_PER_PERSON", "MAX_TEAM_MEMBERS", "MAX_SITE_VIEWERS", "MAX_ARCHIVE_BYTES",
+	"SHOWCASE_BIO_MAX_LENGTH", "MAX_TEAMS_PER_PERSON", "MAX_TEAM_MEMBERS", "MAX_SITE_VIEWERS", "MAX_ARCHIVE_BYTES",
 	"MAX_FILES_PER_SITE", "UPLOAD_CONCURRENCY", "SEARCH_TELEMETRY_RETENTION_DAYS", "SEARCH_SESSION_MAX_AGE",
 }
 
@@ -31,6 +31,7 @@ func TestLoadOpLimitsDefaultToTodaysValues(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 	want := oplimits.Values{
+		ShowcaseBioMaxLength: 280,
 		DeletedRetentionDays: 30, IdleGraceDays: 30, IdleMaxEmails: 0,
 		PreviewLinkTTL: time.Hour, ExportLinkTTL: 10 * time.Minute,
 		APIKeyDefaultDays: 90, APIKeyExpiryWarningDays: 14,
@@ -67,6 +68,7 @@ func TestLoadOpLimitsOverrides(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 	want := oplimits.Values{
+		ShowcaseBioMaxLength: 280,
 		DeletedRetentionDays: 7, IdleGraceDays: 14, IdleMaxEmails: 25,
 		PreviewLinkTTL: 30 * time.Minute, ExportLinkTTL: 2 * time.Hour,
 		APIKeyDefaultDays: 30, APIKeyExpiryWarningDays: 7,

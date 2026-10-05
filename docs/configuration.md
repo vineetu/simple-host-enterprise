@@ -495,3 +495,10 @@ pods (the generated ConfigMap and Secret keep fixed names). Run
 `docs/cloud/aws.md`, `gcp.md`, `azure.md`, `oci.md` and `upcloud.md` show where the
 database, bucket, and certificate values for a specific cloud's managed
 services map onto this table.
+
+| Setting | Default | Allowed | What it does |
+|---|---|---|---|
+| `SHOWCASE_BIO_MAX_LENGTH` | `280` | 1–2000 | Maximum plain-text personal showcase bio length. |
+
+Personal home choice and showcase curation use the dashboard or OIDC connector;
+see [Your home page](your-home-page.md).

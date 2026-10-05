@@ -79,6 +79,21 @@ func TestCredentialsThroughMCP(t *testing.T) {
 	if ok, text := call(bearer, "deploy_site", map[string]any{"site": "demo", "files": []any{index}}); !ok {
 		t.Fatalf("deploy_site by bearer failed: %s", text)
 	}
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+	}{
+		{"set_home_page", map[string]any{"site": "demo"}},
+		{"set_bio", map[string]any{"bio": "My projects"}},
+		{"set_showcase_site", map[string]any{"site": "demo", "pinned": true, "order": float64(10)}},
+	} {
+		if ok, text := call(bearer, tc.name, tc.args); !ok {
+			t.Fatalf("%s by OIDC connector: %s", tc.name, text)
+		}
+		if ok, _ := call(map[string]string{"X-API-Key": fullKey}, tc.name, tc.args); ok {
+			t.Fatalf("%s accepted CI key", tc.name)
+		}
+	}
 	if ok, text := call(bearer, "get_state", map[string]any{"site": "demo", "owner": "alice"}); !ok {
 		t.Fatalf("get_state by bearer (site API through the host gate) failed: %s", text)
 	}

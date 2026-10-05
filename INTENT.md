@@ -75,6 +75,14 @@ artifact.
 
 ## Decisions already made
 
+- **2026-10-05 — Home-page parity follows Enterprise identity and access.**
+  Bring personal home selection, a signed-in showcase feed, bio, pins and order
+  to the existing person host and index. A home opens at its existing site URL
+  after access checks, preserving site origins and OIDC sessions. Content stays
+  in the bucket; presentation settings stay in Postgres. Team indexes remain.
+  The owner's 2026-09-29 decision excludes custom domains and short names.
+
+
 - **2026-09-23 — The unit is the person, not the artifact.** Each user owns one subdomain; all
   their work lives beneath it. Rejected: a subdomain per artifact, which does not survive
   someone making hundreds. *(Since 2026-09-26 each site is served on its own host beneath the

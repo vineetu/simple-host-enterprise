@@ -28,7 +28,7 @@ const (
 	skillBundleName      = "simple-host-skills"
 	skillBundleURL       = "/skills.zip"
 	// skillReleaseType is hand-set, so it has to move with the version above
-	// it. 0.15.5 says only the uploader, owner or team deletes an uploaded
+	// it. 0.15.6 adds personal home and showcase curation; 0.15.5 says only the uploader, owner or team deletes an uploaded
 	// file from the site's own address, and drops a vendor's name from the
 	// builder skill; 0.15.4 says a renamed person's old page of sites is not found and
 	// that site_activity's referring domains are visitor data; 0.15.3

@@ -25,3 +25,7 @@
 The top-level `README.md` says how to run the package locally, `CLAUDE.md`
 and `AGENTS.md` carry the working rules, and `SCRUB.md` is the checklist that
 keeps identifiers of the code this package was derived from out of this tree.
+
+Your person address can open a selected home site; its showcase has a signed-in
+feed, bio, pins and manual order. Access and site origins stay in force. See
+[Your home page](your-home-page.md).

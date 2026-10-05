@@ -105,7 +105,9 @@ type hostGate struct {
 	// ownerIndex backs the root of an owner host (owner_index.go), wired in
 	// NewHostGate from the database and factored into a field for the same
 	// reason as siteForServing above.
-	ownerIndex ownerIndexData
+	ownerIndex   ownerIndexData
+	personHome   func(context.Context, string) (string, error)
+	presentation func(context.Context, string) (db.PersonPresentation, map[string]db.ShowcasePreference, error)
 	// teamMember reports whether userID belongs to the team ownerID (false
 	// for a person): a member sees a team's index page as its owner does.
 	// Nil counts nobody as a member.
@@ -168,6 +170,17 @@ func NewHostGate(hosts HostModel, files *SiteFiles, database *sql.DB, signingKey
 			}
 		},
 		ownerIndex: newOwnerIndexData(database),
+		personHome: func(ctx context.Context, owner string) (string, error) {
+			return db.ServingPersonHome(ctx, database, owner)
+		},
+		presentation: func(ctx context.Context, id string) (db.PersonPresentation, map[string]db.ShowcasePreference, error) {
+			p, e := db.GetPersonPresentation(ctx, database, id)
+			if e != nil {
+				return p, nil, e
+			}
+			prefs, e := db.GetShowcasePreferences(ctx, database, id)
+			return p, prefs, e
+		},
 		teamMember: func(ctx context.Context, ownerID, userID string) (bool, error) {
 			return db.IsTeamMember(ctx, database, ownerID, userID)
 		},
@@ -289,6 +302,13 @@ func (g *hostGate) serveOwnerHost(w http.ResponseWriter, r *http.Request, label 
 	}
 	if r.URL.Path == switchAccountPath {
 		g.switchAccount(w, r, requestHost)
+		return
+	}
+	if r.URL.Path == "/showcase.json" {
+		g.serveOwnerIndex(w, r, label, requestHost)
+		return
+	}
+	if r.URL.Path == "/" && g.servePersonHome(w, r, label, requestHost) {
 		return
 	}
 	if r.URL.Path == "/" {
@@ -657,6 +677,11 @@ func (g *hostGate) serveSiteHost(w http.ResponseWriter, r *http.Request, label s
 		if !g.redirectMovedSite(w, r, requestHost, ownerLabelPart, sitePart, r.URL.EscapedPath()) {
 			g.missingSite(w, r, requestHost)
 		}
+		return
+	}
+
+	if r.URL.Path == "/showcase.json" {
+		g.serveOwnerIndex(w, r, ownerLabelPart, requestHost)
 		return
 	}
 

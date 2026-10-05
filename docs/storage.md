@@ -533,3 +533,7 @@ What comes back and what does not:
 - A site in Recently deleted comes back in Recently deleted, and is purged
   when its original window ends.
 
+
+Your person address can open a selected home site; its showcase has a signed-in
+feed, bio, pins and manual order. Access and site origins stay in force. See
+[Your home page](your-home-page.md).

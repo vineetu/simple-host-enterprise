@@ -42,6 +42,12 @@ const SiteAPIDeletePattern = "HOSTGATE DELETE /api/sites/{site}/assets/{id}"
 // route can never become reachable by a publish key without someone
 // deciding it should be.
 var routeKeyAccess = map[string]keyAccess{
+	"GET /api/me/home":                   keyNever,
+	"PUT /api/me/home":                   keyNever,
+	"GET /api/me/bio":                    keyNever,
+	"PUT /api/me/bio":                    keyNever,
+	"GET /api/sites/{sitename}/showcase": keyNever,
+	"PUT /api/sites/{sitename}/showcase": keyNever,
 	// Publish: deploy, update, roll back, list; versions and archives;
 	// saved data and assets; who am I; MCP.
 	"GET /api/me":                                                                  keyPublish,

@@ -197,6 +197,9 @@ func membersSchema() map[string]any {
 
 func outputSchemas() map[string]map[string]any {
 	return map[string]map[string]any{
+		"set_home_page":     outObject(map[string]any{"site": map[string]any{"type": []string{"string", "null"}}}, "site"),
+		"set_bio":           outObject(map[string]any{"bio": outString("Plain-text showcase bio."), "max_length": outInteger("Configured character limit.")}, "bio", "max_length"),
+		"set_showcase_site": outObject(map[string]any{"site": outString("Site name."), "pinned": outBool("Pinned ahead of other sites."), "order": outInteger("Manual order.")}, "site", "pinned", "order"),
 		"get_account": outObject(map[string]any{
 			"id":       outString("The account's id."),
 			"username": outString("The account's username: the `owner` value for its own sites."),

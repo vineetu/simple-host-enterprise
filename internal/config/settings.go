@@ -188,6 +188,7 @@ func Settings() []Setting {
 			Description: "Teams one person may belong to before they can create another."},
 		{Name: "MAX_TEAM_MEMBERS", Group: "access", Type: "int", Default: itoa(int64(op.MaxTeamMembers)), Min: 1, Max: maxTeamMembers, Unit: "members",
 			Description: "Members of one team, pending ones included."},
+		{Name: "SHOWCASE_BIO_MAX_LENGTH", Group: "sites", Type: "int", Default: "280", Min: 1, Max: 2000, Unit: "characters", Description: "Maximum plain-text bio length on a personal showcase."},
 		{Name: "MAX_SITE_VIEWERS", Group: "access", Type: "int", Default: itoa(int64(op.MaxSiteViewers)), Min: 1, Max: maxSiteViewers, Unit: "entries",
 			Description: "People and teams on one site's viewer list."},
 		{Name: "ACCESS_LOG_VISIBILITY", Group: "access", Type: "enum", Default: defaultAccessLogVisibility, Allowed: []string{"counts", "owner", "admin"}, Security: true,

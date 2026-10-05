@@ -38,6 +38,9 @@ type fixture struct {
 // fixture and on a fixture naming no tool, so a tool added later cannot ship
 // without one.
 var fixtures = []fixture{
+	{"set_home_page", []map[string]any{{"site": "demo"}, {"site": nil}}},
+	{"set_bio", []map[string]any{{"bio": "My projects"}, {"bio": ""}}},
+	{"set_showcase_site", []map[string]any{{"site": "demo", "pinned": true, "order": float64(10)}}},
 	{"get_account", []map[string]any{{}}},
 	{"list_sites", []map[string]any{{}}},
 	{"get_site", []map[string]any{{"owner": "alice", "site": "demo"}}},

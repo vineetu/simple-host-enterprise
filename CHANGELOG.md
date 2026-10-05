@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.9.3 — 2026-10-05
+
+- Personal home selection opens an owned site at its existing address after
+  access checks; the normal index remains when unavailable. Rename follows
+  the choice; deletion and transfer clear it.
+- Signed-in personal showcase feed, plain-text bio, pinned sites and manual
+  order, with dashboard and OIDC connector controls. Private sites stay private.
+
+
 Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
 pin the digest, not the tag. `simple-host version` prints the running
 release, commit and schema.

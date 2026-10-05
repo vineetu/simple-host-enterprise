@@ -539,6 +539,19 @@
       "basic": false
     },
     {
+      "name": "SHOWCASE_BIO_MAX_LENGTH",
+      "group": "sites",
+      "description": "Maximum plain-text bio length on a personal showcase.",
+      "type": "int",
+      "default": "280",
+      "min": 1,
+      "max": 2000,
+      "unit": "characters",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
       "name": "MAX_ARCHIVE_BYTES",
       "group": "sites",
       "description": "The largest archive one deploy may send. Raise the ingress body-size limit with it.",

@@ -360,6 +360,64 @@ func expandDescriptions(node any) {
 func toolList() []Tool {
 	return []Tool{
 		{
+			Name: "set_home_page", Title: "Set my home page", Description: "Choose one of your personally owned sites for your person address. Its access rules stay in force. Use null to restore your showcase; while your site certificate is pending the showcase remains. Teams keep their index.",
+			InputSchema: object(map[string]any{"site": map[string]any{"type": []string{"string", "null"}, "description": "Owned site name, or null for the showcase."}}, "site"), Annotations: writes(false, true), family: familyAccount,
+			call: func(args map[string]any) (upstream, error) {
+				v, ok := args["site"]
+				if !ok {
+					return upstream{}, fmt.Errorf("site is required")
+				}
+				if v != nil {
+					if _, ok := v.(string); !ok {
+						return upstream{}, fmt.Errorf("site must be a name or null")
+					}
+				}
+				b, _ := json.Marshal(map[string]any{"site": v})
+				return upstream{Method: "PUT", Path: "/api/me/home", Body: b, ContentType: "application/json"}, nil
+			},
+		},
+		{
+			Name: "set_bio", Title: "Set my showcase bio", Description: "Save a short plain-text bio for your personal showcase. An empty string clears it. The response includes the configured maximum length.",
+			InputSchema: object(map[string]any{"bio": str("Plain-text bio; empty clears it.")}, "bio"), Annotations: writes(false, true), family: familyAccount,
+			call: func(args map[string]any) (upstream, error) {
+				v, ok := args["bio"].(string)
+				if !ok {
+					return upstream{}, fmt.Errorf("bio must be a string")
+				}
+				b, _ := json.Marshal(map[string]any{"bio": v})
+				return upstream{Method: "PUT", Path: "/api/me/bio", Body: b, ContentType: "application/json"}, nil
+			},
+		},
+		{
+			Name: "set_showcase_site", Title: "Pin and order a showcase site", Description: "Pin and order one of your personally owned sites in your showcase. Pinned sites come first, then smaller order numbers, then newest update. This changes presentation only: it never lists a private site or changes access.",
+			InputSchema: object(map[string]any{"site": str(siteArgDesc), "pinned": map[string]any{"type": "boolean"}, "order": map[string]any{"type": "integer", "minimum": 0, "maximum": 1000000}}, "site"), Annotations: writes(false, true), family: familySite,
+			call: func(args map[string]any) (upstream, error) {
+				name, e := stringArg(args, "site")
+				if e != nil {
+					return upstream{}, e
+				}
+				body := map[string]any{}
+				if v, ok := args["pinned"]; ok {
+					if _, ok := v.(bool); !ok {
+						return upstream{}, fmt.Errorf("pinned must be boolean")
+					}
+					body["pinned"] = v
+				}
+				if _, ok := args["order"]; ok {
+					v, e := wholeNumber(args, "order")
+					if e != nil || v < 0 || v > 1000000 {
+						return upstream{}, fmt.Errorf("order must be 0 to 1000000")
+					}
+					body["order"] = v
+				}
+				if len(body) == 0 {
+					return upstream{}, fmt.Errorf("send pinned or order")
+				}
+				b, _ := json.Marshal(body)
+				return upstream{Method: "PUT", Path: "/api/sites/" + url.PathEscape(name) + "/showcase", Body: b, ContentType: "application/json"}, nil
+			},
+		},
+		{
 			Name:  "get_account",
 			Title: "Get the signed-in account",
 			Description: "Return the authenticated Simple Host account: its username, whether it is an admin, the teams it belongs to, and each namespace's usage against its quota. " +

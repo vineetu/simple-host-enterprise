@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"html"
 	"log"
@@ -43,6 +44,8 @@ func newOwnerIndexData(database *sql.DB) ownerIndexData {
 // ownerIndexEntry is one row of the page.
 type ownerIndexEntry struct {
 	name      string
+	pinned    bool
+	order     int
 	url       string
 	updatedAt time.Time
 	// shared marks a site everyone signed in can reach. Only the owner sees
@@ -158,10 +161,48 @@ func (g *hostGate) serveOwnerIndex(w http.ResponseWriter, r *http.Request, label
 		isOwner = member
 	}
 	entries := ownerIndexVisible(owner, sites, restricted, isOwner, g.hosts)
+	bio := ""
+	if g.presentation != nil {
+		p, prefs, err := g.presentation(r.Context(), ownerUserID)
+		if err != nil {
+			status = 500
+			http.Error(w, "failed to load showcase", 500)
+			return
+		}
+		bio = p.Bio
+		for i := range entries {
+			pref := prefs[entries[i].name]
+			entries[i].pinned = pref.Pinned
+			entries[i].order = pref.Order
+		}
+		sort.SliceStable(entries, func(i, j int) bool {
+			if entries[i].pinned != entries[j].pinned {
+				return entries[i].pinned
+			}
+			return entries[i].order < entries[j].order
+		})
+	}
+	if r.URL.Path == "/showcase.json" {
+		w.Header().Set("Cache-Control", "no-store")
+		items := make([]map[string]any, 0, len(entries))
+		for _, e := range entries {
+			items = append(items, map[string]any{"name": e.name, "url": e.url, "updated_at": e.updatedAt, "pinned": e.pinned, "order": e.order})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		data, _ := json.Marshal(map[string]any{"owner": owner, "bio": bio, "sites": items})
+		if r.Method != "HEAD" {
+			_, _ = w.Write(data)
+		}
+		written = int64(len(data))
+		return
+	}
 
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	body := renderOwnerIndex(owner, entries, isOwner)
+	if bio != "" {
+		body = strings.Replace(body, "</h1>", "</h1><p>"+html.EscapeString(bio)+"</p>", 1)
+	}
 	w.Header().Set("Content-Length", fmt.Sprint(len(body)))
 	w.WriteHeader(http.StatusOK)
 	written = int64(len(body))
@@ -262,6 +303,9 @@ func renderOwnerIndex(owner string, entries []ownerIndexEntry, isOwner bool) str
 			b.WriteString(`"><span class="name">`)
 			b.WriteString(html.EscapeString(e.name))
 			b.WriteString(`</span>`)
+			if e.pinned {
+				b.WriteString(`<span class="tag">Pinned</span>`)
+			}
 			if isOwner {
 				switch {
 				case e.restricted:

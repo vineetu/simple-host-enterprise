@@ -156,6 +156,11 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 
 ` + idleNoticeHTML(r.Context(), h.database, user) + `
 <section>
+  <h2 class="section-title">Your home page</h2>
+  <p class="login-copy">Your person address opens your showcase, or a site you choose. Your address opens the site's usual URL; its access rules still apply. Its usual address keeps working; if it is unpublished, deleted, taken down or awaiting its certificate, your showcase appears. Teams keep their index.</p>
+  <div class="add-row"><select id="home-site" aria-label="Home page"><option value="">Your showcase</option></select><button id="home-save" type="button" class="btn-login">Save home page</button></div>
+  <p class="share-help">Your showcase feed is <code>/showcase.json</code> on your person address, behind company sign-in. It lists the same sites as your showcase for the current viewer.</p>
+  <label for="showcase-bio">Your showcase bio</label><div class="add-row"><textarea id="showcase-bio" rows="3"></textarea><button id="bio-save" type="button" class="btn-login">Save bio</button></div><p id="home-status" role="status"></p>
   <h2 class="section-title">Your sites</h2>
   <p class="login-copy">Open each site, choose who can open it, name its viewers, manage the files it has uploaded, make an earlier version live, restore its saved data, download it, rename it, hand it to a team, or delete it. A new site opens only for you (or your team). Publishing is done by your AI app.</p>
   ` + usageHTML + oplimits.Expand(`
@@ -401,6 +406,7 @@ const dashboardSitesScript = `<script>
   var container = document.getElementById('site-list');
   if (!container) return;
   var CH = {'X-Simple-Host-Client': 'control-ui'};
+  var username=document.querySelector('.mast').getAttribute('data-username');
 
   function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
   function fmtBytes(n) {
@@ -513,6 +519,10 @@ const dashboardSitesScript = `<script>
   }
 
   function renderSites(sites) {
+    var select=document.getElementById('home-site');
+    select.innerHTML='<option value="">Your showcase</option>';
+    (sites||[]).filter(function(s){return s.owner_username===username && s.access_role==='owner';}).forEach(function(s){var o=document.createElement('option');o.value=s.name;o.textContent=s.name;select.appendChild(o);});
+    fetch('/api/me/home', {headers: CH}).then(function(r){return r.json();}).then(function(d){select.value=d.site||'';});
     if (!sites || !sites.length) { renderFirstRun(); return; }
     container.innerHTML = '';
     sites.forEach(function(site){
@@ -542,6 +552,12 @@ const dashboardSitesScript = `<script>
 
   function renderPanel(panel, site) {
     var owner = site.owner_username, name = site.name;
+    if(owner===username && site.access_role==='owner') {
+      var c=document.createElement('div');c.className='site-subsection';
+      c.innerHTML='<h4>Your showcase</h4><label><input type="checkbox" class="showcase-pin"> Pinned</label> <label>Order <input type="number" class="showcase-order" min="0" max="1000000" value="0"></label> <button type="button" class="btn-login showcase-save">Save</button><p class="share-help showcase-status">Pin first, then smaller order numbers. Access stays unchanged.</p>';
+      fetch('/api/sites/'+encodeURIComponent(name)+'/showcase', {headers: CH}).then(function(r){return r.json();}).then(function(d){c.querySelector('.showcase-pin').checked=d.pinned;c.querySelector('.showcase-order').value=d.order;});
+      c.querySelector('.showcase-save').onclick=function(){savePresentation('/api/sites/'+encodeURIComponent(name)+'/showcase',{pinned:c.querySelector('.showcase-pin').checked,order:Number(c.querySelector('.showcase-order').value)}).then(function(){c.querySelector('.showcase-status').textContent='Showcase saved.';}).catch(function(e){c.querySelector('.showcase-status').textContent=e.message;});};
+    }
     // An admin's restriction is lifted only by an admin, so the controls
     // that would open the site up are off while it stands.
     var locked = site.access_decision && site.access_decision.decision === 'restricted' ? ' disabled' : '';
@@ -927,8 +943,13 @@ const dashboardSitesScript = `<script>
     loadAssets();
     loadActivity();
     loadVisitors();
+    if(c) panel.appendChild(c);
   }
 
+  function savePresentation(path,body){return fetch(path,{method:'PUT',headers:{'Content-Type':'application/json','X-Simple-Host-Client':'control-ui'},body:JSON.stringify(body)}).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||'Save failed');return d;});});}
+  document.getElementById('home-save').onclick=function(){savePresentation('/api/me/home',{site:document.getElementById('home-site').value||null}).then(function(){document.getElementById('home-status').textContent='Home page saved.';}).catch(function(e){document.getElementById('home-status').textContent=e.message;});};
+  document.getElementById('bio-save').onclick=function(){savePresentation('/api/me/bio',{bio:document.getElementById('showcase-bio').value}).then(function(){document.getElementById('home-status').textContent='Bio saved.';}).catch(function(e){document.getElementById('home-status').textContent=e.message;});};
+  fetch('/api/me/bio', {headers: CH}).then(function(r){return r.json();}).then(function(d){document.getElementById('showcase-bio').value=d.bio||'';document.getElementById('showcase-bio').maxLength=d.max_length;});
   loadSites();
 })();
 </script>`

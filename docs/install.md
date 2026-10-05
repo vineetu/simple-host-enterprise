@@ -985,3 +985,7 @@ No alerting stack ships with the package. What to watch:
   or your cloud's managed certificate).
 - `simplehost_db_connections_in_use` near the pool limit.
 - The managed database's storage and PITR status.
+
+Your person address can open a selected home site; its showcase has a signed-in
+feed, bio, pins and manual order. Access and site origins stay in force. See
+[Your home page](your-home-page.md).

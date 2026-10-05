@@ -888,3 +888,7 @@ of `docs/configuration.md`.
 - **Removing it**: `docs/uninstall.md`, in order. Delete the `<base>` and
   `*.<base>` DNS records before the namespace (which releases the load
   balancer), and export what should be kept first.
+
+Your person address can open a selected home site; its showcase has a signed-in
+feed, bio, pins and manual order. Access and site origins stay in force. See
+[Your home page](docs/your-home-page.md).

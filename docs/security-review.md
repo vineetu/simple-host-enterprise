@@ -468,3 +468,17 @@ Accepted, and why:
 - The skill and MCP client code paths beyond routing (`internal/mcp/*_test.go`
   proves every tool's path resolves against the real router, not that the
   client behaves correctly with hostile input).
+
+### Personal home and showcase review (2026-10-05)
+
+Home selection accepts only a personally owned, live-row site and follows its
+ID. Deletion or transfer clears the choice. Opening the person root checks the
+existing host session and viewer permission, then redirects to the canonical
+site URL; no new content origin or session widening is introduced. Missing,
+unpublished, taken-down, disabled-owner or certificate-pending homes use the
+normal index. The feed shares the index visibility filter, authenticates before
+resolving a person, sets no-store and exposes no CORS credentials. Bio is plain
+text and escaped in HTML; pin/order changes never alter listing or access.
+Settings use the existing cookie Origin check and transactional audit helpers,
+and reject all CI key scopes; connected apps use their OIDC identity. Verified
+by the lifecycle, host, feed, credential and database-backed tool tests.

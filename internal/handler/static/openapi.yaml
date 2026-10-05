@@ -5,7 +5,7 @@ info:
     Internal static website hosting. Every site is served at the root of its
     own host, `<sitename>.<owner>.<base>/` (for example
     `todo.alice.example.com/`). The owner host `<owner>.<base>/` serves the
-    person's or team's index page. Until the owner's certificate is ready it
+    person's or team's index page, or a person's selected home site. The authenticated /showcase.json on an owner host has the same viewer-specific visibility as its index, with bio, pins and order. A selected home redirects to the site's existing URL after access checks; content and data keep their site origin. Until the owner's certificate is ready it
     also serves their sites at `<owner>.<base>/<sitename>/`; after that,
     those addresses, and `/api/sites/<sitename>/...` on the owner host,
     redirect to each site's own host with path and query kept (`301` for GET
@@ -3107,6 +3107,105 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           description: No held identity has that id
+
+  /api/me/home:
+    get:
+      summary: Choose a personally owned home site, or null for the showcase. Access
+        rules remain in force; the showcase stays while its certificate is pending.
+      responses:
+        '200':
+          description: Saved settings
+        '404':
+          description: No owned site
+    put:
+      summary: Choose a personally owned home site, or null for the showcase. Access
+        rules remain in force; the showcase stays while its certificate is pending.
+      responses:
+        '200':
+          description: Saved settings
+        '404':
+          description: No owned site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                site:
+                  type: string
+                  nullable: true
+              additionalProperties: false
+  /api/me/bio:
+    get:
+      summary: 'Read or save your plain-text showcase bio. Default limit: 280 characters,
+        configurable.'
+      responses:
+        '200':
+          description: Saved settings
+        '404':
+          description: No owned site
+    put:
+      summary: 'Read or save your plain-text showcase bio. Default limit: 280 characters,
+        configurable.'
+      responses:
+        '200':
+          description: Saved settings
+        '404':
+          description: No owned site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bio:
+                  type: string
+              additionalProperties: false
+  /api/sites/{sitename}/showcase:
+    get:
+      summary: Read or save pin and order for a personally owned site; access and
+        listing are unchanged.
+      responses:
+        '200':
+          description: Saved settings
+        '404':
+          description: No owned site
+      parameters:
+      - in: path
+        name: sitename
+        required: true
+        schema:
+          type: string
+    put:
+      summary: Read or save pin and order for a personally owned site; access and
+        listing are unchanged.
+      responses:
+        '200':
+          description: Saved settings
+        '404':
+          description: No owned site
+      parameters:
+      - in: path
+        name: sitename
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pinned:
+                  type: boolean
+                order:
+                  type: integer
+                  minimum: 0
+                  maximum: 1000000
+              additionalProperties: false
 
 components:
   headers:

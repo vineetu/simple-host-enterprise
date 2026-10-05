@@ -568,6 +568,7 @@ func TestCapabilitiesUsesPlainProductLanguage(t *testing.T) {
 		"Choose who can open it",
 		"Check activity",
 		"Good to know",
+		"Your home page",
 	}
 	if !slices.Equal(headings, wantHeadings) {
 		t.Errorf("capability headings = %q, want %q", headings, wantHeadings)

@@ -167,6 +167,29 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	s := realServer(t, database)
 	aliceKey := createPerson(t, database, "alice")
 	bobKey := createPerson(t, database, "bob")
+	var aliceID string
+	if err := database.QueryRow(`SELECT id FROM users WHERE username='alice'`).Scan(&aliceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO oauth_clients(client_id,client_name,redirect_uris) VALUES('home-client','Home client','[]')`); err != nil {
+		t.Fatal(err)
+	}
+	const homeToken = "shat_home_fixture_0123456789abcdef"
+	tx, err := database.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, _, err := db.InsertOAuthGrant(context.Background(), tx, aliceID, "home-client", "https://hosting.corp.test/mcp")
+	if err == nil {
+		err = db.InsertOAuthToken(context.Background(), tx, db.HashAPIKey(homeToken), grant, "access", time.Now().Add(time.Hour))
+	}
+	if err != nil {
+		tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 
 	byName := map[string]Tool{}
 	for _, tool := range Tools() {
@@ -186,7 +209,12 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 		for k, v := range modern("tools/call", name) {
 			req.Header.Set(k, v)
 		}
-		req.Header.Set("X-API-Key", key)
+		if name == "set_home_page" || name == "set_bio" || name == "set_showcase_site" {
+			req.Header.Set("Authorization", "Bearer "+homeToken)
+			req = req.WithContext(auth.WithMCPCaller(req.Context()))
+		} else {
+			req.Header.Set("X-API-Key", key)
+		}
 		if remote != "" {
 			req.RemoteAddr = remote
 		}
@@ -222,6 +250,8 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	logo := map[string]any{"path": "logo.png", "content": base64.StdEncoding.EncodeToString([]byte{0x89, 'P', 'N', 'G', 0, 1, 0xff}), "encoding": "base64"}
 
 	call("get_account", map[string]any{})
+	call("set_home_page", map[string]any{"site": nil})
+	call("set_bio", map[string]any{"bio": "My work"})
 	call("create_team", map[string]any{"name": "acme-team"})
 	call("list_teams", map[string]any{})
 	call("get_account", map[string]any{}) // now with a team
@@ -231,6 +261,8 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	call("list_team_members", map[string]any{"team": "acme-team"})
 
 	call("deploy_site", map[string]any{"site": "demo", "files": []any{index, logo}})
+	call("set_home_page", map[string]any{"site": "demo"})
+	call("set_showcase_site", map[string]any{"site": "demo", "pinned": true, "order": float64(10)})
 	call("deploy_site", map[string]any{"site": "other", "owner": "alice", "intent": "create", "files": []any{index}})
 	etag := call("get_site", map[string]any{"site": "demo", "owner": "alice"})["etag"].(string)
 	call("deploy_site", map[string]any{"site": "demo", "owner": "alice", "intent": "update", "etag": etag, "files": []any{index, logo}})

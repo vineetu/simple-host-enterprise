@@ -916,6 +916,23 @@ Config names are documented in `docs/configuration.md`; schema in
 
 ## 15. Search, showcase, owner index
 
+- **Your home page (2026-10-05).** Dashboard and OIDC connector select a
+  personally owned home, opened at its existing site URL after access checks;
+  the index remains for inaccessible/unavailable homes or pending certificates.
+  Rename follows the site ID; deletion/transfer clear it. Teams keep their index.
+  Plain-text bio, pins and manual order curate the personal index. Feed
+  `GET /showcase.json` on person and site hosts uses the same authenticated,
+  viewer-specific filter, no-store, and no CORS. Pin/order never changes access.
+- **Home routes.** `GET /api/me/home`, `PUT /api/me/home`, `GET /api/me/bio`,
+  `PUT /api/me/bio`, `GET /api/sites/{sitename}/showcase`,
+  `PUT /api/sites/{sitename}/showcase`.
+- **Home MCP.** `set_home_page`, `set_bio`, `set_showcase_site`.
+- **Home implementation.** `person_home.go`, `person_home_host.go`,
+  `internal/db/person_home.go`, migration `0059_person_home.sql`;
+  `SHOWCASE_BIO_MAX_LENGTH` (280, range 1–2000). Settings use transactional
+  audit, OIDC sessions/connector only; no CI-key access. Content stays in S3.
+
+
 - **What.** Search indexes the text of `listed`/`network` sites (a background
   worker re-extracts on every deploy, rollback and delete; PostgreSQL full
   text) and answers signed-in callers, linking each result to the site's
