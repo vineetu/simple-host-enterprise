@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-10-09
+
+- The hosted setup helper keeps its questions, browser validation and generated installation files. Its assistant and mistake check have been removed. Enterprise configuration and chart pins are unchanged.
+
 ## Chart 0.2.1 — 2026-10-05
 
 - Pins the published 0.9.3 image digest; the existing-cluster and Kubernetes
