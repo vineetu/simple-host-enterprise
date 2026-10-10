@@ -58,6 +58,20 @@ type Values struct {
 	// SearchSessionMaxAge is SEARCH_SESSION_MAX_AGE: the lifetime of the
 	// anonymous search session cookie.
 	SearchSessionMaxAge time.Duration
+	// SiteStorageMaxBytes is SITE_STORAGE_MAX_BYTES: key-value and table data
+	// one site may hold.
+	SiteStorageMaxBytes int
+	// SiteStorageFilesMaxBytes is SITE_STORAGE_FILES_MAX_BYTES: stored files
+	// one site may hold.
+	SiteStorageFilesMaxBytes int
+	// SiteStorageFileMaxBytes is SITE_STORAGE_FILE_MAX_BYTES: one stored file.
+	SiteStorageFileMaxBytes int
+	// SiteStorageValueMaxBytes is SITE_STORAGE_VALUE_MAX_BYTES: one key's
+	// value or one table row, as JSON.
+	SiteStorageValueMaxBytes int
+	// SiteStorageMaxResources is SITE_STORAGE_MAX_RESOURCES: storage
+	// resources (namespaces, databases, file buckets) one site may have.
+	SiteStorageMaxResources int
 }
 
 // Defaults are the values every installation used before they could be set.
@@ -79,6 +93,11 @@ func Defaults() Values {
 		UploadConcurrency:            2,
 		SearchTelemetryRetentionDays: 180,
 		SearchSessionMaxAge:          180 * 24 * time.Hour,
+		SiteStorageMaxBytes:          10_000_000,
+		SiteStorageFilesMaxBytes:     10_000_000,
+		SiteStorageFileMaxBytes:      1_000_000,
+		SiteStorageValueMaxBytes:     65_536,
+		SiteStorageMaxResources:      20,
 	}
 }
 
@@ -191,6 +210,11 @@ func (v Values) Placeholders() []string {
 		"{{MAX_FILES_PER_SITE}}", Count(v.MaxFilesPerSite),
 		"{{SEARCH_TELEMETRY_RETENTION}}", Days(v.SearchTelemetryRetentionDays),
 		"{{SEARCH_SESSION_MAX_AGE}}", Duration(v.SearchSessionMaxAge),
+		"{{SITE_STORAGE_MAX_BYTES}}", Count(v.SiteStorageMaxBytes),
+		"{{SITE_STORAGE_FILES_MAX_BYTES}}", Count(v.SiteStorageFilesMaxBytes),
+		"{{SITE_STORAGE_FILE_MAX_BYTES}}", Count(v.SiteStorageFileMaxBytes),
+		"{{SITE_STORAGE_VALUE_MAX_BYTES}}", Count(v.SiteStorageValueMaxBytes),
+		"{{SITE_STORAGE_MAX_RESOURCES}}", Count(v.SiteStorageMaxResources),
 	}
 }
 

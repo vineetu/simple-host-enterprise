@@ -159,12 +159,13 @@ func UndeleteSite(ctx context.Context, q Querier, siteID string) error {
 }
 
 // SiteStoredBytes is what one site adds to its owner's storage quota: its
-// versions' recorded sizes plus its live assets.
+// versions' recorded sizes plus its live assets and stored files.
 func SiteStoredBytes(ctx context.Context, q Querier, siteID string) (int64, error) {
 	var n int64
 	err := q.QueryRowContext(ctx, `
 		SELECT (SELECT COALESCE(sum(size_bytes), 0) FROM versions WHERE site_id = $1::uuid)
-		     + (SELECT COALESCE(sum(size), 0) FROM site_assets WHERE site_id = $1::uuid AND deleted_at IS NULL)`,
+		     + (SELECT COALESCE(sum(size), 0) FROM site_assets WHERE site_id = $1::uuid AND deleted_at IS NULL)
+		     + (SELECT COALESCE(sum(size), 0) FROM site_storage_files WHERE site_id = $1::uuid)`,
 		siteID).Scan(&n)
 	return n, err
 }

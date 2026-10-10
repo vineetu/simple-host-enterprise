@@ -42,6 +42,8 @@ func OwnerUsageOf(ctx context.Context, q Querier, ownerID string) (OwnerUsage, e
 			   WHERE s.user_id = $1 AND (s.deleted_at IS NULL OR COALESCE(s.purge_at, s.deleted_at + $2 * interval '1 second') > now()))
 			+ (SELECT COALESCE(sum(a.size), 0) FROM site_assets a JOIN sites s ON s.id = a.site_id
 			   WHERE s.user_id = $1 AND (s.deleted_at IS NULL OR COALESCE(s.purge_at, s.deleted_at + $2 * interval '1 second') > now()) AND a.deleted_at IS NULL)
+			+ (SELECT COALESCE(sum(f.size), 0) FROM site_storage_files f JOIN sites s ON s.id = f.site_id
+			   WHERE s.user_id = $1 AND (s.deleted_at IS NULL OR COALESCE(s.purge_at, s.deleted_at + $2 * interval '1 second') > now()))
 	`
 	var usage OwnerUsage
 	err := q.QueryRowContext(ctx, query, ownerID, int64(DeletedSiteRetention()/time.Second)).Scan(&usage.Sites, &usage.Bytes)

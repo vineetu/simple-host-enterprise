@@ -146,6 +146,11 @@ knobs, not secrets, so all three fall back to the defaults below rather than ref
 | `ASSET_MAX_FILE_BYTES` | No | `26214400` (25 MiB) | Must parse as a positive integer. |
 | `ASSET_MAX_SITE_BYTES` | No | `524288000` (500 MiB) | Must parse as a positive integer. Enforced against the site's live asset rows under a per-site lock, so concurrent uploads on any replica cannot both pass. |
 | `ASSET_MAX_SITE_COUNT` | No | `5000` | Must parse as a positive integer. |
+| `SITE_STORAGE_MAX_BYTES` | No | `10000000` | Must be 1000 to 1000000000. Key-value and table data one site's storage may hold (docs/designs/storage-presets.md). |
+| `SITE_STORAGE_FILES_MAX_BYTES` | No | `10000000` | Must be 1000 to 1000000000. Files one site's storage may hold; they also count toward `QUOTA_MAX_BYTES`. |
+| `SITE_STORAGE_FILE_MAX_BYTES` | No | `1000000` | Must be 1000 to 1000000000. The largest single stored file. |
+| `SITE_STORAGE_VALUE_MAX_BYTES` | No | `65536` | Must be 1024 to 1048576. The largest key-value value or table row, as JSON. |
+| `SITE_STORAGE_MAX_RESOURCES` | No | `20` | Must be 1 to 200. Storage resources one site may have. |
 
 None of the shipped overlays (`local`, `byo`) set these; they are left at
 their code defaults unless an installation has a reason to raise or lower

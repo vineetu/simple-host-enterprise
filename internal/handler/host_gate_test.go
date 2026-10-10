@@ -100,6 +100,10 @@ func (f *fakeSiteAPI) ServeAsset(w http.ResponseWriter, _ *http.Request, call si
 	f.record("ServeAsset", w, call, id)
 }
 
+func (f *fakeSiteAPI) Storage(w http.ResponseWriter, _ *http.Request, call siteAPICall, rest string) {
+	f.record("Storage", w, call, rest)
+}
+
 // hostGateTestAuthUser is the one identity fakeAuthMiddleware and
 // fakeAPIKeyMiddleware recognise, keyed by the exact cookie/header
 // authenticatedGateRequest and apiKeyGateRequest set.

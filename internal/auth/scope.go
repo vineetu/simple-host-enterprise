@@ -68,6 +68,7 @@ var routeKeyAccess = map[string]keyAccess{
 	"GET /api/collaboration/sites/{owner}/{sitename}/state-versions/{id}":          keyPublish,
 	"POST /api/collaboration/sites/{owner}/{sitename}/state-versions/{id}/restore": keyPublish,
 	"GET /api/collaboration/sites/{owner}/{sitename}/assets":                       keyPublish,
+	"GET /api/collaboration/sites/{owner}/{sitename}/storage":                      keyPublish,
 	SiteAPIPattern: keyPublish,
 	"POST /mcp":    keyPublish,
 	"GET /mcp":     keyPublish,
@@ -77,9 +78,11 @@ var routeKeyAccess = map[string]keyAccess{
 	// audit and access logs, search. A key on the audit and access logs
 	// sees only its owner's own namespace and teams, even an admin's: the
 	// company-wide view needs a browser session (handler/audit_access.go).
-	"DELETE /api/sites/{sitename}":                                          keyFull,
-	"DELETE /api/collaboration/sites/{owner}/{sitename}/assets/{id}":        keyFull,
-	SiteAPIDeletePattern:                                                    keyFull,
+	"DELETE /api/sites/{sitename}":                                                keyFull,
+	"DELETE /api/collaboration/sites/{owner}/{sitename}/assets/{id}":              keyFull,
+	"PUT /api/collaboration/sites/{owner}/{sitename}/storage/resources/{name}":    keyFull,
+	"DELETE /api/collaboration/sites/{owner}/{sitename}/storage/resources/{name}": keyFull,
+	SiteAPIDeletePattern: keyFull,
 	"DELETE /api/collaboration/sites/{owner}/{sitename}":                    keyFull,
 	"POST /api/sites/{sitename}/transfer":                                   keyFull,
 	"POST /api/collaboration/sites/{owner}/{sitename}/transfer":             keyFull,

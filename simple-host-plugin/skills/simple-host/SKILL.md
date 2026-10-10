@@ -199,6 +199,7 @@ References are one level deep. Read each selected file completely before acting.
 | Detect and build a framework with relative paths | [`references/frameworks.md`](references/frameworks.md) |
 | Validate, package, upload, and verify a site | [`references/packaging-and-validation.md`](references/packaging-and-validation.md) |
 | Add state, search, or AI/browser capabilities | [`references/state-and-ai.md`](references/state-and-ai.md) |
+| Save entries from different people, or data only some may see (forms, orders, comments, per-person data, an owner-only admin page) | [`references/storage.md`](references/storage.md) |
 
 Typical combinations:
 

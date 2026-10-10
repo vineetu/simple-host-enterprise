@@ -37,6 +37,11 @@ const (
 	minRateLimitEvery           = time.Millisecond
 	maxRateLimitEvery           = time.Hour
 	rateLimitPrefix             = "RATE_LIMIT_"
+	minSiteStorageBytes         = 1_000
+	maxSiteStorageBytes         = 1_000_000_000
+	minSiteStorageValueBytes    = 1_024
+	maxSiteStorageValueBytes    = 1_048_576
+	maxSiteStorageResources     = 200
 )
 
 // RateLimit is one RATE_LIMIT_<NAME>=<burst>/<interval> setting: a bucket
@@ -88,6 +93,11 @@ func loadOpLimits(apiKeyMaxDays int64) (oplimits.Values, error) {
 	v.MaxFilesPerSite = intIn("MAX_FILES_PER_SITE", v.MaxFilesPerSite, 1, maxFilesPerSite)
 	v.UploadConcurrency = intIn("UPLOAD_CONCURRENCY", v.UploadConcurrency, 1, maxUploadConcurrency)
 	v.SearchTelemetryRetentionDays = intIn("SEARCH_TELEMETRY_RETENTION_DAYS", v.SearchTelemetryRetentionDays, 1, maxSearchTelemetryRetention)
+	v.SiteStorageMaxBytes = intIn("SITE_STORAGE_MAX_BYTES", v.SiteStorageMaxBytes, minSiteStorageBytes, maxSiteStorageBytes)
+	v.SiteStorageFilesMaxBytes = intIn("SITE_STORAGE_FILES_MAX_BYTES", v.SiteStorageFilesMaxBytes, minSiteStorageBytes, maxSiteStorageBytes)
+	v.SiteStorageFileMaxBytes = intIn("SITE_STORAGE_FILE_MAX_BYTES", v.SiteStorageFileMaxBytes, minSiteStorageBytes, maxSiteStorageBytes)
+	v.SiteStorageValueMaxBytes = intIn("SITE_STORAGE_VALUE_MAX_BYTES", v.SiteStorageValueMaxBytes, minSiteStorageValueBytes, maxSiteStorageValueBytes)
+	v.SiteStorageMaxResources = intIn("SITE_STORAGE_MAX_RESOURCES", v.SiteStorageMaxResources, 1, maxSiteStorageResources)
 	v.SearchSessionMaxAge = durationIn("SEARCH_SESSION_MAX_AGE", v.SearchSessionMaxAge, minSearchSessionMaxAge, maxSearchSessionMaxAge)
 	if err != nil {
 		return oplimits.Values{}, err

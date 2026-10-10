@@ -1168,6 +1168,72 @@ Config names are documented in `docs/configuration.md`; schema in
   reconciler), `OWNER_INGRESS_TEMPLATE` (default `simple-host`),
   `OWNER_HOSTS_INTERVAL` (default 15s). See `docs/site-isolation.md`.
 
+## 20. Site storage with access presets
+
+- **What.** Per-site storage for pages: key-value namespaces (`kv`: keys to
+  JSON values), databases of tables (`db`: rows with columns the owner
+  declares: text, integer, number, boolean, json, optionally required, or a
+  reference to a row of another table), and file buckets (`files`: paths to
+  files). Every resource, and every table of a database, has an access
+  matrix: `read`, `add`, `edit`, `delete`, each one of `nobody`, `owner`,
+  `own`, `signed-in`, `anyone`. Seven presets (`public`, `inbox`, `wall`,
+  `records`, `personal`, `board`, `private`, the default), with
+  single-action overrides saved as `custom`. Four rules refuse a matrix on
+  save (`400 invalid_access`, `rule`): `anonymous_change`, `add_own`,
+  `own_needs_signed_in_add`, `blind_change`; 161 of the 625 matrices are
+  valid, as on hosted. Who is who: `anyone` is everyone who may open the
+  site, anonymous network visitors for reads only (they never write);
+  `signed-in` is every colleague who may open it; `own` is whoever added the
+  entry, plus the owner; `owner` is the owner or a team member, through
+  their tools or signed in on the site's own host (a page then has owner
+  rights for storage data only); `nobody` is the owner's tools only (a key
+  or the connector). Pages never send SQL: the server builds every
+  statement; an own edit or delete carries `added_by = caller` in the
+  statement; `id`, `added_by`, `created_at`, `updated_at` are the server's;
+  a reference must name a row the caller may read (else `404
+  invalid_reference`); a referenced row cannot be deleted (`409
+  referenced`). A key-value or file `PUT` is an add or an edit, decided by
+  the server under the site's storage lock. Visitors see `mine`; owners also
+  see `added_by` (a username). Tables are rows in Postgres (JSONB, no
+  per-site DDL); files are bucket objects written through the asset code
+  (scan, type allowlist, envelope, SHA-256, retire sweep) and count toward
+  `QUOTA_MAX_BYTES`. Every change is audited (`storage_resource_set`,
+  `storage_resource_delete`, `storage_add`, `storage_edit`,
+  `storage_delete`). Previews stay read-only. Design:
+  `docs/designs/storage-presets.md`.
+- **Status.** Built.
+- **Routes.** `GET /api/collaboration/sites/{owner}/{sitename}/storage`,
+  `PUT /api/collaboration/sites/{owner}/{sitename}/storage/resources/{name}`,
+  `DELETE /api/collaboration/sites/{owner}/{sitename}/storage/resources/{name}`
+  (owner or team member; PUT and DELETE need a full-scope key). Host-gate, on
+  the site's own host (named `/api/sites/{site}/storage/...` or nameless
+  `/api/site/storage/...`): `GET .../storage`;
+  `GET .../storage/kv/{name}/keys`, `GET|PUT|DELETE .../storage/kv/{name}/keys/{key}`;
+  `GET|POST .../storage/db/{name}/tables/{table}/rows`,
+  `GET|PATCH|DELETE .../storage/db/{name}/tables/{table}/rows/{id}`;
+  `GET .../storage/files/{name}/objects`,
+  `GET|PUT|DELETE .../storage/files/{name}/objects/{path...}`. Anonymous
+  GETs on a network-approved site; every DELETE is `SiteAPIDeletePattern`
+  (full-scope key).
+- **MCP.** `storage_list_resources`, `storage_set_resource`,
+  `storage_delete_resource`, `storage_list_kv_keys`, `storage_get_kv`,
+  `storage_put_kv`, `storage_delete_kv`, `storage_list_rows`,
+  `storage_get_row`, `storage_add_row`, `storage_edit_row`,
+  `storage_delete_row`, `storage_list_file_objects`, `storage_delete_file`.
+- **Skill.** `references/storage.md`; `references/state-and-ai.md` points
+  new pages at storage; `simple-host-builder` §2.
+- **Go.** `internal/storagepolicy/policy.go` (matrix, presets, rules,
+  columns); `internal/handler/site_storage.go` (site-facing routes),
+  `site_storage_admin.go` (settings), `host_gate.go` (`siteAPIStorage`);
+  `internal/db/site_storage.go`; `internal/mcp/storage_tools.go`;
+  `internal/db/quota.go`, `deleted_sites.go`, `erase.go` (site export
+  `storage.json`, person export `storage-entries.json`), `storage_check.go`.
+- **DB.** `site_storage_resources`, `site_storage_kv`, `site_storage_rows`,
+  `site_storage_files` (0060, backward-compatible).
+- **Config.** `SITE_STORAGE_MAX_BYTES`, `SITE_STORAGE_FILES_MAX_BYTES`,
+  `SITE_STORAGE_FILE_MAX_BYTES`, `SITE_STORAGE_VALUE_MAX_BYTES`,
+  `SITE_STORAGE_MAX_RESOURCES`.
+
 ---
 
 ## Orphans and dormant surface

@@ -17,6 +17,7 @@ Simple Host is a server at `{{BASE_URL}}`. A site belongs to a namespace owned b
 | Versioned state (default for stateful sites) | `GET/PUT /api/sites/<site>/state/versioned` | anyone who can open the site (the last 20 versions can be restored) |
 | Plain state (explicit last-write-wins only) | `GET/PUT /api/sites/<site>/state` | anyone who can open the site |
 | Uploaded files (images, PDFs, CSV...) | `POST/GET /api/sites/<site>/assets` | anyone who can open the site |
+| Storage with access presets (key-value, tables, files) | `/api/sites/<site>/storage/...` | decided per resource or table by its preset: e.g. everyone reads the menu, each person sees only their own orders, the owner sees all |
 
 The package ships no AI model or proxy. A prototype that needs one calls whatever endpoint the platform team provides for this installation; ask them what exists first.
 
@@ -109,6 +110,16 @@ await fetch(url, {
 
 Gotchas: plain and versioned saves share the same blob, and plain saves still bump its version. Plain state has the same 1 MiB cap and the same audience: anyone who can open the site. Never put API keys, secrets, or PII in it.
 
+### 2c. Storage with access presets
+
+What it is: key-value namespaces, databases of tables, and file buckets the owner creates with `storage_set_resource`, each with a preset that decides who may read, add, edit and delete: `public` (everyone reads, the owner writes), `inbox` (everyone sends, the owner reads), `wall` (everyone reads, people post and remove their own), `records` (each person sees their own, the owner sees all and updates them), `personal` (each person's own data), `board` (everyone edits, the owner deletes), `private` (owner only, the default). The owner signed in on the site has owner rights, so an admin page inside the site works.
+
+When to choose: whenever entries come from different people or some data must stay with its owner: forms, orders, bookings, sign-ups, comments, per-person notes, an owner's admin page. Keep versioned state for one shared document.
+
+How to use: read `simple-host/references/storage.md` completely; it has the routes, the presets, the table columns and the fetch code.
+
+Gotchas: the owner creates resources before the page uses them; pages never send SQL; show stored values with `textContent`; tell the user in one line who can see and change what.
+
 ### 3. Uploaded files
 
 For a photo, PDF, or CSV a page wants to reference by URL, upload it with `POST /api/sites/<site>/assets` (multipart, field `file`, 25 MiB per file by default). It survives redeploys and rollbacks. See `simple-host/references/state-and-ai.md` for the contract.
@@ -137,9 +148,12 @@ Use this as a guide when the user describes an idea:
 | "a tracker/list my whole team edits at once" | static + versioned state (conflict-safe saves) |
 | "I just want to host my landing page" | static only |
 | "a chat UI" or "a tool that thinks" | static + versioned state, calling an AI endpoint the platform team provides; ask what exists first |
+| "a form people fill in and only I read" | static + storage, `inbox` |
+| "people order or book, and I see and update every order" | static + storage: `public` products, `records` orders, an owner admin page |
+| "everyone keeps their own list" | static + storage, `personal` |
 | "only my team should see it" | static, published under the team (`only_me`), or `specific` with the team as viewer |
 
-If the user wants something Simple Host can't host (server-side execution, private per-user data, real-time multiplayer), say so explicitly. Don't try to bolt it on.
+If the user wants something Simple Host can't host (server-side execution, real-time multiplayer), say so explicitly. Per-person data and owner-only data are storage presets (`records`, `personal`, `private`). Don't try to bolt it on.
 
 ## Generating a prompt for another agent
 

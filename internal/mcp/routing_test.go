@@ -109,6 +109,20 @@ var fixtures = []fixture{
 		{"site": "demo"},
 		{"site": "demo", "owner": "alice", "keep": false},
 	}},
+	{"storage_list_resources", []map[string]any{{"owner": "alice", "site": "demo"}}},
+	{"storage_set_resource", []map[string]any{{"owner": "alice", "site": "demo", "resource": "shop", "kind": "kv", "preset": "public"}}},
+	{"storage_delete_resource", []map[string]any{{"owner": "alice", "site": "demo", "resource": "shop"}}},
+	{"storage_list_kv_keys", []map[string]any{{"owner": "alice", "site": "demo", "resource": "menu", "prefix": "a", "limit": float64(5)}}},
+	{"storage_get_kv", []map[string]any{{"owner": "alice", "site": "demo", "resource": "menu", "key": "hours"}}},
+	{"storage_put_kv", []map[string]any{{"owner": "alice", "site": "demo", "resource": "menu", "key": "hours", "value": "9-5"}}},
+	{"storage_delete_kv", []map[string]any{{"owner": "alice", "site": "demo", "resource": "menu", "key": "hours"}}},
+	{"storage_list_rows", []map[string]any{{"owner": "alice", "site": "demo", "resource": "shop", "table": "orders", "where": map[string]any{"status": "new"}, "desc": true}}},
+	{"storage_get_row", []map[string]any{{"owner": "alice", "site": "demo", "resource": "shop", "table": "orders", "id": float64(3)}}},
+	{"storage_add_row", []map[string]any{{"owner": "alice", "site": "demo", "resource": "shop", "table": "orders", "values": map[string]any{"item": "bread"}}}},
+	{"storage_edit_row", []map[string]any{{"owner": "alice", "site": "demo", "resource": "shop", "table": "orders", "id": float64(3), "values": map[string]any{"status": "sent"}}}},
+	{"storage_delete_row", []map[string]any{{"owner": "alice", "site": "demo", "resource": "shop", "table": "orders", "id": float64(3)}}},
+	{"storage_list_file_objects", []map[string]any{{"owner": "alice", "site": "demo", "resource": "photos"}}},
+	{"storage_delete_file", []map[string]any{{"owner": "alice", "site": "demo", "resource": "photos", "path": "2026/cake.jpg"}}},
 	{"create_team", []map[string]any{{"name": "acme-team"}}},
 	{"list_teams", []map[string]any{{}}},
 	{"list_team_members", []map[string]any{{"team": "acme-team"}}},
@@ -141,8 +155,8 @@ func TestEveryToolResolvesToARealRoute(t *testing.T) {
 				if route.SiteHost != "" {
 					// The site API is not on the router: the host gate answers
 					// it on the owner's host. The end-to-end test drives it.
-					if !strings.HasPrefix(route.Path, "/api/sites/") || !strings.HasSuffix(route.Path, "/state/versioned") {
-						t.Errorf("%s resolves to %s on an owner host, which is not the site API's state route", tc.tool, route.Path)
+					if !strings.HasPrefix(route.Path, "/api/sites/") || !(strings.HasSuffix(route.Path, "/state/versioned") || strings.Contains(route.Path, "/storage/")) {
+						t.Errorf("%s resolves to %s on an owner host, which is not the site API's state or storage routes", tc.tool, route.Path)
 					}
 					continue
 				}

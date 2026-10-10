@@ -3,7 +3,7 @@ package db
 import "context"
 
 // StoredObject is one object the database says the bucket holds and a site
-// needs: a site's live version, or one of its live uploaded files.
+// needs: a site's live version, or one of its live uploaded or stored files.
 // Deleted is true for a site in Recently deleted, which a restore needs whole.
 type StoredObject struct {
 	SiteID  string
@@ -26,6 +26,9 @@ func ListStoredObjects(ctx context.Context, q Querier) ([]StoredObject, error) {
 		SELECT s.id::text, u.username, s.name, 0, a.id::text, s.deleted_at IS NOT NULL
 		FROM site_assets a JOIN sites s ON s.id = a.site_id JOIN users u ON u.id = s.user_id
 		WHERE a.deleted_at IS NULL
+		UNION ALL
+		SELECT s.id::text, u.username, s.name, 0, f.object_id::text, s.deleted_at IS NOT NULL
+		FROM site_storage_files f JOIN sites s ON s.id = f.site_id JOIN users u ON u.id = s.user_id
 		ORDER BY 1, 5`)
 	if err != nil {
 		return nil, err

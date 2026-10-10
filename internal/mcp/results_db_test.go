@@ -466,6 +466,77 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 		t.Errorf("site_activity with a publish key = %v", limited)
 	}
 
+	// Site storage, as dave from his own address.
+	daveKey := createPerson(t, database, "dave")
+	const daveAddr = "198.51.100.9:4321"
+	dv := func(name string, args map[string]any) map[string]any {
+		t.Helper()
+		return callFrom(daveKey, daveAddr, name, args)
+	}
+	dv("deploy_site", map[string]any{"site": "shop", "files": []any{index}})
+	st := func(extra map[string]any) map[string]any {
+		args := map[string]any{"site": "shop", "owner": "dave"}
+		for k, v := range extra {
+			args[k] = v
+		}
+		return args
+	}
+	if got := dv("storage_set_resource", st(map[string]any{"resource": "menu", "kind": "kv", "preset": "public"})); got["created"] != true {
+		t.Errorf("storage_set_resource menu = %v", got)
+	}
+	if got := dv("storage_set_resource", st(map[string]any{"resource": "contact", "kind": "kv", "preset": "inbox"})); got["notes"] == nil {
+		t.Errorf("an inbox gets no note: %v", got)
+	}
+	tables := map[string]any{
+		"products": map[string]any{"preset": "public", "columns": map[string]any{"name": "text", "price": "integer"}},
+		"orders": map[string]any{"preset": "records", "delete": "own", "columns": map[string]any{
+			"product_id": map[string]any{"type": "integer", "references": "products"}, "qty": "integer", "status": "text"}},
+		"extra": map[string]any{"columns": map[string]any{"x": "text"}},
+	}
+	if got := dv("storage_set_resource", st(map[string]any{"resource": "shop", "kind": "db", "preset": "board", "delete": "own", "tables": tables})); got["resource"].(map[string]any)["preset"] != "custom" {
+		t.Errorf("custom database = %v", got)
+	}
+	delete(tables, "extra")
+	if got := dv("storage_set_resource", st(map[string]any{"resource": "shop", "tables": tables})); got["removed_tables"] == nil || got["created"] != false {
+		t.Errorf("table removal = %v", got)
+	}
+	if got := dv("storage_list_resources", st(nil)); len(got["resources"].([]any)) != 3 {
+		t.Errorf("storage_list_resources = %v", got)
+	}
+	if got := dv("storage_put_kv", st(map[string]any{"resource": "menu", "key": "hours", "value": "9-5"})); got["added"] != true {
+		t.Errorf("storage_put_kv = %v", got)
+	}
+	dv("storage_put_kv", st(map[string]any{"resource": "menu", "key": "hours", "value": map[string]any{"open": 9}}))
+	dv("storage_put_kv", st(map[string]any{"resource": "menu", "key": "soup", "value": "leek"}))
+	if got := dv("storage_get_kv", st(map[string]any{"resource": "menu", "key": "hours"})); got["mine"] != true || got["added_by"] != "dave" {
+		t.Errorf("storage_get_kv = %v", got)
+	}
+	if got := dv("storage_list_kv_keys", st(map[string]any{"resource": "menu", "limit": 1})); got["next_after"] != "hours" {
+		t.Errorf("storage_list_kv_keys = %v", got)
+	}
+	dv("storage_delete_kv", st(map[string]any{"resource": "menu", "key": "soup"}))
+	product := dv("storage_add_row", st(map[string]any{"resource": "shop", "table": "products", "values": map[string]any{"name": "bread", "price": 400}}))
+	order := dv("storage_add_row", st(map[string]any{"resource": "shop", "table": "orders", "values": map[string]any{"product_id": product["id"], "qty": 2, "status": "new"}}))
+	if got := dv("storage_edit_row", st(map[string]any{"resource": "shop", "table": "orders", "id": order["id"], "values": map[string]any{"status": "sent"}})); got["status"] != "sent" || got["qty"] != float64(2) {
+		t.Errorf("storage_edit_row = %v", got)
+	}
+	dv("storage_get_row", st(map[string]any{"resource": "shop", "table": "orders", "id": order["id"]}))
+	if got := dv("storage_list_rows", st(map[string]any{"resource": "shop", "table": "orders", "where": map[string]any{"status": "sent"}})); len(got["rows"].([]any)) != 1 {
+		t.Errorf("storage_list_rows = %v", got)
+	}
+	dv("storage_delete_row", st(map[string]any{"resource": "shop", "table": "orders", "id": order["id"]}))
+	dv("storage_delete_row", st(map[string]any{"resource": "shop", "table": "products", "id": product["id"]}))
+	dv("storage_set_resource", st(map[string]any{"resource": "photos", "kind": "files", "preset": "wall"}))
+	if _, err := database.Exec(`INSERT INTO site_storage_files (site_id, resource, path, object_id, content_type, size, sha256, added_by)
+		SELECT s.id, 'photos', 'cake.png', '6f1d7c52-0000-4000-8000-000000000002', 'image/png', 7, '\x00', s.user_id FROM sites s WHERE s.name = 'shop'`); err != nil {
+		t.Fatal(err)
+	}
+	if got := dv("storage_list_file_objects", st(map[string]any{"resource": "photos"})); len(got["files"].([]any)) != 1 {
+		t.Errorf("storage_list_file_objects = %v", got)
+	}
+	dv("storage_delete_file", st(map[string]any{"resource": "photos", "path": "cake.png"}))
+	dv("storage_delete_resource", st(map[string]any{"resource": "contact"}))
+
 	// Properties that a single-account fixture cannot produce: download
 	// counts need a real browser download, and admin/team kinds are never the
 	// signed-in account's.

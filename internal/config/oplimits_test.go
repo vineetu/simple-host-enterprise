@@ -14,6 +14,7 @@ var opLimitKeys = []string{
 	"PREVIEW_LINK_TTL", "EXPORT_LINK_TTL", "API_KEY_DEFAULT_DAYS", "API_KEY_EXPIRY_WARNING_DAYS",
 	"SHOWCASE_BIO_MAX_LENGTH", "MAX_TEAMS_PER_PERSON", "MAX_TEAM_MEMBERS", "MAX_SITE_VIEWERS", "MAX_ARCHIVE_BYTES",
 	"MAX_FILES_PER_SITE", "UPLOAD_CONCURRENCY", "SEARCH_TELEMETRY_RETENTION_DAYS", "SEARCH_SESSION_MAX_AGE",
+	"SITE_STORAGE_MAX_BYTES", "SITE_STORAGE_FILES_MAX_BYTES", "SITE_STORAGE_FILE_MAX_BYTES", "SITE_STORAGE_VALUE_MAX_BYTES", "SITE_STORAGE_MAX_RESOURCES",
 }
 
 func opLimitsEnv(t *testing.T) {
@@ -38,6 +39,8 @@ func TestLoadOpLimitsDefaultToTodaysValues(t *testing.T) {
 		MaxTeamsPerPerson: 10, MaxTeamMembers: 50, MaxSiteViewers: 50,
 		MaxArchiveBytes: 100 << 20, MaxFilesPerSite: 50_000, UploadConcurrency: 2,
 		SearchTelemetryRetentionDays: 180, SearchSessionMaxAge: 180 * 24 * time.Hour,
+		SiteStorageMaxBytes: 10_000_000, SiteStorageFilesMaxBytes: 10_000_000, SiteStorageFileMaxBytes: 1_000_000,
+		SiteStorageValueMaxBytes: 65_536, SiteStorageMaxResources: 20,
 	}
 	if cfg.Limits != want {
 		t.Fatalf("Limits = %+v, want %+v", cfg.Limits, want)
@@ -58,6 +61,8 @@ func TestLoadOpLimitsOverrides(t *testing.T) {
 		"API_KEY_EXPIRY_WARNING_DAYS": "7", "MAX_TEAMS_PER_PERSON": "3", "MAX_TEAM_MEMBERS": "200",
 		"MAX_SITE_VIEWERS": "5", "MAX_ARCHIVE_BYTES": "262144000", "MAX_FILES_PER_SITE": "80000",
 		"UPLOAD_CONCURRENCY": "4", "SEARCH_TELEMETRY_RETENTION_DAYS": "30", "SEARCH_SESSION_MAX_AGE": "720h",
+		"SITE_STORAGE_MAX_BYTES": "5000000", "SITE_STORAGE_FILES_MAX_BYTES": "20000000", "SITE_STORAGE_FILE_MAX_BYTES": "2000000",
+		"SITE_STORAGE_VALUE_MAX_BYTES": "4096", "SITE_STORAGE_MAX_RESOURCES": "5",
 		"RATE_LIMIT_AUTH_EMAIL":  "3/1m",
 		"RATE_LIMIT_OAUTH_TOKEN": " 240/250ms ",
 	} {
@@ -75,6 +80,8 @@ func TestLoadOpLimitsOverrides(t *testing.T) {
 		MaxTeamsPerPerson: 3, MaxTeamMembers: 200, MaxSiteViewers: 5,
 		MaxArchiveBytes: 250 << 20, MaxFilesPerSite: 80_000, UploadConcurrency: 4,
 		SearchTelemetryRetentionDays: 30, SearchSessionMaxAge: 30 * 24 * time.Hour,
+		SiteStorageMaxBytes: 5_000_000, SiteStorageFilesMaxBytes: 20_000_000, SiteStorageFileMaxBytes: 2_000_000,
+		SiteStorageValueMaxBytes: 4096, SiteStorageMaxResources: 5,
 	}
 	if cfg.Limits != want {
 		t.Fatalf("Limits = %+v, want %+v", cfg.Limits, want)

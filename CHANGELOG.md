@@ -24,6 +24,34 @@ release, commit and schema.
 
 ## Unreleased
 
+### Added
+- **Site storage with access presets** (`docs/designs/storage-presets.md`,
+  FEATURES.md section 20). Pages can save to key-value namespaces, databases
+  of tables, and file buckets that the owner creates. Each resource, or each
+  table, has a read/add/edit/delete matrix of nobody, owner, own, signed-in
+  or anyone. Seven presets: `public`, `inbox`, `wall`, `records`,
+  `personal`, `board`, and `private` (the default). Four rules refuse unsafe
+  settings. These are the same as hosted Simple Host.
+- **Who is who.** Signed-in means a colleague who can open the site. Owner
+  means the owner or a team member, through their tools or signed in on the
+  site itself, so an owner-only admin page works. Nobody means the owner's
+  tools only. Anonymous visitors to a network-approved site read anyone data
+  and never write.
+- **How the server enforces it.** Pages never send SQL. An own edit or
+  delete is checked in the statement. References must be readable, and a
+  referenced row cannot be deleted. Owners see who added each entry.
+- **Where the data lives.** Tables and key-value data are Postgres rows.
+  Files are bucket objects written through the asset code, and they count
+  toward `QUOTA_MAX_BYTES`. Every change is audited.
+- **Limits:** `SITE_STORAGE_MAX_BYTES`, `SITE_STORAGE_FILES_MAX_BYTES`,
+  `SITE_STORAGE_FILE_MAX_BYTES`, `SITE_STORAGE_VALUE_MAX_BYTES`,
+  `SITE_STORAGE_MAX_RESOURCES`.
+- **Exports.** The site export gains `storage.json`, and the person export
+  gains `storage-entries.json`. `verify-storage` checks stored files.
+- **Schema:** migration 0060, backward-compatible.
+- **Connector:** 14 `storage_*` tools.
+- **Skill 0.16.0:** `references/storage.md`.
+
 - **Enterprise setup offers an inspectable Helm download.** The hosted helper packages a wrapper Chart.yaml, selected values under enterprise:, the pinned published dependency and a README for lint/render/dry-run/install/upgrade. The Kubernetes guide distinguishes wrapper and direct-chart values; install.sh is optional.
 
 ### Changed

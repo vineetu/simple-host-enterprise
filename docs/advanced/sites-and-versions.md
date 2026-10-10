@@ -32,6 +32,11 @@ the pod's memory with `UPLOAD_CONCURRENCY`: each upload holds its archive and fi
 | `ASSET_MAX_FILE_BYTES` | `26214400` | at least 1 bytes | The largest file a page may upload. |
 | `ASSET_MAX_SITE_BYTES` | `524288000` | at least 1 bytes | Uploaded files one site may hold, in bytes. |
 | `ASSET_MAX_SITE_COUNT` | `5000` | at least 1 files | Uploaded files one site may hold. |
+| `SITE_STORAGE_MAX_BYTES` | `10000000` | 1000–1000000000 bytes | Key-value and table data one site's storage may hold. |
+| `SITE_STORAGE_FILES_MAX_BYTES` | `10000000` | 1000–1000000000 bytes | Files one site's storage may hold. They also count toward QUOTA_MAX_BYTES. |
+| `SITE_STORAGE_FILE_MAX_BYTES` | `1000000` | 1000–1000000000 bytes | The largest single file in a site's storage. |
+| `SITE_STORAGE_VALUE_MAX_BYTES` | `65536` | 1024–1048576 bytes | The largest key-value value or table row, as JSON. |
+| `SITE_STORAGE_MAX_RESOURCES` | `20` | 1–200 resources | Storage resources (key-value namespaces, databases and file buckets) one site may have. |
 | `SEARCH_SESSION_MAX_AGE` | `4320h` | 1h–9600h Go duration | Lifetime of the anonymous cookie site search uses for its limits and counts. |
 | `RATE_LIMIT_MANAGEMENT_CLIENT` | `60/1s` | any (warns past 10× looser) | Management API calls per client address. |
 | `RATE_LIMIT_MANAGEMENT_USER` | `30/10s` | any (warns past 10× looser) | Management changes per person. |

@@ -16,6 +16,10 @@ sites/<site-id>/manifest.json   whose the site is: owner, name, live version and
                                 serving reads it)
 ```
 
+Site storage (`docs/designs/storage-presets.md`) puts its files under the
+same `sites/<site-id>/assets/<id>` keys, written once like assets; its
+key-value and table data live in Postgres with the state document.
+
 Postgres decides what is served: `sites.active_version` names the live
 version, and switching versions is a row update, not a file operation. The
 state document, users, teams and audit log live only in Postgres.

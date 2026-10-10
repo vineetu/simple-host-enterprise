@@ -91,6 +91,9 @@ type siteAPICall struct {
 	ActorUserID string
 	ActorKind   string // "person" (session) or "key" (X-API-Key)
 	KeyID       string
+	// SessionID is the site-host session the request carried: set for a
+	// page, empty for the owner's tools (a key or the connector's token).
+	SessionID string
 
 	// ViaSiteLabel is the host label the request arrived on (an owner
 	// label, or a full "<site>.<owner>" site label).

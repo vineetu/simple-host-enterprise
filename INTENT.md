@@ -99,7 +99,20 @@ artifact.
 - **2026-09-23 — Static pages plus a stateful API, never a per-app backend.** This is what
   makes a prototype or a tracker possible while keeping both the token cost and the
   infrastructure cost near zero.
-- **2026-09-23 — Per-site state is the only data store.** The public product also has
+- **2026-10-10 — Site storage with access presets.** The owner decided Enterprise gets the
+  storage presets once they were verified on hosted Simple Host. This is the "designed feature
+  with several types" the 2026-09-23 decision below anticipated: key-value namespaces, databases
+  of tables, and file buckets, each (or each table) with a read/add/edit/delete matrix and the
+  same seven presets and four rules as hosted. It fits the architecture without new
+  infrastructure: tables and key-value data are Postgres rows (no per-site schemas, no SQLite),
+  files are bucket objects through the asset code, pods stay stateless. `signed-in` means a
+  colleague who can open the site; `owner` includes the owner or a team member signed in on the
+  site itself (owner rights for storage data only; site hosts already refuse framing); anonymous
+  network visitors only read. Owners see who added each entry by username (every writer is a
+  named company identity). Not in this version: per-entry history and owner SQL. Design:
+  `docs/designs/storage-presets.md`.
+- **2026-09-23 — Per-site state is the only data store.** *Superseded for new structured data
+  by "Site storage with access presets" (2026-10-10); state stays for one shared document.* The public product also has
   append-only collections; this one deliberately does not. A single append-only type is a
   primitive, not a data-store design. If artifacts ever need somewhere to write beyond their
   own state, that is a designed feature with several types, decided then — not this one

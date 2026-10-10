@@ -327,7 +327,7 @@ func deploySiteSchema() map[string]any {
 // placeholders ("{{DELETED_RETENTION}}"); they are filled here, so the list
 // states the values this server enforces.
 func Tools() []Tool {
-	tools := toolList()
+	tools := append(toolList(), storageTools()...)
 	schemas := outputSchemas()
 	for i := range tools {
 		tools[i].OutputSchema = schemas[tools[i].Name]

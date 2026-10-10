@@ -1218,6 +1218,100 @@ paths:
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
+  /api/collaboration/sites/{owner}/{sitename}/storage:
+    get:
+      summary: List a site's storage
+      description: 'Owner/member operation. The site''s storage resources (key-value namespaces, databases of tables, file buckets), each with its preset, access matrix, tables and bytes, plus `usage` (bytes used and the limits) and `presets` (each preset''s matrix). Pages read and change the data on the site''s own host under `/api/sites/{site}/storage/...` (docs/designs/storage-presets.md). A publish-scope key may call it.'
+      tags: [Collaboration]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+      responses:
+        '200':
+          description: The resources, usage and presets
+          content:
+            application/json:
+              schema:
+                type: object
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/collaboration/sites/{owner}/{sitename}/storage/resources/{name}:
+    put:
+      summary: Create or change a storage resource
+      description: 'Owner/member operation. Body `{"kind": "kv"|"db"|"files", "preset": "public"|"inbox"|"wall"|"records"|"personal"|"board"|"private", "read"/"add"/"edit"/"delete": optional overrides, "tables": {"<table>": {"preset", overrides, "columns": {"<column>": "text"|"integer"|"number"|"boolean"|"json" or {"type", "required", "references"}}}}}`. `kind` is required to create and cannot change (409 `kind_mismatch`). A matrix that breaks a rule is refused with 400 `invalid_access` and `rule` (`anonymous_change`, `add_own`, `own_needs_signed_in_add`, `blind_change`). For `db`, every table is passed each time; a table left out is deleted with its rows (`removed_tables`). At most {{SITE_STORAGE_MAX_RESOURCES}} resources per site. An invalid body, kind, table, column or matrix is a 400 with its `code`. Audited as `storage_resource_set`. Full-scope key or session.'
+      tags: [Collaboration]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Changed
+        '201':
+          description: Created
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`kind_mismatch` or `too_many_resources`'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    delete:
+      summary: Delete a storage resource
+      description: Owner/member operation. Deletes the resource and every key, row or file in it; it cannot be brought back. Audited as `storage_resource_delete`. Full-scope key or session.
+      tags: [Collaboration]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+        '400':
+          $ref: '#/components/responses/SkillVersionRequired'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
   /api/collaboration/sites/{owner}/{sitename}/assets/{id}:
     delete:
       summary: Delete one uploaded file

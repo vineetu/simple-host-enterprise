@@ -29,6 +29,7 @@ type siteAPIRoutes interface {
 	ListAssets(w http.ResponseWriter, r *http.Request, call siteAPICall)
 	DeleteAsset(w http.ResponseWriter, r *http.Request, call siteAPICall, id string)
 	ServeAsset(w http.ResponseWriter, r *http.Request, call siteAPICall, id string)
+	Storage(w http.ResponseWriter, r *http.Request, call siteAPICall, rest string)
 }
 
 // The host gate decides, per hostname, which routes the mux may answer.
@@ -836,6 +837,9 @@ const (
 	siteAPIStateVersioned
 	siteAPIAssetsCollection
 	siteAPIAssetItem
+	// siteAPIStorage is everything under .../storage; the rest of the path
+	// travels in the asset-id slot and SiteAPIHandler.Storage parses it.
+	siteAPIStorage
 )
 
 // looksLikeSiteFacingAPIPath is parseSiteAPIPath plus the older
@@ -903,6 +907,9 @@ func parseSiteAPISuffix(suffix string) (kind siteAPIRouteKind, assetID string, o
 	if id, ok := strings.CutPrefix(suffix, "assets/"); ok && id != "" && safepath.IsSegment(id) {
 		return siteAPIAssetItem, id, true
 	}
+	if rest, ok := strings.CutPrefix(suffix, "storage"); ok && (rest == "" || strings.HasPrefix(rest, "/")) {
+		return siteAPIStorage, rest, true
+	}
 	return 0, "", false
 }
 
@@ -939,7 +946,7 @@ func (g *hostGate) serveSiteAPI(w http.ResponseWriter, r *http.Request, kind sit
 	}
 
 	method := r.Method
-	needsWrite := method == http.MethodPut || method == http.MethodPost || method == http.MethodDelete
+	needsWrite := method == http.MethodPut || method == http.MethodPost || method == http.MethodPatch || method == http.MethodDelete
 	safeMethod := method == http.MethodGet || method == http.MethodHead
 	if !safeMethod {
 		if ok := g.checkSiteAPIOrigin(w, r); !ok {
@@ -952,7 +959,7 @@ func (g *hostGate) serveSiteAPI(w http.ResponseWriter, r *http.Request, kind sit
 	// carrying a credential take the normal path below, so an anonymous
 	// visitor can read what the page reads and change nothing.
 	_, hasBearer := auth.BearerToken(r)
-	if safeMethod && (kind == siteAPIState || kind == siteAPIStateVersioned) && r.Header.Get("X-API-Key") == "" && !hasBearer && g.networkOpen != nil {
+	if safeMethod && (kind == siteAPIState || kind == siteAPIStateVersioned || kind == siteAPIStorage) && r.Header.Get("X-API-Key") == "" && !hasBearer && g.networkOpen != nil {
 		if _, _, valid := g.validHostSession(r, label+"."+g.hosts.BaseHost()); !valid {
 			open, err := g.networkOpen(r, siteID)
 			if err != nil {
@@ -962,10 +969,15 @@ func (g *hostGate) serveSiteAPI(w http.ResponseWriter, r *http.Request, kind sit
 			}
 			if open {
 				call := siteAPICall{Owner: owner, SiteName: siteName, SiteID: siteID, Restricted: restricted, ActorKind: "anonymous"}
-				if kind == siteAPIState {
+				switch kind {
+				case siteAPIState:
 					g.siteAPI.GetState(w, r, call)
-				} else {
+				case siteAPIStateVersioned:
 					g.siteAPI.GetStateVersioned(w, r, call)
+				default:
+					// The storage matrix lets an anonymous visitor read
+					// only what is read anyone, and change nothing.
+					g.siteAPI.Storage(w, r, call, assetID)
 				}
 				return
 			}
@@ -974,7 +986,7 @@ func (g *hostGate) serveSiteAPI(w http.ResponseWriter, r *http.Request, kind sit
 
 	// WithSiteAPI puts this request in the API-key scope table
 	// (auth.SiteAPIPattern): the mux never matched it, so it has no pattern.
-	user, _, keyID, ok := g.authenticateSiteAPI(w, r.WithContext(auth.WithSiteAPI(auth.WithExpectedSessionHost(r.Context(), label+"."+g.hosts.BaseHost()))))
+	user, sessionID, keyID, ok := g.authenticateSiteAPI(w, r.WithContext(auth.WithSiteAPI(auth.WithExpectedSessionHost(r.Context(), label+"."+g.hosts.BaseHost()))))
 	if !ok {
 		return
 	}
@@ -994,7 +1006,7 @@ func (g *hostGate) serveSiteAPI(w http.ResponseWriter, r *http.Request, kind sit
 	}
 	call := siteAPICall{
 		Owner: owner, SiteName: siteName, SiteID: siteID, Restricted: restricted,
-		ActorUserID: user.ID, ActorKind: actorKind, KeyID: keyID,
+		ActorUserID: user.ID, ActorKind: actorKind, KeyID: keyID, SessionID: sessionID,
 		ViaSiteLabel: label, ViaSiteName: siteName,
 		ViaSiteObserved: viaSiteObserved(r, label+"."+g.hosts.BaseHost()),
 	}
@@ -1033,6 +1045,8 @@ func (g *hostGate) serveSiteAPI(w http.ResponseWriter, r *http.Request, kind sit
 		} else {
 			methodNotAllowed(w, "DELETE")
 		}
+	case siteAPIStorage:
+		g.siteAPI.Storage(w, r, call, assetID)
 	}
 }
 

@@ -237,6 +237,7 @@ func (h *SiteHandler) Register(mux *http.ServeMux, authMiddleware, skillVersionM
 	h.registerPersonHome(mux, ownerMutation, browserWrite)
 	h.registerViewerRoutes(mux, ownerMutation, browserWrite)
 	h.registerAssetAdminRoutes(mux, ownerMutation, browserWrite)
+	h.registerStorageAdminRoutes(mux, ownerMutation, browserWrite)
 	h.registerStateHistoryRoutes(mux, ownerMutation, browserWrite)
 	h.registerMoveRoutes(mux, ownerMutation, browserWrite)
 	h.registerPreviewRoutes(mux, ownerMutation)

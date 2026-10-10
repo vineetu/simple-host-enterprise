@@ -91,6 +91,17 @@ var PersonExportQueries = []struct{ File, Query string }{
 	{"sessions.json", `SELECT COALESCE(json_agg(t ORDER BY t.created_at), '[]') FROM (
 		SELECT created_at, last_seen_at, expires_at, revoked_at, host(ip) AS ip, user_agent
 		FROM sessions WHERE user_id = $1::uuid) t`},
+	// What they added to other sites' storage. An erasure keeps the entries
+	// (they are the site's data, like saved state) and forgets who added them.
+	{"storage-entries.json", `SELECT COALESCE(json_agg(t ORDER BY t.created_at), '[]') FROM (
+		SELECT owner.username AS owner, s.name AS site, k.resource, 'kv' AS kind, k.key AS entry, k.value, k.created_at
+		FROM site_storage_kv k JOIN sites s ON s.id = k.site_id JOIN users owner ON owner.id = s.user_id WHERE k.added_by = $1::uuid
+		UNION ALL
+		SELECT owner.username, s.name, r.resource, 'db', r.table_name || '/' || r.id, r.data, r.created_at
+		FROM site_storage_rows r JOIN sites s ON s.id = r.site_id JOIN users owner ON owner.id = s.user_id WHERE r.added_by = $1::uuid
+		UNION ALL
+		SELECT owner.username, s.name, f.resource, 'files', f.path, NULL, f.created_at
+		FROM site_storage_files f JOIN sites s ON s.id = f.site_id JOIN users owner ON owner.id = s.user_id WHERE f.added_by = $1::uuid) t`},
 	// Grants waiting for their provider-vouched email: the same ones an
 	// erasure deletes.
 	{"pending-grants.json", `WITH me AS (SELECT lower(email) AS email FROM users WHERE id = $1::uuid AND email_source = 'claimed')
@@ -126,6 +137,19 @@ var SiteExportQueries = []struct{ File, Query string }{
 		WHERE v.site_id = $1::uuid) t`},
 	{"assets.json", `SELECT COALESCE(json_agg(t ORDER BY t.created_at), '[]') FROM (
 		SELECT id, name, content_type, size, created_at, deleted_at FROM site_assets WHERE site_id = $1::uuid) t`},
+	{"storage.json", `SELECT json_build_object(
+		'resources', (SELECT COALESCE(json_agg(t ORDER BY t.name), '[]') FROM (
+			SELECT name, kind, preset, read_who AS read, add_who AS add, edit_who AS edit, delete_who AS delete, settings, bytes, created_at, updated_at
+			FROM site_storage_resources WHERE site_id = $1::uuid) t),
+		'kv', (SELECT COALESCE(json_agg(t ORDER BY t.resource, t.key), '[]') FROM (
+			SELECT k.resource, k.key, k.value, u.username AS added_by, k.created_at, k.updated_at
+			FROM site_storage_kv k LEFT JOIN users u ON u.id = k.added_by WHERE k.site_id = $1::uuid) t),
+		'rows', (SELECT COALESCE(json_agg(t ORDER BY t.resource, t.table_name, t.id), '[]') FROM (
+			SELECT r.resource, r.table_name, r.id, r.data, u.username AS added_by, r.created_at, r.updated_at
+			FROM site_storage_rows r LEFT JOIN users u ON u.id = r.added_by WHERE r.site_id = $1::uuid) t),
+		'files', (SELECT COALESCE(json_agg(t ORDER BY t.resource, t.path), '[]') FROM (
+			SELECT f.resource, f.path, f.content_type, f.size, u.username AS added_by, f.created_at, f.updated_at
+			FROM site_storage_files f LEFT JOIN users u ON u.id = f.added_by WHERE f.site_id = $1::uuid) t))`},
 }
 
 // OwnedSite is one site a person owns, recovery window included.
