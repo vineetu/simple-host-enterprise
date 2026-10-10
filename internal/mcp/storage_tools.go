@@ -162,7 +162,7 @@ func storageTools() []Tool {
 			Description: "Create a storage resource for a site's pages, or change who may do what with it. Kinds: `kv` (keys to JSON values), `db` (tables of rows with declared columns), `files` (paths to files). " +
 				storagePresetsText + storageWhoText +
 				"A preset may take single-action overrides (e.g. preset inbox with add signed-in), saved as `custom`. Four rules refuse unsafe settings with `invalid_access`: edit or delete never anyone; add never own; own needs add signed-in or narrower; edit and delete never wider than read. " +
-				"For `db`, pass every table each time: `tables` maps a table name to {preset, columns}, a column being a type (text, integer, number, boolean, json) or {type, required, references: <table>} for a row id in another table; a table without a preset takes the database's. " +
+				"For `db`, pass every table each time: `tables` maps a table name to {preset, columns}, a column being a type (text, integer, number, boolean, json) or {type, required, references: <table>} for a row id in another table; a new table without a preset takes the database's, an existing one keeps its own; removing a column or changing its type clears its values. " +
 				"id, added_by, created_at and updated_at are the server's. A table left out is deleted with its rows: ask the user first. Pick the narrowest preset that does the job and tell the user in one line who can see and change what. " +
 				"Works for the owner or a member of the owning team, with a connected app or a full-scope key.",
 			InputSchema: storageResourceArgs(map[string]any{

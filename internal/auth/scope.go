@@ -31,10 +31,17 @@ const (
 // owner or restricted-site host, which is not served by the mux).
 const SiteAPIPattern = "HOSTGATE /api/sites/{site}/{state|assets}"
 
-// SiteAPIDeletePattern is the site-facing API's one DELETE, an uploaded
-// file's: a full key only, like the management route, since a deleted file
-// cannot be brought back (a publish key's other writes can all be undone).
+// SiteAPIDeletePattern is a DELETE on the site-facing API (an uploaded file,
+// or a storage key, row or file): a full key only, like the management
+// routes, since none of them can be brought back.
 const SiteAPIDeletePattern = "HOSTGATE DELETE /api/sites/{site}/assets/{id}"
+
+// SiteAPIStorageWritePattern is any other change to site storage through the
+// site-facing API (PUT, POST, PATCH under .../storage): a full key only. A
+// storage entry keeps no history, so unlike saved state a publish key's
+// change to it could not be undone. Pages and the connector are not keys and
+// are unaffected.
+const SiteAPIStorageWritePattern = "HOSTGATE WRITE /api/sites/{site}/storage/..."
 
 // routeKeyAccess classifies every registered route. It is deny-by-default:
 // a pattern missing from it is refused to every key, and
@@ -82,7 +89,8 @@ var routeKeyAccess = map[string]keyAccess{
 	"DELETE /api/collaboration/sites/{owner}/{sitename}/assets/{id}":              keyFull,
 	"PUT /api/collaboration/sites/{owner}/{sitename}/storage/resources/{name}":    keyFull,
 	"DELETE /api/collaboration/sites/{owner}/{sitename}/storage/resources/{name}": keyFull,
-	SiteAPIDeletePattern: keyFull,
+	SiteAPIDeletePattern:                                                    keyFull,
+	SiteAPIStorageWritePattern:                                              keyFull,
 	"DELETE /api/collaboration/sites/{owner}/{sitename}":                    keyFull,
 	"POST /api/sites/{sitename}/transfer":                                   keyFull,
 	"POST /api/collaboration/sites/{owner}/{sitename}/transfer":             keyFull,
@@ -217,6 +225,9 @@ func requestPattern(r *http.Request) string {
 		if r.Method == http.MethodDelete {
 			return SiteAPIDeletePattern
 		}
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && isStoragePath(r.URL.Path) {
+			return SiteAPIStorageWritePattern
+		}
 		return SiteAPIPattern
 	}
 	return r.Pattern
@@ -252,4 +263,17 @@ func WithSiteAPI(ctx context.Context) context.Context {
 func isSiteAPI(ctx context.Context) bool {
 	v, _ := ctx.Value(siteAPIKey).(bool)
 	return v
+}
+
+// isStoragePath reports whether a site-facing API path is under .../storage
+// (named /api/sites/{site}/storage or nameless /api/site/storage).
+func isStoragePath(p string) bool {
+	if rest, ok := strings.CutPrefix(p, "/api/site/"); ok {
+		return rest == "storage" || strings.HasPrefix(rest, "storage/")
+	}
+	if rest, ok := strings.CutPrefix(p, "/api/sites/"); ok {
+		_, suffix, _ := strings.Cut(rest, "/")
+		return suffix == "storage" || strings.HasPrefix(suffix, "storage/")
+	}
+	return false
 }

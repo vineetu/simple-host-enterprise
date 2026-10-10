@@ -488,7 +488,7 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 		t.Errorf("an inbox gets no note: %v", got)
 	}
 	tables := map[string]any{
-		"products": map[string]any{"preset": "public", "columns": map[string]any{"name": "text", "price": "integer"}},
+		"products": map[string]any{"preset": "public", "columns": map[string]any{"name": "text", "price": "integer", "tmp": "text"}},
 		"orders": map[string]any{"preset": "records", "delete": "own", "columns": map[string]any{
 			"product_id": map[string]any{"type": "integer", "references": "products"}, "qty": "integer", "status": "text"}},
 		"extra": map[string]any{"columns": map[string]any{"x": "text"}},
@@ -497,7 +497,8 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 		t.Errorf("custom database = %v", got)
 	}
 	delete(tables, "extra")
-	if got := dv("storage_set_resource", st(map[string]any{"resource": "shop", "tables": tables})); got["removed_tables"] == nil || got["created"] != false {
+	tables["products"] = map[string]any{"columns": map[string]any{"name": "text", "price": "integer"}}
+	if got := dv("storage_set_resource", st(map[string]any{"resource": "shop", "tables": tables})); got["removed_tables"] == nil || got["cleared_columns"] == nil || got["created"] != false {
 		t.Errorf("table removal = %v", got)
 	}
 	if got := dv("storage_list_resources", st(nil)); len(got["resources"].([]any)) != 3 {

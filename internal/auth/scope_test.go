@@ -56,7 +56,7 @@ func TestEveryRouteIsClassified(t *testing.T) {
 		}
 	}
 	for pattern := range routeKeyAccess {
-		if _, ok := routes[pattern]; !ok && pattern != SiteAPIPattern && pattern != SiteAPIDeletePattern {
+		if _, ok := routes[pattern]; !ok && pattern != SiteAPIPattern && pattern != SiteAPIDeletePattern && pattern != SiteAPIStorageWritePattern {
 			t.Errorf("routeKeyAccess lists %q, which no longer exists", pattern)
 		}
 	}

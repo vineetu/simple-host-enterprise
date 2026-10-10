@@ -345,6 +345,26 @@ func TestStorageSettingsRoutes(t *testing.T) {
 	if rec := w.do(r); rec.Code != http.StatusForbidden {
 		t.Errorf("publish key settings = %d", rec.Code)
 	}
+	// A publish key reads storage but never changes it: an entry keeps no
+	// history, so its change could not be undone.
+	site := "shop.alice." + accessBase
+	for _, tc := range []struct {
+		method, path, body string
+		want               int
+	}{
+		{http.MethodGet, "/api/site/storage/kv/menu/keys", "", http.StatusOK},
+		{http.MethodPut, "/api/site/storage/kv/menu/keys/k", `{"value":1}`, http.StatusForbidden},
+		{http.MethodPut, "/api/sites/shop/storage/kv/menu/keys/k", `{"value":1}`, http.StatusForbidden},
+		{http.MethodDelete, "/api/site/storage/kv/menu/keys/k", "", http.StatusForbidden},
+		{http.MethodPut, "/api/sites/shop/state/versioned", `{"version":0,"state":{}}`, http.StatusOK},
+	} {
+		r := httptest.NewRequest(tc.method, "https://"+site+tc.path, strings.NewReader(tc.body))
+		r.Header.Set("X-API-Key", publish)
+		r.Header.Set("Content-Type", "application/json")
+		if rec := w.do(r); rec.Code != tc.want {
+			t.Errorf("publish key %s %s = %d %s, want %d", tc.method, tc.path, rec.Code, rec.Body, tc.want)
+		}
+	}
 
 	// A database: a table left out goes with its rows.
 	tables := map[string]any{
@@ -605,5 +625,115 @@ func TestStorageCrossSite(t *testing.T) {
 	r.Header.Set("X-API-Key", w.apiKeys["alice"])
 	if rec := w.do(r); rec.Code == http.StatusOK {
 		t.Errorf("base host storage = %d", rec.Code)
+	}
+}
+
+// Review round 1: the byte count matches what Postgres stores, whatever the
+// edits; a number that grows when stored counts at its stored size; a table
+// re-sent without a preset keeps its own; a removed column's values go; the
+// listing shows a non-owner only what they may use.
+func TestStorageReviewFixes(t *testing.T) {
+	w := newAccessWorld(t)
+	w.storageSite("shop", db.AccessCompany)
+	tables := map[string]any{
+		"products": map[string]any{"preset": "public", "columns": map[string]any{"name": "text", "secret": "text"}},
+		"orders":   map[string]any{"preset": "records", "columns": map[string]any{"note": "json"}},
+	}
+	if rec := w.settings("alice", http.MethodPut, "shop", "shop", map[string]any{"kind": "db", "preset": "board", "tables": tables}); rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d %s", rec.Code, rec.Body)
+	}
+	vera := storageTestCaller{"author", "vera", false}
+	olly := storageTestCaller{"colleague", "olly", false}
+	owner := storageTestCaller{"owner-tool", "alice", true}
+	rows := "/api/site/storage/db/shop/tables/orders/rows"
+	counted := func() (int64, int64) {
+		var c, actual int64
+		_ = w.database.QueryRow(`SELECT bytes FROM site_storage_resources WHERE name = 'shop'`).Scan(&c)
+		_ = w.database.QueryRow(`SELECT COALESCE(sum(octet_length(data::text)), 0) FROM site_storage_rows WHERE resource = 'shop'`).Scan(&actual)
+		return c, actual
+	}
+	rec := w.siteReq(vera, "shop", http.MethodPost, rows, []byte(`{"note":{"a":1,"b":[1,2,3],"c":"x"}}`), "application/json")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("add = %d %s", rec.Code, rec.Body)
+	}
+	var row map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &row)
+	id := int64(row["id"].(float64))
+	for i := 0; i < 5; i++ {
+		owned := storageTestCaller{"owner-on-site", "alice", false}
+		if rec := w.siteReq(owned, "shop", http.MethodPatch, fmt.Sprintf("%s/%d", rows, id), []byte(`{"note":{"a":1,"b":[1,2,3],"c":"x"}}`), "application/json"); rec.Code != http.StatusOK {
+			t.Fatalf("edit = %d %s", rec.Code, rec.Body)
+		}
+	}
+	if c, actual := counted(); c != actual || c == 0 {
+		t.Errorf("counted %d bytes, stored %d", c, actual)
+	}
+	// 1e100000 is 8 bytes sent and 100001 digits stored: refused before
+	// the database builds it. 1e300 stays within range and is stored at its
+	// full 301 digits, counted at that size.
+	if rec := w.siteReq(vera, "shop", http.MethodPost, rows, []byte(`{"note":[1e100000]}`), "application/json"); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_number") {
+		t.Errorf("amplified number = %d %s", rec.Code, rec.Body)
+	}
+	if rec := w.siteReq(vera, "shop", http.MethodPost, rows, []byte(`{"note":[1e300,1E-300]}`), "application/json"); rec.Code != http.StatusCreated {
+		t.Errorf("in-range exponents = %d %s", rec.Code, rec.Body)
+	}
+	if rec := w.siteReq(owner, "shop", http.MethodPut, "/api/site/storage/kv/nope/keys/k", []byte(`{"value":1e999}`), "application/json"); rec.Code != http.StatusBadRequest && rec.Code != http.StatusNotFound {
+		t.Errorf("kv exponent = %d", rec.Code)
+	}
+	// The stored-size limit itself: a row whose stored form passes the
+	// value limit is refused after the write and rolled back.
+	prev := oplimits.Get()
+	small := prev
+	small.SiteStorageValueMaxBytes = 1024
+	oplimits.Set(small)
+	big := `{"note":[` + strings.TrimSuffix(strings.Repeat("1e300,", 6), ",") + `]}`
+	if rec := w.siteReq(vera, "shop", http.MethodPost, rows, []byte(big), "application/json"); rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("stored size over the value limit = %d %s", rec.Code, rec.Body)
+	}
+	oplimits.Set(prev)
+	if c, actual := counted(); c != actual {
+		t.Errorf("after the refused add: counted %d, stored %d", c, actual)
+	}
+	// Re-sending the tables without presets keeps each table's own, and
+	// dropping a column clears its values.
+	if rec := w.siteReq(owner, "shop", http.MethodPost, "/api/site/storage/db/shop/tables/products/rows", []byte(`{"name":"bread","secret":"cost 2"}`), "application/json"); rec.Code != http.StatusCreated {
+		t.Fatalf("product = %d %s", rec.Code, rec.Body)
+	}
+	resend := map[string]any{
+		"products": map[string]any{"columns": map[string]any{"name": "text"}},
+		"orders":   map[string]any{"columns": map[string]any{"note": "json"}},
+	}
+	rec = w.settings("alice", http.MethodPut, "shop", "shop", map[string]any{"tables": resend})
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"cleared_columns":{"products":["secret"]}`) {
+		t.Fatalf("resend = %d %s", rec.Code, rec.Body)
+	}
+	var out map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	tbls := out["resource"].(map[string]any)["tables"].(map[string]any)
+	if tbls["orders"].(map[string]any)["preset"] != "records" || tbls["products"].(map[string]any)["preset"] != "public" {
+		t.Errorf("tables lost their presets: %v", tbls)
+	}
+	if c, actual := counted(); c != actual {
+		t.Errorf("after clearing a column: counted %d, stored %d", c, actual)
+	}
+	resend["products"] = map[string]any{"columns": map[string]any{"name": "text", "secret": "boolean"}}
+	if rec := w.settings("alice", http.MethodPut, "shop", "shop", map[string]any{"tables": resend}); rec.Code != http.StatusOK {
+		t.Fatalf("re-add = %d %s", rec.Code, rec.Body)
+	}
+	rec = w.siteReq(olly, "shop", http.MethodGet, "/api/site/storage/db/shop/tables/products/rows", nil, "")
+	if !strings.Contains(rec.Body.String(), `"secret":null`) {
+		t.Errorf("a re-added column shows old values: %s", rec.Body)
+	}
+	// The listing: olly does not see a private resource at all.
+	if rec := w.settings("alice", http.MethodPut, "shop", "costs", map[string]any{"kind": "kv", "preset": "private"}); rec.Code != http.StatusCreated {
+		t.Fatal(rec.Body)
+	}
+	rec = w.siteReq(olly, "shop", http.MethodGet, "/api/site/storage", nil, "")
+	if strings.Contains(rec.Body.String(), `"costs"`) || !strings.Contains(rec.Body.String(), `"shop"`) {
+		t.Errorf("olly's listing = %s", rec.Body)
+	}
+	rec = w.siteReq(storageTestCaller{"owner-on-site", "alice", false}, "shop", http.MethodGet, "/api/site/storage", nil, "")
+	if !strings.Contains(rec.Body.String(), `"costs"`) {
+		t.Errorf("owner's listing = %s", rec.Body)
 	}
 }

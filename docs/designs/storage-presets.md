@@ -183,9 +183,16 @@ MCP tools follow the routes: `storage_list_resources`,
 `storage_list`, `storage_get`, `storage_put`, `storage_delete` (data through
 the site-facing routes as the owner's tools, which reach `nobody`).
 
-API key scopes: the site-facing routes keep `SiteAPIPattern` (publish) and
-every DELETE stays `SiteAPIDeletePattern` (full). The settings routes are
-owner routes like the asset routes.
+API key scopes: reading storage takes a publish key (`SiteAPIPattern`);
+every change through a key needs a full key (`SiteAPIDeletePattern` for a
+DELETE, `SiteAPIStorageWritePattern` for PUT, POST and PATCH), because a
+storage entry keeps no history and a change could not be undone. Pages and
+the connector are not keys. The settings routes are owner routes like the
+asset routes: GET publish, PUT and DELETE full.
+
+`GET .../storage` shows the owner every resource; anyone else sees only the
+resources and tables where the matrix lets them do something, so the list
+does not map the site's private data.
 
 ## Tables
 
@@ -205,18 +212,24 @@ PUT /api/collaboration/sites/ana/bakery/storage/resources/shop
   "<table>"}` (a row id in another table of the same database).
 - `id`, `added_by`, `created_at`, `updated_at` belong to the server; a request
   that sets them is refused. Unknown columns are refused, not ignored.
-- A row is at most `SITE_STORAGE_ROW_MAX_BYTES` (64 KB) of JSON.
+- A row is at most `SITE_STORAGE_VALUE_MAX_BYTES` (64 KB) of JSON as stored.
 - **References respect read access.** The parent row must exist and be
   readable by the caller under the parent table's `read`; otherwise
   `404 invalid_reference`, the same as a missing parent. A row that other rows
   reference cannot be deleted (`409 referenced`); delete the children first.
+  That refusal counts children the caller may not see, so it tells them one
+  exists: accepted, since keeping references whole matters more than that bit.
 - **Ownership is checked in the statement.** An `own` edit or delete carries
   `AND added_by = $caller` in the same `UPDATE` or `DELETE`; zero rows is
   `404`, so another person's row looks like no row.
-- Changing a table's columns later is allowed: values of a removed column stay
-  in the stored JSON but are no longer returned or writable; a new column
-  starts empty. Removing a table deletes its rows (the tool says so).
-- A table added later uses the database's default matrix.
+- Changing a table's columns later is allowed: a removed column, or one given
+  another type, loses its stored values in the same transaction
+  (`cleared_columns`), so a column added back starts empty. Removing a table
+  deletes its rows (the tool says so).
+- A table added later uses the database's default matrix; a table that
+  already exists keeps its own unless the change states one.
+- A JSON number's exponent must be within ±308. Postgres stores numbers
+  exactly, so `1e100000` would be 8 bytes sent and 100,001 digits stored.
 
 ## Limits and quota
 
@@ -231,8 +244,11 @@ Every limit is an env setting with hosted's value as the default:
 | `SITE_STORAGE_MAX_RESOURCES` (per site) | 20 |
 
 Files also count toward `QUOTA_MAX_BYTES`. Usage is kept on the resource row
-and updated in the same transaction as each change, under the resource's row
-lock, so the check is exact across replicas. Rate limits reuse the saved-data
+and updated in the same transaction as each change, under the site's storage
+lock (a Postgres advisory lock), so the check is exact across replicas. Every
+entry is measured the way Postgres stores it (`octet_length` of the jsonb
+text, plus the key), on add, edit and delete alike, so the count cannot drift;
+the limits are checked after the write and a refusal rolls it back. Rate limits reuse the saved-data
 policies (per client and per site, shared across replicas).
 
 ## Audit
@@ -252,6 +268,10 @@ are, through the access log.
   point-in-time recovery covers disaster. Per-entry undo can be added later
   without changing the model.
 - **No raw SQL for owners** (above).
+- **Erasure keeps entries.** A person erased by an admin loses their name on
+  everything they added (`added_by` becomes empty): the entries stay as the
+  site's data, as saved state does, and `own` actions on them fall to the
+  owner.
 - **No legacy translation.** Enterprise never had storage resources, so there
   are no older `read`/`write`/`write_mode` fields to translate and nothing is
   `legacy`.

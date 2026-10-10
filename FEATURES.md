@@ -1213,8 +1213,12 @@ Config names are documented in `docs/configuration.md`; schema in
   `GET|PATCH|DELETE .../storage/db/{name}/tables/{table}/rows/{id}`;
   `GET .../storage/files/{name}/objects`,
   `GET|PUT|DELETE .../storage/files/{name}/objects/{path...}`. Anonymous
-  GETs on a network-approved site; every DELETE is `SiteAPIDeletePattern`
-  (full-scope key).
+  GETs on a network-approved site. A key reads with publish scope; every
+  change through a key needs a full-scope key (`SiteAPIDeletePattern`,
+  `SiteAPIStorageWritePattern`: an entry keeps no history). `GET .../storage`
+  shows a non-owner only the resources and tables they may use. Entries are
+  counted at their stored size; a number's exponent is within ±308; a column
+  removed or retyped loses its values (`cleared_columns`).
 - **MCP.** `storage_list_resources`, `storage_set_resource`,
   `storage_delete_resource`, `storage_list_kv_keys`, `storage_get_kv`,
   `storage_put_kv`, `storage_delete_kv`, `storage_list_rows`,

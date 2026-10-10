@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lib/pq"
 	"github.com/vsriram/simple-host/internal/storagepolicy"
 )
 
@@ -198,10 +199,14 @@ type StorageEntryMeta struct {
 	UpdatedAt       *time.Time
 }
 
-// StorageKV is one key.
+// StorageKV is one key. Stored is the bytes it counts toward the site's
+// limit: the key plus the value as Postgres stores it (octet_length of the
+// jsonb text), the one measure every add, edit and delete uses, so the count
+// cannot drift (a value's text can grow when stored: 1e9 becomes 1000000000).
 type StorageKV struct {
-	Key   string
-	Value json.RawMessage
+	Key    string
+	Value  json.RawMessage
+	Stored int64
 	StorageEntryMeta
 }
 
@@ -224,7 +229,7 @@ func nullableUUID(s string) any {
 // ListStorageKV lists keys in order, after page.After.
 func ListStorageKV(ctx context.Context, q Querier, siteID, resource string, page ListPage) ([]StorageKV, error) {
 	rows, err := q.QueryContext(ctx, `
-		SELECT k.key, k.value, COALESCE(k.added_by::text, ''), COALESCE(u.username, ''), k.created_at, k.updated_at
+		SELECT k.key, k.value, octet_length(k.key) + octet_length(k.value::text), COALESCE(k.added_by::text, ''), COALESCE(u.username, ''), k.created_at, k.updated_at
 		FROM site_storage_kv k LEFT JOIN users u ON u.id = k.added_by
 		WHERE k.site_id = $1::uuid AND k.resource = $2
 		  AND left(k.key, length($3)) = $3 AND k.key COLLATE "C" > $4
@@ -239,7 +244,7 @@ func ListStorageKV(ctx context.Context, q Querier, siteID, resource string, page
 	for rows.Next() {
 		var e StorageKV
 		var updated time.Time
-		if err := rows.Scan(&e.Key, &e.Value, &e.AddedBy, &e.AddedByUsername, &e.CreatedAt, &updated); err != nil {
+		if err := rows.Scan(&e.Key, &e.Value, &e.Stored, &e.AddedBy, &e.AddedByUsername, &e.CreatedAt, &updated); err != nil {
 			return nil, err
 		}
 		e.UpdatedAt = &updated
@@ -253,10 +258,10 @@ func GetStorageKV(ctx context.Context, q Querier, siteID, resource, key string) 
 	var e StorageKV
 	var updated time.Time
 	err := q.QueryRowContext(ctx, `
-		SELECT k.key, k.value, COALESCE(k.added_by::text, ''), COALESCE(u.username, ''), k.created_at, k.updated_at
+		SELECT k.key, k.value, octet_length(k.key) + octet_length(k.value::text), COALESCE(k.added_by::text, ''), COALESCE(u.username, ''), k.created_at, k.updated_at
 		FROM site_storage_kv k LEFT JOIN users u ON u.id = k.added_by
 		WHERE k.site_id = $1::uuid AND k.resource = $2 AND k.key = $3`, siteID, resource, key).
-		Scan(&e.Key, &e.Value, &e.AddedBy, &e.AddedByUsername, &e.CreatedAt, &updated)
+		Scan(&e.Key, &e.Value, &e.Stored, &e.AddedBy, &e.AddedByUsername, &e.CreatedAt, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return StorageKV{}, ErrStorageNotFound
 	}
@@ -264,22 +269,29 @@ func GetStorageKV(ctx context.Context, q Querier, siteID, resource, key string) 
 	return e, err
 }
 
-// InsertStorageKV adds a key.
-func InsertStorageKV(ctx context.Context, tx *sql.Tx, siteID, resource, key string, value json.RawMessage, addedBy string) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO site_storage_kv (site_id, resource, key, value, added_by) VALUES ($1::uuid, $2, $3, $4::jsonb, $5::uuid)`,
-		siteID, resource, key, string(value), nullableUUID(addedBy))
-	return err
+// InsertStorageKV adds a key and returns its stored size.
+func InsertStorageKV(ctx context.Context, tx *sql.Tx, siteID, resource, key string, value json.RawMessage, addedBy string) (int64, error) {
+	var stored int64
+	err := tx.QueryRowContext(ctx, `INSERT INTO site_storage_kv (site_id, resource, key, value, added_by) VALUES ($1::uuid, $2, $3, $4::jsonb, $5::uuid)
+		RETURNING octet_length(key) + octet_length(value::text)`,
+		siteID, resource, key, string(value), nullableUUID(addedBy)).Scan(&stored)
+	return stored, err
 }
 
 // UpdateStorageKV changes a key's value, keeping who added it. With
 // onlyAddedBy set the key must have been added by that person; zero rows is
 // ErrStorageNotFound either way.
-func UpdateStorageKV(ctx context.Context, tx *sql.Tx, siteID, resource, key string, value json.RawMessage, onlyAddedBy string) error {
-	res, err := tx.ExecContext(ctx, `
+func UpdateStorageKV(ctx context.Context, tx *sql.Tx, siteID, resource, key string, value json.RawMessage, onlyAddedBy string) (int64, error) {
+	var stored int64
+	err := tx.QueryRowContext(ctx, `
 		UPDATE site_storage_kv SET value = $4::jsonb, updated_at = now()
-		WHERE site_id = $1::uuid AND resource = $2 AND key = $3 AND ($5::uuid IS NULL OR added_by = $5::uuid)`,
-		siteID, resource, key, string(value), nullableUUID(onlyAddedBy))
-	return oneRow(res, err)
+		WHERE site_id = $1::uuid AND resource = $2 AND key = $3 AND ($5::uuid IS NULL OR added_by = $5::uuid)
+		RETURNING octet_length(key) + octet_length(value::text)`,
+		siteID, resource, key, string(value), nullableUUID(onlyAddedBy)).Scan(&stored)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrStorageNotFound
+	}
+	return stored, err
 }
 
 // DeleteStorageKV deletes a key, under the same onlyAddedBy rule.
@@ -305,10 +317,12 @@ func oneRow(res sql.Result, err error) error {
 	return nil
 }
 
-// StorageRow is one row of a table.
+// StorageRow is one row of a table. Stored is octet_length(data::text), the
+// row's count toward the site's limit (see StorageKV).
 type StorageRow struct {
-	ID   int64
-	Data json.RawMessage
+	ID     int64
+	Data   json.RawMessage
+	Stored int64
 	StorageEntryMeta
 }
 
@@ -329,11 +343,11 @@ type RowQuery struct {
 	Offset      int
 }
 
-const storageRowColumns = `r.id, r.data, COALESCE(r.added_by::text, ''), COALESCE(u.username, ''), r.created_at, r.updated_at`
+const storageRowColumns = `r.id, r.data, octet_length(r.data::text), COALESCE(r.added_by::text, ''), COALESCE(u.username, ''), r.created_at, r.updated_at`
 
 func scanStorageRow(row interface{ Scan(...any) error }) (StorageRow, error) {
 	var r StorageRow
-	err := row.Scan(&r.ID, &r.Data, &r.AddedBy, &r.AddedByUsername, &r.CreatedAt, &r.UpdatedAt)
+	err := row.Scan(&r.ID, &r.Data, &r.Stored, &r.AddedBy, &r.AddedByUsername, &r.CreatedAt, &r.UpdatedAt)
 	return r, err
 }
 
@@ -407,13 +421,40 @@ func InsertStorageRow(ctx context.Context, tx *sql.Tx, siteID, resource, table s
 	return GetStorageRow(ctx, tx, siteID, resource, table, id)
 }
 
-// UpdateStorageRow replaces a row's data, under the onlyAddedBy rule.
-func UpdateStorageRow(ctx context.Context, tx *sql.Tx, siteID, resource, table string, id int64, data json.RawMessage, onlyAddedBy string) error {
-	res, err := tx.ExecContext(ctx, `
+// UpdateStorageRow replaces a row's data, under the onlyAddedBy rule, and
+// returns its new stored size.
+func UpdateStorageRow(ctx context.Context, tx *sql.Tx, siteID, resource, table string, id int64, data json.RawMessage, onlyAddedBy string) (int64, error) {
+	var stored int64
+	err := tx.QueryRowContext(ctx, `
 		UPDATE site_storage_rows SET data = $5::jsonb, updated_at = now()
-		WHERE site_id = $1::uuid AND resource = $2 AND table_name = $3 AND id = $4 AND ($6::uuid IS NULL OR added_by = $6::uuid)`,
-		siteID, resource, table, id, string(data), nullableUUID(onlyAddedBy))
-	return oneRow(res, err)
+		WHERE site_id = $1::uuid AND resource = $2 AND table_name = $3 AND id = $4 AND ($6::uuid IS NULL OR added_by = $6::uuid)
+		RETURNING octet_length(data::text)`,
+		siteID, resource, table, id, string(data), nullableUUID(onlyAddedBy)).Scan(&stored)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrStorageNotFound
+	}
+	return stored, err
+}
+
+// StripStorageColumns removes columns' values from every row of a table (a
+// column the owner removed or retyped) and returns the bytes freed, so a
+// column added back later starts empty.
+func StripStorageColumns(ctx context.Context, tx *sql.Tx, siteID, resource, table string, columns []string) (int64, error) {
+	if len(columns) == 0 {
+		return 0, nil
+	}
+	var freed int64
+	err := tx.QueryRowContext(ctx, `
+		WITH before AS (
+			SELECT id, octet_length(data::text) AS n FROM site_storage_rows
+			WHERE site_id = $1::uuid AND resource = $2 AND table_name = $3 AND data ?| $4::text[]),
+		after AS (
+			UPDATE site_storage_rows r SET data = r.data - $4::text[]
+			FROM before b WHERE r.id = b.id
+			RETURNING r.id, octet_length(r.data::text) AS n)
+		SELECT COALESCE(sum(b.n - a.n), 0) FROM before b JOIN after a ON a.id = b.id`,
+		siteID, resource, table, pq.Array(columns)).Scan(&freed)
+	return freed, err
 }
 
 // DeleteStorageRow deletes a row, under the onlyAddedBy rule.

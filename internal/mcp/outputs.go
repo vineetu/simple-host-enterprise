@@ -390,10 +390,11 @@ func outputSchemas() map[string]map[string]any {
 			"presets": anyJSON("Each preset's matrix."),
 		}, "resources", "usage", "presets"),
 		"storage_set_resource": outObject(map[string]any{
-			"resource":       storageResourceSchema(),
-			"created":        outBool("true when the resource is new."),
-			"removed_tables": outArray("Tables left out, deleted with their rows.", outString("A table.")),
-			"notes":          outArray("What the settings mean for pages; tell the user.", outString("A note.")),
+			"resource":        storageResourceSchema(),
+			"created":         outBool("true when the resource is new."),
+			"removed_tables":  outArray("Tables left out, deleted with their rows.", outString("A table.")),
+			"cleared_columns": anyJSON("Per table, the columns removed or retyped, whose stored values were cleared."),
+			"notes":           outArray("What the settings mean for pages; tell the user.", outString("A note.")),
 		}, "resource", "created"),
 		"storage_delete_resource": doneSchema(),
 		"storage_list_kv_keys": outObject(map[string]any{

@@ -166,6 +166,7 @@ func (h *SiteHandler) putStorageResource(w http.ResponseWriter, r *http.Request)
 	res := db.StorageResource{SiteID: access.Site.ID, Name: name, Kind: kind, Preset: resolved.Preset, Access: resolved.Matrix, Settings: db.StorageSettings{Base: resolved.Base}}
 
 	var removed []string
+	stripped := map[string][]string{}
 	if kind == "db" {
 		if len(req.Tables) == 0 {
 			writeStorageError(w, http.StatusBadRequest, "invalid_tables", `a database needs its tables: {"tables": {"orders": {"preset": "records", "columns": {"item": "text"}}}}`)
@@ -190,7 +191,13 @@ func (h *SiteHandler) putStorageResource(w http.ResponseWriter, r *http.Request)
 				writeStorageError(w, http.StatusBadRequest, "invalid_columns", err.Error())
 				return
 			}
-			tr, ruleErr := sp.Resolve(spec.Spec, resolved)
+			// An existing table keeps its own matrix unless this change
+			// states one; a new table starts from the database's.
+			fallback := resolved
+			if old, ok := existing.Settings.Tables[t]; exists && ok {
+				fallback = sp.Resolved{Matrix: old.Access, Preset: old.Preset, Base: old.Base}
+			}
+			tr, ruleErr := sp.Resolve(spec.Spec, fallback)
 			if ruleErr != nil {
 				invalidAccess(w, ruleErr, "table "+t)
 				return
@@ -198,9 +205,17 @@ func (h *SiteHandler) putStorageResource(w http.ResponseWriter, r *http.Request)
 			res.Settings.Tables[t] = db.StorageTable{Preset: tr.Preset, Base: tr.Base, Access: tr.Matrix, Columns: spec.Columns}
 		}
 		if exists {
-			for t := range existing.Settings.Tables {
+			for t, old := range existing.Settings.Tables {
 				if !names[t] {
 					removed = append(removed, t)
+					continue
+				}
+				// A column removed or given another type loses its stored
+				// values, so one added back later starts empty.
+				for col, c := range old.Columns {
+					if now, ok := res.Settings.Tables[t].Columns[col]; !ok || now.Type != c.Type {
+						stripped[t] = append(stripped[t], col)
+					}
 				}
 			}
 		}
@@ -225,6 +240,17 @@ func (h *SiteHandler) putStorageResource(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+	for _, t := range sp.SortedKeys(stripped) {
+		freed, err := db.StripStorageColumns(r.Context(), tx, access.Site.ID, name, t, stripped[t])
+		if err != nil {
+			storageInternal(w, "strip columns", err)
+			return
+		}
+		if err := db.AddStorageBytes(r.Context(), tx, access.Site.ID, name, -freed); err != nil {
+			storageInternal(w, "column bytes", err)
+			return
+		}
+	}
 	actorID := ""
 	if user := auth.GetUser(r.Context()); user != nil {
 		actorID = user.ID
@@ -239,6 +265,9 @@ func (h *SiteHandler) putStorageResource(w http.ResponseWriter, r *http.Request)
 		extra["tables"] = tables
 		if len(removed) > 0 {
 			extra["removed_tables"] = removed
+		}
+		if len(stripped) > 0 {
+			extra["cleared_columns"] = stripped
 		}
 	}
 	if err := h.audit.RecordTx(r.Context(), tx, audit.Event{
@@ -264,6 +293,9 @@ func (h *SiteHandler) putStorageResource(w http.ResponseWriter, r *http.Request)
 	out := map[string]any{"resource": storageResourceAdminView{storageView(saved), saved.Bytes}, "created": created}
 	if len(removed) > 0 {
 		out["removed_tables"] = removed
+	}
+	if len(stripped) > 0 {
+		out["cleared_columns"] = stripped
 	}
 	if notes := storageNotes(saved); len(notes) > 0 {
 		out["notes"] = notes
