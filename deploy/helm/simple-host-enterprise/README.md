@@ -8,7 +8,7 @@ and `postgres.mode: incluster`. With `ownerCerts: manual` and an existing
 It does not create a cluster, VPC, or cloud account resources.
 
 ```sh
-helm install simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.2.1 -n simple-host --create-namespace -f my-values.yaml
+helm install simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.2.2 -n simple-host --create-namespace -f my-values.yaml
 ```
 
 - Every value, with its default and what it does: [values.yaml](values.yaml).
@@ -68,3 +68,9 @@ Chart 0.2.1 pins release 0.9.3: personal home selection, signed-in showcase
 feed, bio, pins and manual order. Site access and origins remain in force. Set
 `extraConfig.SHOWCASE_BIO_MAX_LENGTH` to change the default 280-character bio
 limit. [Home-page behavior](../../../docs/your-home-page.md).
+
+Chart 0.2.2 pins release 0.9.4: site storage with access presets (key-value,
+tables and files per site, each with a preset for who may read, add, edit and
+delete). It adds migration 0060, which the chart's migrate job applies; 0.9.3
+runs against it, so rolling back stays safe. Storage limits are
+`extraConfig.SITE_STORAGE_*` settings (values.yaml).

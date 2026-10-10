@@ -1,5 +1,12 @@
 # Changelog
 
+## Chart 0.2.2 — 2026-10-10
+
+- Pins the published 0.9.4 image digest
+  (`sha256:5b704de0f3378b963bc7bfad693e16dc1ce20213b43253ada55dad9cc3893beb`), so the
+  existing-cluster and Kubernetes 1-Click installs get site storage with
+  access presets. Migration 0060 runs in the chart's migrate job.
+
 ## v0.9.4 — 2026-10-10
 
 Schema 0060 (backward-compatible: v0.9.3 runs against it, so a rollback is safe).
