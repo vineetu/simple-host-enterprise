@@ -482,7 +482,11 @@ recreates each one whose owner is found, under the same site id (so the
 objects' keys still match), with every kept version, the version that was
 live, and its uploaded files. It audits each as `site_restore` with `from:
 bucket_rebuild`. Run it again as more people sign in; a site already in
-the database is left alone.
+the database is left alone. Saved state and site storage (key-value, tables,
+and which stored file is at which path) live only in Postgres, so a rebuild
+does not bring them back; the stored files' objects stay in the bucket, and
+the retention rule expires them in time. Postgres point-in-time recovery is
+what protects saved data.
 
 - **Who gets a site.** A person's sites go only to the account with the
   same sign-in identity, whatever username it was given this time; never

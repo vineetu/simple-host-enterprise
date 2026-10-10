@@ -213,7 +213,7 @@ func (h *SiteHandler) putStorageResource(w http.ResponseWriter, r *http.Request)
 				// A column removed or given another type loses its stored
 				// values, so one added back later starts empty.
 				for col, c := range old.Columns {
-					if now, ok := res.Settings.Tables[t].Columns[col]; !ok || now.Type != c.Type {
+					if now, ok := res.Settings.Tables[t].Columns[col]; !ok || now.Type != c.Type || now.References != c.References {
 						stripped[t] = append(stripped[t], col)
 					}
 				}
@@ -297,7 +297,20 @@ func (h *SiteHandler) putStorageResource(w http.ResponseWriter, r *http.Request)
 	if len(stripped) > 0 {
 		out["cleared_columns"] = stripped
 	}
-	if notes := storageNotes(saved); len(notes) > 0 {
+	notes := storageNotes(saved)
+	if kind == "db" && exists && req.Spec != (sp.Spec{}) {
+		// The database's own access only seeds new tables: say which
+		// existing ones kept theirs, so a change meant for all is not
+		// silently partial.
+		for _, t := range sp.SortedKeys(req.Tables) {
+			if spec := req.Tables[t].Spec; spec == (sp.Spec{}) {
+				if _, existed := existing.Settings.Tables[t]; existed {
+					notes = append(notes, "table "+t+" kept its own access ("+saved.Settings.Tables[t].Preset+"); the database's preset applies to new tables only, so name a preset on this table to change it")
+				}
+			}
+		}
+	}
+	if len(notes) > 0 {
 		out["notes"] = notes
 	}
 	writeJSON(w, status, out)

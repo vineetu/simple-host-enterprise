@@ -191,8 +191,15 @@ the connector are not keys. The settings routes are owner routes like the
 asset routes: GET publish, PUT and DELETE full.
 
 `GET .../storage` shows the owner every resource; anyone else sees only the
-resources and tables where the matrix lets them do something, so the list
-does not map the site's private data.
+resources and tables where the matrix lets them do something, and a visible
+column that references a hidden table does not name it, so the list does not
+map the site's private data.
+
+A row body is read before the write transaction opens, so a slow request
+never holds the site's storage lock or a database connection.
+
+An `own` edit or delete of an entry the caller can see but did not add
+answers `404`, as for an entry they cannot see.
 
 ## Tables
 
@@ -223,13 +230,20 @@ PUT /api/collaboration/sites/ana/bakery/storage/resources/shop
   `AND added_by = $caller` in the same `UPDATE` or `DELETE`; zero rows is
   `404`, so another person's row looks like no row.
 - Changing a table's columns later is allowed: a removed column, or one given
-  another type, loses its stored values in the same transaction
-  (`cleared_columns`), so a column added back starts empty. Removing a table
+  another type or another `references` table, loses its stored values in the
+  same transaction (`cleared_columns`), so a column added back starts empty.
+  A narrower rule that keeps the type (`required` added) leaves existing
+  values as they are. Removing a table
   deletes its rows (the tool says so).
 - A table added later uses the database's default matrix; a table that
-  already exists keeps its own unless the change states one.
-- A JSON number's exponent must be within ±308. Postgres stores numbers
-  exactly, so `1e100000` would be 8 bytes sent and 100,001 digits stored.
+  already exists keeps its own unless the change states one. When a change
+  sets the database's preset, the answer's `notes` name each existing table
+  that kept its own, so a change meant for every table is not silently
+  partial.
+- Numbers written with exponents are bounded before they reach Postgres,
+  which stores numbers exactly (`1e100000` would be 8 bytes sent and
+  100,001 digits stored): each exponent is within ±308, and the digits the
+  exponents add across one body stay within the value limit.
 
 ## Limits and quota
 
@@ -248,7 +262,9 @@ and updated in the same transaction as each change, under the site's storage
 lock (a Postgres advisory lock), so the check is exact across replicas. Every
 entry is measured the way Postgres stores it (`octet_length` of the jsonb
 text, plus the key), on add, edit and delete alike, so the count cannot drift;
-the limits are checked after the write and a refusal rolls it back. Rate limits reuse the saved-data
+the limits are checked after the write and a refusal rolls it back. The
+stored form puts a space after each `,` and `:`, so a value near the limit
+can measure up to about half again what was sent. Rate limits reuse the saved-data
 policies (per client and per site, shared across replicas).
 
 ## Audit
@@ -275,6 +291,8 @@ are, through the access log.
 - **No legacy translation.** Enterprise never had storage resources, so there
   are no older `read`/`write`/`write_mode` fields to translate and nothing is
   `legacy`.
+- **No rebuild from the bucket.** Like saved state, storage lives in
+  Postgres; `rebuild-index` restores sites, not their saved data.
 - **The saved state document and assets are unchanged.** Existing pages keep
   working; new pages are pointed at storage.
 

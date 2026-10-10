@@ -686,7 +686,15 @@ func TestStorageReviewFixes(t *testing.T) {
 	small := prev
 	small.SiteStorageValueMaxBytes = 1024
 	oplimits.Set(small)
-	big := `{"note":[` + strings.TrimSuffix(strings.Repeat("1e300,", 6), ",") + `]}`
+	// Exponents that would add more digits than the value limit allows are
+	// refused before the database builds them.
+	many := `{"note":[` + strings.TrimSuffix(strings.Repeat("1e300,", 6), ",") + `]}`
+	if rec := w.siteReq(vera, "shop", http.MethodPost, rows, []byte(many), "application/json"); rec.Code != http.StatusBadRequest {
+		t.Errorf("exponent budget = %d %s", rec.Code, rec.Body)
+	}
+	// 500 ones are 1,010 bytes sent and about 1,510 stored (", " between
+	// them): refused at the stored size, after the write, rolled back.
+	big := `{"note":[` + strings.TrimSuffix(strings.Repeat("1,", 500), ",") + `]}`
 	if rec := w.siteReq(vera, "shop", http.MethodPost, rows, []byte(big), "application/json"); rec.Code != http.StatusRequestEntityTooLarge {
 		t.Errorf("stored size over the value limit = %d %s", rec.Code, rec.Body)
 	}
@@ -735,5 +743,48 @@ func TestStorageReviewFixes(t *testing.T) {
 	rec = w.siteReq(storageTestCaller{"owner-on-site", "alice", false}, "shop", http.MethodGet, "/api/site/storage", nil, "")
 	if !strings.Contains(rec.Body.String(), `"costs"`) {
 		t.Errorf("owner's listing = %s", rec.Body)
+	}
+}
+
+// Review round 2: a database-level change says which tables kept their own
+// access; a column whose reference changes is cleared; a non-owner's listing
+// never names a hidden table through a reference.
+func TestStorageReviewRoundTwo(t *testing.T) {
+	w := newAccessWorld(t)
+	w.storageSite("hr", db.AccessCompany)
+	tables := map[string]any{
+		"payroll": map[string]any{"preset": "private", "columns": map[string]any{"name": "text"}},
+		"teams":   map[string]any{"preset": "public", "columns": map[string]any{"name": "text"}},
+		"shifts": map[string]any{"preset": "board", "columns": map[string]any{
+			"employee": map[string]any{"type": "integer", "references": "payroll"}, "day": "text"}},
+	}
+	if rec := w.settings("alice", http.MethodPut, "hr", "hr", map[string]any{"kind": "db", "tables": tables}); rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d %s", rec.Code, rec.Body)
+	}
+	olly := storageTestCaller{"colleague", "olly", false}
+	rec := w.siteReq(olly, "hr", http.MethodGet, "/api/site/storage", nil, "")
+	if strings.Contains(rec.Body.String(), "payroll") || !strings.Contains(rec.Body.String(), "shifts") {
+		t.Errorf("olly's listing names the hidden table: %s", rec.Body)
+	}
+	owner := storageTestCaller{"owner-tool", "alice", true}
+	if rec := w.siteReq(owner, "hr", http.MethodPost, "/api/site/storage/db/hr/tables/shifts/rows", []byte(`{"day":"mon"}`), "application/json"); rec.Code != http.StatusCreated {
+		t.Fatalf("shift = %d %s", rec.Code, rec.Body)
+	}
+	if _, err := w.database.Exec(`UPDATE site_storage_rows SET data = data || '{"employee": 1}' WHERE table_name = 'shifts'`); err != nil {
+		t.Fatal(err)
+	}
+	// Change the reference and set a database-level preset without naming
+	// one on the tables.
+	tables["shifts"] = map[string]any{"columns": map[string]any{"employee": map[string]any{"type": "integer", "references": "teams"}, "day": "text"}}
+	tables["payroll"] = map[string]any{"columns": map[string]any{"name": "text"}}
+	tables["teams"] = map[string]any{"columns": map[string]any{"name": "text"}}
+	rec = w.settings("alice", http.MethodPut, "hr", "hr", map[string]any{"preset": "private", "tables": tables})
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"cleared_columns":{"shifts":["employee"]}`) || !strings.Contains(rec.Body.String(), "table shifts kept its own access (board)") {
+		t.Errorf("db-level change = %d %s", rec.Code, rec.Body)
+	}
+	var left int
+	_ = w.database.QueryRow(`SELECT count(*) FROM site_storage_rows WHERE table_name = 'shifts' AND data ? 'employee'`).Scan(&left)
+	if left != 0 {
+		t.Errorf("%d rows keep the old reference", left)
 	}
 }

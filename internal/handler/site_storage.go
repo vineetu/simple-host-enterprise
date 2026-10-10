@@ -220,6 +220,18 @@ func (h *SiteAPIHandler) listStorage(w http.ResponseWriter, r *http.Request, cal
 				if len(v.Tables) == 0 {
 					continue
 				}
+				// A visible column must not name a hidden table.
+				for name, t := range v.Tables {
+					cols := map[string]sp.Column{}
+					for col, spec := range t.Columns {
+						if _, shown := v.Tables[spec.References]; spec.References != "" && !shown {
+							spec.References = ""
+						}
+						cols[col] = spec
+					}
+					t.Columns = cols
+					v.Tables[name] = t
+				}
 			} else if !usable(res.Access) {
 				continue
 			}
@@ -432,14 +444,17 @@ func (h *SiteAPIHandler) storageKV(w http.ResponseWriter, r *http.Request, call 
 	}
 }
 
-// boundedNumbers refuses a JSON number written with an exponent beyond
-// ±308 (the range of a float). Postgres stores numbers exactly, so 1e100000
-// is 8 bytes sent and 100,001 digits built in the database: refusing it here
-// keeps a small body from making the database build a huge value before the
-// stored-size check can refuse it.
+// boundedNumbers refuses a body whose numbers would grow past the value
+// limit when stored. Postgres stores numbers exactly, so 1e100000 is 8 bytes
+// sent and 100,001 digits built in the database, and many 1e-308s are each
+// 6 bytes that become 310. Each exponent must be within ±308 (a float's
+// range), and the digits the exponents add, summed over the body, must stay
+// within SITE_STORAGE_VALUE_MAX_BYTES, so a small body cannot make the
+// database build a large value before the stored-size check refuses it.
 func boundedNumbers(raw []byte) bool {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
+	budget := oplimits.Get().SiteStorageValueMaxBytes
 	for {
 		tok, err := dec.Token()
 		if err == io.EOF {
@@ -459,6 +474,12 @@ func boundedNumbers(raw []byte) bool {
 		}
 		exp, err := strconv.Atoi(strings.TrimPrefix(s[i+1:], "+"))
 		if err != nil || exp > 308 || exp < -308 {
+			return false
+		}
+		if exp < 0 {
+			exp = -exp
+		}
+		if budget -= exp; budget < 0 {
 			return false
 		}
 	}
@@ -484,7 +505,7 @@ func readStorageJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 		return false
 	}
 	if !boundedNumbers(body) {
-		writeStorageError(w, http.StatusBadRequest, "invalid_number", "a number's exponent must be within ±308")
+		writeStorageError(w, http.StatusBadRequest, "invalid_number", "numbers written with exponents (1e300) would be too long as stored: write them out, each exponent within ±308")
 		return false
 	}
 	return true
@@ -766,9 +787,9 @@ func (h *SiteAPIHandler) listRows(w http.ResponseWriter, r *http.Request, call s
 	writeJSON(w, http.StatusOK, map[string]any{"rows": out, "next_offset": next})
 }
 
-// rowValues reads and checks a row body against the table's columns. With
-// partial, required columns may be missing (an edit).
-func rowValues(w http.ResponseWriter, r *http.Request, t db.StorageTable, partial bool) (map[string]json.RawMessage, bool) {
+// readRowBody reads a row body. It runs before the write transaction opens,
+// so a slow body never holds the site's storage lock or a connection.
+func readRowBody(w http.ResponseWriter, r *http.Request) (map[string]json.RawMessage, bool) {
 	var values map[string]json.RawMessage
 	if !readStorageJSON(w, r, &values) {
 		return nil, false
@@ -777,6 +798,12 @@ func rowValues(w http.ResponseWriter, r *http.Request, t db.StorageTable, partia
 		writeStorageError(w, http.StatusBadRequest, "invalid_body", "the body must be one JSON object of column values")
 		return nil, false
 	}
+	return values, true
+}
+
+// rowValues checks a row body against the table's columns, as read under the
+// lock. With partial, required columns may be missing (an edit).
+func rowValues(w http.ResponseWriter, values map[string]json.RawMessage, t db.StorageTable, partial bool) (map[string]json.RawMessage, bool) {
 	for col, raw := range values {
 		if sp.ServerColumns[col] {
 			writeStorageError(w, http.StatusBadRequest, "server_column", col+" is set by the server; leave it out")
@@ -848,6 +875,10 @@ func encodeRow(values map[string]json.RawMessage) (json.RawMessage, error) {
 }
 
 func (h *SiteAPIHandler) addRow(w http.ResponseWriter, r *http.Request, call siteAPICall, c sp.Caller, name, table string) {
+	body, ok := readRowBody(w, r)
+	if !ok {
+		return
+	}
 	tx, res, _, err := h.beginStorageWrite(r.Context(), call, name, "db", false)
 	if err != nil {
 		if errors.Is(err, db.ErrStorageNotFound) {
@@ -867,7 +898,7 @@ func (h *SiteAPIHandler) addRow(w http.ResponseWriter, r *http.Request, call sit
 		refuseStorage(w, c, sp.Add, t.Access.Add)
 		return
 	}
-	values, ok := rowValues(w, r, t, false)
+	values, ok := rowValues(w, body, t, false)
 	if !ok || !h.checkReferences(w, r, tx, call, c, res, t, values) {
 		return
 	}
@@ -899,6 +930,10 @@ func (h *SiteAPIHandler) addRow(w http.ResponseWriter, r *http.Request, call sit
 }
 
 func (h *SiteAPIHandler) editRow(w http.ResponseWriter, r *http.Request, call siteAPICall, c sp.Caller, name, table string, id int64) {
+	body, ok := readRowBody(w, r)
+	if !ok {
+		return
+	}
 	tx, res, _, err := h.beginStorageWrite(r.Context(), call, name, "db", false)
 	if err != nil {
 		if errors.Is(err, db.ErrStorageNotFound) {
@@ -928,7 +963,7 @@ func (h *SiteAPIHandler) editRow(w http.ResponseWriter, r *http.Request, call si
 		storageInternal(w, "row lookup", err)
 		return
 	}
-	values, ok := rowValues(w, r, t, true)
+	values, ok := rowValues(w, body, t, true)
 	if !ok || !h.checkReferences(w, r, tx, call, c, res, t, values) {
 		return
 	}
