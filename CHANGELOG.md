@@ -1,28 +1,8 @@
 # Changelog
 
-## 2026-10-09
+## v0.9.4 — 2026-10-10
 
-- The hosted setup helper keeps its questions, browser validation and generated installation files. Its assistant and mistake check have been removed. Enterprise configuration and chart pins are unchanged.
-
-## Chart 0.2.1 — 2026-10-05
-
-- Pins the published 0.9.3 image digest; the existing-cluster and Kubernetes
-  1-Click installs include personal home and showcase controls.
-
-## v0.9.3 — 2026-10-05
-
-- Personal home selection opens an owned site at its existing address after
-  access checks; the normal index remains when unavailable. Rename follows
-  the choice; deletion and transfer clear it.
-- Signed-in personal showcase feed, plain-text bio, pinned sites and manual
-  order, with dashboard and OIDC connector controls. Private sites stay private.
-
-
-Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
-pin the digest, not the tag. `simple-host version` prints the running
-release, commit and schema.
-
-## Unreleased
+Schema 0060 (backward-compatible: v0.9.3 runs against it, so a rollback is safe).
 
 ### Added
 - **Site storage with access presets** (`docs/designs/storage-presets.md`,
@@ -51,6 +31,38 @@ release, commit and schema.
 - **Schema:** migration 0060, backward-compatible.
 - **Connector:** 14 `storage_*` tools.
 - **Skill 0.16.0:** `references/storage.md`.
+- **Security review.** Two rounds were run before release. Fixes from them:
+  - entries are counted at their stored size;
+  - number exponents are bounded;
+  - any change through an API key needs a full-scope key;
+  - row bodies are read before the site's storage lock;
+  - a removed, retyped or retargeted column is cleared;
+  - an existing table keeps its own access;
+  - a non-owner's resource list shows only what they may use.
+
+## 2026-10-09
+
+- The hosted setup helper keeps its questions, browser validation and generated installation files. Its assistant and mistake check have been removed. Enterprise configuration and chart pins are unchanged.
+
+## Chart 0.2.1 — 2026-10-05
+
+- Pins the published 0.9.3 image digest; the existing-cluster and Kubernetes
+  1-Click installs include personal home and showcase controls.
+
+## v0.9.3 — 2026-10-05
+
+- Personal home selection opens an owned site at its existing address after
+  access checks; the normal index remains when unavailable. Rename follows
+  the choice; deletion and transfer clear it.
+- Signed-in personal showcase feed, plain-text bio, pinned sites and manual
+  order, with dashboard and OIDC connector controls. Private sites stay private.
+
+
+Releases are published as `ghcr.io/vineetu/simple-host-enterprise:<version>`;
+pin the digest, not the tag. `simple-host version` prints the running
+release, commit and schema.
+
+## Unreleased
 
 - **Enterprise setup offers an inspectable Helm download.** The hosted helper packages a wrapper Chart.yaml, selected values under enterprise:, the pinned published dependency and a README for lint/render/dry-run/install/upgrade. The Kubernetes guide distinguishes wrapper and direct-chart values; install.sh is optional.
 

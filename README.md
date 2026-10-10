@@ -52,6 +52,7 @@ Read docs/install-kubernetes.md in this repository and install Simple Host into 
 - Each site has one JSON document its pages read and write, plain or versioned.
 - The last 20 changes are kept; the owner or a team member restores any of them.
 - Pages upload files (images, video, PDFs and more), with per-site limits and the same malware scan.
+- Site storage: key-value, tables and files, each with a preset for who may read, add, edit and delete: everyone reads the menu, each person sees only their own orders, the owner sees all from an admin page inside the site. The same seven presets as hosted Simple Host; pages never send SQL.
 
 ### Agents
 - An MCP server at `<base>/mcp`, connected through the company's own sign-in. Every tool call runs as that person.
