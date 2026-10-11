@@ -226,3 +226,12 @@ after the presets were verified on hosted): key-value, tables and files, the sam
 and four rules, on Postgres rows and the bucket rather than SQLite and local disk. Checked hosted
 the same day: no hosted change; the security review of the Enterprise build found nothing that
 applies to hosted's engine.
+
+2026-10-11: Hosted connector, skills and llms.txt open with a map from short requests to what to
+build (booking, inbox without sign-in, public, a private page per client), with new booking and
+portal recipes; auth.js asks for sign-in in a small dialog when a page has no sign-in box, keeps
+typed values across the Google round trip on a site's own origin, and table lists also read like
+an array; create_site and update_site warn about broken pages. Checked Enterprise the same day:
+its pages and connector sign people in through OIDC and have their own helper and recipes, so
+nothing here applies as a fix; porting the request map to the Enterprise connector is a separate
+change. The portal recipe is refused on Simple Hack, which has no named viewers.
