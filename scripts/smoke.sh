@@ -324,7 +324,11 @@ fi
 echo "== once it is ready, the old address and the v1.2 dash host redirect to $site_host"
 expect 301 "$owner_host" "/$name/"
 expect_header_value "$owner_host" "/$name/a/b.html?q=1" Location "https://$site_host/a/b.html?q=1"
-expect_header_value "$owner_host" "/$name//evil.example.com" Location "https://$site_host//evil.example.com"
+# Traefik (the DigitalOcean 1-Click's ingress) merges the double slash before
+# the request arrives; either way the redirect has to stay on the site host.
+evil_location="$(curl -sS -o /dev/null -D - "https://$owner_host/$name//evil.example.com" 2>/dev/null | grep -i '^location:' | tail -1 | sed 's/^[^:]*: *//' | tr -d '\r')"
+check "/$name//evil.example.com redirects within $site_host ($evil_location)" \
+  test "$evil_location" = "https://$site_host//evil.example.com" -o "$evil_location" = "https://$site_host/evil.example.com"
 expect_header_value "$owner_host" "/api/sites/$name/state/versioned" Location "https://$site_host/api/sites/$name/state/versioned"
 expect 308 "$owner_host" "/api/sites/$name/state/versioned" -X PUT -H "Content-Type: application/json" -d '{}'
 expect_header "$owner_host" "/$name/" Cross-Origin-Resource-Policy

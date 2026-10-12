@@ -1,5 +1,16 @@
 # DigitalOcean (DOKS)
 
+Verified 2026-10-12 on DigitalOcean (sfo2) with chart 0.2.2 (v0.9.4): DOKS 1.37 (two
+`s-2vcpu-4gb` nodes), the 1-Click's `deploy.sh` (1 m 37 s), `upgrade.sh` and
+`uninstall.sh` from the marketplace stack, a Spaces bucket with a key limited to it
+(`BACKUP_SSE=none`; every object carried the envelope), and the load balancer's PROXY
+protocol passing visitors' own addresses. `make smoke` passed 104 of 105 with the
+in-cluster database, the one difference being Traefik collapsing `//` in a path (the
+smoke test now accepts either form), and 94 of 94 after moving to Managed PostgreSQL 16
+over its VPC host with `verify-full` on port 25060. Certificates came from a test CA
+ClusterIssuer on an sslip.io name, so DNS-01 in DigitalOcean DNS was not part of
+this run.
+
 Verified 2026-10-01 on DigitalOcean (nyc3): DOKS 1.35 (two `s-2vcpu-4gb` nodes), the
 1-Click's `deploy.sh` (1 m 46 s to a load balancer IP), Managed PostgreSQL 16 over its
 VPC host with `verify-full` as `doadmin`, a Spaces bucket with a bucket-limited key, and
@@ -16,12 +27,13 @@ kustomize overlay: values go in one values file, not `config.env` / `secrets.env
 
 The Kubernetes 1-Click installs Traefik (its own IngressClass, `simple-host`, in
 `simple-host-ingress`, so a controller the cluster already runs is left alone),
-cert-manager if the cluster has none, and the chart with no settings: the database
-starts, and Simple Host waits for the values below. Chart 0.1.1 still has those
-DigitalOcean defaults; 0.2.0 is provider-neutral and needs the preset
+cert-manager if the cluster has none, and the chart with the DigitalOcean preset
+as the stack's `values.yml`: the database starts, and Simple Host waits for the
+values below. From 0.2.0 the chart is provider-neutral and needs that preset
 (`deploy/helm/simple-host-enterprise/values-digitalocean.yaml`) for Spaces, the
 Traefik class, NetworkPolicy, and a Let's Encrypt DNS-01 issuer on DigitalOcean
-DNS. Marketplace workflows can pin `--version 0.1.1`. Without the 1-Click, install
+DNS; a stack that installs the chart with no values leaves the Ingress with no
+class and fails at "certificates.issuer is required". Without the 1-Click, install
 cert-manager and a controller, then:
 
 ```sh
