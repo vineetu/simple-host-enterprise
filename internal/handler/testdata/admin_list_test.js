@@ -129,3 +129,28 @@ assert.equal(sitelist.hidden, true);
 assert.deepEqual(names(), ['ann', 'bob', 'cid']);
 assert.equal(bob.style.display, '');
 assert.equal(ann.style.display, 'none');
+
+// Several words must all match; a word starting with "-" hides matches; a lone "-" is ignored.
+filter.value = '-roadmap';
+filter.listeners.input();
+assert.equal(bob.style.display, 'none');
+assert.equal(ann.style.display, '');
+assert.equal(cid.style.display, '');
+filter.value = 'ANN -atlas';
+filter.listeners.input();
+assert.equal(ann.style.display, '');
+assert.equal(cid.style.display, 'none');
+filter.value = '-roadmap -atlas';
+filter.listeners.input();
+assert.equal(ann.style.display, '');
+assert.equal(bob.style.display, 'none');
+assert.equal(cid.style.display, 'none');
+filter.value = '-';
+filter.listeners.input();
+assert.equal(ann.style.display, '');
+assert.equal(bob.style.display, '');
+assert.equal(cid.style.display, '');
+filter.value = 'bob portfolio';
+filter.listeners.input();
+assert.equal(ann.style.display, 'none');
+assert.equal(bob.style.display, 'none');

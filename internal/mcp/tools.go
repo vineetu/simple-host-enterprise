@@ -377,8 +377,8 @@ func toolList() []Tool {
 			},
 		},
 		{
-			Name: "set_bio", Title: "Set my showcase bio", Description: "Save a short plain-text bio for your personal showcase. An empty string clears it. The response includes the configured maximum length.",
-			InputSchema: object(map[string]any{"bio": str("Plain-text bio; empty clears it.")}, "bio"), Annotations: writes(false, true), family: familyAccount,
+			Name: "set_bio", Title: "Set my showcase bio", Description: "Save a short plain-text bio for your personal showcase. An empty string clears it. It replaces the earlier bio, which is not kept anywhere, so ask the person before replacing or clearing a bio they wrote. The response includes the configured maximum length.",
+			InputSchema: object(map[string]any{"bio": str("Plain-text bio; empty clears it.")}, "bio"), Annotations: writes(true, true), family: familyAccount,
 			call: func(args map[string]any) (upstream, error) {
 				v, ok := args["bio"].(string)
 				if !ok {
@@ -867,7 +867,7 @@ func toolList() []Tool {
 		{
 			Name:        "revoke_site_viewer",
 			Title:       "Remove a named viewer",
-			Description: "Remove one person or team from a site's viewer list, or a pending viewer by their email. The access level does not change: removing the last viewer leaves the site open only to its owner or team until set_site_access says otherwise.",
+			Description: "Remove one person or team from a site's viewer list, or a pending viewer by their email: while the site's access level is specific, that person loses access to the site from their next request, and it comes back only if the owner grants it again with grant_site_viewer. Nothing on the site is deleted. The access level does not change: removing the last viewer leaves the site open only to its owner or team until set_site_access says otherwise.",
 			InputSchema: object(map[string]any{
 				"site":     str(siteArgDesc),
 				"owner":    str(ownerArgDesc),

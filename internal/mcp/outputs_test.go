@@ -81,6 +81,9 @@ func TestEveryToolStatesAllFourHints(t *testing.T) {
 		"deploy_site":   {true, false},
 		"delete_site":   {true, true},
 		"update_state":  {true, false},
+		// set_bio overwrites a bio that is not kept; revoke_site_viewer ends access at once, as on hosted.
+		"set_bio":            {true, true},
+		"revoke_site_viewer": {true, true},
 	}
 	for _, tool := range Tools() {
 		if w, ok := want[tool.Name]; ok {

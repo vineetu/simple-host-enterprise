@@ -478,7 +478,7 @@ func (h *AdminHandler) dashboard(w http.ResponseWriter, r *http.Request) {
 
 		// Filter + sort toolbar. Both operate client-side on the user blocks below.
 		fmt.Fprintf(&b, `<div class="toolbar">
-  <input type="search" id="filter" class="filter-input" placeholder="Filter users or sites…" autocomplete="off">
+  <input type="search" id="filter" class="filter-input" placeholder="Filter users or sites (-word hides)" aria-label="Filter users or sites: every word must match, a word starting with a minus sign hides rows that match it" autocomplete="off">
   <label class="sort-label">Sort
     <select id="sort" class="sort-select">
       <option value="recent-sites" selected>Recently created sites</option>
@@ -1410,11 +1410,18 @@ const adminListScript = `<script>
     // entirely: sites on their own, ordered by the timestamp named here.
     const FLAT_SORTS = { 'recent-sites': 'data-created', 'latest-sites': 'data-updated' };
     const flatMode = () => sortSel && Object.prototype.hasOwnProperty.call(FLAT_SORTS, sortSel.value);
+    // Several words: plain words must all match, a word starting with "-"
+    // hides rows that match it, a lone "-" is ignored (the hosted admin's rule).
+    const matches = (q, hay) => q.split(/\s+/).every((w) => {
+      if (w.charAt(0) !== '-') return !w || hay.indexOf(w) !== -1;
+      w = w.slice(1);
+      return !w || hay.indexOf(w) === -1;
+    });
     const applyFilter = () => {
       const q = (filter.value || '').trim().toLowerCase();
       const show = (el) => {
-        const hay = el.getAttribute('data-search') || '';
-        el.style.display = (!q || hay.indexOf(q) !== -1) ? '' : 'none';
+        const hay = (el.getAttribute('data-search') || '').toLowerCase();
+        el.style.display = matches(q, hay) ? '' : 'none';
       };
       blocks.forEach(show);
       rows.forEach(show);

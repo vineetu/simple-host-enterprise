@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.9.5 — 2026-10-13
+
+No schema change.
+
+### Changed
+- **MCP hints match what the tools do, as on hosted Simple Host.** `set_bio`
+  is marked destructive: it replaces the earlier bio, which is not kept, and
+  its description says to ask before replacing or clearing a bio the person
+  wrote. `revoke_site_viewer` stays destructive, as hosted now marks it too.
+  Its description now says that, while the site's level is `specific`, the
+  removed person loses access at once and gets it back only if the owner
+  grants it again.
+- **The /admin users and sites filter takes several words.** Plain words must
+  all match, a word starting with `-` hides rows that match it, case is
+  ignored, and a lone `-` is ignored. This is the same rule as the hosted admin.
+- PARITY.md is copied from hosted. It has the same rows as hosted's copy,
+  including the gaps listed there.
+
 ## Chart 0.2.2 — 2026-10-10
 
 - Pins the published 0.9.4 image digest

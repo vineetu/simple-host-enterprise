@@ -592,7 +592,9 @@ Config names are documented in `docs/configuration.md`; schema in
   `/api/site/...` site API (or the fallback owner path, section 5). v1.2
   `<owner>--<site>.<base>` addresses redirect to the current address.
 - **MCP.** `find_users`, `list_site_viewers`, `grant_site_viewer`,
-  `revoke_site_viewer`.
+  `revoke_site_viewer` (destructive: while the level is `specific` the removed
+  person loses access at once, and it comes back only if the owner grants it
+  again; nothing on the site is deleted).
 - **Skill.** `references/collaboration.md` §7 (Named viewers).
 - **Pages.** `/dashboard` viewers panel; "Shared with me" (section 5).
 - **Go.** `internal/handler/viewers.go`, `host_gate.go`
@@ -825,7 +827,10 @@ Config names are documented in `docs/configuration.md`; schema in
   and sites (views, storage from a cached bucket measurement, updated; each
   site links to its current address), new
   users, state-backend usage, visitors and activity, all sites (each with
-  Restrict, or the restriction's reason and Lift: section 7). "Revoke a
+  Restrict, or the restriction's reason and Lift: section 7). The users and
+  sites filter takes several words: plain words must all match, a word
+  starting with `-` hides rows that match it, case is ignored, and a lone `-`
+  is ignored (2026-10-13, as on hosted). "Revoke a
   leaked key": paste any person's key (a password field; never echoed, logged
   or stored), that key alone is revoked and the answer names its owner, key
   name and last four; audited `admin_key_revoke` with the owner's name.
@@ -926,7 +931,7 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Home routes.** `GET /api/me/home`, `PUT /api/me/home`, `GET /api/me/bio`,
   `PUT /api/me/bio`, `GET /api/sites/{sitename}/showcase`,
   `PUT /api/sites/{sitename}/showcase`.
-- **Home MCP.** `set_home_page`, `set_bio`, `set_showcase_site`.
+- **Home MCP.** `set_home_page`, `set_bio` (destructive: it replaces the earlier bio, which is not kept), `set_showcase_site`.
 - **Home implementation.** `person_home.go`, `person_home_host.go`,
   `internal/db/person_home.go`, migration `0059_person_home.sql`;
   `SHOWCASE_BIO_MAX_LENGTH` (280, range 1–2000). Settings use transactional
