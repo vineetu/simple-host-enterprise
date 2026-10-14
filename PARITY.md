@@ -25,6 +25,8 @@ The weekly Simple Hack demo reset (2026-10-10, installation pending) is an opera
 | Area | Hosted | Enterprise | Status |
 |---|---|---|---|
 | Connector archive upload links (2026-10-14) | One-time site-bound links, 15 minutes, shell archive upload with sign-in checked again at upload and a 20-link cap per account | Not built yet; check the same day before shipping a related security change | gap → enterprise |
+| WordPress import from the owner's export (2026-10-14) | `create_import_link` one-time page (30 min, sign-in re-checked at upload), deterministic converter `internal/wpimport` (no AI), `get_import_report` with feature setup calls; not on Simple Hack (team sites are new builds) | Not built. The converter package is self-contained and could be reused; the link, page and report would need Enterprise's OIDC connector and bucket storage | `gap → enterprise`
+| Change a few files of a site (2026-10-14) | `update_site` `keep_other_files` / `remove_files`, `PUT /v1/sites/{s}/files?keep=1` | MCP file list deploys replace the whole version (with `If-Match`) | `gap → enterprise`
 | Sites: deploy, versions, rollback, delete | tar.gz/zip or inline JSON files; `KEEP_VERSIONS`; rollback; delete | tar.gz or MCP file list, `If-Match` ETags; 5 versions kept; rollback; delete | `same` |
 | Versions kept per site | Hosted defaults: 4, chhotabreak/vineetu/jot-transcribe default 10; KEEP_VERSIONS_SELF_SET limits who may set per-site retention, KEEP_VERSIONS_OVERRIDES follows old handles; newest N plus live, including unpublished versions (2026-10-05) | Every site keeps 5; these knobs are absent | `different on purpose` — hosted-only policy; self-hosted caps are opt-in |
 | Website file allowances (2026-10-05) | 200 MB total for new sites from SITE_TOTAL_CAP_FROM, 1024 MB per account; after-prune checks on all deploy paths, alias-aware overrides, usage in dashboard and connector, file-size tips; saved data and storage resources excluded; self-hosted defaults have no caps; Simple Hack keeps its own limits | No matching MAX_SITE_TOTAL_MB or MAX_ACCOUNT_MB knobs | `different on purpose` — hosted-only disk policy |
@@ -177,7 +179,7 @@ Every numbered `FEATURES.md` section, per repo, and the rows above that cover it
 | hosted | Abuse limits and hardening | Rate limits and abuse caps; Quotas; Security headers; Country-blocked sign-in |
 | hosted | Signals and notifications | Notifications |
 | hosted | Operations (health, schema, CLI) | Health and metrics; Deployment model; Schema migrations and version stamp; Operational times and limits; Setup helper and advanced docs |
-| hosted | MCP tool index (51 website tools; hosted Simple Hack event tools) | MCP tools |
+| hosted | MCP tool index (53 website tools; hosted Simple Hack event tools) | MCP tools |
 | hosted | Unplaced routes and tools | (index of FEATURES itself, no feature) |
 | enterprise | Identity: OIDC sign-in, sessions, hand-off | Owner sign-in and sessions; Sign out and sign out everywhere; Change sign-in email; Sign-in alert email; Visitor sign-in on a site |
 | enterprise | API keys (CI and automation) | API keys rows; Revoke a leaked key (admin); Why a key stopped working; Deploy from CI in one call |
