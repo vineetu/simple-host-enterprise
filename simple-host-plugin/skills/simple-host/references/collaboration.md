@@ -222,7 +222,7 @@ Any kept version can be previewed the same way, which is how to look at an old
 version before rolling back to it.
 
 When the person is happy, make it live with the rollback below, to `N`. The
-dashboard's Versions list (in a site's Manage panel) does the same with
+dashboard's Versions section (Manage on a site, then Versions) does the same with
 Preview and Make live.
 
 ## 5. Versions and rollback
@@ -271,7 +271,7 @@ list, and the uploaded files with a list naming them. It works once, within
 {{EXPORT_LINK_TTL}}, without signing in: give it to the user to open (do not fetch it
 yourself, or it is used up), and never post it where others can see it. A
 used link answers 410; ask for a new one. Connector tool: `export_site`. The user can also use
-"Download site" in the site's Manage panel on `/dashboard`.
+Download in the site's Manage menu on `/dashboard`.
 
 ## 6. Who can open the site
 

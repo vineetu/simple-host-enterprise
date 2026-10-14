@@ -328,7 +328,7 @@ Config names are documented in `docs/configuration.md`; schema in
   `publish_required`). Every version list carries `live`. The owner or a
   team member mints a preview link for any kept version (`GET
   .../versions/{version}/preview`, MCP `preview_version`, "Preview" in the
-  Manage panel's Versions list): the site's own address plus
+  site's Versions section, opened from Manage on the dashboard): the site's own address plus
   `_preview/<version>-<expiry>-<HMAC>/`, signed with the session signing key
   over site id, version and expiry, valid `PREVIEW_LINK_TTL` (1h). The host gate serves it
   (on the site host, and on the fallback owner path) only to a host session
@@ -413,9 +413,9 @@ Config names are documented in `docs/configuration.md`; schema in
   and conflict rules; `references/packaging-and-validation.md`,
   `references/collaboration.md` §1–5 and §8, `references/frameworks.md`;
   `skills/fix-paths-for-subpath-hosting/`, `skills/simple-host-builder/`.
-- **Pages.** `/dashboard` "Your sites" (each links to its address with its live version and last update; Manage: Versions with
-  Preview and Make live, Download site, Rename, Move to a team, Delete with the site name typed back; Rename and Move are off while an admin's
-  restriction stands), "Shared with me", "Recently deleted" and "Not used lately" (idle cleanup); `/admin` "Recently
+- **Pages.** `/dashboard` "Your sites" (a card per own or team site: the name links to its address with the role, access level, network request or admin decision, live version, and last update; Open in a new tab; Manage menu with Who can open, Versions with
+  Preview and Make live, Saved data, Uploaded files, Activity and visitors, Showcase for the owner's own sites, Download, Rename, Move to a team, and Delete last. Delete asks in a dialog and does not ask for the site name. Widening who can open asks first. Rename, Move, and raising the level are off while an admin's
+  restriction stands. Search from 10 sites), "Shared with me", "Recently deleted" and "Not used lately" (idle cleanup); `/admin` "Recently
   deleted", "Not used lately".
 - **Go.** `internal/handler/site.go`, `site_restore.go`, `collaboration.go`, `site_mutation.go`, `preview.go`, `dashboard.go`,
   `site_move.go`, `admin_move.go`, `site_export.go`, `admin_erase.go` (`writeSiteExport`), `idle_cleanup.go`, `site_use.go`, `smtp_mailer.go`,
@@ -890,15 +890,22 @@ Config names are documented in `docs/configuration.md`; schema in
 - **What.** `/dashboard` on the base host: sign-in prompt when signed out;
   when signed in, API keys (mint/list/revoke; a new key stays on screen
   until dismissed), "Your sites" across the
-  person's and their teams' namespaces, each name linking to the site's
-  address with its live version and last update, with access level (and the last
-  admin decision: declined, revoked or restricted, with the note), viewers, assets,
-  versions with Make live (rollback with the listed ETag; a 412 says to
-  reload), saved-data history with Restore (the newest is marked current),
-  Download site (section 5), rename and hand over (section 5), Delete (the
-  site name typed back; it goes to Recently deleted), Visitors (counts per
-  day, the top pages and where visitors came from by domain, over 30 days;
-  rows too where `ACCESS_LOG_VISIBILITY` shows them), each namespace's usage against its quota (sites, stored
+  person's and their teams' namespaces. Each site is a card: the name links
+  to the site's address, and the sub-line shows the role, access level, any
+  network request or the last admin decision (declined, revoked, or restricted,
+  with the note in Who can open), the live version, and the last update. Open
+  opens the site in a new tab. Manage opens one menu, and one section under
+  the card: Who can open (the level and the viewers), Versions with Preview
+  and Make live (rollback with the listed ETag; a 412 says to reload), Saved
+  data with Restore (the newest is marked current), Uploaded files, Activity
+  and visitors (counts per day, the top pages and where visitors came from
+  by domain, over 30 days; rows too where `ACCESS_LOG_VISIBILITY` shows
+  them), Showcase for the owner's own sites, Download (section 5), Rename
+  and Move to a team (section 5; both off, with the level controls, while an
+  admin's restriction stands), and Delete. Delete asks in a dialog and moves
+  the site to Recently deleted, where it can be restored. It does not ask
+  for the site name. Widening who can open asks first. Search appears from
+  10 sites. The page also shows each namespace's usage against its quota (sites, stored
   bytes; the same numbers `GET /api/me` returns as `usage`), "Teams"
   (section 9), "Shared with
   me" (section 5; hidden when empty), "Recently

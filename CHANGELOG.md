@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.9.6
+## v0.9.6 — 2026-10-14
 
 No schema change.
 
@@ -12,6 +12,19 @@ No schema change.
   hosts do not serve the mark. A site keeps its own favicon.
 - **Plugin icon.** `/plugin.zip` includes the mark for the agent-app
   plugin and the Agent Plugins manifest.
+
+### Changed
+- **Your sites on the dashboard is a card with a Manage menu.** Each site you
+  own, or that a team you are in owns, keeps its name, role, access level,
+  network request or admin decision, live version, and last update. Open
+  opens the site in a new tab. Manage opens one menu: Who can open (the level
+  and the viewers), Versions, Saved data, Uploaded files, Activity and
+  visitors, Showcase for your own sites, Download, Rename, Move to a team,
+  and Delete. Delete asks in a dialog and moves the site to Recently deleted
+  for the retention window, where it can be restored with its files, saved
+  data, viewers, and uploads. It does not ask for the site name. Widening who
+  can open asks first. A network request still needs a reason, and an admin
+  must approve it. Search appears when there are 10 or more sites.
 
 ## Chart 0.2.3 — 2026-10-13
 

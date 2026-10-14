@@ -431,8 +431,8 @@ second factor). Only a browser navigation is redirected: a page's own
 `fetch`, a script, or an agent gets `401 {"error":"unauthorized"}` instead of
 a sign-in page it cannot use.
 
-Every site has an access level, set from `/dashboard`'s "Your sites" panel
-("Who can open it") or with `POST /api/sites/{site}/access`
+Every site has an access level, set from `/dashboard`'s "Your sites" menu
+(Manage, then Who can open) or with `POST /api/sites/{site}/access`
 (`POST /api/collaboration/sites/{owner}/{sitename}/access` for a team's
 site), body `{"level": "..."}`:
 
@@ -453,7 +453,7 @@ pages, assets and saved data and change nothing; a signed-in person adds
 `?signin` to the address to use their own rights. The owner can move a site
 to any lower level at any time; that ends its network approval.
 
-Named viewers are managed under a site's "Viewers" section or through the
+Named viewers are managed with who can open a site (Manage, then Who can open) or through the
 API (`GET`/`POST /api/collaboration/sites/{owner}/{sitename}/viewers`,
 `DELETE .../viewers/{username}`). Adding one sets the site to `specific`;
 removing the last one leaves it there, open only to the owner or team.
@@ -514,8 +514,8 @@ JSON, CSV, plain text, zip, gzip) regardless of its declared type or
 extension — a relabeled HTML file is refused, never served. Default
 limits are `ASSET_MAX_FILE_BYTES`/`ASSET_MAX_SITE_BYTES`/
 `ASSET_MAX_SITE_COUNT` (`docs/configuration.md`: 25 MiB / 500 MiB / 5,000).
-An owner also manages a site's assets from `/dashboard`'s "Your sites"
-panel, or through the base-host, session-authenticated mirror
+An owner also manages a site's uploaded files from `/dashboard`'s "Your sites"
+menu (Manage, then Uploaded files), or through the base-host, session-authenticated mirror
 `GET`/`DELETE /api/collaboration/sites/{owner}/{sitename}/assets[/{id}]`.
 A site archive may not contain a top-level `_assets/` entry; the upload is
 refused before it ever reaches disk.
@@ -598,8 +598,8 @@ rows with user ids but redacts `ip`/`user_agent`; `admin` closes
 `/api/access` to non-admins entirely. Admins signed in with a browser
 session always see full rows.
 
-The dashboard's per-site panel gained "Activity" and "Visitors" tabs
-(`/dashboard`, under "Your sites") backed by the same two routes scoped to
+The dashboard's per-site Activity and visitors section
+(`/dashboard`, Manage under "Your sites") has Activity and Visitors tabs backed by the same two routes scoped to
 that site; the admin view gained an "Activity & visitors" section
 (`/admin#admin-activity`) with the same two feeds unfiltered across every
 owner, plus an Export CSV/JSONL link per feed to:

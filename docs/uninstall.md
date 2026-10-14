@@ -17,7 +17,7 @@ teams, the audit log and the access log). Decide with the owner of the
 pilot what must outlive it, then:
 
 - **Tell people, with a date.** Each owner or team member can download a
-  site whole from the dashboard (**Download site**: live files, saved data
+  site whole from the dashboard (Manage, then Download: live files, saved data
   and its history, versions and uploaded files as one zip), or ask their
   agent to (`export_site`).
 - **The audit trail.** As an admin, download the audit log and the access

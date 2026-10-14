@@ -133,7 +133,7 @@ gets exactly that, and everything else downloads instead of executing.
 The owner or a team member manages a site's uploaded files without opening
 the site: `list_site_assets` and `delete_site_asset` (or
 `GET /api/collaboration/sites/<owner>/<site>/assets` and
-`DELETE .../assets/<id>`; the dashboard's Assets list does the same). A delete
+`DELETE .../assets/<id>`; the dashboard's Uploaded files list does the same). A delete
 is final and the file's address stops working, so name the file and its size
 and ask before each one. Deleting needs a full-scope key or a connector; a
 publish key can list and upload but not delete. On the site's own
