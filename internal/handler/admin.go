@@ -1389,6 +1389,13 @@ const adminHeadHTML = `<!doctype html>
     .overview{grid-template-columns:1fr}
     .toolbar{flex-direction:column;align-items:stretch}
     .analytics-range{justify-self:start;flex-wrap:wrap}
+    /* Key and team rows wrap on a phone rather than push the page sideways. */
+    .login-form{flex-wrap:wrap}
+    .login-form input{min-width:0;flex:1 1 100%}
+    main > *{min-width:0}
+    .rank-list .rank-row > .rank-metric{white-space:normal;text-align:left}
+    .usage-row{grid-template-columns:1fr}
+    .rank-list .rank-row > .rank-name{white-space:normal;overflow-wrap:anywhere}
   }
   /* Your sites cards, Manage menu, and confirm dialog. Light only. */
   .site-search-line{
