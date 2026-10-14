@@ -34,19 +34,48 @@ func TestDashboardScriptsParse(t *testing.T) {
 	}
 }
 
-// The site panel offers what the page says it does, each over its route.
+// The site card offers what the page says it does, each over its route.
+// Deleting a site is recoverable, so the sites script no longer asks for
+// the name. Team deletion still does, and still uses the browser dialogs.
 func TestDashboardSitePanelControls(t *testing.T) {
 	for _, want := range []string{
 		"make-live", "'/rollback'", "'If-Match': site.etag",
 		"'/state-versions'", "restore-state",
-		"'/export-link'", "Download site",
-		"delete-site-button", "Type the site name to confirm",
+		"'/export-link'",
 		"include=shared", "renderShared",
 		"location.origin + '/mcp'", "/plugin.zip", "/install.html",
 		"'/api/teams'", "'/members'", "'/leave'", "confirm_team_delete", "?confirm_name=", "Type the team name to confirm",
+		"Delete site", "gone for good", "{{DELETED_RETENTION}}",
+		"Search your sites", "No sites match.",
+		`aria-haspopup="menu"`, "Who can open", "Uploaded files", "Move to a team",
 	} {
 		if !strings.Contains(dashboardScript, want) {
 			t.Errorf("dashboard script lacks %q", want)
 		}
+	}
+	for _, gone := range []string{
+		"Type the site name to confirm",
+		"confirm(",
+		"prompt(",
+		"alert(",
+	} {
+		if strings.Contains(dashboardSitesScript, gone) {
+			t.Errorf("sites script still has %q", gone)
+		}
+	}
+}
+
+// TestDashboardSitesScriptBehavior runs the pure menu, search, and delete
+// helpers in the sites script. It skips when node is not installed.
+func TestDashboardSitesScriptBehavior(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required for the sites menu behavior test")
+	}
+	script := strings.TrimSuffix(strings.TrimPrefix(dashboardSitesScript, "<script>"), "</script>")
+	command := exec.Command(node, "testdata/dashboard_sites_test.js")
+	command.Env = append(os.Environ(), "DASHBOARD_SITES_SCRIPT="+script)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("run sites menu behavior test: %v\n%s", err, output)
 	}
 }

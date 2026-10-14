@@ -388,45 +388,21 @@ const dashboardScript = `<script>
 })();
 </script>` + dashboardSitesScript + dashboardDeletedScript + dashboardTeamsScript
 
-// dashboardSitesScript renders the signed-in person's accessible sites and,
-// for a site they own or belong to the owning team of (requireOwnerRole's
-// gate), an access-level control, a viewer list and an asset list, each
-// backed by the existing collaboration API — fetch-driven panels against
-// the same endpoints the share dialog itself calls, not the dialog markup
-// verbatim, since these live inline per site row rather than in one global
-// modal.
+// dashboardSitesScript renders the signed-in person's sites as cards.
+// Own and team sites (access_role owner or member) get Open and a Manage
+// menu. The menu opens one section at a time, or acts at once for Download
+// and Delete. Viewers stay in Shared with me. Placeholders such as
+// {{DELETED_RETENTION}} are expanded when the page is served.
 //
 // Every fetch to a site-management endpoint carries
 // X-Simple-Host-Client: control-ui, which is what exempts a browser
 // (rather than the skill or MCP) from the skill-version guard
-// (notice_middleware.go's isClassifiedNonSkillClient) — without it every
+// (notice_middleware.go's isClassifiedNonSkillClient). Without it every
 // one of these calls would 400 with "skill_version_required".
 const dashboardSitesScript = `<script>
 (function(){
-  var container = document.getElementById('site-list');
-  if (!container) return;
-  var CH = {'X-Simple-Host-Client': 'control-ui'};
-  var username=document.querySelector('.mast').getAttribute('data-username');
-
-  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
-  function fmtBytes(n) {
-    if (n < 1024) return n + ' B';
-    var units = ['KB','MB','GB'], u = -1;
-    do { n = n / 1024; u++; } while (n >= 1024 && u < units.length - 1);
-    return n.toFixed(1) + ' ' + units[u];
-  }
-
-  function loadSites() {
-    fetch('/api/collaboration/sites?include=shared', {credentials: 'same-origin', headers: CH})
-      .then(function(r){ return r.json(); })
-      .then(function(all){
-        all = all || [];
-        renderShared(all.filter(function(s){ return s.access_role === 'viewer'; }));
-        renderSites(all.filter(function(s){ return s.access_role !== 'viewer'; }));
-      })
-      .catch(function(){ container.innerHTML = '<div class="rank-empty">Could not load sites.</div>'; });
-  }
-
+  // Pure helpers stay above the DOM so a test run can call them and return.
+  // Reach is only_me < specific < company < listed < network.
   var LEVELS = [
     ['only_me', 'Only me (or my team)'],
     ['specific', 'Specific people or teams'],
@@ -434,20 +410,151 @@ const dashboardSitesScript = `<script>
     ['listed', 'Listed in the showcase and search'],
     ['network', 'Anyone on the network, no sign-in (needs admin approval)']
   ];
+  var SHORT_LEVEL = {only_me: 'only you', specific: 'named people', company: 'company', listed: 'listed', network: 'network'};
+  var LEVEL_REACH = {only_me: 0, specific: 1, company: 2, listed: 3, network: 4};
+  var SEARCH_MIN = 10;
+  var SECTION_TITLE = {
+    access: 'Who can open',
+    versions: 'Versions',
+    saved: 'Saved data',
+    files: 'Uploaded files',
+    activity: 'Activity and visitors',
+    showcase: 'Your showcase',
+    rename: 'Rename',
+    move: 'Move to a team'
+  };
+  var CHEVRON = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+
+  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
   function levelLabel(level) {
     for (var i = 0; i < LEVELS.length; i++) { if (LEVELS[i][0] === level) return LEVELS[i][1]; }
     return level || '';
   }
+  function levelReach(level) {
+    return Object.prototype.hasOwnProperty.call(LEVEL_REACH, level) ? LEVEL_REACH[level] : -1;
+  }
+  function widensAccess(from, to) {
+    var a = levelReach(from), b = levelReach(to);
+    return a >= 0 && b >= 0 && b > a;
+  }
+  function networkReasonRequired(level) { return level === 'network'; }
+  function reasonAcceptable(text) { return String(text || '').trim() !== ''; }
+  function addingViewerWidens(level) { return level === 'only_me'; }
+  function accessState(site) {
+    var label = SHORT_LEVEL[site && site.access] || '';
+    var extra = '';
+    if (site && site.access_decision && site.access_decision.decision === 'restricted') extra = 'restricted';
+    else if (site && site.network_request) extra = 'requested';
+    if (label && extra) return label + ', ' + extra;
+    return extra || label;
+  }
+  // Showcase is the owner's own sites only, the same gate as "Your showcase".
+  // Pass showcase as {pinned: true} once known. Omit the state while unknown.
+  function menuItems(site, me, showcase) {
+    site = site || {};
+    var ver = Number(site.active_version) || 0;
+    var items = [
+      {id: 'access', label: 'Who can open', state: accessState(site), section: 'access'},
+      {id: 'versions', label: 'Versions', state: ver > 0 ? ('v' + ver + ' live') : '', section: 'versions'},
+      {id: 'saved', label: 'Saved data', section: 'saved'},
+      {id: 'files', label: 'Uploaded files', section: 'files'},
+      {id: 'activity', label: 'Activity and visitors', section: 'activity'}
+    ];
+    if (site.owner_username === me && site.access_role === 'owner') {
+      items.push({id: 'showcase', label: 'Showcase', state: (showcase && showcase.pinned) ? 'pinned' : '', section: 'showcase'});
+    }
+    items.push({id: 'download', label: 'Download', act: 'download'});
+    items.push({id: 'rename', label: 'Rename', section: 'rename'});
+    items.push({id: 'move', label: 'Move to a team', section: 'move'});
+    items.push({id: 'sep', sep: true});
+    items.push({id: 'delete', label: 'Delete', act: 'delete', danger: true});
+    return items;
+  }
+  function searchVisible(count) { return count >= SEARCH_MIN; }
+  // Match the owner/name line and the team name (the owning namespace).
+  function siteMatches(site, query) {
+    var q = String(query || '').trim().toLowerCase();
+    if (!q) return true;
+    site = site || {};
+    var owner = String(site.owner_username || '').toLowerCase();
+    var name = String(site.name || '').toLowerCase();
+    var team = String(site.team_name || '').toLowerCase();
+    return (owner + '/' + name).indexOf(q) !== -1 || owner.indexOf(q) !== -1 || name.indexOf(q) !== -1 || (team !== '' && team.indexOf(q) !== -1);
+  }
+  // A delete here can be restored, so the dialog does not ask for the name.
+  function deleteDialog(owner, name) {
+    return {
+      title: 'Delete "' + owner + '/' + name + '"?',
+      body: 'It stops being served at once and moves to Recently deleted for {{DELETED_RETENTION}}, where it can be restored with its files, saved data, viewers, and uploads. After that it is gone for good.',
+      confirmLabel: 'Delete site',
+      danger: true,
+      field: null
+    };
+  }
+  function accessAsk(site, level) {
+    var who = levelLabel(level);
+    var spec = {
+      title: 'Let more people open "' + site.owner_username + '/' + site.name + '"?',
+      body: who + ' will be able to open it.',
+      confirmLabel: 'Change who can open it'
+    };
+    if (networkReasonRequired(level)) {
+      if (!widensAccess(site.access, level)) spec.title = 'Ask for network access for "' + site.owner_username + '/' + site.name + '"?';
+      spec.body = who + ' will be able to open it. An admin must approve this.';
+      spec.confirmLabel = 'Ask an admin';
+      spec.field = {label: 'Why does it need to be open?', required: true};
+    }
+    return spec;
+  }
+  function viewerAsk(site) {
+    return {
+      title: 'Add viewers to "' + site.owner_username + '/' + site.name + '"?',
+      body: 'Adding a viewer changes who can open it to specific people or teams.',
+      confirmLabel: 'Add viewers'
+    };
+  }
 
-  // approvalProgress is " (1 of 2 approvals)" while a request needs more
-  // than one admin, and nothing otherwise.
+  if (typeof __DASHBOARD_TEST__ !== 'undefined' && __DASHBOARD_TEST__) {
+    var root = typeof globalThis !== 'undefined' ? globalThis : window;
+    root.__dashboardSites = {
+      menuItems: menuItems,
+      widensAccess: widensAccess,
+      levelReach: levelReach,
+      accessState: accessState,
+      searchVisible: searchVisible,
+      siteMatches: siteMatches,
+      reasonAcceptable: reasonAcceptable,
+      networkReasonRequired: networkReasonRequired,
+      addingViewerWidens: addingViewerWidens,
+      deleteDialog: deleteDialog,
+      accessAsk: accessAsk,
+      viewerAsk: viewerAsk,
+      levelLabel: levelLabel,
+      SEARCH_MIN: SEARCH_MIN,
+      LEVELS: LEVELS
+    };
+  }
+
+  var container = document.getElementById('site-list');
+  if (!container) return;
+  var CH = {'X-Simple-Host-Client': 'control-ui'};
+  var username = document.querySelector('.mast').getAttribute('data-username');
+  var siteQuery = '';
+  var searchOn = false;
+  var showcaseCache = {};
+  var rowMenuEl = null, rowMenuBtn = null;
+  var dlg = null, dlgSettle = null;
+
+  function fmtBytes(n) {
+    if (n < 1024) return n + ' B';
+    var units = ['KB','MB','GB'], u = -1;
+    do { n = n / 1024; u++; } while (n >= 1024 && u < units.length - 1);
+    return n.toFixed(1) + ' ' + units[u];
+  }
   function approvalProgress(req) {
     if (!req || !(req.approvals_required > 1)) return '';
     return ' (' + (req.approvals || 0) + ' of ' + req.approvals_required + ' approvals)';
   }
-
-  // decisionNote is the last admin decision about who can open the site,
-  // shown until the owner acts on it (see access_decision in the API).
   function decisionNote(site) {
     var d = site.access_decision;
     if (!d) return '';
@@ -463,17 +570,267 @@ const dashboardSitesScript = `<script>
     if (!d) return '';
     return {restricted: ' · restricted by an admin', declined: ' · network access declined', revoked: ' · network access revoked'}[d.decision] || '';
   }
-
-  // safeURL keeps only http(s) addresses as link targets.
   function safeURL(u) { return /^https?:\/\//i.test(u || '') ? u : '#'; }
   function when(s) { var d = new Date(s); return isNaN(d) ? '' : d.toLocaleString(); }
   function liveLine(site) {
     var v = site.active_version > 0 ? 'version ' + site.active_version + ' live' : 'nothing published';
     return v + ' · updated ' + when(site.updated_at);
   }
+  function siteBase(site) {
+    return '/api/collaboration/sites/' + encodeURIComponent(site.owner_username) + '/' + encodeURIComponent(site.name);
+  }
+  function miItem(label, attrs, state, danger) {
+    var aria = state ? ' aria-label="' + esc(label + ', ' + state) + '"' : '';
+    return '<button type="button" class="mi' + (danger ? ' danger' : '') + '" role="menuitem"' + attrs + aria + '>' +
+      esc(label) + (state ? '<span class="mi-state">' + esc(state) + '</span>' : '') + '</button>';
+  }
+  function menuMarkup(items) {
+    return items.map(function(item) {
+      if (item.sep) return '<div class="mi-sep" role="separator"></div>';
+      var attrs = '';
+      if (item.section) attrs += ' data-section="' + esc(item.section) + '"';
+      if (item.act) attrs += ' data-act="' + esc(item.act) + '"';
+      return miItem(item.label, attrs, item.state, item.danger);
+    }).join('');
+  }
 
-  // renderFirstRun is the empty state: sites come from connecting an AI
-  // app, so the one step that does that is shown in place of an empty list.
+  function ancestorBreaksFixed(el) {
+    var n = el;
+    while (n && n !== document.documentElement) {
+      if (n.nodeType !== 1) { n = n.parentElement; continue; }
+      var st = window.getComputedStyle(n);
+      if ((st.transform && st.transform !== 'none') ||
+          (st.filter && st.filter !== 'none') ||
+          (st.contain && st.contain !== 'none')) return true;
+      n = n.parentElement;
+    }
+    return false;
+  }
+  function closeRowMenu() {
+    var btn = rowMenuBtn, el = rowMenuEl;
+    if (el) { el.remove(); rowMenuEl = null; }
+    if (btn) { btn.setAttribute('aria-expanded', 'false'); rowMenuBtn = null; }
+    return btn;
+  }
+  function positionRowMenu(menu, btn) {
+    var r = btn.getBoundingClientRect();
+    var pad = 8;
+    var mw = menu.offsetWidth, mh = menu.offsetHeight;
+    var left = Math.max(pad, Math.min(window.innerWidth - mw - pad, r.right - mw));
+    var below = r.bottom + 4, above = r.top - mh - 4, top;
+    if (below + mh <= window.innerHeight - pad) top = below;
+    else if (above >= pad) top = above;
+    else top = pad;
+    menu.style.left = left + 'px';
+    menu.style.top = top + 'px';
+  }
+  function bindRowMenuKeys(menu) {
+    menu.addEventListener('keydown', function(e) {
+      var all = [].slice.call(menu.querySelectorAll('.mi:not([aria-disabled])'));
+      if (!all.length) return;
+      var i = all.indexOf(document.activeElement);
+      if (i < 0) i = 0;
+      if (e.key === 'ArrowDown') { e.preventDefault(); all[(i + 1) % all.length].focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); all[(i - 1 + all.length) % all.length].focus(); }
+      else if (e.key === 'Home') { e.preventDefault(); all[0].focus(); }
+      else if (e.key === 'End') { e.preventDefault(); all[all.length - 1].focus(); }
+      else if (e.key === 'Escape') { e.preventDefault(); var b = closeRowMenu(); if (b) b.focus(); }
+      else if (e.key === 'Tab') { closeRowMenu(); }
+    });
+  }
+  function openRowMenu(btn, html, host, ariaLabel) {
+    closeRowMenu();
+    var menu = document.createElement('div');
+    menu.className = 'row-menu';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', ariaLabel || 'Menu');
+    menu.innerHTML = html;
+    var parent = host;
+    if (!parent || ancestorBreaksFixed(parent)) parent = document.body;
+    if (parent !== document.body) {
+      var after = btn.closest('.site-actions');
+      if (after && after.parentNode === parent) parent.insertBefore(menu, after.nextSibling);
+      else parent.appendChild(menu);
+    } else {
+      parent.appendChild(menu);
+    }
+    rowMenuEl = menu;
+    rowMenuBtn = btn;
+    btn.setAttribute('aria-expanded', 'true');
+    positionRowMenu(menu, btn);
+    bindRowMenuKeys(menu);
+    var first = menu.querySelector('.mi:not([aria-disabled])');
+    if (first) {
+      try { first.focus({preventScroll: true}); }
+      catch (err) { try { first.focus(); } catch (err2) {} }
+    }
+    menu.addEventListener('click', function(e) {
+      var item = e.target.closest && e.target.closest('.mi');
+      if (!item || item.getAttribute('aria-disabled') === 'true') return;
+      e.stopPropagation();
+      var trigger = rowMenuBtn;
+      var section = item.getAttribute('data-section');
+      var act = item.getAttribute('data-act');
+      closeRowMenu();
+      runAction(trigger, section, act);
+    });
+  }
+  function openSiteMenu(btn) {
+    var row = btn.closest('.site-card');
+    var site = row && row._site;
+    if (!site) return;
+    var key = site.owner_username + '/' + site.name;
+    openRowMenu(btn, menuMarkup(menuItems(site, username, showcaseCache[key])), row, 'Manage ' + site.owner_username + '/' + site.name);
+    if (!(site.owner_username === username && site.access_role === 'owner') || showcaseCache[key]) return;
+    fetch('/api/sites/' + encodeURIComponent(site.name) + '/showcase', {credentials: 'same-origin', headers: CH})
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(d) {
+        if (!d) return;
+        showcaseCache[key] = {pinned: !!d.pinned};
+        if (rowMenuBtn !== btn || !rowMenuEl || !d.pinned) return;
+        var el = rowMenuEl.querySelector('[data-section="showcase"]');
+        if (!el) return;
+        var state = el.querySelector('.mi-state');
+        if (!state) {
+          state = document.createElement('span');
+          state.className = 'mi-state';
+          el.appendChild(state);
+        }
+        state.textContent = 'pinned';
+        el.setAttribute('aria-label', 'Showcase, pinned');
+      })
+      .catch(function() {});
+  }
+  function runAction(btn, section, act) {
+    var row = btn && btn.closest('.site-card');
+    var site = row && row._site;
+    if (!site) return;
+    if (btn.focus) btn.focus();
+    if (act === 'download') { downloadSite(site, btn); return; }
+    if (act === 'delete') { deleteSite(site); return; }
+    if (section) openSection(row, site, section);
+  }
+
+  function dialogFocusable(root) {
+    var all = root.querySelectorAll('button, textarea, input, a[href]');
+    var out = [], i;
+    for (i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (el.disabled || el.closest('[hidden]')) continue;
+      out.push(el);
+    }
+    return out;
+  }
+  function finishDialog(ok) {
+    if (!dlgSettle) return;
+    var done = dlgSettle;
+    dlgSettle = null;
+    var area = dlg.querySelector('textarea');
+    var value = area ? area.value : '';
+    var kind = dlg.getAttribute('data-kind');
+    if (dlg.open && dlg.close) dlg.close();
+    else dlg.removeAttribute('open');
+    var back = dlg._back;
+    dlg._back = null;
+    if (back && back.focus && document.contains(back)) { try { back.focus(); } catch (err) {} }
+    if (kind === 'alert') done();
+    else if (kind === 'field') done(ok ? value : null);
+    else done(!!ok);
+  }
+  function ensureDialog() {
+    if (dlg) return dlg;
+    dlg = document.createElement('dialog');
+    dlg.className = 'sh-dlg';
+    dlg.setAttribute('role', 'dialog');
+    dlg.setAttribute('aria-modal', 'true');
+    dlg.setAttribute('aria-labelledby', 'sh-dlg-title');
+    dlg.setAttribute('aria-describedby', 'sh-dlg-body');
+    dlg.innerHTML =
+      '<form class="sh-dlg-box" method="dialog" novalidate>' +
+        '<h2 class="sh-dlg-title" id="sh-dlg-title"></h2>' +
+        '<p class="sh-dlg-body" id="sh-dlg-body"></p>' +
+        '<label class="sh-dlg-field"><span class="sh-dlg-label"></span><textarea class="sh-dlg-input" rows="3"></textarea></label>' +
+        '<div class="sh-dlg-actions">' +
+          '<button class="sh-dlg-btn" type="button" data-sh-dlg="cancel">Cancel</button>' +
+          '<button class="sh-dlg-btn sh-dlg-primary" type="submit" data-sh-dlg="ok">OK</button>' +
+        '</div>' +
+      '</form>';
+    document.body.appendChild(dlg);
+    dlg.querySelector('form').addEventListener('submit', function(e) {
+      e.preventDefault();
+      if (dlg.querySelector('[data-sh-dlg="ok"]').disabled) return;
+      finishDialog(true);
+    });
+    dlg.querySelector('[data-sh-dlg="cancel"]').addEventListener('click', function() { finishDialog(false); });
+    dlg.addEventListener('cancel', function(e) { e.preventDefault(); finishDialog(false); });
+    dlg.addEventListener('click', function(e) { if (e.target === dlg) finishDialog(false); });
+    dlg.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finishDialog(false); return; }
+      if (e.key !== 'Tab') return;
+      var items = dialogFocusable(dlg);
+      if (!items.length) return;
+      var first = items[0], last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    });
+    return dlg;
+  }
+  function ask(o) {
+    o = o || {};
+    ensureDialog();
+    if (dlgSettle) finishDialog(false);
+    var field = !!o.field;
+    dlg.setAttribute('data-kind', o.alert ? 'alert' : (field ? 'field' : 'confirm'));
+    var q = function(s) { return dlg.querySelector(s); };
+    q('.sh-dlg-title').textContent = o.title || '';
+    var body = q('.sh-dlg-body');
+    body.textContent = o.body || '';
+    body.hidden = !o.body;
+    var fieldWrap = q('.sh-dlg-field');
+    var area = q('textarea');
+    fieldWrap.hidden = !field;
+    q('.sh-dlg-label').textContent = field && o.field.label ? o.field.label : '';
+    area.value = field && o.field.value ? o.field.value : '';
+    var okBtn = q('[data-sh-dlg="ok"]');
+    var cancelBtn = q('[data-sh-dlg="cancel"]');
+    okBtn.textContent = o.confirmLabel || 'OK';
+    okBtn.classList.toggle('sh-dlg-danger', !!o.danger);
+    cancelBtn.textContent = o.cancelLabel || 'Cancel';
+    cancelBtn.hidden = !!o.alert;
+    var required = field && o.field.required;
+    area.oninput = function() { okBtn.disabled = required && !reasonAcceptable(area.value); };
+    okBtn.disabled = required && !reasonAcceptable(area.value);
+    var back = document.activeElement;
+    return new Promise(function(resolve) {
+      dlg._back = back;
+      dlgSettle = function(result) { resolve(result); };
+      if (!dlg.open) { if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', ''); }
+      var focusEl = field ? area : (o.danger && !o.alert ? cancelBtn : okBtn);
+      if (focusEl && focusEl.focus) focusEl.focus();
+    });
+  }
+  function tell(message) { return ask({title: message, confirmLabel: 'OK', alert: true}); }
+  function accepted(result) { return result !== false && result != null; }
+
+  function loadSites() {
+    fetch('/api/collaboration/sites?include=shared', {credentials: 'same-origin', headers: CH})
+      .then(function(r) { return r.json(); })
+      .then(function(all) {
+        all = all || [];
+        renderShared(all.filter(function(s) { return s.access_role === 'viewer'; }));
+        renderSites(all.filter(function(s) { return s.access_role !== 'viewer'; }));
+      })
+      .catch(function() {
+        closeRowMenu();
+        container.innerHTML = '<div class="rank-empty">Could not load sites.</div>';
+        var line = document.getElementById('site-search-line');
+        if (line) line.hidden = true;
+        var empty = document.getElementById('site-nomatch');
+        if (empty) empty.hidden = true;
+        searchOn = false;
+      });
+  }
+
   function renderFirstRun() {
     container.innerHTML = '';
     var box = document.createElement('div');
@@ -505,105 +862,209 @@ const dashboardSitesScript = `<script>
     container.appendChild(box);
   }
 
-  // renderShared lists the sites shared with the person: open only.
   function renderShared(sites) {
     var section = document.getElementById('shared-section');
     var list = document.getElementById('shared-list');
     if (!section || !list) return;
     section.hidden = !sites.length;
-    list.innerHTML = sites.map(function(site){
+    list.innerHTML = sites.map(function(site) {
       var via = site.shared_via ? 'shared with ' + site.shared_via : 'shared with you';
       return '<div class="rank-row"><span class="rank-name"><a href="' + esc(safeURL(site.url)) + '">' + esc(site.owner_username) + '/' + esc(site.name) + '</a>' +
         ' <span class="rank-sub">' + esc(via) + ' · updated ' + esc(when(site.updated_at)) + '</span></span></div>';
     }).join('');
   }
 
+  function ensureSearch() {
+    var line = document.getElementById('site-search-line');
+    if (line) return line;
+    line = document.createElement('div');
+    line.id = 'site-search-line';
+    line.className = 'site-search-line';
+    line.hidden = true;
+    line.innerHTML = '<label for="site-search">Search your sites</label><input id="site-search" type="search" autocomplete="off">';
+    var nomatch = document.createElement('div');
+    nomatch.id = 'site-nomatch';
+    nomatch.className = 'rank-empty site-nomatch';
+    nomatch.hidden = true;
+    nomatch.textContent = 'No sites match.';
+    container.parentNode.insertBefore(line, container);
+    container.parentNode.insertBefore(nomatch, container);
+    line.querySelector('input').addEventListener('input', function() {
+      siteQuery = this.value;
+      applySiteSearch();
+    });
+    return line;
+  }
+  function setSearch(count) {
+    var line = ensureSearch();
+    searchOn = searchVisible(count);
+    line.hidden = !searchOn;
+    if (!searchOn) siteQuery = '';
+    var input = line.querySelector('input');
+    if (input && input.value !== siteQuery) input.value = siteQuery;
+    if (!searchOn) {
+      var empty = document.getElementById('site-nomatch');
+      if (empty) empty.hidden = true;
+    }
+  }
+  function applySiteSearch() {
+    var rows = container.querySelectorAll('.site-card');
+    var q = searchOn ? siteQuery : '';
+    var shown = 0;
+    Array.prototype.forEach.call(rows, function(row) {
+      var match = siteMatches(row._site, q);
+      if (!match) {
+        if (rowMenuBtn && row.contains(rowMenuBtn)) closeRowMenu();
+        var panel = row.querySelector('.site-panel');
+        if (panel && !panel.hidden) closeSection(row, false);
+      }
+      row.hidden = !match;
+      if (match) shown++;
+    });
+    var empty = document.getElementById('site-nomatch');
+    if (empty) empty.hidden = !(String(q || '').trim() && rows.length && shown === 0);
+  }
+
   function renderSites(sites) {
-    var select=document.getElementById('home-site');
-    select.innerHTML='<option value="">Your showcase</option>';
-    (sites||[]).filter(function(s){return s.owner_username===username && s.access_role==='owner';}).forEach(function(s){var o=document.createElement('option');o.value=s.name;o.textContent=s.name;select.appendChild(o);});
-    fetch('/api/me/home', {headers: CH}).then(function(r){return r.json();}).then(function(d){select.value=d.site||'';});
-    if (!sites || !sites.length) { renderFirstRun(); return; }
+    var select = document.getElementById('home-site');
+    select.innerHTML = '<option value="">Your showcase</option>';
+    (sites || []).filter(function(s) { return s.owner_username === username && s.access_role === 'owner'; }).forEach(function(s) {
+      var o = document.createElement('option');
+      o.value = s.name;
+      o.textContent = s.name;
+      select.appendChild(o);
+    });
+    fetch('/api/me/home', {headers: CH}).then(function(r) { return r.json(); }).then(function(d) { select.value = d.site || ''; });
+    closeRowMenu();
+    if (!sites || !sites.length) { setSearch(0); renderFirstRun(); return; }
+    setSearch(sites.length);
     container.innerHTML = '';
-    sites.forEach(function(site){
+    sites.forEach(function(site) {
       var canManage = site.access_role === 'owner' || site.access_role === 'member';
       var row = document.createElement('div');
-      row.className = 'rank-row site-row';
-      row.innerHTML = '<span class="rank-name"><a href="' + esc(safeURL(site.url)) + '">' + esc(site.owner_username) + '/' + esc(site.name) + '</a>' +
+      row.className = 'rank-row site-row site-card';
+      row._site = site;
+      var label = site.owner_username + '/' + site.name;
+      row.innerHTML = '<div class="site-id"><span class="rank-name"><a href="' + esc(safeURL(site.url)) + '">' + esc(label) + '</a>' +
         ' <span class="rank-sub">' + esc(site.access_role) + ' · ' + esc(levelLabel(site.access)) +
         (site.network_request ? ' · network access requested' + approvalProgress(site.network_request) : esc(decisionShort(site))) +
-        ' · ' + esc(liveLine(site)) + '</span></span>' +
-        (canManage ? '<button type="button" class="btn-reject manage-toggle">Manage</button>' : '');
+        ' · ' + esc(liveLine(site)) + '</span></span></div>' +
+        '<div class="site-actions"><a class="btn-login site-open" href="' + esc(safeURL(site.url)) + '" target="_blank" rel="noopener">Open</a>' +
+        (canManage ? '<button type="button" class="btn-login site-manage" aria-haspopup="menu" aria-expanded="false" aria-label="Manage ' + esc(label) + '">Manage ' + CHEVRON + '</button>' : '') +
+        '</div>';
       var panel = document.createElement('div');
       panel.className = 'site-panel';
       panel.hidden = true;
       row.appendChild(panel);
       container.appendChild(row);
       if (!canManage) return;
-
-      var toggle = row.querySelector('.manage-toggle');
-      var loaded = false;
-      toggle.addEventListener('click', function(){
-        panel.hidden = !panel.hidden;
-        if (!panel.hidden && !loaded) { loaded = true; renderPanel(panel, site); }
+      panel.addEventListener('keydown', function(e) {
+        if (e.key !== 'Escape') return;
+        e.preventDefault();
+        e.stopPropagation();
+        closeSection(row, true);
       });
     });
+    applySiteSearch();
   }
 
-  function renderPanel(panel, site) {
-    var owner = site.owner_username, name = site.name;
-    if(owner===username && site.access_role==='owner') {
-      var c=document.createElement('div');c.className='site-subsection';
-      c.innerHTML='<h4>Your showcase</h4><label><input type="checkbox" class="showcase-pin"> Pinned</label> <label>Order <input type="number" class="showcase-order" min="0" max="1000000" value="0"></label> <button type="button" class="btn-login showcase-save">Save</button><p class="share-help showcase-status">Pin first, then smaller order numbers. Access stays unchanged.</p>';
-      fetch('/api/sites/'+encodeURIComponent(name)+'/showcase', {headers: CH}).then(function(r){return r.json();}).then(function(d){c.querySelector('.showcase-pin').checked=d.pinned;c.querySelector('.showcase-order').value=d.order;});
-      c.querySelector('.showcase-save').onclick=function(){savePresentation('/api/sites/'+encodeURIComponent(name)+'/showcase',{pinned:c.querySelector('.showcase-pin').checked,order:Number(c.querySelector('.showcase-order').value)}).then(function(){c.querySelector('.showcase-status').textContent='Showcase saved.';}).catch(function(e){c.querySelector('.showcase-status').textContent=e.message;});};
+  function closeSection(row, restoreFocus) {
+    var panel = row.querySelector('.site-panel');
+    if (!panel) return;
+    panel.hidden = true;
+    panel.innerHTML = '';
+    panel.removeAttribute('data-section');
+    if (restoreFocus === false) return;
+    var manage = row.querySelector('.site-manage');
+    if (manage && manage.focus) manage.focus();
+  }
+  function openSection(row, site, section) {
+    var panel = row.querySelector('.site-panel');
+    if (!panel) return;
+    if (!panel.hidden && panel.getAttribute('data-section') === section) {
+      closeSection(row, true);
+      return;
     }
-    // An admin's restriction is lifted only by an admin, so the controls
-    // that would open the site up are off while it stands.
+    panel.hidden = false;
+    panel.setAttribute('data-section', section);
+    renderSection(panel, site, section);
+    if (panel.scrollIntoView) panel.scrollIntoView({block: 'nearest'});
+  }
+  function focusSection(panel) {
+    var nodes = panel.querySelectorAll('select, input, textarea, button, a');
+    var i;
+    for (i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      if (el.disabled || el.hidden || el.classList.contains('site-panel-close')) continue;
+      el.focus();
+      return;
+    }
+    var closeBtn = panel.querySelector('.site-panel-close');
+    if (closeBtn) closeBtn.focus();
+  }
+  function sectionBody(site, section) {
     var locked = site.access_decision && site.access_decision.decision === 'restricted' ? ' disabled' : '';
-    var options = LEVELS.map(function(l){
+    var options = LEVELS.map(function(l) {
       return '<option value="' + l[0] + '"' + (l[0] === site.access ? ' selected' : '') + '>' + esc(l[1]) + '</option>';
     }).join('');
-    panel.innerHTML =
-      '<div class="site-subsection"><h4>Who can open it</h4>' +
-      '<div class="add-row"><select class="access-select"' + locked + '>' + options + '</select>' +
-      '<button type="button" class="btn-login access-button"' + locked + '>Save</button></div>' +
-      '<p class="share-help access-status">' + (site.network_request ? 'Network access requested; waiting for ' + (site.network_request.approvals_required > 1 ? 'two admins' + approvalProgress(site.network_request) : 'an admin') + '. The site keeps its current level until then.' : esc(decisionNote(site))) + '</p></div>' +
-      '<div class="site-subsection"><h4>Viewers</h4>' +
-      '<p class="share-help">Named viewers can open the site while it is set to specific people or teams. Adding one sets that level. Someone who hasn\'t signed in yet can be added by work email; they can open the site after their first sign-in.</p>' +
-      '<div class="viewer-list" aria-live="polite"></div>' +
-      '<div class="add-row"><input type="text" class="add-viewer-input" placeholder="username or work email, another" autocomplete="off"' + locked + '>' +
-      '<button type="button" class="btn-login add-viewer-button"' + locked + '>Add</button></div></div>' +
-      '<div class="site-subsection"><h4>Assets</h4><div class="asset-list" aria-live="polite"></div></div>' +
-      '<div class="site-subsection"><h4>Versions</h4>' +
-      '<p class="share-help">Preview opens a version in a new tab, for you and your team only, for {{PREVIEW_LINK_TTL}}. Make live shows it to visitors at once; the other versions stay here.</p>' +
-      '<div class="version-list" aria-live="polite"></div></div>' +
-      '<div class="site-subsection"><h4>Saved data</h4>' +
-      '<p class="share-help">The last versions of what the site\'s pages have saved. Restore puts an earlier one back as the current saved data; the data it replaces stays in this list.</p>' +
-      '<div class="state-list" aria-live="polite"></div></div>' +
-      '<div class="site-subsection"><h4>Download</h4>' +
-      '<p class="share-help">One zip of the live files, the current saved data and its history, the version list and the uploaded files.</p>' +
-      '<div class="add-row"><button type="button" class="btn-login download-button">Download site</button></div></div>' +
-      '<div class="site-subsection"><h4>Rename</h4>' +
-      '<p class="share-help">The site gets a new address. The old one sends visitors on to it until another site takes the name.</p>' +
-      '<div class="add-row"><input type="text" class="rename-input" placeholder="new-name" autocomplete="off"' + locked + '>' +
-      '<button type="button" class="btn-login rename-button"' + locked + '>Rename</button></div></div>' +
-      '<div class="site-subsection"><h4>Move to a team</h4>' +
-      '<p class="share-help">Move the site into a team you are in. Its files, versions, saved data, uploads, access and viewers go with it, and the old address sends visitors on to the new one. Network access has to be requested again.</p>' +
-      '<div class="add-row"><input type="text" class="transfer-input" placeholder="team-name" autocomplete="off"' + locked + '>' +
-      '<button type="button" class="btn-login transfer-button"' + locked + '>Move</button></div></div>' +
-      '<div class="site-subsection"><h4>Delete</h4>' +
-      '<p class="share-help">The site stops being served at once. It stays in Recently deleted for {{DELETED_RETENTION}} with its files, saved data, viewers and uploads, and can be restored from there.</p>' +
-      '<div class="add-row"><button type="button" class="btn-reject delete-site-button">Delete site</button></div></div>' +
-      '<div class="site-subsection site-tabs"><div class="site-tab-buttons">' +
-      '<button type="button" class="btn-reject site-tab-button active" data-tab="activity">Activity</button>' +
-      '<button type="button" class="btn-reject site-tab-button" data-tab="visitors">Visitors</button>' +
-      '</div>' +
-      '<div class="site-tab-panel activity-tab"><div class="activity-list" aria-live="polite"></div></div>' +
-      '<div class="site-tab-panel visitor-tab" hidden><div class="visitor-list" aria-live="polite"></div></div>' +
-      '</div>';
+    if (section === 'access') {
+      return '<div class="site-subsection"><div class="add-row"><select class="access-select"' + locked + '>' + options + '</select>' +
+        '<button type="button" class="btn-login access-button"' + locked + '>Save</button></div>' +
+        '<p class="share-help access-status">' + (site.network_request ? 'Network access requested; waiting for ' + (site.network_request.approvals_required > 1 ? 'two admins' + approvalProgress(site.network_request) : 'an admin') + '. The site keeps its current level until then.' : esc(decisionNote(site))) + '</p></div>' +
+        '<div class="site-subsection"><h4>Viewers</h4>' +
+        '<p class="share-help">Named viewers can open the site while it is set to specific people or teams. Adding one sets that level. Someone who hasn\'t signed in yet can be added by work email; they can open the site after their first sign-in.</p>' +
+        '<div class="viewer-list" aria-live="polite"></div>' +
+        '<div class="add-row"><input type="text" class="add-viewer-input" placeholder="username or work email, another" autocomplete="off"' + locked + '>' +
+        '<button type="button" class="btn-login add-viewer-button"' + locked + '>Add</button></div></div>';
+    }
+    if (section === 'versions') {
+      return '<div class="site-subsection"><p class="share-help">Preview opens a version in a new tab, for you and your team only, for {{PREVIEW_LINK_TTL}}. Make live shows it to visitors at once; the other versions stay here.</p>' +
+        '<div class="version-list" aria-live="polite"></div></div>';
+    }
+    if (section === 'saved') {
+      return '<div class="site-subsection"><p class="share-help">The last versions of what the site\'s pages have saved. Restore puts an earlier one back as the current saved data; the data it replaces stays in this list.</p>' +
+        '<div class="state-list" aria-live="polite"></div></div>';
+    }
+    if (section === 'files') {
+      return '<div class="site-subsection"><div class="asset-list" aria-live="polite"></div></div>';
+    }
+    if (section === 'activity') {
+      return '<div class="site-subsection site-tabs"><div class="site-tab-buttons">' +
+        '<button type="button" class="btn-reject site-tab-button active" data-tab="activity">Activity</button>' +
+        '<button type="button" class="btn-reject site-tab-button" data-tab="visitors">Visitors</button>' +
+        '</div>' +
+        '<div class="site-tab-panel activity-tab"><div class="activity-list" aria-live="polite"></div></div>' +
+        '<div class="site-tab-panel visitor-tab" hidden><div class="visitor-list" aria-live="polite"></div></div>' +
+        '</div>';
+    }
+    if (section === 'showcase') {
+      return '<div class="site-subsection"><label><input type="checkbox" class="showcase-pin"> Pinned</label> <label>Order <input type="number" class="showcase-order" min="0" max="1000000" value="0"></label> <button type="button" class="btn-login showcase-save">Save</button><p class="share-help showcase-status">Pin first, then smaller order numbers. Access stays unchanged.</p></div>';
+    }
+    if (section === 'rename') {
+      return '<div class="site-subsection"><p class="share-help">The site gets a new address. The old one sends visitors on to it until another site takes the name.</p>' +
+        '<div class="add-row"><input type="text" class="rename-input" placeholder="new-name" autocomplete="off"' + locked + '>' +
+        '<button type="button" class="btn-login rename-button"' + locked + '>Rename</button></div></div>';
+    }
+    if (section === 'move') {
+      return '<div class="site-subsection"><p class="share-help">Move the site into a team you are in. Its files, versions, saved data, uploads, access and viewers go with it, and the old address sends visitors on to the new one. Network access has to be requested again.</p>' +
+        '<div class="add-row"><input type="text" class="transfer-input" placeholder="team-name" autocomplete="off"' + locked + '>' +
+        '<button type="button" class="btn-login transfer-button"' + locked + '>Move</button></div></div>';
+    }
+    return '';
+  }
+  function renderSection(panel, site, section) {
+    var title = SECTION_TITLE[section] || 'Manage';
+    panel.innerHTML = '<div class="site-panel-bar"><h4>' + esc(title) + '</h4><button type="button" class="btn-reject site-panel-close">Close</button></div>' + sectionBody(site, section);
+    panel.querySelector('.site-panel-close').addEventListener('click', function() {
+      closeSection(panel.closest('.site-card'), true);
+    });
+    wireSection(panel, site, section);
+    focusSection(panel);
+  }
 
-    var base = '/api/collaboration/sites/' + encodeURIComponent(owner) + '/' + encodeURIComponent(name);
+  function wireSection(panel, site, section) {
+    var owner = site.owner_username, name = site.name;
+    var base = siteBase(site);
     var viewerList = panel.querySelector('.viewer-list');
     var assetList = panel.querySelector('.asset-list');
     var activityList = panel.querySelector('.activity-list');
@@ -613,9 +1074,25 @@ const dashboardSitesScript = `<script>
     var auditQuery = '/api/audit?owner=' + encodeURIComponent(owner) + '&site=' + encodeURIComponent(name);
     var accessQuery = '/api/access?owner=' + encodeURIComponent(owner) + '&site=' + encodeURIComponent(name);
 
-    panel.querySelectorAll('.site-tab-button').forEach(function(button){
-      button.addEventListener('click', function(){
-        panel.querySelectorAll('.site-tab-button').forEach(function(b){ b.classList.remove('active'); });
+    if (section === 'showcase') {
+      var c = panel.querySelector('.site-subsection');
+      var key = owner + '/' + name;
+      fetch('/api/sites/' + encodeURIComponent(name) + '/showcase', {headers: CH}).then(function(r) { return r.json(); }).then(function(d) {
+        c.querySelector('.showcase-pin').checked = d.pinned;
+        c.querySelector('.showcase-order').value = d.order;
+        showcaseCache[key] = {pinned: !!d.pinned};
+      });
+      c.querySelector('.showcase-save').onclick = function() {
+        savePresentation('/api/sites/' + encodeURIComponent(name) + '/showcase', {pinned: c.querySelector('.showcase-pin').checked, order: Number(c.querySelector('.showcase-order').value)}).then(function() {
+          showcaseCache[key] = {pinned: c.querySelector('.showcase-pin').checked};
+          c.querySelector('.showcase-status').textContent = 'Showcase saved.';
+        }).catch(function(e) { c.querySelector('.showcase-status').textContent = e.message; });
+      };
+    }
+
+    panel.querySelectorAll('.site-tab-button').forEach(function(button) {
+      button.addEventListener('click', function() {
+        panel.querySelectorAll('.site-tab-button').forEach(function(b) { b.classList.remove('active'); });
         button.classList.add('active');
         var showActivity = button.getAttribute('data-tab') === 'activity';
         panel.querySelector('.activity-tab').hidden = !showActivity;
@@ -625,12 +1102,12 @@ const dashboardSitesScript = `<script>
 
     function loadActivity() {
       fetch(auditQuery, {credentials: 'same-origin', headers: CH})
-        .then(function(r){ return r.json(); })
-        .then(function(body){
+        .then(function(r) { return r.json(); })
+        .then(function(body) {
           var events = (body && body.events) || [];
           activityList.innerHTML = '';
           if (!events.length) { activityList.innerHTML = '<div class="rank-empty">No recorded actions yet.</div>'; return; }
-          events.forEach(function(e){
+          events.forEach(function(e) {
             var row = document.createElement('div');
             row.className = 'rank-row';
             row.innerHTML = '<span class="rank-name">' + esc(e.action) +
@@ -638,19 +1115,16 @@ const dashboardSitesScript = `<script>
             activityList.appendChild(row);
           });
         })
-        .catch(function(){ activityList.innerHTML = '<div class="rank-empty">Could not load activity.</div>'; });
+        .catch(function() { activityList.innerHTML = '<div class="rank-empty">Could not load activity.</div>'; });
     }
-
-    // The top pages and where visitors came from (referring domain only),
-    // counted over the last 30 days; nothing about who.
     function appendTopLists(target, body) {
-      [['Top pages', body.top_pages, 'path'], ['Where visitors came from', body.top_referrers, 'domain']].forEach(function(list){
+      [['Top pages', body.top_pages, 'path'], ['Where visitors came from', body.top_referrers, 'domain']].forEach(function(list) {
         if (!list[1] || !list[1].length) return;
         var head = document.createElement('div');
         head.className = 'rank-row';
         head.innerHTML = '<span class="rank-name"><strong>' + esc(list[0]) + '</strong> <span class="rank-sub">last 30 days, people only</span></span>';
         target.appendChild(head);
-        list[1].forEach(function(t){
+        list[1].forEach(function(t) {
           var row = document.createElement('div');
           row.className = 'rank-row';
           row.innerHTML = '<span class="rank-name">' + esc(t[list[2]]) + ' <span class="rank-sub">' + esc(t.views) + ' views</span></span>';
@@ -658,14 +1132,12 @@ const dashboardSitesScript = `<script>
         });
       });
     }
-
     function loadVisitors() {
       fetch(accessQuery, {credentials: 'same-origin', headers: CH})
-        .then(function(r){ return r.json(); })
-        .then(function(body){
+        .then(function(r) { return r.json(); })
+        .then(function(body) {
           visitorList.innerHTML = '';
           if (body && body.days) {
-            // Counts only (ACCESS_LOG_VISIBILITY=counts): who viewed is for admins.
             if (!body.days.length) { visitorList.innerHTML = '<div class="rank-empty">No recorded visits in the last 30 days.</div>'; return; }
             var total = document.createElement('div');
             total.className = 'rank-row';
@@ -676,7 +1148,7 @@ const dashboardSitesScript = `<script>
             daysHead.className = 'rank-row';
             daysHead.innerHTML = '<span class="rank-name"><strong>By day</strong></span>';
             visitorList.appendChild(daysHead);
-            body.days.forEach(function(d){
+            body.days.forEach(function(d) {
               var row = document.createElement('div');
               row.className = 'rank-row';
               row.innerHTML = '<span class="rank-name">' + esc(d.day) + ' <span class="rank-sub">' + esc(d.views) + ' views · ' + esc(d.unique_viewers) + ' people</span></span>';
@@ -686,14 +1158,13 @@ const dashboardSitesScript = `<script>
           }
           var entries = (body && body.entries) || [];
           if (!entries.length) { visitorList.innerHTML = '<div class="rank-empty">No recorded visits yet.</div>'; return; }
-          // Row-level visibility: the top lists above the recent visits.
           var tops = document.createElement('div');
           visitorList.appendChild(tops);
           fetch(accessQuery + '&summary=counts', {credentials: 'same-origin', headers: CH})
-            .then(function(r){ return r.ok ? r.json() : null; })
-            .then(function(counts){ if (counts) appendTopLists(tops, counts); })
-            .catch(function(){});
-          entries.forEach(function(e){
+            .then(function(r) { return r.ok ? r.json() : null; })
+            .then(function(counts) { if (counts) appendTopLists(tops, counts); })
+            .catch(function() {});
+          entries.forEach(function(e) {
             var row = document.createElement('div');
             row.className = 'rank-row';
             row.innerHTML = '<span class="rank-name">' + esc(e.method) + ' ' + esc(e.path) +
@@ -701,16 +1172,15 @@ const dashboardSitesScript = `<script>
             visitorList.appendChild(row);
           });
         })
-        .catch(function(){ visitorList.innerHTML = '<div class="rank-empty">Could not load visitors.</div>'; });
+        .catch(function() { visitorList.innerHTML = '<div class="rank-empty">Could not load visitors.</div>'; });
     }
-
     function loadViewers() {
       fetch(base + '/viewers', {credentials: 'same-origin', headers: CH})
-        .then(function(r){ return r.json(); })
-        .then(function(viewers){
+        .then(function(r) { return r.json(); })
+        .then(function(viewers) {
           viewerList.innerHTML = '';
           if (!viewers || !viewers.length) { viewerList.innerHTML = '<div class="rank-empty">No named viewers.</div>'; return; }
-          viewers.forEach(function(v){
+          viewers.forEach(function(v) {
             var row = document.createElement('div');
             row.className = 'rank-row';
             row.innerHTML = '<span class="rank-name">' + esc(v.username) + ' <span class="rank-sub">' + (v.pending ? 'hasn\'t signed in yet' : esc(v.kind)) + '</span></span>' +
@@ -718,16 +1188,15 @@ const dashboardSitesScript = `<script>
             viewerList.appendChild(row);
           });
         })
-        .catch(function(){ viewerList.innerHTML = '<div class="rank-empty">Could not load viewers.</div>'; });
+        .catch(function() { viewerList.innerHTML = '<div class="rank-empty">Could not load viewers.</div>'; });
     }
-
     function loadAssets() {
       fetch(base + '/assets', {credentials: 'same-origin', headers: CH})
-        .then(function(r){ return r.json(); })
-        .then(function(assets){
+        .then(function(r) { return r.json(); })
+        .then(function(assets) {
           assetList.innerHTML = '';
-          if (!assets || !assets.length) { assetList.innerHTML = '<div class="rank-empty">No assets uploaded.</div>'; return; }
-          assets.forEach(function(a){
+          if (!assets || !assets.length) { assetList.innerHTML = '<div class="rank-empty">No uploaded files.</div>'; return; }
+          assets.forEach(function(a) {
             var row = document.createElement('div');
             row.className = 'rank-row';
             row.innerHTML = '<span class="rank-name"><a href="' + esc(a.url) + '">' + esc(a.name) + '</a> <span class="rank-sub">' + esc(a.content_type) + ' · ' + fmtBytes(a.size) + '</span></span>' +
@@ -735,96 +1204,135 @@ const dashboardSitesScript = `<script>
             assetList.appendChild(row);
           });
         })
-        .catch(function(){ assetList.innerHTML = '<div class="rank-empty">Could not load assets.</div>'; });
+        .catch(function() { assetList.innerHTML = '<div class="rank-empty">Could not load assets.</div>'; });
     }
-
-    panel.querySelector('.access-button').addEventListener('click', function(){
-      var level = panel.querySelector('.access-select').value;
+    function saveAccess(level, reason) {
       var payload = {level: level};
-      if (level === 'network') {
-        var reason = prompt('Anyone who can reach this server will be able to open the site without signing in. An admin has to approve this. Why does it need to be open?');
-        if (!reason) return;
-        payload.reason = reason;
-      }
+      if (reason) payload.reason = String(reason).trim();
       fetch(base + '/access', {
         method: 'POST', credentials: 'same-origin',
         headers: Object.assign({'Content-Type': 'application/json'}, CH),
         body: JSON.stringify(payload),
-      }).then(function(r){
-        return r.json().then(function(b){
-          if (!r.ok) { alert('Could not change access: ' + (b.error || 'unknown error')); return; }
-          panel.querySelector('.access-status').textContent = b.note || '';
+      }).then(function(r) {
+        return r.json().then(function(b) {
+          if (!r.ok) { tell('Could not change access: ' + (b.error || 'unknown error')); return; }
+          var status = panel.querySelector('.access-status');
+          if (status) status.textContent = b.note || '';
+          site.access = level;
           loadSites();
         });
-      }).catch(function(){ alert('Network error changing access.'); });
-    });
-
-    panel.querySelector('.add-viewer-button').addEventListener('click', function(){
-      var input = panel.querySelector('.add-viewer-input');
-      var usernames = input.value.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
-      if (!usernames.length) return;
-      fetch(base + '/viewers', {
-        method: 'POST', credentials: 'same-origin',
-        headers: Object.assign({'Content-Type': 'application/json'}, CH),
-        body: JSON.stringify({usernames: usernames}),
-      }).then(function(r){
-        if (!r.ok) return r.json().then(function(b){ alert('Could not add: ' + (b.error || 'unknown error')); });
-        input.value = '';
-        loadViewers();
-      }).catch(function(){ alert('Network error adding viewers.'); });
-    });
-
-    function moveSite(path, payload, confirmText) {
-      if (!confirm(confirmText)) return;
-      fetch(base + path, {
-        method: 'POST', credentials: 'same-origin',
-        headers: Object.assign({'Content-Type': 'application/json'}, CH),
-        body: JSON.stringify(payload),
-      }).then(function(r){
-        return r.json().then(function(b){
-          if (!r.ok) { alert('Could not move the site: ' + (b.error || 'unknown error')); return; }
-          alert(b.owner + '/' + b.name + ' is now at ' + b.url + '\nThe old address sends visitors there.');
-          loadSites();
-        });
-      }).catch(function(){ alert('Network error moving the site.'); });
+      }).catch(function() { tell('Network error changing access.'); });
     }
 
-    panel.querySelector('.rename-button').addEventListener('click', function(){
-      var name = panel.querySelector('.rename-input').value.trim();
-      if (!name) return;
-      moveSite('/rename', {name: name}, 'Rename ' + site.name + ' to ' + name + '? Its address changes; the old one redirects.');
+    var accessButton = panel.querySelector('.access-button');
+    if (accessButton) accessButton.addEventListener('click', function() {
+      var level = panel.querySelector('.access-select').value;
+      if (!(widensAccess(site.access, level) || networkReasonRequired(level))) { saveAccess(level, ''); return; }
+      var spec = accessAsk(site, level);
+      ask(spec).then(function(result) {
+        if (!accepted(result)) return;
+        var reason = spec.field ? String(result) : '';
+        if (spec.field && !reasonAcceptable(reason)) return;
+        saveAccess(level, reason);
+      });
     });
 
-    panel.querySelector('.transfer-button').addEventListener('click', function(){
+    var addViewer = panel.querySelector('.add-viewer-button');
+    if (addViewer) addViewer.addEventListener('click', function() {
+      var input = panel.querySelector('.add-viewer-input');
+      var usernames = input.value.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+      if (!usernames.length) return;
+      var send = function() {
+        fetch(base + '/viewers', {
+          method: 'POST', credentials: 'same-origin',
+          headers: Object.assign({'Content-Type': 'application/json'}, CH),
+          body: JSON.stringify({usernames: usernames}),
+        }).then(function(r) {
+          if (!r.ok) return r.json().then(function(b) { tell('Could not add: ' + (b.error || 'unknown error')); });
+          input.value = '';
+          if (addingViewerWidens(site.access)) {
+            site.access = 'specific';
+            var sel = panel.querySelector('.access-select');
+            if (sel) sel.value = 'specific';
+          }
+          loadViewers();
+        }).catch(function() { tell('Network error adding viewers.'); });
+      };
+      if (addingViewerWidens(site.access)) ask(viewerAsk(site)).then(function(ok) { if (ok) send(); });
+      else send();
+    });
+
+    function moveSite(path, payload, spec) {
+      ask(spec).then(function(ok) {
+        if (!ok) return;
+        fetch(base + path, {
+          method: 'POST', credentials: 'same-origin',
+          headers: Object.assign({'Content-Type': 'application/json'}, CH),
+          body: JSON.stringify(payload),
+        }).then(function(r) {
+          return r.json().then(function(b) {
+            if (!r.ok) { tell('Could not move the site: ' + (b.error || 'unknown error')); return; }
+            ask({
+              title: b.owner + '/' + b.name + ' is now at ' + b.url,
+              body: 'The old address sends visitors there.',
+              confirmLabel: 'OK',
+              alert: true
+            }).then(function() { loadSites(); });
+          });
+        }).catch(function() { tell('Network error moving the site.'); });
+      });
+    }
+    var renameButton = panel.querySelector('.rename-button');
+    if (renameButton) renameButton.addEventListener('click', function() {
+      var next = panel.querySelector('.rename-input').value.trim();
+      if (!next) return;
+      moveSite('/rename', {name: next}, {
+        title: 'Rename ' + site.name + ' to ' + next + '?',
+        body: 'Its address changes; the old one redirects.',
+        confirmLabel: 'Rename'
+      });
+    });
+    var transferButton = panel.querySelector('.transfer-button');
+    if (transferButton) transferButton.addEventListener('click', function() {
       var to = panel.querySelector('.transfer-input').value.trim();
       if (!to) return;
-      moveSite('/transfer', {to: to}, 'Move ' + owner + '/' + site.name + ' into ' + to + '? Every member of that team can then change or delete it.');
+      moveSite('/transfer', {to: to}, {
+        title: 'Move ' + owner + '/' + site.name + ' into ' + to + '?',
+        body: 'Every member of that team can then change or delete it.',
+        confirmLabel: 'Move'
+      });
     });
 
-    viewerList.addEventListener('click', function(ev){
+    if (viewerList) viewerList.addEventListener('click', function(ev) {
       var button = ev.target.closest('.remove-viewer');
       if (!button) return;
       fetch(base + '/viewers/' + encodeURIComponent(button.getAttribute('data-username')), {method: 'DELETE', credentials: 'same-origin', headers: CH})
         .then(loadViewers)
-        .catch(function(){ alert('Network error removing viewer.'); });
+        .catch(function() { tell('Network error removing viewer.'); });
     });
-
-    assetList.addEventListener('click', function(ev){
+    if (assetList) assetList.addEventListener('click', function(ev) {
       var button = ev.target.closest('.remove-asset');
       if (!button) return;
-      if (!confirm('Delete this asset? Any page still linking to it will break.')) return;
-      fetch(base + '/assets/' + encodeURIComponent(button.getAttribute('data-id')), {method: 'DELETE', credentials: 'same-origin', headers: CH})
-        .then(loadAssets)
-        .catch(function(){ alert('Network error deleting asset.'); });
+      ask({
+        title: 'Delete this asset?',
+        body: 'Any page still linking to it will break.',
+        confirmLabel: 'Delete',
+        danger: true
+      }).then(function(ok) {
+        if (!ok) return;
+        fetch(base + '/assets/' + encodeURIComponent(button.getAttribute('data-id')), {method: 'DELETE', credentials: 'same-origin', headers: CH})
+          .then(loadAssets)
+          .catch(function() { tell('Network error deleting asset.'); });
+      });
     });
 
     function loadVersions() {
       fetch(base + '/versions', {credentials: 'same-origin', headers: CH})
-        .then(function(r){ return r.json(); })
-        .then(function(versions){
+        .then(function(r) { return r.json(); })
+        .then(function(versions) {
           versionList.innerHTML = '';
           if (!versions || !versions.length) { versionList.innerHTML = '<div class="rank-empty">No versions yet.</div>'; return; }
-          versions.forEach(function(v){
+          versions.forEach(function(v) {
             var live = v.version_number === site.active_version;
             var row = document.createElement('div');
             row.className = 'rank-row';
@@ -836,16 +1344,15 @@ const dashboardSitesScript = `<script>
             versionList.appendChild(row);
           });
         })
-        .catch(function(){ versionList.innerHTML = '<div class="rank-empty">Could not load versions.</div>'; });
+        .catch(function() { versionList.innerHTML = '<div class="rank-empty">Could not load versions.</div>'; });
     }
-
     function loadStateVersions() {
       fetch(base + '/state-versions', {credentials: 'same-origin', headers: CH})
-        .then(function(r){ return r.json(); })
-        .then(function(entries){
+        .then(function(r) { return r.json(); })
+        .then(function(entries) {
           stateList.innerHTML = '';
           if (!entries || !entries.length) { stateList.innerHTML = '<div class="rank-empty">Nothing saved yet.</div>'; return; }
-          entries.forEach(function(e, i){
+          entries.forEach(function(e, i) {
             var row = document.createElement('div');
             row.className = 'rank-row';
             row.innerHTML = '<span class="rank-name">Saved data version ' + esc(e.version) +
@@ -855,101 +1362,159 @@ const dashboardSitesScript = `<script>
             stateList.appendChild(row);
           });
         })
-        .catch(function(){ stateList.innerHTML = '<div class="rank-empty">Could not load saved data history.</div>'; });
+        .catch(function() { stateList.innerHTML = '<div class="rank-empty">Could not load saved data history.</div>'; });
     }
-
-    versionList.addEventListener('click', function(ev){
+    if (versionList) versionList.addEventListener('click', function(ev) {
       var preview = ev.target.closest('.preview-version');
       if (preview) {
-        // Opened before the request so the browser treats it as the click's
-        // own window, then pointed at the link once it arrives.
         var win = window.open('', '_blank');
         fetch(base + '/versions/' + encodeURIComponent(preview.getAttribute('data-version')) + '/preview', {credentials: 'same-origin', headers: CH})
-          .then(function(r){ return r.json().then(function(b){
-            if (!r.ok) { if (win) win.close(); alert('Could not open the preview: ' + (b.error || 'unknown error')); return; }
+          .then(function(r) { return r.json().then(function(b) {
+            if (!r.ok) { if (win) win.close(); tell('Could not open the preview: ' + (b.error || 'unknown error')); return; }
             if (win) { win.opener = null; win.location = b.url; } else { location.href = b.url; }
           }); })
-          .catch(function(){ if (win) win.close(); alert('Network error opening the preview.'); });
+          .catch(function() { if (win) win.close(); tell('Network error opening the preview.'); });
         return;
       }
       var button = ev.target.closest('.make-live');
       if (!button) return;
       var version = parseInt(button.getAttribute('data-version'), 10);
-      if (!confirm('Make version ' + version + ' of ' + site.name + ' live? Visitors see it at once.')) return;
-      button.disabled = true;
-      fetch(base + '/rollback', {
-        method: 'POST', credentials: 'same-origin',
-        headers: Object.assign({'Content-Type': 'application/json', 'If-Match': site.etag}, CH),
-        body: JSON.stringify({version: version}),
-      }).then(function(r){
-        return r.json().then(function(b){
-          if (!r.ok) {
-            alert(r.status === 412 ? 'The site changed since this page loaded. Reload and try again.' : 'Could not make it live: ' + (b.error || 'unknown error'));
-            button.disabled = false;
-            return;
-          }
-          site.active_version = b.active_version;
-          site.etag = b.etag;
-          loadVersions();
-          loadSites();
-        });
-      }).catch(function(){ alert('Network error changing the live version.'); button.disabled = false; });
+      ask({
+        title: 'Make version ' + version + ' of ' + site.name + ' live?',
+        body: 'Visitors see it at once.',
+        confirmLabel: 'Make live'
+      }).then(function(ok) {
+        if (!ok) return;
+        button.disabled = true;
+        fetch(base + '/rollback', {
+          method: 'POST', credentials: 'same-origin',
+          headers: Object.assign({'Content-Type': 'application/json', 'If-Match': site.etag}, CH),
+          body: JSON.stringify({version: version}),
+        }).then(function(r) {
+          return r.json().then(function(b) {
+            if (!r.ok) {
+              button.disabled = false;
+              if (button.focus) button.focus();
+              tell(r.status === 412 ? 'The site changed since this page loaded. Reload and try again.' : 'Could not make it live: ' + (b.error || 'unknown error'));
+              return;
+            }
+            site.active_version = b.active_version;
+            site.etag = b.etag;
+            loadVersions();
+            loadSites();
+          });
+        }).catch(function() { button.disabled = false; if (button.focus) button.focus(); tell('Network error changing the live version.'); });
+      });
     });
-
-    stateList.addEventListener('click', function(ev){
+    if (stateList) stateList.addEventListener('click', function(ev) {
       var button = ev.target.closest('.restore-state');
       if (!button) return;
-      if (!confirm('Restore saved data version ' + button.getAttribute('data-version') + '? It replaces what the pages have saved now; the data it replaces stays in this list.')) return;
-      button.disabled = true;
-      fetch(base + '/state-versions/' + encodeURIComponent(button.getAttribute('data-id')) + '/restore', {method: 'POST', credentials: 'same-origin', headers: CH})
-        .then(function(r){
-          return r.json().then(function(b){
-            if (!r.ok) { alert('Could not restore: ' + (b.error || 'unknown error')); button.disabled = false; return; }
-            loadStateVersions();
-          });
-        })
-        .catch(function(){ alert('Network error restoring saved data.'); button.disabled = false; });
+      ask({
+        title: 'Restore saved data version ' + button.getAttribute('data-version') + '?',
+        body: 'It replaces what the pages have saved now; the data it replaces stays in this list.',
+        confirmLabel: 'Restore'
+      }).then(function(ok) {
+        if (!ok) return;
+        button.disabled = true;
+        fetch(base + '/state-versions/' + encodeURIComponent(button.getAttribute('data-id')) + '/restore', {method: 'POST', credentials: 'same-origin', headers: CH})
+          .then(function(r) {
+            return r.json().then(function(b) {
+              if (!r.ok) { button.disabled = false; if (button.focus) button.focus(); tell('Could not restore: ' + (b.error || 'unknown error')); return; }
+              loadStateVersions();
+            });
+          })
+          .catch(function() { button.disabled = false; if (button.focus) button.focus(); tell('Network error restoring saved data.'); });
+      });
     });
 
-    panel.querySelector('.download-button').addEventListener('click', function(){
-      var button = this;
-      button.disabled = true;
-      fetch(base + '/export-link', {method: 'POST', credentials: 'same-origin', headers: CH})
-        .then(function(r){
-          return r.json().then(function(b){
-            button.disabled = false;
-            if (!r.ok || !b.url) { alert('Could not prepare the download: ' + (b.error || 'unknown error')); return; }
-            location.href = b.url;
-          });
-        })
-        .catch(function(){ alert('Network error preparing the download.'); button.disabled = false; });
-    });
-
-    panel.querySelector('.delete-site-button').addEventListener('click', function(){
-      var typed = prompt('Delete ' + owner + '/' + name + '? It stops being served at once and stays in Recently deleted for {{DELETED_RETENTION}}. Type the site name to confirm:');
-      if (typed === null) return;
-      if (typed.trim() !== name) { alert('The name did not match, so nothing was deleted.'); return; }
-      fetch(base, {method: 'DELETE', credentials: 'same-origin', headers: CH})
-        .then(function(r){
-          if (r.ok) { location.reload(); return; }
-          return r.json().then(function(b){ alert('Could not delete: ' + (b.error || 'unknown error')); });
-        })
-        .catch(function(){ alert('Network error deleting the site.'); });
-    });
-
-    loadVersions();
-    loadStateVersions();
-    loadViewers();
-    loadAssets();
-    loadActivity();
-    loadVisitors();
-    if(c) panel.appendChild(c);
+    if (activityList) loadActivity();
+    if (visitorList) loadVisitors();
+    if (viewerList) loadViewers();
+    if (assetList) loadAssets();
+    if (versionList) loadVersions();
+    if (stateList) loadStateVersions();
   }
 
-  function savePresentation(path,body){return fetch(path,{method:'PUT',headers:{'Content-Type':'application/json','X-Simple-Host-Client':'control-ui'},body:JSON.stringify(body)}).then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||'Save failed');return d;});});}
-  document.getElementById('home-save').onclick=function(){savePresentation('/api/me/home',{site:document.getElementById('home-site').value||null}).then(function(){document.getElementById('home-status').textContent='Home page saved.';}).catch(function(e){document.getElementById('home-status').textContent=e.message;});};
-  document.getElementById('bio-save').onclick=function(){savePresentation('/api/me/bio',{bio:document.getElementById('showcase-bio').value}).then(function(){document.getElementById('home-status').textContent='Bio saved.';}).catch(function(e){document.getElementById('home-status').textContent=e.message;});};
-  fetch('/api/me/bio', {headers: CH}).then(function(r){return r.json();}).then(function(d){document.getElementById('showcase-bio').value=d.bio||'';document.getElementById('showcase-bio').maxLength=d.max_length;});
+  function downloadSite(site, button) {
+    if (button) button.disabled = true;
+    fetch(siteBase(site) + '/export-link', {method: 'POST', credentials: 'same-origin', headers: CH})
+      .then(function(r) {
+        return r.json().then(function(b) {
+          if (button) button.disabled = false;
+          if (!r.ok || !b.url) {
+            if (button && button.focus) button.focus();
+            tell('Could not prepare the download: ' + (b.error || 'unknown error'));
+            return;
+          }
+          location.href = b.url;
+        });
+      })
+      .catch(function() {
+        if (button) { button.disabled = false; if (button.focus) button.focus(); }
+        tell('Network error preparing the download.');
+      });
+  }
+  function deleteSite(site) {
+    ask(deleteDialog(site.owner_username, site.name)).then(function(ok) {
+      if (!ok) return;
+      fetch(siteBase(site), {method: 'DELETE', credentials: 'same-origin', headers: CH})
+        .then(function(r) {
+          if (r.ok) { location.reload(); return; }
+          return r.json().then(function(b) { tell('Could not delete: ' + (b.error || 'unknown error')); });
+        })
+        .catch(function() { tell('Network error deleting the site.'); });
+    });
+  }
+
+  document.addEventListener('click', function(e) {
+    var trigger = e.target.closest && e.target.closest('.site-manage');
+    if (trigger) {
+      if (rowMenuBtn === trigger) closeRowMenu();
+      else openSiteMenu(trigger);
+      return;
+    }
+    if (rowMenuEl && !(e.target.closest && e.target.closest('.row-menu'))) closeRowMenu();
+  });
+  document.addEventListener('keydown', function(e) {
+    var t = e.target.closest && e.target.closest('.site-manage');
+    if (!t) return;
+    if (e.key === 'ArrowDown' && rowMenuBtn !== t) {
+      e.preventDefault();
+      openSiteMenu(t);
+    }
+  });
+  window.addEventListener('resize', function() { closeRowMenu(); });
+  window.addEventListener('orientationchange', function() { closeRowMenu(); });
+  // A page scroll, including the one a browser makes to bring the button
+  // into view as the menu opens, keeps the menu on its button. It closes
+  // only once the button has left the screen. A scroll inside the menu does not.
+  window.addEventListener('scroll', function(e) {
+    if (!rowMenuEl || !rowMenuBtn) return;
+    if (e.target === rowMenuEl || (rowMenuEl.contains && rowMenuEl.contains(e.target))) return;
+    var r = rowMenuBtn.getBoundingClientRect();
+    if (r.bottom < 0 || r.top > window.innerHeight) { closeRowMenu(); return; }
+    positionRowMenu(rowMenuEl, rowMenuBtn);
+  }, true);
+
+  function savePresentation(path, body) {
+    return fetch(path, {method: 'PUT', headers: {'Content-Type': 'application/json', 'X-Simple-Host-Client': 'control-ui'}, body: JSON.stringify(body)}).then(function(r) {
+      return r.json().then(function(d) { if (!r.ok) throw new Error(d.error || 'Save failed'); return d; });
+    });
+  }
+  document.getElementById('home-save').onclick = function() {
+    savePresentation('/api/me/home', {site: document.getElementById('home-site').value || null}).then(function() {
+      document.getElementById('home-status').textContent = 'Home page saved.';
+    }).catch(function(e) { document.getElementById('home-status').textContent = e.message; });
+  };
+  document.getElementById('bio-save').onclick = function() {
+    savePresentation('/api/me/bio', {bio: document.getElementById('showcase-bio').value}).then(function() {
+      document.getElementById('home-status').textContent = 'Bio saved.';
+    }).catch(function(e) { document.getElementById('home-status').textContent = e.message; });
+  };
+  fetch('/api/me/bio', {headers: CH}).then(function(r) { return r.json(); }).then(function(d) {
+    document.getElementById('showcase-bio').value = d.bio || '';
+    document.getElementById('showcase-bio').maxLength = d.max_length;
+  });
   loadSites();
 })();
 </script>`
