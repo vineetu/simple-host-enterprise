@@ -24,6 +24,7 @@ The weekly Simple Hack demo reset (2026-10-10, installation pending) is an opera
 
 | Area | Hosted | Enterprise | Status |
 |---|---|---|---|
+| Connector archive upload links (2026-10-14) | One-time site-bound links, 15 minutes, shell archive upload with sign-in checked again at upload and a 20-link cap per account | Not built yet; check the same day before shipping a related security change | gap → enterprise |
 | Sites: deploy, versions, rollback, delete | tar.gz/zip or inline JSON files; `KEEP_VERSIONS`; rollback; delete | tar.gz or MCP file list, `If-Match` ETags; 5 versions kept; rollback; delete | `same` |
 | Versions kept per site | Hosted defaults: 4, chhotabreak/vineetu/jot-transcribe default 10; KEEP_VERSIONS_SELF_SET limits who may set per-site retention, KEEP_VERSIONS_OVERRIDES follows old handles; newest N plus live, including unpublished versions (2026-10-05) | Every site keeps 5; these knobs are absent | `different on purpose` — hosted-only policy; self-hosted caps are opt-in |
 | Website file allowances (2026-10-05) | 200 MB total for new sites from SITE_TOTAL_CAP_FROM, 1024 MB per account; after-prune checks on all deploy paths, alias-aware overrides, usage in dashboard and connector, file-size tips; saved data and storage resources excluded; self-hosted defaults have no caps; Simple Hack keeps its own limits | No matching MAX_SITE_TOTAL_MB or MAX_ACCOUNT_MB knobs | `different on purpose` — hosted-only disk policy |
@@ -120,6 +121,7 @@ The weekly Simple Hack demo reset (2026-10-10, installation pending) is an opera
 
 | Date | Fixed in | Fix | Other side |
 |---|---|---|---|
+| 2026-10-14 | hosted | Upload links re-check connector sign-in or API key at upload, mint short-lived internal credentials only for the upload, and count live links per account | checked local Enterprise code: no create_upload_link, upload token route or retained internal credentials; n/a |
 | 2026-10-05 | hosted | Person-host home origin is limited to the selected site; visitor sessions require exact host and site; small-box path homes redirect to the existing site URL | checked: Enterprise homes redirect to the existing site origin after access checks, retaining host-bound OIDC sessions; settings are audited and exclude CI keys; feed stays authenticated and no-store |
 | 2026-10-01 | hosted | In hosted Hack mode, the Caddy certificate gate checks actual event/team/site records before permitting on-demand certificates; ordinary Host allowlist is unchanged | enterprise uses configured ingress/cert-manager certificates and has no Caddy ask endpoint: n/a |
 | 2026-10-01 | hosted | Reviewed organiser connector scopes: explicit `sites events` versus `sites team:<uuid>`, malformed/mixed grants refused for use and refresh, event-role checks retained, team/personal publishing boundaries tested | enterprise has no hosted-event roles or team grant markers; its OAuth inventory and permissions are unchanged |
@@ -175,7 +177,7 @@ Every numbered `FEATURES.md` section, per repo, and the rows above that cover it
 | hosted | Abuse limits and hardening | Rate limits and abuse caps; Quotas; Security headers; Country-blocked sign-in |
 | hosted | Signals and notifications | Notifications |
 | hosted | Operations (health, schema, CLI) | Health and metrics; Deployment model; Schema migrations and version stamp; Operational times and limits; Setup helper and advanced docs |
-| hosted | MCP tool index (50 website tools; hosted Simple Hack event tools) | MCP tools |
+| hosted | MCP tool index (51 website tools; hosted Simple Hack event tools) | MCP tools |
 | hosted | Unplaced routes and tools | (index of FEATURES itself, no feature) |
 | enterprise | Identity: OIDC sign-in, sessions, hand-off | Owner sign-in and sessions; Sign out and sign out everywhere; Change sign-in email; Sign-in alert email; Visitor sign-in on a site |
 | enterprise | API keys (CI and automation) | API keys rows; Revoke a leaked key (admin); Why a key stopped working; Deploy from CI in one call |
