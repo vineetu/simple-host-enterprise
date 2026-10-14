@@ -5,6 +5,7 @@
   "author": {
     "name": "Simple Host"
   },
+  "icon": "./.claude-plugin/icon.png",
   "skills": [
     "skills/simple-host",
     "skills/simple-host-builder",

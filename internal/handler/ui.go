@@ -7,8 +7,10 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -167,7 +169,80 @@ func RegisterUIRoutes(mux *http.ServeMux, baseURL string) {
 	mux.HandleFunc("GET /openapi.yaml", serveExpandedStatic("openapi.yaml", "application/yaml; charset=utf-8"))
 	mux.HandleFunc("GET /{$}", serveExpandedStatic("index.html", "text/html; charset=utf-8"))
 	mux.HandleFunc("GET /capabilities.html", serveExpandedStatic("capabilities.html", "text/html; charset=utf-8"))
+	// The product icon, on the app host only. The host gate does not hand
+	// these paths to the mux on an owner host or a site host, so a site
+	// keeps its own favicon and an owner host never answers with this mark.
+	// This repo has no handler-only file list. These patterns are more
+	// specific than the GET / file server, which is what puts the day-long
+	// cache header on the response instead of the file server's headers.
+	mux.Handle("GET /favicon.svg", serveIcon(sub, "favicon.svg"))
+	mux.Handle("GET /favicon.ico", serveIcon(sub, "favicon.ico"))
+	mux.Handle("GET /favicon-32.png", serveIcon(sub, "favicon-32.png"))
+	mux.Handle("GET /apple-touch-icon.png", serveIcon(sub, "apple-touch-icon.png"))
 	mux.Handle("GET /", fileServer)
+}
+
+// productIconLinksHTML is the four versioned icon addresses, root-relative,
+// for a page served on the app host. ?v=b is the cache-buster: a future
+// icon change is picked up by bumping that letter.
+const productIconLinksHTML = `<link rel="icon" href="/favicon.svg?v=b" type="image/svg+xml">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=b">
+<link rel="icon" href="/favicon.ico?v=b" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=b">
+`
+
+// productIconLinks is productIconLinksHTML. prefix is empty on the app host.
+// On any other host it is the app origin (no trailing slash), because that
+// host does not serve the icon files.
+func productIconLinks(prefix string) string {
+	prefix = strings.TrimRight(prefix, "/")
+	if prefix == "" {
+		return productIconLinksHTML
+	}
+	return strings.ReplaceAll(productIconLinksHTML, `href="`, `href="`+html.EscapeString(prefix))
+}
+
+// iconOrigin returns origin when it is an http or https origin with no user,
+// path, query, or fragment, and "" otherwise. Pages that are not on the app
+// host use it both as the icon link prefix and as the only img-src they add.
+func iconOrigin(origin string) string {
+	origin = strings.TrimRight(strings.TrimSpace(origin), "/")
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return ""
+	}
+	if parsed.Scheme != "https" && parsed.Scheme != "http" {
+		return ""
+	}
+	if parsed.Path != "" && parsed.Path != "/" {
+		return ""
+	}
+	return parsed.Scheme + "://" + parsed.Host
+}
+
+// absoluteProductIconLinks is productIconLinks for a page served on an owner
+// host or a site host. An empty or unusable origin omits the links: a
+// root-relative address would ask that host, which does not serve this mark.
+func absoluteProductIconLinks(origin string) string {
+	origin = iconOrigin(origin)
+	if origin == "" {
+		return ""
+	}
+	return productIconLinks(origin)
+}
+
+// serveIcon serves one embedded icon with a day of caching. The name is the
+// file's own name, which is what sets the Content-Type.
+func serveIcon(fsys fs.FS, name string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, err := fs.ReadFile(fsys, name)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(data))
+	})
 }
 
 // serveExpandedStatic serves an embedded static file with this

@@ -681,11 +681,12 @@ func writeConnectError(w http.ResponseWriter, message string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusBadRequest)
-	fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><title>Connecting an app</title></head>
+	fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><title>Connecting an app</title>
+%s</head>
 <body><main style="max-width:640px;margin:80px auto;font-family:sans-serif">
 <h1>The app could not be connected</h1>
 <p>%s</p>
-</main></body></html>`, html.EscapeString(message))
+</main></body></html>`, productIconLinks(""), html.EscapeString(message))
 }
 
 // ---- token endpoint ----------------------------------------------------------------

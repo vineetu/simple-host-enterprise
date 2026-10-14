@@ -49,6 +49,8 @@ func buildPluginZip(baseURL string) ([]byte, error) {
 		if err != nil {
 			return err
 		}
+		// Markdown and JSON carry the placeholders. Icon PNGs, and any other
+		// file, are copied byte for byte.
 		if ext := path.Ext(name); ext == ".md" || ext == ".json" {
 			body = []byte(fillTemplate(string(body), version, baseURL))
 		}

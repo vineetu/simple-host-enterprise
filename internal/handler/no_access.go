@@ -23,8 +23,17 @@ import (
 const switchAccountPath = "/auth/switch"
 
 // noAccessCSP is the no-access page's policy: sandboxed (an opaque origin),
-// inline styles only, never framed.
+// inline styles only, never framed. noAccessPolicy adds img-src for the app
+// origin alone, so the product icon can load and no other host can.
 const noAccessCSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'"
+
+func noAccessPolicy(origin string) string {
+	origin = iconOrigin(origin)
+	if origin == "" {
+		return noAccessCSP
+	}
+	return noAccessCSP + "; img-src " + origin
+}
 
 func newUserLabel(database db.Querier) func(ctx context.Context, userID string) string {
 	return func(ctx context.Context, userID string) string {
@@ -51,15 +60,16 @@ func (g *hostGate) noAccess(w http.ResponseWriter, r *http.Request, userID strin
 	if g.userLabel != nil && userID != "" {
 		name = g.userLabel(r.Context(), userID)
 	}
-	body := renderNoAccess(name)
+	body := renderNoAccess(name, g.hosts.origin)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	// The page names the signed-in person. Sandboxed, it has an opaque
 	// origin: on the owner-path fallback, where every site of the owner
 	// shares one origin, another site's script that opened it cannot read
-	// it. It runs no script and cannot be framed.
-	w.Header().Set("Content-Security-Policy", noAccessCSP)
+	// it. It runs no script and cannot be framed. img-src names only the
+	// app origin, for the product icon.
+	w.Header().Set("Content-Security-Policy", noAccessPolicy(g.hosts.origin))
 	w.WriteHeader(http.StatusNotFound)
 	if r.Method != http.MethodHead {
 		_, _ = w.Write([]byte(body))
@@ -120,14 +130,18 @@ func switchTarget(hosts HostModel, raw string) (string, bool) {
 	return "https://" + normalizeHost(parsed.Host) + "/", true
 }
 
-func renderNoAccess(name string) string {
+func renderNoAccess(name, origin string) string {
 	var b strings.Builder
 	b.WriteString(`<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex,nofollow">
+`)
+	// This page is served on a site host or the owner-path fallback. Those
+	// hosts do not serve the product icon, so the links name the app host.
+	b.WriteString(absoluteProductIconLinks(origin))
+	b.WriteString(`<meta name="robots" content="noindex,nofollow">
 <title>No access</title>
 <style>
   body{margin:0;background:#fbfbfc;color:#16181d;font:16px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}

@@ -199,7 +199,7 @@ func (g *hostGate) serveOwnerIndex(w http.ResponseWriter, r *http.Request, label
 
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	body := renderOwnerIndex(owner, entries, isOwner)
+	body := renderOwnerIndex(owner, entries, isOwner, g.hosts.origin)
 	if bio != "" {
 		body = strings.Replace(body, "</h1>", "</h1><p>"+html.EscapeString(bio)+"</p>", 1)
 	}
@@ -240,14 +240,17 @@ func (g *hostGate) recordOwnerIndexVisit(r *http.Request, label, userID, session
 // renderOwnerIndex writes the page. Every style is inline: an owner host
 // serves that owner's sites and nothing else, and adding a stylesheet path to
 // it would widen the host's allow-list for decoration.
-func renderOwnerIndex(owner string, entries []ownerIndexEntry, isOwner bool) string {
+func renderOwnerIndex(owner string, entries []ownerIndexEntry, isOwner bool, origin string) string {
 	var b strings.Builder
 	b.WriteString(`<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex,nofollow">
+`)
+	// The owner host does not serve the product icon. The links name the app host.
+	b.WriteString(absoluteProductIconLinks(origin))
+	b.WriteString(`<meta name="robots" content="noindex,nofollow">
 <title>`)
 	b.WriteString(html.EscapeString(owner))
 	b.WriteString(`</title>

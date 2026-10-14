@@ -1043,7 +1043,7 @@ const adminHeadHTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Simple Host · Admin</title>
+` + productIconLinksHTML + `<title>Simple Host · Admin</title>
 <link rel="stylesheet" href="/ps-blue.css">
 <style>
   /* Page-specific layout overrides only — tokens/components live in ps-blue.css. */

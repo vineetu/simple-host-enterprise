@@ -8,7 +8,8 @@
 //   - Serve /plugin.zip: the same skills plus the Claude plugin manifest
 //     (.claude-plugin/plugin.json, .mcp.json) and the Agent Plugins one
 //     (plugin.json, mcp.json), with {{BASE_URL}} filled in at serve time so
-//     the plugin points at this instance's /mcp.
+//     the plugin points at this instance's /mcp. The product icon PNGs
+//     travel with it and are not rewritten.
 //   - Serve /skills/version ({version, sha256}) for the agent's
 //     version-check and integrity verification.
 //
@@ -18,5 +19,5 @@ package plugin
 
 import "embed"
 
-//go:embed all:skills all:.claude-plugin .mcp.json plugin.json mcp.json
+//go:embed all:skills all:.claude-plugin all:assets .mcp.json plugin.json mcp.json
 var FS embed.FS

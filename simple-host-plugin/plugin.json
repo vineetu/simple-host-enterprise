@@ -13,7 +13,9 @@
       "interface": {
         "displayName": "Simple Host",
         "shortDescription": "Publish and manage your team's static sites.",
-        "websiteURL": "{{BASE_URL}}"
+        "websiteURL": "{{BASE_URL}}",
+        "composerIcon": "./assets/icon.png",
+        "logo": "./assets/logo.png"
       }
     }
   }

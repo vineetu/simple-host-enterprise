@@ -162,7 +162,7 @@ Config names are documented in `docs/configuration.md`; schema in
   `connector_revoke`) on `/auth/sessions`, through two session-only routes.
   `/plugin.zip` is an installable
   plugin (an agent-app plugin manifest and the Agent Plugins manifest, plus the skills) already
-  pointing at `<base>/mcp`.
+  pointing at `<base>/mcp`. The zip includes the product icon.
 - **Status.** Built.
 - **Routes.** `POST /mcp`, `GET /mcp`, `DELETE /mcp`,
   `GET /.well-known/oauth-protected-resource`,
@@ -993,11 +993,16 @@ Config names are documented in `docs/configuration.md`; schema in
 
 ## 17. Landing and static pages
 
-- **What.** The base host serves embedded static pages and the API spec.
+- **What.** The base host serves embedded static pages, the API spec, and
+  the product icon (the Simple Host mark). Every page links it. An owner
+  host and a site host do not serve it, so a site keeps its own favicon.
 - **Routes.** `GET /` (file server: `docs.html`, `install.html`,
   `changelog.html`, fonts, CSS); `GET /{$}` (`index.html`),
-  `GET /capabilities.html` and `GET /openapi.yaml`, served with the
-  installation's operational values filled in (section 18).
+  `GET /capabilities.html`, `GET /openapi.yaml`, `GET /favicon.svg`,
+  `GET /favicon.ico`, `GET /favicon-32.png`, `GET /apple-touch-icon.png`.
+  The pages and the API spec are served with the installation's operational
+  values filled in (section 18). The icon routes answer on the app host
+  only, with `Cache-Control: public, max-age=86400`.
 - **Go.** `internal/handler/ui.go`, `internal/handler/static/`.
   `changelog.html` is the owner's to edit (see `CLAUDE.md`).
 

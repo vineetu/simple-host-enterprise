@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.9.6
+
+No schema change.
+
+### Added
+- **Product icon.** The app host serves the Simple Host mark at
+  `/favicon.svg`, `/favicon.ico`, `/favicon-32.png`, and
+  `/apple-touch-icon.png`, and pages link those addresses (with `?v=b`).
+  A page on an owner host or a site host links the app host, because those
+  hosts do not serve the mark. A site keeps its own favicon.
+- **Plugin icon.** `/plugin.zip` includes the mark for the agent-app
+  plugin and the Agent Plugins manifest.
+
 ## Chart 0.2.3 — 2026-10-13
 
 - Pins the published 0.9.5 image digest

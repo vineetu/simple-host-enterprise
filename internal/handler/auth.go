@@ -847,12 +847,13 @@ const connectedAppsScript = `<script>
 func writeAuthError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><title>Sign-in problem</title></head>
+	fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><title>Sign-in problem</title>
+%s</head>
 <body><main style="max-width:640px;margin:80px auto;font-family:sans-serif">
 <h1>Sign-in didn't complete</h1>
 <p>%s</p>
 <p><a href="/auth/login">Try again</a></p>
-</main></body></html>`, html.EscapeString(message))
+</main></body></html>`, productIconLinks(""), html.EscapeString(message))
 }
 
 // sanitizeRedirectPath is the "to" validation shared by the post-sign-in
