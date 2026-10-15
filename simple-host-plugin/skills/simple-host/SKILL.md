@@ -239,6 +239,10 @@ Typical combinations:
      `?publish=false` (`publish: false`), give them the `preview_version`
      link, and make it live with a rollback to it once they are happy
      (`references/collaboration.md`).
+   - **Change a few pages:** send only those files with `keep_other_files: true`
+     (REST: `?keep=1` on the update `PUT`); every other live file is kept.
+     `remove_files` (`&remove=<path>`, repeatable) drops named files. Read the
+     pages first with `read_site_file`; the ETag rule is the same.
    `PUT ...?create=true` (create when missing, update otherwise) exists for
    unattended build pipelines with a publish key; you name the intent instead.
    If the user wants their CI to deploy, point them at it (`/openapi.yaml`).

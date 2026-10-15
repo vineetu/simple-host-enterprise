@@ -452,3 +452,11 @@ const reservedAssetsPath = "_assets"
 func isReservedAssetsPath(name string) bool {
 	return name == reservedAssetsPath || strings.HasPrefix(name, reservedAssetsPath+"/")
 }
+
+// MergeLimits are the extracted-site caps a merged deploy (a few files sent,
+// the rest kept from the live version) is held to: the same total, per-file
+// and entry limits an uploaded archive meets.
+func MergeLimits() (total, file int64, entries int) {
+	l := configuredExtractLimits()
+	return l.total, l.file, l.entries
+}

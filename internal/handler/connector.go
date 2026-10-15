@@ -113,6 +113,7 @@ func (h *ConnectorHandler) Register(mux *http.ServeMux, authMiddleware func(http
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", h.protectedResourceMetadata)
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", h.authorizationServerMetadata)
 
+	mux.HandleFunc("GET /.well-known/muse-client.json", h.museClientMetadata) // museClientPath
 	mux.HandleFunc("POST /oauth/register", h.register)
 	mux.HandleFunc("GET /oauth/authorize", h.authorize)
 	originCheck := originCheckMiddleware(h.hosts, h.issuer)
@@ -449,6 +450,9 @@ type authzError struct {
 	redirect    bool
 	code        string
 	description string
+	// museHelp: an unknown client ID where Meta Muse is allowed; the page
+	// says what to paste in Muse's Client ID box.
+	museHelp bool
 }
 
 func (h *ConnectorHandler) parseAuthorize(ctx context.Context, q url.Values) (authzRequest, *authzError) {
@@ -466,6 +470,9 @@ func (h *ConnectorHandler) parseAuthorize(ctx context.Context, q url.Values) (au
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			log.Printf("oauth: get client: %v", err)
+		}
+		if h.museAllowed() && (q.Get("redirect_uri") == museRedirectURI || !(strings.HasPrefix(clientID, prefixClient) || strings.Contains(clientID, "://"))) {
+			return req, &authzError{code: "invalid_client", museHelp: true, description: "The Client ID entered in the app is not one this server knows."}
 		}
 		return req, &authzError{code: "invalid_client", description: "The app that sent you here is not registered. Go back to the app and connect again."}
 	}
@@ -551,6 +558,10 @@ func (h *ConnectorHandler) authorize(w http.ResponseWriter, r *http.Request) {
 	if aerr != nil {
 		if aerr.redirect {
 			http.Redirect(w, r, h.errorRedirect(req, aerr), http.StatusFound)
+			return
+		}
+		if aerr.museHelp {
+			writeMuseHelp(w, h.mcpResource)
 			return
 		}
 		writeConnectError(w, aerr.description)
@@ -675,6 +686,70 @@ func (h *ConnectorHandler) decide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, h.redirectWith(req.RedirectURI, map[string]string{"code": code, "state": req.State}), http.StatusSeeOther)
+}
+
+// ---- Meta Muse ---------------------------------------------------------------------
+
+// Meta Muse neither registers itself (RFC 7591) nor publishes client
+// metadata, so it asks the person for a Client ID. The server pre-registers
+// one public client for it, under a short id (meta-muse) and the URL of a
+// client metadata document, held to PKCE like any other public client. As
+// for every app, the company decides: Muse connects only when
+// OAUTH_REDIRECT_HOSTS allows agent.meta.ai (redirectAllowed, checked again
+// at every authorization); otherwise nothing is registered or served.
+const (
+	museClientPath    = "/.well-known/muse-client.json"
+	museShortClientID = "meta-muse"
+	museClientName    = "Meta Muse"
+	museRedirectURI   = "https://agent.meta.ai/api/hatch/oauth/callback"
+)
+
+func (h *ConnectorHandler) museClientID() string { return h.issuer + museClientPath }
+
+func (h *ConnectorHandler) museAllowed() bool { return h.redirectAllowed(museRedirectURI) }
+
+// EnsureBuiltinClients registers Meta Muse's client when the company allows
+// it. Run at boot; idempotent.
+func (h *ConnectorHandler) EnsureBuiltinClients(ctx context.Context) error {
+	if !h.museAllowed() {
+		return nil
+	}
+	if err := db.UpsertBuiltinOAuthClient(ctx, h.database, h.museClientID(), museClientName, []string{museRedirectURI}); err != nil {
+		return err
+	}
+	return db.UpsertBuiltinOAuthClient(ctx, h.database, museShortClientID, museClientName, []string{museRedirectURI})
+}
+
+func (h *ConnectorHandler) museClientMetadata(w http.ResponseWriter, r *http.Request) {
+	if !h.museAllowed() {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"client_id":                  h.museClientID(),
+		"client_name":                museClientName,
+		"redirect_uris":              []string{museRedirectURI},
+		"grant_types":                []string{"authorization_code", "refresh_token"},
+		"response_types":             []string{"code"},
+		"token_endpoint_auth_method": "none",
+	})
+}
+
+// writeMuseHelp answers an unknown client ID where Meta Muse is allowed:
+// most likely a person typed something else into Muse's Client ID box.
+func writeMuseHelp(w http.ResponseWriter, mcpURL string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusBadRequest)
+	fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><title>Connecting an app</title>
+%s</head>
+<body><main style="max-width:640px;margin:80px auto;font-family:sans-serif">
+<h1>The app could not be connected</h1>
+<p>The Client ID entered in the app is not one this server knows.</p>
+<p>If you are adding Simple Host in Meta Muse, put this in the Client ID box: <code>%s</code></p>
+<p>The MCP URL stays <code>%s</code>. Then sign in and choose Allow.</p>
+</main></body></html>`, productIconLinks(""), museShortClientID, html.EscapeString(mcpURL))
 }
 
 func writeConnectError(w http.ResponseWriter, message string) {

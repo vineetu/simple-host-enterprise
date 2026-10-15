@@ -66,6 +66,24 @@ func InsertOAuthClient(ctx context.Context, q Querier, c OAuthClient) error {
 	return err
 }
 
+// UpsertBuiltinOAuthClient creates or refreshes a public client the server
+// defines itself (Meta Muse, which cannot register). It counts as used, so
+// the sweep of abandoned registrations never removes it.
+func UpsertBuiltinOAuthClient(ctx context.Context, q Querier, clientID, name string, redirectURIs []string) error {
+	uris, err := json.Marshal(redirectURIs)
+	if err != nil {
+		return err
+	}
+	_, err = q.ExecContext(ctx, `
+		INSERT INTO oauth_clients (client_id, client_secret_hash, client_name, redirect_uris, token_endpoint_auth_method, last_used_at)
+		VALUES ($1, NULL, $2, $3, 'none', now())
+		ON CONFLICT (client_id) DO UPDATE SET client_secret_hash = NULL, client_name = EXCLUDED.client_name,
+		  redirect_uris = EXCLUDED.redirect_uris, token_endpoint_auth_method = 'none',
+		  last_used_at = COALESCE(oauth_clients.last_used_at, now())`,
+		clientID, name, string(uris))
+	return err
+}
+
 func GetOAuthClient(ctx context.Context, q Querier, clientID string) (OAuthClient, error) {
 	var c OAuthClient
 	var uris string

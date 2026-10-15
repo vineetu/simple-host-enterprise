@@ -366,6 +366,10 @@ func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
+	keep, remove, ok := deployKeep(w, r)
+	if !ok {
+		return
+	}
 	actor := auth.GetUser(r.Context())
 	if actor == nil {
 		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
@@ -413,6 +417,13 @@ func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Req
 	}
 	if !requireSitePrecondition(w, r, access.Site, true) {
 		return
+	}
+	if keep {
+		if err := h.keepLiveFiles(r.Context(), access.Site.ID, access.Site.ActiveVersion, files, remove); err != nil {
+			log.Printf("keep live files for %s/%s: %v", ownerUsername, siteName, err)
+			writeKeepError(w, err)
+			return
+		}
 	}
 	previousVersion := access.Site.ActiveVersion
 	maxVersion, err := db.GetMaxVersionNumber(r.Context(), tx, access.Site.ID)

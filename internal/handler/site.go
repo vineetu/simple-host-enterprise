@@ -608,6 +608,10 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	keep, remove, ok := deployKeep(w, r)
+	if !ok {
+		return
+	}
 	if !validateStoredUsername(w, target.OwnerUsername) {
 		return
 	}
@@ -655,6 +659,13 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 	// optional here; the owner-qualified routes (team sites) require it.
 	if !requireSitePrecondition(w, r, site, false) {
 		return
+	}
+	if keep {
+		if err := h.keepLiveFiles(r.Context(), site.ID, site.ActiveVersion, files, remove); err != nil {
+			log.Printf("keep live files for %s/%s: %v", target.OwnerUsername, siteName, err)
+			writeKeepError(w, err)
+			return
+		}
 	}
 
 	maxVersion, err := db.GetMaxVersionNumber(r.Context(), tx, site.ID)

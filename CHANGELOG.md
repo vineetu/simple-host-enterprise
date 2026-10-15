@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.9.7 — 2026-10-15
+
+No schema change.
+
+### Added
+- **Change a few files of a site.** An update with `?keep=1` (MCP
+  `deploy_site` `keep_other_files: true`) sends only the pages that change;
+  every other live file is kept, and `&remove=<path>` (`remove_files`) drops
+  named files. The merge runs under the site lock after the If-Match check.
+- **Meta Muse.** When `OAUTH_REDIRECT_HOSTS` names `agent.meta.ai`, Muse
+  connects with the Client ID `meta-muse` (or the URL of
+  `/.well-known/muse-client.json`). A company that does not list it gets
+  nothing new.
+
 ## Chart 0.2.4 — 2026-10-14
 
 - Pins the published 0.9.6 image digest

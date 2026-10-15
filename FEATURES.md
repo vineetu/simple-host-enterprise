@@ -167,7 +167,7 @@ Config names are documented in `docs/configuration.md`; schema in
 - **Routes.** `POST /mcp`, `GET /mcp`, `DELETE /mcp`,
   `GET /.well-known/oauth-protected-resource`,
   `GET /.well-known/oauth-protected-resource/mcp`,
-  `GET /.well-known/oauth-authorization-server`, `POST /oauth/register`,
+  `GET /.well-known/oauth-authorization-server`, `GET /.well-known/muse-client.json`, `POST /oauth/register`,
   `GET /oauth/authorize`, `POST /oauth/authorize`, `POST /oauth/token`,
   `POST /oauth/revoke`, `GET /plugin.zip`, `GET /api/me/connections`,
   `DELETE /api/me/connections/{id}` (both browser session only).
@@ -187,6 +187,15 @@ Config names are documented in `docs/configuration.md`; schema in
   code to the grant on redemption).
 - **Config.** `OAUTH_REDIRECT_HOSTS`, `OAUTH_ACCESS_TTL`, `OAUTH_REFRESH_TTL`,
   `PUBLIC_BASE_URL`.
+- **Meta Muse (2026-10-15).** Muse cannot register itself, so it asks the person
+  for a Client ID. When `OAUTH_REDIRECT_HOSTS` names `agent.meta.ai`, the server
+  pre-registers one public client for it at boot (`EnsureBuiltinClients`), under
+  the short id `meta-muse` and the URL of its metadata document,
+  `GET /.well-known/muse-client.json`; PKCE as for every public client, and the
+  sweep of abandoned registrations keeps it. An unknown client ID then gets a page
+  naming `meta-muse` to paste. Without `agent.meta.ai` in the list nothing is
+  registered and the document is 404, and authorization re-checks the list, so
+  removing it stops Muse at once.
 
 ## 4. Skills bundle and skill-version gate
 
@@ -320,6 +329,13 @@ Config names are documented in `docs/configuration.md`; schema in
   deletes the sites of a disabled person or of a team with no active member
   (section 13); nobody else's. Visitor counts are kept per address, so a
   moved site's Visitors tab starts again.
+  **Change a few files (2026-10-15).** An update with `?keep=1` (MCP
+  `deploy_site` `keep_other_files: true`) takes only the files that change: under
+  the site lock, after the If-Match check, every live file the archive does not
+  replace is kept, and `&remove=<path>` (MCP `remove_files`) drops named ones.
+  The merged version meets the same total, per-file and entry limits as an
+  upload (413 otherwise) and must have an `index.html` (400). Without `keep`
+  the archive is the whole new version, as before.
   **Preview before live.** An update sent with `?publish=false` (MCP
   `deploy_site` `publish: false`) stores the new version, quota-checked and
   scanned like any deploy, without making it live: `active_version` and the

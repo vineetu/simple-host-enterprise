@@ -183,6 +183,7 @@ var routeKeyAccess = map[string]keyAccess{
 	"GET /.well-known/oauth-protected-resource": keyNever,
 	"GET /.well-known/oauth-protected-resource/mcp": keyNever,
 	"GET /.well-known/oauth-authorization-server":   keyNever,
+	"GET /.well-known/muse-client.json":             keyNever,
 	"POST /oauth/register":                          keyNever,
 	"GET /oauth/authorize":                          keyNever,
 	"POST /oauth/token":                             keyNever,

@@ -106,7 +106,9 @@ func buildArchive(args map[string]any) ([]byte, error) {
 		}
 	}
 
-	if !sawIndex {
+	// With keep_other_files the live index.html is kept unless replaced; the
+	// server checks the merged version.
+	if keep, _ := args["keep_other_files"].(bool); !sawIndex && !keep {
 		return nil, fmt.Errorf("no index.html at the site root; the site would not serve")
 	}
 	if err := archive.Close(); err != nil {

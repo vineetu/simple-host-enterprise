@@ -287,8 +287,8 @@ func deploySiteSchema() map[string]any {
 		"site": str(siteArgDesc + " With intent create and no owner, the site is created in your own account."),
 		"files": map[string]any{
 			"type": "array",
-			"description": "The complete file list for the new version — a full replacement, not a patch. " +
-				"Must include a file whose path is exactly `index.html`, or the deploy is rejected. " +
+			"description": "The complete file list for the new version — a full replacement, not a patch — unless keep_other_files is true, when it is just the files that change. " +
+				"The new version must include a file whose path is exactly `index.html`, or the deploy is rejected. " +
 				"Total decoded content must stay under 8 MiB.",
 			"minItems": 1,
 			"items": object(map[string]any{
@@ -310,6 +310,15 @@ func deploySiteSchema() map[string]any {
 		},
 		"owner": str(ownerArgDesc + " Required to publish into a team's namespace."),
 		"etag":  str(etagArgDesc),
+		"keep_other_files": map[string]any{
+			"type":        "boolean",
+			"description": "Only for an update. true keeps every file of the live version that files does not replace, so you send just the pages you changed. Default false: files is the whole new version.",
+		},
+		"remove_files": map[string]any{
+			"type":        "array",
+			"items":       map[string]any{"type": "string"},
+			"description": "Only with keep_other_files: paths of live files to drop from the new version, e.g. [\"old-page.html\"].",
+		},
 		"publish": map[string]any{
 			"type": "boolean",
 			"description": "Only for an update. Omit (or true) to make the new version live at once. false stores it without changing what visitors see: " +
@@ -484,8 +493,8 @@ func toolList() []Tool {
 				"a create that finds the site already there is an error to report, not something to paper over. " +
 				"Earlier versions are retained (the newest few; older ones are removed as new ones arrive) and can be restored with rollback_site. " +
 				"Each namespace has a quota of sites and stored bytes, and the server may scan uploads for malware; a refusal says which limit or file, and nothing is stored. " +
-				"This REPLACES the whole site: the files given are the complete new version, and anything not listed stops existing. " +
-				"To change one page of an existing site you must send every other file again unchanged, so read them first with list_site_files and read_site_file unless you hold the site's complete source. " +
+				"By default this REPLACES the whole site: the files given are the complete new version, and anything not listed stops existing. " +
+				"To change a few pages of an existing site, send only those files with intent update and keep_other_files true: every other live file is kept, and remove_files drops named paths. " +
 				"Call list_sites or get_site first to settle which namespace you are publishing into and whether the site exists there; " +
 				"pass that namespace as owner, and for an update pass the etag you captured before you started editing.",
 			InputSchema: deploySiteSchema(),
@@ -524,6 +533,48 @@ func toolList() []Tool {
 				if hold && intent == "create" {
 					return upstream{}, fmt.Errorf("publish false is only for an update: a new site's first version is always live (only its owner or team can open it until set_site_access widens it)")
 				}
+				keep := false
+				if _, present := args["keep_other_files"]; present {
+					if keep, err = boolArg(args, "keep_other_files"); err != nil {
+						return upstream{}, err
+					}
+				}
+				var remove []string
+				if raw, present := args["remove_files"]; present {
+					if !keep {
+						return upstream{}, fmt.Errorf("remove_files requires keep_other_files: true")
+					}
+					list, isList := raw.([]any)
+					if !isList {
+						return upstream{}, fmt.Errorf("remove_files must be a list of paths")
+					}
+					for _, item := range list {
+						p, isString := item.(string)
+						if !isString || p == "" {
+							return upstream{}, fmt.Errorf("remove_files must be a list of paths")
+						}
+						remove = append(remove, p)
+					}
+				}
+				if keep && intent == "create" {
+					return upstream{}, fmt.Errorf("keep_other_files is only for an update: a new site has no files to keep")
+				}
+				// The query an update carries: publish=false, keep=1 and
+				// the paths to remove.
+				query := url.Values{}
+				if hold {
+					query.Set("publish", "false")
+				}
+				if keep {
+					query.Set("keep", "1")
+					for _, p := range remove {
+						query.Add("remove", p)
+					}
+				}
+				suffix := ""
+				if len(query) > 0 {
+					suffix = "?" + query.Encode()
+				}
 
 				path := ownerScoped
 				if collaboration != "" {
@@ -541,15 +592,13 @@ func toolList() []Tool {
 				case "create":
 					return upstream{Method: "POST", Path: path, Body: archive, ContentType: "application/gzip"}, nil
 				case "update":
-					if hold {
-						path += "?publish=false"
-					}
-					return upstream{Method: "PUT", Path: path, Body: archive, ContentType: "application/gzip", IfMatch: etag}, nil
+					return upstream{Method: "PUT", Path: path + suffix, Body: archive, ContentType: "application/gzip", IfMatch: etag}, nil
 				}
-				if hold {
-					// No intent and no owner, holding the version back: that can
-					// only be an update of a site in the caller's own account.
-					return upstream{Method: "PUT", Path: ownerScoped + "?publish=false", Body: archive,
+				if hold || keep {
+					// No intent and no owner, holding the version back or
+					// keeping its other files: that can only be an update of a
+					// site in the caller's own account.
+					return upstream{Method: "PUT", Path: ownerScoped + suffix, Body: archive,
 						ContentType: "application/gzip", IfMatch: etag}, nil
 				}
 

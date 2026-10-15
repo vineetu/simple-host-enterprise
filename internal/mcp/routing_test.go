@@ -328,6 +328,19 @@ func TestDeploySiteIntentPicksTheRequest(t *testing.T) {
 			path:   "/api/sites/demo",
 		},
 		{
+			name:    "keep_other_files sends only the changed page, with removals",
+			args:    map[string]any{"site": "demo", "owner": "acme-team", "intent": "update", "etag": `"v1"`, "keep_other_files": true, "remove_files": []any{"old.html", "a b.html"}, "files": []any{map[string]any{"path": "about.html", "content": "<p>new</p>"}}},
+			method:  http.MethodPut,
+			path:    "/api/collaboration/sites/acme-team/demo?keep=1&remove=old.html&remove=a+b.html",
+			ifMatch: `"v1"`,
+		},
+		{
+			name:   "keep_other_files with neither argument is an update of the caller's own site",
+			args:   map[string]any{"site": "demo", "keep_other_files": true, "publish": false, "files": []any{map[string]any{"path": "about.html", "content": "x"}}},
+			method: http.MethodPut,
+			path:   "/api/sites/demo?keep=1&publish=false",
+		},
+		{
 			name:     "neither argument is the pre-0.9 client, which still falls back",
 			args:     map[string]any{"site": "demo", "files": files},
 			method:   http.MethodPost,
@@ -351,6 +364,16 @@ func TestDeploySiteIntentPicksTheRequest(t *testing.T) {
 				t.Errorf("fallback present = %v, want %v", up.Fallback != nil, tc.fallback)
 			}
 		})
+	}
+
+	for _, bad := range []map[string]any{
+		{"site": "demo", "intent": "create", "keep_other_files": true, "files": files},
+		{"site": "demo", "intent": "update", "remove_files": []any{"a.html"}, "files": files},
+		{"site": "demo", "intent": "update", "files": []any{map[string]any{"path": "about.html", "content": "x"}}},
+	} {
+		if _, err := tool.call(bad); err == nil {
+			t.Errorf("deploy_site accepted %v", bad)
+		}
 	}
 
 	// An owner with no intent is the call that used to guess. It is refused
