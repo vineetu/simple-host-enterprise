@@ -8,7 +8,7 @@ and `postgres.mode: incluster`. With `ownerCerts: manual` and an existing
 It does not create a cluster, VPC, or cloud account resources.
 
 ```sh
-helm install simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.2.4 -n simple-host --create-namespace -f my-values.yaml
+helm install simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.2.5 -n simple-host --create-namespace -f my-values.yaml
 ```
 
 - Every value, with its default and what it does: [values.yaml](values.yaml).
@@ -68,6 +68,10 @@ Chart 0.2.1 pins release 0.9.3: personal home selection, signed-in showcase
 feed, bio, pins and manual order. Site access and origins remain in force. Set
 `extraConfig.SHOWCASE_BIO_MAX_LENGTH` to change the default 280-character bio
 limit. [Home-page behavior](../../../docs/your-home-page.md).
+
+Chart 0.2.5 pins release 0.9.7: change a few files of a site (`keep_other_files`), and Meta Muse
+when `OAUTH_REDIRECT_HOSTS` names `agent.meta.ai`. No schema change, so rolling
+back to 0.2.4 is safe.
 
 Chart 0.2.4 pins release 0.9.6: the product icon on the app host and in the
 plugin, and the dashboard's Your sites card with one Manage menu. No schema

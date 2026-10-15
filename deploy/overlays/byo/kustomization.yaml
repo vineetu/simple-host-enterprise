@@ -32,11 +32,11 @@ secretGenerator:
   - name: simple-host-db-ca
     files: [ca.crt=db-ca.crt]
 
-# The recommended image is the v0.9.6 release, pinned by its digest (the tag
+# The recommended image is the v0.9.7 release, pinned by its digest (the tag
 # is for reading; the digest is what is pulled):
-#   ghcr.io/vineetu/simple-host-enterprise:v0.9.6
+#   ghcr.io/vineetu/simple-host-enterprise:v0.9.7
 #     newName: ghcr.io/vineetu/simple-host-enterprise
-#     digest: sha256:4699c869ea2ecac2b673362caf2b2bf4078b8092a08d935ae1c8e9cca02407ac
+#     digest: sha256:9d9ee01e72dce681d355f83239f0348fb85d8eb7a78637c7384ad37f8e3be946
 # Verify it first (INSTALL.md, section 3). `name` matches the base;
 # change `newName` (and the digest) to your own scanned mirror if images must
 # come from a private registry (see the pull-secret note at the end of this
