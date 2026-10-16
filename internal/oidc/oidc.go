@@ -168,7 +168,7 @@ func (p *Provider) Exchange(ctx context.Context, code, codeVerifier string) (Tok
 		return TokenResponse{}, fmt.Errorf("oidc: token exchange: unexpected status %s (error %q)", resp.Status, truncate(e.Error, 64))
 	}
 	var tok TokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tok); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&tok); err != nil {
 		return TokenResponse{}, fmt.Errorf("oidc: decode token response: %w", err)
 	}
 	if tok.IDToken == "" {
@@ -256,6 +256,12 @@ func (p *Provider) VerifyIDToken(ctx context.Context, rawToken, expectedNonce st
 	}
 	if !audienceContains(raw["aud"], p.cfg.ClientID) {
 		return Claims{}, fmt.Errorf("oidc: id_token audience does not include client id %q", p.cfg.ClientID)
+	}
+	// OIDC Core 3.1.3.7: with several audiences, azp must be this client.
+	if list, ok := raw["aud"].([]any); ok && len(list) > 1 {
+		if azp, _ := raw["azp"].(string); azp != p.cfg.ClientID {
+			return Claims{}, errors.New("oidc: id_token has several audiences and azp is not this client")
+		}
 	}
 	exp, ok := numericClaim(raw["exp"])
 	if !ok || time.Now().After(time.Unix(exp, 0)) {

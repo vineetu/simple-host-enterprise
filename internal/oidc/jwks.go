@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net/http"
 	"sync"
@@ -96,7 +97,7 @@ func (c *jwksCache) refresh(ctx context.Context) error {
 		return fmt.Errorf("fetch JWKS: unexpected status %s", resp.Status)
 	}
 	var doc jwksDocument
-	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&doc); err != nil {
 		return fmt.Errorf("decode JWKS: %w", err)
 	}
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Sign-in hardening, from the review of the same OIDC code in Simple Hack's company sign-in: discovery, JWKS and token responses are read up to 1 MB, and an ID token with several audiences must name this client in `azp`.
+
 ## Chart 0.2.5 — 2026-10-15
 
 - Pins the published 0.9.7 image digest

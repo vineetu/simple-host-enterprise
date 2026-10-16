@@ -300,3 +300,24 @@ func TestDiscoverRefusesHTTP(t *testing.T) {
 		t.Fatalf("Discover with InsecureAllowed: %v", err)
 	}
 }
+
+func TestVerifyIDTokenSeveralAudiencesNeedAzp(t *testing.T) {
+	tp := newTestProvider(t)
+	ctx := context.Background()
+	p, err := Discover(ctx, Config{
+		Issuer: tp.issuer(), ClientID: "client-1", ClientSecret: "secret",
+		RedirectURL: "https://example.test/auth/callback",
+	}, tp.server.Client())
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	claims := baseClaims(tp.issuer(), "client-1", "nonce-abc")
+	claims["aud"] = []any{"client-1", "another-client"}
+	if _, err := p.VerifyIDToken(ctx, tp.mintIDToken(t, claims), "nonce-abc"); err == nil {
+		t.Fatal("several audiences without azp must be rejected")
+	}
+	claims["azp"] = "client-1"
+	if _, err := p.VerifyIDToken(ctx, tp.mintIDToken(t, claims), "nonce-abc"); err != nil {
+		t.Fatalf("several audiences with azp = this client: %v", err)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -45,7 +46,7 @@ func discover(ctx context.Context, client *http.Client, issuer string, insecureA
 		return discoveryDocument{}, fmt.Errorf("fetch discovery document: unexpected status %s", resp.Status)
 	}
 	var doc discoveryDocument
-	if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&doc); err != nil {
 		return discoveryDocument{}, fmt.Errorf("decode discovery document: %w", err)
 	}
 	if strings.TrimRight(doc.Issuer, "/") != issuer {
