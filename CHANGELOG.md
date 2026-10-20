@@ -1,5 +1,11 @@
 # Changelog
 
+## Chart 0.2.6 — 2026-10-20
+
+- Pins the published 0.9.8 image digest
+  (`sha256:642c4a5f0f06cb3b18d2a3dd063a5f613e4d507a471ff681cf546c3656923ee2`). No
+  migration.
+
 ## v0.9.8 — 2026-10-20
 
 No schema change.

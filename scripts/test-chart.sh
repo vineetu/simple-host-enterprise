@@ -230,9 +230,9 @@ def external(docs, by):
         raise AssertionError(f"networkPolicy {froms}")
     one(by, "Deployment", "simple-host-owner-hosts")
     img = c["image"]
-    digest = "sha256:9d9ee01e72dce681d355f83239f0348fb85d8eb7a78637c7384ad37f8e3be946"
+    digest = "sha256:642c4a5f0f06cb3b18d2a3dd063a5f613e4d507a471ff681cf546c3656923ee2"
     if not img.endswith("@" + digest):
-        raise AssertionError(f"image not pinned to v0.9.7 digest: {img}")
+        raise AssertionError(f"image not pinned to v0.9.8 digest: {img}")
     repo = img.split("@")[0]
     if ":" in repo.rsplit("/", 1)[-1]:
         raise AssertionError(f"image pulled by tag: {img}")
