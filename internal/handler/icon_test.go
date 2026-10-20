@@ -281,7 +281,7 @@ func TestPagesLinkProductIcon(t *testing.T) {
 	}
 
 	// No usable app origin: leave the icon off, and do not open img-src.
-	if strings.Contains(renderNoAccess("vera", ""), "favicon") {
+	if strings.Contains(renderNoAccess("vera", "", ""), "favicon") {
 		t.Fatal("no-access page with an empty origin linked an icon")
 	}
 	if strings.Contains(renderOwnerIndex("alice", nil, true, ""), "favicon") {

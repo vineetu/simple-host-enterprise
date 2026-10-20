@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Sign-in hardening, from the review of the same OIDC code in Simple Hack's company sign-in: discovery, JWKS and token responses are read up to 1 MB, and an ID token with several audiences must name this client in `azp`.
+- The sign-in problem page and the no-access page use the shared sign-in card, light only.
 
 ## Chart 0.2.5 — 2026-10-15
 

@@ -60,7 +60,9 @@ func (g *hostGate) noAccess(w http.ResponseWriter, r *http.Request, userID strin
 	if g.userLabel != nil && userID != "" {
 		name = g.userLabel(r.Context(), userID)
 	}
-	body := renderNoAccess(name, g.hosts.origin)
+	// The eyebrow is the host already on this request, or nothing. Missing
+	// and unshared sites share this call, so the page never learns which.
+	body := renderNoAccess(name, g.hosts.origin, normalizeHost(r.Host))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
@@ -130,7 +132,31 @@ func switchTarget(hosts HostModel, raw string) (string, bool) {
 	return "https://" + normalizeHost(parsed.Host) + "/", true
 }
 
-func renderNoAccess(name, origin string) string {
+// signInCardCSS is the shared sign-in card, light only. Enterprise has no
+// dark theme. Both pages keep it in a style element: the no-access policy
+// allows style-src 'unsafe-inline' and default-src 'none' forbids a script
+// and any other stylesheet.
+const signInCardCSS = `*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:32px 16px;background:#f5f6f8;color:#16181d;font:16px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+main{width:100%;max-width:400px;background:#fff;border:1px solid #d6d9e0;border-radius:14px;box-shadow:0 1px 2px rgba(22,24,29,.04),0 12px 32px rgba(22,24,29,.08);padding:28px 26px 22px}
+.eyebrow{margin:0 0 6px;font-size:12px;font-weight:600;letter-spacing:.12em;line-height:1.4;text-transform:uppercase;color:#5d6370;overflow-wrap:anywhere}
+h1{margin:0 0 8px;font-size:22px;font-weight:650;line-height:1.25;letter-spacing:-.015em;color:#16181d}
+.lead{margin:0 0 18px;color:#4a505c;font-size:15.5px;line-height:1.5;overflow-wrap:anywhere}
+.who{margin:0 0 16px;padding:10px 12px;border:1px solid #d6d9e0;border-radius:10px;font-size:14px;line-height:1.4;color:#16181d;overflow-wrap:anywhere}
+.who strong{font-weight:650}
+a.primary,a.secondary{display:flex;align-items:center;justify-content:center;width:100%;height:48px;border-radius:10px;font-weight:600;font-size:15.5px;line-height:1.2;text-align:center;text-decoration:none}
+a.primary{background:#1b4ee0;color:#fff}
+a.primary:hover{background:#163db3}
+a.secondary{margin-top:10px;background:#fff;color:#16181d;border:1px solid #d6d9e0}
+a.primary:focus-visible,a.secondary:focus-visible{outline:3px solid #b9caf7;outline-offset:2px}
+.fine{margin:16px 0 0;font-size:13px;line-height:1.5;color:#5d6370}
+`
+
+// renderNoAccess is the one page for a missing site and a site the person
+// may not open. host is the host they asked for, shown as the eyebrow, or
+// "" when this render does not have it. It is not a fact about the site:
+// the wording stays the same either way, and never says whether it exists.
+func renderNoAccess(name, origin, host string) string {
 	var b strings.Builder
 	b.WriteString(`<!doctype html>
 <html lang="en">
@@ -144,25 +170,29 @@ func renderNoAccess(name, origin string) string {
 	b.WriteString(`<meta name="robots" content="noindex,nofollow">
 <title>No access</title>
 <style>
-  body{margin:0;background:#fbfbfc;color:#16181d;font:16px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
-  main{max-width:560px;margin:0 auto;padding:72px 24px}
-  h1{font-size:24px;margin:0 0 12px}
-  p{margin:0 0 12px;color:#4a505c}
-  a{color:#1b4ee0}
-</style>
+`)
+	b.WriteString(signInCardCSS)
+	b.WriteString(`</style>
 </head>
 <body>
 <main>
-<h1>This site doesn't exist or isn't shared with you</h1>
+`)
+	if strings.TrimSpace(host) != "" {
+		b.WriteString(`<p class="eyebrow">`)
+		b.WriteString(html.EscapeString(host))
+		b.WriteString(`</p>
+`)
+	}
+	b.WriteString(`<h1>This site doesn't exist or isn't shared with you</h1>
 `)
 	if name != "" {
-		b.WriteString(`<p>You're signed in as <strong>`)
+		b.WriteString(`<p class="who">You're signed in as <strong>`)
 		b.WriteString(html.EscapeString(name))
 		b.WriteString(`</strong>.</p>
 `)
 	}
-	b.WriteString(`<p>Ask the person who sent you the link to share it with you.</p>
-<p><a href="` + switchAccountPath + `">Switch account</a></p>
+	b.WriteString(`<p class="lead">Ask the person who sent you the link to share it with you.</p>
+<a class="primary" href="` + switchAccountPath + `">Switch account</a>
 </main>
 </body>
 </html>

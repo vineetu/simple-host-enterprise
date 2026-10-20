@@ -847,14 +847,34 @@ const connectedAppsScript = `<script>
 func writeAuthError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><title>Sign-in problem</title>
-%s</head>
-<body><main style="max-width:640px;margin:80px auto;font-family:sans-serif">
-<h1>Sign-in didn't complete</h1>
-<p>%s</p>
-<p><a href="/auth/login">Try again</a></p>
-</main></body></html>`, productIconLinks(""), html.EscapeString(message))
+	// The stylesheet is an argument, not part of the format string: it
+	// contains width:100%, which Fprintf would read as a verb.
+	fmt.Fprintf(w, authErrorHTML, productIconLinks(""), signInCardCSS, html.EscapeString(message))
 }
+
+// authErrorHTML is the sign-in problem page, the same light card as the
+// no-access page. writeAuthError escapes the message before this is filled.
+const authErrorHTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Sign-in problem</title>
+%s<style>
+%s</style>
+</head>
+<body>
+<main>
+<p class="eyebrow">Sign in</p>
+<h1>Sign-in didn't complete</h1>
+<p class="lead">%s</p>
+<a class="primary" href="/auth/login">Sign in again</a>
+<p class="fine">If this keeps happening, ask your IT team.</p>
+</main>
+</body>
+</html>
+`
 
 // sanitizeRedirectPath is the "to" validation shared by the post-sign-in
 // redirect here and by the hand-off's own final

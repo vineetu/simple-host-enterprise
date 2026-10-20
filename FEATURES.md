@@ -64,7 +64,8 @@ Config names are documented in `docs/configuration.md`; schema in
   or that the signed-in person may not open, gets the same 404 page: "This
   site doesn't exist or isn't shared with you", who they are signed in as
   (username and email), "Ask the person who sent you the link to share it
-  with you", and Switch account. A signed-out browser is sent to sign in
+  with you", and Switch account. The sign-in problem page and this page
+  use the shared sign-in card, light only. A signed-out browser is sent to sign in
   first in both cases, so the page confirms nothing; scripts and agents get
   the plain 404 (only a refused existing site is audited `access_denied`).
   The page is served with `Content-Security-Policy: sandbox` (an opaque
