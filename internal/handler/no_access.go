@@ -60,9 +60,9 @@ func (g *hostGate) noAccess(w http.ResponseWriter, r *http.Request, userID strin
 	if g.userLabel != nil && userID != "" {
 		name = g.userLabel(r.Context(), userID)
 	}
-	// The eyebrow is the host already on this request, or nothing. Missing
-	// and unshared sites share this call, so the page never learns which.
-	body := renderNoAccess(name, g.hosts.origin, normalizeHost(r.Host))
+	// The page is byte-identical for a missing site, an unshared one and a
+	// moved one, whatever host was asked for.
+	body := renderNoAccess(name, g.hosts.origin)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
@@ -153,10 +153,8 @@ a.primary:focus-visible,a.secondary:focus-visible{outline:3px solid #b9caf7;outl
 `
 
 // renderNoAccess is the one page for a missing site and a site the person
-// may not open. host is the host they asked for, shown as the eyebrow, or
-// "" when this render does not have it. It is not a fact about the site:
-// the wording stays the same either way, and never says whether it exists.
-func renderNoAccess(name, origin, host string) string {
+// may not open. It never says whether the site exists.
+func renderNoAccess(name, origin string) string {
 	var b strings.Builder
 	b.WriteString(`<!doctype html>
 <html lang="en">
@@ -177,12 +175,6 @@ func renderNoAccess(name, origin, host string) string {
 <body>
 <main>
 `)
-	if strings.TrimSpace(host) != "" {
-		b.WriteString(`<p class="eyebrow">`)
-		b.WriteString(html.EscapeString(host))
-		b.WriteString(`</p>
-`)
-	}
 	b.WriteString(`<h1>This site doesn't exist or isn't shared with you</h1>
 `)
 	if name != "" {

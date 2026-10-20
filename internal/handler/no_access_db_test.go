@@ -41,7 +41,6 @@ func TestNoAccessPageIsTheSameForMissingAndUnshared(t *testing.T) {
 		"Ask the person who sent you the link to share it with you.",
 		`href="/auth/switch"`,
 		">Switch account</a>",
-		`<p class="eyebrow">demo.alice.` + accessBase + `</p>`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("no-access page lacks %q:\n%s", want, body)
@@ -57,14 +56,8 @@ func TestNoAccessPageIsTheSameForMissingAndUnshared(t *testing.T) {
 			t.Errorf("no-access page CSP = %q", csp)
 		}
 	}
-	missingBody := missing.Body.String()
-	if !strings.Contains(missingBody, `<p class="eyebrow">nope.alice.`+accessBase+`</p>`) {
-		t.Errorf("missing page eyebrow:\n%s", missingBody)
-	}
-	// Same page. Only the host they asked for differs, which the address
-	// bar already showed, so the two still cannot be told apart.
-	if strings.ReplaceAll(missingBody, "nope.alice."+accessBase, "HOST") != strings.ReplaceAll(body, "demo.alice."+accessBase, "HOST") {
-		t.Errorf("missing and unshared pages differ:\n%s\n---\n%s", missingBody, body)
+	if missing.Body.String() != body {
+		t.Errorf("missing and unshared pages differ:\n%s\n---\n%s", missing.Body.String(), body)
 	}
 	if n := w.count(`SELECT count(*) FROM audit_events WHERE action = 'access_denied'`); n != 1 {
 		t.Errorf("access_denied rows = %d, want 1 (the unshared site only)", n)

@@ -41,10 +41,8 @@ func TestWriteAuthErrorCard(t *testing.T) {
 
 func TestRenderNoAccessCard(t *testing.T) {
 	name := `Vera <b>x</b> & "y"`
-	host := `notes.alice.example/<script>`
-	body := renderNoAccess(name, "https://foo.example", host)
+	body := renderNoAccess(name, "https://foo.example")
 	for _, want := range []string{
-		`<p class="eyebrow">` + html.EscapeString(host) + `</p>`,
 		`<h1>This site doesn't exist or isn't shared with you</h1>`,
 		`<p class="who">You're signed in as <strong>` + html.EscapeString(name) + `</strong>.</p>`,
 		`<p class="lead">Ask the person who sent you the link to share it with you.</p>`,
@@ -57,30 +55,22 @@ func TestRenderNoAccessCard(t *testing.T) {
 	}
 	assertSignInCard(t, body)
 	if strings.Contains(body, "<b>") || strings.Contains(body, "<script") {
-		t.Fatalf("name or host was not escaped:\n%s", body)
+		t.Fatalf("name was not escaped:\n%s", body)
 	}
 
-	// No host, no eyebrow. The wording does not change.
-	plain := renderNoAccess(name, "", "  ")
-	if strings.Contains(plain, `class="eyebrow"`) {
-		t.Fatalf("blank host still wrote an eyebrow:\n%s", plain)
-	}
-	if !strings.Contains(plain, `<h1>This site doesn't exist or isn't shared with you</h1>`) {
-		t.Fatal("heading changed when the host was left off")
+	if strings.Contains(body, `class="eyebrow"`) {
+		t.Fatalf("no-access page names a host:\n%s", body)
 	}
 
 	// No name, no signed-in row.
-	anon := renderNoAccess("", "https://foo.example", "notes.alice.example")
+	anon := renderNoAccess("", "https://foo.example")
 	if strings.Contains(anon, "You're signed in") || strings.Contains(anon, "<strong>") {
 		t.Fatalf("empty name still named someone:\n%s", anon)
 	}
 
-	// A missing site and an unshared site are the same page. Only the host
-	// they asked for differs.
-	missing := renderNoAccess("vera", "https://foo.example", "nope.alice.example")
-	unshared := renderNoAccess("vera", "https://foo.example", "demo.alice.example")
-	if strings.ReplaceAll(missing, "nope.alice.example", "HOST") != strings.ReplaceAll(unshared, "demo.alice.example", "HOST") {
-		t.Fatalf("pages differ by more than the host:\n%s\n---\n%s", missing, unshared)
+	// A missing site and an unshared site are the same page.
+	if renderNoAccess("vera", "https://foo.example") != renderNoAccess("vera", "https://foo.example") {
+		t.Fatal("the page is not deterministic")
 	}
 }
 
@@ -109,8 +99,8 @@ func TestNoAccessCardKeepsCSP(t *testing.T) {
 	}
 	body := rec.Body.String()
 	assertSignInCard(t, body)
-	if !strings.Contains(body, `<p class="eyebrow">`+aliceSiteHost+`</p>`) {
-		t.Errorf("eyebrow:\n%s", body)
+	if strings.Contains(body, `class="eyebrow"`) {
+		t.Errorf("no-access page names a host:\n%s", body)
 	}
 	if !strings.Contains(body, `<p class="who">You're signed in as <strong>`+html.EscapeString(name)+`</strong>.</p>`) {
 		t.Errorf("signed-in row:\n%s", body)
