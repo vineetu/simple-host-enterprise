@@ -8,7 +8,7 @@
 # Base images are pinned by digest so a rebuild uses the same bytes; Dependabot
 # (.github/dependabot.yml) proposes digest bumps. golang:1.27.1 and
 # distroless static:nonroot as of 2026-10-02.
-FROM --platform=$BUILDPLATFORM golang:1.27.1@sha256:e0174e51e81218523251d85d248a90d24c3d5e81543b4f07a5d66229397db190 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.2@sha256:820153096fda4de6ac1b7194d12e416b7dd8f4e9a33d17e0345b111b945162d8 AS build
 ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
