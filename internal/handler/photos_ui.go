@@ -24,13 +24,13 @@ func (h *DashboardHandler) photos(w http.ResponseWriter, r *http.Request) {
 	w.Write(page)
 }
 func registerPhotoCodecs(mux *http.ServeMux) {
-	mux.Handle("GET /photo-codecs/v2/{file}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /photo-codecs/v3/{file}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		file := r.PathValue("file")
 		asset := file
 		if file == "wasm.js" {
 			asset = "libheif.wasm"
 		}
-		b, err := staticFiles.ReadFile("static/photo-codecs/v2/" + asset)
+		b, err := staticFiles.ReadFile("static/photo-codecs/v3/" + asset)
 		if err != nil {
 			http.NotFound(w, r)
 			return

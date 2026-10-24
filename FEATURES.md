@@ -152,18 +152,26 @@ Config names are documented in `docs/configuration.md`; schema in
   frames. The optional `get_site` preview is an open/copy card because sites
   refuse framing. Four `MCP_APP_*` flags use off/on/accounts:<usernames>;
   defaults are off pending Kubernetes smoke and interactive host validation. With every flag off the
-  original tool inventory and results are unchanged. `add_photos` stays callable
+  Apps add no tool inventory or result changes; the metadata file-list improvement
+  applies with flags off too. `add_photos` stays callable
   by name and returns the company sign-in page when the host has no UI.
 - **Add photos page.** `GET /photos` uses the company OIDC browser session.
   `POST /v1/sites/{site}/photos` accepts at most 30 client-encoded JPEG/WebP
   images, each at most 1,000,000 bytes and 1600 pixels per side. Optional `owner`
   selects a team namespace; only the owner or owning team's members can write.
   The browser strips metadata, using self-hosted HEIF and TIFF workers at
-  `GET /photo-codecs/v2/{file}`. Server validation, collision-safe names under
+  `GET /photo-codecs/v3/{file}`. Server validation, collision-safe names under
   `images/`, and one ordinary versioned update preserve other files and apply
   ETags, quotas, scanning, and audit. The picker uses `deploy_site` with
   `keep_other_files`, an ETag, and base64 files through the host session; no
-  credentials enter the frame. Its selection fits one inline update.
+  credentials enter the frame. Its selection fits one inline update. Both screens
+  check 50 MP headers before native decoding and apply decode deadlines. TIFF
+  Deflate output is bounded per strip/tile. The picker probes worker/Wasm support
+  and sends unsupported HEIC/TIFF selections to the photos link. Both screens
+  reconcile uncertain saves by reserved path and SHA-256 before retrying.
+  `list_site_files` reads bounded metadata, not the version archive; optional
+  `sha256_paths` hashes up to 30 files of at most 1 MB each. The photo POST honors
+  an optional `If-Match` before naming files and inside the update transaction.
 - **Where.** `internal/mcp/apps.go`, `internal/mcp/apps/`,
   `internal/handler/photos*.go`, and `internal/handler/static/photo*`.
 
@@ -430,6 +438,7 @@ Config names are documented in `docs/configuration.md`; schema in
   `POST /api/collaboration/sites/{owner}/{sitename}/rollback`,
   `GET /api/collaboration/sites/{owner}/{sitename}/versions`,
   `GET /api/collaboration/sites/{owner}/{sitename}/versions/{version}/archive`,
+  `GET /api/collaboration/sites/{owner}/{sitename}/versions/{version}/files`,
   `GET /api/collaboration/sites/{owner}/{sitename}/versions/{version}/preview`,
   `POST /api/sites/{sitename}/transfer`,
   `POST /api/collaboration/sites/{owner}/{sitename}/transfer`,

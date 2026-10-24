@@ -302,9 +302,20 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 
 	// State and files, on a restricted site: the owner host still answers.
 	active := int(call("get_site", map[string]any{"site": "demo", "owner": "alice"})["active_version"].(float64))
-	listed := call("list_site_files", map[string]any{"site": "demo", "owner": "alice", "version": active})
+	listed := call("list_site_files", map[string]any{"site": "demo", "owner": "alice", "version": active, "sha256_paths": []any{"index.html"}})
 	if listed["count"] != float64(2) {
 		t.Errorf("list_site_files = %v, want index.html and logo.png", listed)
+	}
+	if files, ok := listed["files"].([]any); !ok || !func() bool {
+		for _, f := range files {
+			if entry, ok := f.(map[string]any); ok && entry["path"] == "index.html" {
+				hash, _ := entry["sha256"].(string)
+				return len(hash) == 64
+			}
+		}
+		return false
+	}() {
+		t.Errorf("list_site_files sha256_paths = %v, want a 64-char hash for index.html", listed)
 	}
 	if got := call("read_site_file", map[string]any{"site": "demo", "owner": "alice", "version": active, "path": "index.html"}); got["content"] != "<h1>hi</h1>" || got["encoding"] != "text" {
 		t.Errorf("read_site_file index.html = %v", got)

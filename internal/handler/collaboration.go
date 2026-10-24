@@ -3,7 +3,9 @@ package handler
 import (
 	"archive/zip"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +13,7 @@ import (
 	"log"
 	"mime"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -635,7 +638,15 @@ func (h *SiteHandler) rollbackCollaborationSite(w http.ResponseWriter, r *http.R
 	))
 }
 
+func (h *SiteHandler) listCollaborationVersionFiles(w http.ResponseWriter, r *http.Request) {
+	h.readCollaborationVersion(w, r, true)
+}
+
 func (h *SiteHandler) downloadCollaborationVersion(w http.ResponseWriter, r *http.Request) {
+	h.readCollaborationVersion(w, r, false)
+}
+
+func (h *SiteHandler) readCollaborationVersion(w http.ResponseWriter, r *http.Request, listing bool) {
 	ownerUsername, siteName, ok := validatedCollaborationPath(w, r)
 	if !ok {
 		return
@@ -717,6 +728,11 @@ func (h *SiteHandler) downloadCollaborationVersion(w http.ResponseWriter, r *htt
 	// later revoke, while a revoke that won this boundary denied admission above.
 	unlock()
 	locked = false
+
+	if listing {
+		h.writeVersionFiles(w, r, lease.FS(), versionNumber)
+		return
+	}
 
 	deadline := time.Now().Add(archiveDownloadTimeout)
 	controller := http.NewResponseController(w)
@@ -936,4 +952,57 @@ func (h *SiteHandler) namespaceTarget(w http.ResponseWriter, r *http.Request) (m
 		OwnerID:       access.OwnerID,
 		OwnerUsername: access.OwnerUsername,
 	}, true
+}
+
+// Listings contain metadata only. Hash at most one photo batch on request so
+// clients can reconcile lost replies without downloading a version archive.
+func (h *SiteHandler) writeVersionFiles(w http.ResponseWriter, r *http.Request, root fs.FS, version int) {
+	paths := r.URL.Query()["sha256"]
+	if len(paths) > photoCountLimit {
+		writeJSON(w, 400, errorResponse{Error: "Request at most 30 file hashes."})
+		return
+	}
+	hashes := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		hashes[path] = true
+	}
+	entries, err := collectArchiveEntries(r.Context(), root)
+	if err != nil {
+		writeJSON(w, 500, errorResponse{Error: "Could not read site files."})
+		return
+	}
+	type fileInfo struct {
+		Path   string `json:"path"`
+		Size   int64  `json:"size"`
+		SHA256 string `json:"sha256,omitempty"`
+	}
+	files := make([]fileInfo, 0, len(entries))
+	for _, entry := range entries {
+		if entry.info.IsDir() {
+			continue
+		}
+		item := fileInfo{Path: entry.path, Size: entry.info.Size()}
+		if hashes[item.Path] && item.Size <= photoMaxBytes {
+			data, err := fs.ReadFile(root, item.Path)
+			if err != nil {
+				writeJSON(w, 500, errorResponse{Error: "Could not read site file."})
+				return
+			}
+			item.SHA256 = fmt.Sprintf("%x", sha256.Sum256(data))
+		}
+		files = append(files, item)
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	body, err := json.Marshal(struct {
+		Version int        `json:"version"`
+		Count   int        `json:"count"`
+		Files   []fileInfo `json:"files"`
+	}{version, len(files), files})
+	if err != nil || len(body) > 8<<20 {
+		writeJSON(w, 413, errorResponse{Error: "The file list is too large. Use the photos page."})
+		return
+	}
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(body)
 }

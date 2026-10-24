@@ -9,7 +9,8 @@ import (
 	"testing"
 )
 
-// Snapshot captured from pre-port commit 4671623.
+// Snapshot captured from pre-port commit 4671623; list_site_files updated
+// for the metadata route and optional retry hashes (2026-10-24).
 // It covers discovery, tools/list, and every existing routing fixture result.
 func TestAppsOffByteIdentical(t *testing.T) {
 	s := NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

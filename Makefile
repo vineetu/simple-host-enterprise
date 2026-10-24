@@ -2,7 +2,7 @@
 #
 #   make test          go test ./..., scripts/check-features.sh, check-parity.sh,
 #                      settings_docs.py --check (docs/advanced follows the code),
-#                      and scripts/test-chart.sh when helm is on PATH
+#                      Node 22+ screen suites, and scripts/test-chart.sh when helm is on PATH
 #   make test-db       go test ./... against a throwaway Postgres in Docker
 #   make vuln          govulncheck
 #   make image         docker build -t simple-host:local
@@ -42,6 +42,7 @@ build:
 
 test:
 	go test ./...
+	node --test scripts/tests/*.test.cjs
 	./scripts/check-features.sh
 	./scripts/check-parity.sh
 	python3 scripts/settings_docs.py --check

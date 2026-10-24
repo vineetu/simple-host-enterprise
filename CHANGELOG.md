@@ -2,6 +2,14 @@
 
 ## Unreleased (v0.9.9)
 
+- Bound TIFF Deflate output in codec v3, check native image dimensions before
+  decoding, and apply decode deadlines. The MCP picker checks worker and Wasm
+  support before accepting HEIC/TIFF, with the photos page as its fallback.
+- Reconcile uncertain photo saves before retrying. Both photo screens use a
+  bounded file metadata route, so listing files no longer downloads a site's
+  archive. Photo uploads accept an optional If-Match version check.
+- Run the JavaScript screen regression suites in make test and CI with Node 22.
+
 - Replace the app and plugin icons with the Rounded Simple Host s.h mark,
   using the hosted exports. Raster exports are opaque cream. Page icon links
   use `?v=c`, brand sources are in `docs/brand/`, and the plugin is 0.16.1.

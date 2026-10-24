@@ -70,7 +70,11 @@ Prefer a synchronized local source project. Rebuild it with relative paths.
 If no local source exists, read what is live before changing anything: a deploy
 replaces every file, so anything you do not resend is deleted. With the
 connector, call `list_site_files` and `read_site_file` with the
-`active_version` from `get_site`. Without it, download the exact active
+`active_version` from `get_site`. Listing reads metadata, not the archive;
+`sha256_paths` optionally hashes up to 30 files of at most 1 MB each for retry
+checks. REST: `GET .../versions/<version>/files?sha256=<path>` (8 MiB response
+cap). Photo POSTs accept `If-Match`; recheck reserved names and hashes after an
+uncertain response before retrying. Without the connector, download the exact active
 deployed artifact:
 
 ```

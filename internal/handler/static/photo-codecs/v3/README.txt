@@ -6,9 +6,16 @@ person selected or dropped themselves. No URL input. All runtime requests stay
 on this server. decoder.js is the application's handwritten worker adapter.
 The page terminates each worker after 20 seconds (also on success/error), shows
 "Could not read this photo", continues the batch, and re-enables controls.
+The picker probes its actual blob worker and Wasm permissions before accepting
+HEIC/TIFF. Unsupported frames direct people to the photos link. MCP Apps CSP
+metadata has no worker-src or Wasm permission field (2026-01-26 spec):
+https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/2026-01-26/apps.mdx
 Inputs are capped at 80,000,000 bytes before reading them into memory; header
 sizes are checked against 50,000,000 pixels before HEIC display / TIFF decode.
-UTIF also bounds decoded and tile buffers to 200,000,000 bytes.
+UTIF bounds each decoded image and tile buffer to 200,000,000 bytes. Deflate
+output is copied incrementally into the strip/tile destination and aborts at
+its byte limit, with at most one extra 16 KiB output chunk and pako state.
+These are per-buffer limits, not a limit on total browser or Wasm memory.
 
 Accepted risk (SIM-185, checked 2026-10-23): libheif-js 1.23.5 bundles libheif
 1.23.5 and libde265 1.0.15, affected by CVE-2026-33164 and CVE-2026-33165.
@@ -41,7 +48,7 @@ interface-compatible decoder. The application loads them as separate files.
 UTIF 3.1.0 with local safety patches: UTIF.js. MIT, see LICENSE-UTIF.
 Changes: visited-offset set per buffer and 128-IFD maximum across top-level,
 SubIFD, Exif and maker-note traversal; IFD/value bounds before allocation;
-pixel/tile allocation caps. Original upstream file was 58,271 bytes.
+pixel/tile allocation caps; streaming, bounded Deflate output. Original upstream file was 58,271 bytes.
 License files are unchanged because the dependency versions did not change.
 Package and source:
 https://registry.npmjs.org/utif/-/utif-3.1.0.tgz
@@ -53,5 +60,5 @@ Package and source:
 https://registry.npmjs.org/pako/-/pako-1.0.11.tgz
 https://github.com/nodeca/pako/tree/1.0.11
 
-Bump the /v2/ asset directory if any decoder or adapter changes after release;
+Bump the /v3/ asset directory if any decoder or adapter changes after release;
 these URLs are served with a one-year immutable cache header.

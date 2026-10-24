@@ -5,7 +5,8 @@
   const shrink = file => SHPhotos.shrink(file, { maxBytes: Number($('photo-page').dataset.maxBytes), maxDimension: Number($('photo-page').dataset.maxDimension) });
   const selected = new URLSearchParams(location.search).get('site') || '';
   const account = new URLSearchParams(location.search).get('account') || '';
-  let busy = false, photos = [];
+  let busy = false, photos = [], batchSite = '';
+  const { occupiedPaths, photoPath, digest } = SHPhotos;
   const slug = SHPhotos.slug;
   const size = bytes => bytes >= 1000000 ? (bytes / 1000000).toFixed(1) + ' MB' : Math.max(1, Math.round(bytes / 1000)) + ' KB';
   function element(tag, text, parent) {
@@ -22,10 +23,10 @@
   }
   function lock(on) {
     busy = on;
-    $('files').disabled = on;
-    $('site').disabled = on;
+    $('files').disabled = on || photos.some(photo => photo.attempted);
+    $('site').disabled = on || photos.some(photo => photo.attempted);
     $('save').disabled = on || !photos.length || !$('site').value;
-    $('photos').querySelectorAll('button,input').forEach(node => { node.disabled = on; });
+    $('photos').querySelectorAll('button,input').forEach(node => { node.disabled = on || photos.some(photo => photo.attempted); });
   }
   async function loadSites() {
     const [me, sites] = await Promise.all([request('/api/me'), request('/api/collaboration/sites')]);
@@ -59,7 +60,7 @@
     remove.addEventListener('click', () => { URL.revokeObjectURL(photo.url); photos = photos.filter(item => item !== photo); row.remove(); lock(false); });
   }
   async function choose(files) {
-    if (busy) return;
+    if (busy || photos.some(photo => photo.attempted)) return;
     if (files.length + photos.length > 30) { status('Choose up to 30 photos at a time.'); return; }
     lock(true);
     const failures = [];
@@ -88,15 +89,42 @@
   $('drop').addEventListener('drop', event => choose(Array.from(event.dataTransfer.files)));
   $('save').addEventListener('click', async () => {
     if (busy || !photos.length || !$('site').value) return;
-    const data = new FormData();
-    for (const photo of photos) {
-      const name = slug(photo.input.value); photo.input.value = name;
-      data.append('photos', photo.blob, name + photo.ext);
-    }
     lock(true); status('Saving photos…');
+    let writing = false;
     try {
-      const [owner, site] = $('site').value.split('/');
-      const result = await request('/v1/sites/' + encodeURIComponent(site) + '/photos?owner=' + encodeURIComponent(owner), { method: 'POST', body: data });
+      const target = $('site').value;
+      if (batchSite !== target) { photos.forEach(photo => { delete photo.path; }); batchSite = target; }
+      const [owner, site] = target.split('/');
+      const base = '/api/collaboration/sites/' + encodeURIComponent(owner) + '/' + encodeURIComponent(site);
+      const current = await request(base);
+      const query = new URLSearchParams();
+      photos.filter(photo => photo.attempted).forEach(photo => query.append('sha256', photo.path));
+      const listing = await request(base + '/versions/' + current.active_version + '/files?' + query);
+      if (!Array.isArray(listing.files)) throw new Error('Could not read the site files.');
+      const occupied = occupiedPaths(listing.files);
+      for (const photo of photos) {
+        const stored = listing.files.find(file => file.path === photo.path);
+        if (photo.attempted && stored) {
+          if (stored.sha256 !== await digest(photo.blob)) throw new Error('A file changed during the save. Check the site before choosing these photos again.');
+          photo.saved = true;
+        }
+        if (!photo.attempted) photo.path = photoPath(occupied, slug(photo.input.value) + photo.ext);
+        if (photo.path) occupied.set(photo.path, false);
+      }
+      const remaining = photos.filter(photo => !photo.saved);
+      let result = {site: target, version: current.active_version, photos: []};
+      if (remaining.length) {
+        const data = new FormData();
+        for (const photo of remaining) {
+          data.append('photos', photo.blob, photo.path.slice('images/'.length));
+          photo.attempted = true;
+        }
+        writing = true;
+        result = await request('/v1/sites/' + encodeURIComponent(site) + '/photos?owner=' + encodeURIComponent(owner), { method: 'POST', headers: {'If-Match': current.etag}, body: data });
+        writing = false;
+      }
+      const reconciled = photos.filter(photo => photo.saved).map(photo => ({path: photo.path, url: current.url.replace(/\/$/, '') + '/' + photo.path}));
+      result.photos = [...reconciled, ...result.photos];
       $('results').replaceChildren();
       for (const photo of result.photos) {
         const row = element('div', '', $('results')); row.className = 'result';
@@ -108,7 +136,12 @@
       $('editor').hidden = true; $('done').hidden = false;
       status('Saved as version ' + result.version + '.');
       photos.forEach(photo => URL.revokeObjectURL(photo.url)); photos = [];
-    } catch (error) { status(error.message); }
+    } catch (error) {
+      if (writing && error.status >= 400 && error.status < 500) {
+        photos.filter(photo => !photo.saved).forEach(photo => { delete photo.attempted; delete photo.path; });
+      }
+      status((photos.some(photo => photo.attempted) ? 'The save outcome is uncertain. Save again to check the saved files before retrying. ' : '') + error.message);
+    }
     finally { lock(false); }
   });
   $('again').addEventListener('click', event => {

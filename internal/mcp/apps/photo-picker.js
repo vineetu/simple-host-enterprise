@@ -1,26 +1,6 @@
 (function () {
   'use strict';
-  function occupiedPaths(files) {
-    const occupied = new Map();
-    for (const file of files) {
-      occupied.set(file.path, false);
-      const parts = file.path.split('/');
-      for (let i = 1; i < parts.length; i++) occupied.set(parts.slice(0, i).join('/'), true);
-    }
-    return occupied;
-  }
-  function photoPath(occupied, name) {
-    if (occupied.get('images') === false) throw new Error('The images path is a file. Rename it before adding photos.');
-    const dot = name.lastIndexOf('.'), stem = name.slice(0, dot), ext = name.slice(dot);
-    let path = 'images/' + name;
-    for (let n = 2; occupied.has(path); n++) {
-      if (occupied.get(path)) throw new Error('A folder uses this photo name. Choose another name.');
-      const suffix = '-' + n;
-      path = 'images/' + stem.slice(0, 60 - suffix.length) + suffix + ext;
-    }
-    occupied.set(path, false);
-    return path;
-  }
+  const { occupiedPaths, photoPath } = SHPhotos;
   // A selection is one update and therefore one site version.
   function batches(photos, site, maxBodyBytes) {
     const files = photos.map(photo => ({path:photo.path,content:photo.base64,encoding:'base64'}));
@@ -50,9 +30,9 @@
     parent.appendChild(node); return node;
   }
   function workerFactory() {
-    const base = config.assetOrigin + '/photo-codecs/v2/';
+    const base = config.assetOrigin + '/photo-codecs/v3/';
     // Cross-origin Worker(url) is forbidden. Blob workers inherit the host CSP;
-    // importScripts uses resourceDomains, including script-wrapped Wasm bytes.
+    // The probe below verifies the inherited worker and Wasm permissions.
     const source = 'self.photoCodecBase=' + JSON.stringify(base) + ';importScripts(' + JSON.stringify(base + 'decoder.js?apps=1') + ');';
     const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
     try {
@@ -62,6 +42,23 @@
       return worker;
     } catch (error) { URL.revokeObjectURL(url); throw error; }
   }
+  let codecSupport;
+  function codecsAvailable() {
+    return codecSupport ||= new Promise(resolve => {
+      let worker, timer;
+      const done = value => { clearTimeout(timer); if (worker) worker.terminate(); resolve(value); };
+      try {
+        worker = workerFactory();
+        timer = setTimeout(() => done(false), 3000);
+        worker.onmessage = event => done(event.data.worker === true && event.data.wasm === true);
+        worker.onerror = () => done(false);
+        worker.postMessage({ kind: 'probe' });
+      } catch (_) { done(false); }
+    });
+  }
+  codecsAvailable().then(available => {
+    if (!available) $('files').accept = 'image/jpeg,image/png,image/webp,image/avif,image/bmp,image/gif';
+  });
   // Only the site/error state is consumed. Never parse, retain, or use photos_url.
   app.on('tool-input', params => {
     if (params.arguments?.archive === true) { archive = true; ready = false; document.body.hidden = true; return; }
@@ -99,6 +96,14 @@
     if (files.length + photos.filter(photo => !photo.failed).length > 30) { status('Choose up to 30 photos at a time.'); return; }
     busy = true; lock(); $('add').hidden = true; $('actions').hidden = false;
     for (const [index, file] of files.entries()) {
+      // File filters are hints; inspect signatures before accepting a codec file.
+      try {
+        if (await SHPhotos.codecKind(file) && !await codecsAvailable()) {
+          $('fallback').hidden = false;
+          status('This chat cannot process HEIC or TIFF photos. Use the photos link in the chat.');
+          continue;
+        }
+      } catch (_) { $('fallback').hidden = false; continue; }
       status('Shrinking photos... ' + (index + 1) + ' of ' + files.length);
       const row = element('div', '', $('photos'));
       const image = element('img', '', row, 'photo-visual'); image.alt = 'Photo preview'; image.hidden = true;
@@ -147,15 +152,15 @@
       if (!owner || !name) throw new Error('Choose a site from the list.');
       const target = {owner,site:name};
       const current = await app.callTool('get_site', target);
-      const listing = await app.callTool('list_site_files', {...target,version:current.active_version});
+      const listing = await app.callTool('list_site_files', {...target,version:current.active_version,sha256_paths:remaining.filter(photo => photo.attempted).map(photo => photo.path)});
       current.files = listing.files;
       if (!Array.isArray(current.files)) throw new Error('Could not read the site files. Try again.');
       // Reconcile a lost reply before assigning any new names. Retry the same
       // reserved path when the previous write cannot be confirmed.
       for (const photo of remaining) {
         if (photo.attempted && current.files.some(file => file.path === photo.path)) {
-          const stored = await app.callTool('read_site_file', {...target,version:current.active_version,path:photo.path});
-          if (stored.encoding === 'base64' && stored.content === photo.base64) markSaved(photo);
+          const stored = current.files.find(file => file.path === photo.path);
+          if (stored.sha256 === await SHPhotos.digest(photo.blob)) markSaved(photo);
           else throw new Error('A file changed during the save. Remove this photo and choose it again.');
         }
       }
@@ -178,7 +183,10 @@
         }
       }
       complete();
-    } catch (error) { status(error.message); }
+    } catch (error) {
+      if (/file list is too large/i.test(error.message)) $('fallback').hidden = false;
+      status((photos.some(photo => photo.attempted && !photo.saved) ? 'The save outcome is uncertain. Finish again to check the saved files. ' : '') + error.message);
+    }
     finally { busy = false; lock(); }
   });
   app.start().catch(error => status(error.message));

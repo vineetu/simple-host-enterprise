@@ -71,7 +71,7 @@ function picker({commit = true, fail = true, failAt = 1, maxBodyBytes = 16000000
   const document = {getElementById:get,createElement:node,body:{hidden:false}};
   const app = {hostCapabilities:{serverTools:{}},on:(k,fn)=>handlers[k]=fn,start:async()=>{},callTool:async(name,args)=>{
     if(name==='get_site')return {etag:'v1',active_version:1};
-    if(name==='list_site_files')return {files};
+    if(name==='list_site_files')return {files:files.map(file=>({...file,sha256:file.size===3?'abc':'different'}))};
     if(name==='read_site_file')return {encoding:'base64',content:files.find(f=>f.path===args.path)?.size===3?'YWJj':'different'};
     if(name==='deploy_site'){
       writes.push(args);if(commit || failed) files=args.files.map(file=>({path:file.path,size:3}));
@@ -80,7 +80,7 @@ function picker({commit = true, fail = true, failAt = 1, maxBodyBytes = 16000000
     }
   }};
   const ctx = vm.createContext({document,window:{addEventListener(){}},SHApp:app,SHPhotoConfig:{maxBodyBytes},
-    SHPhotos:{slug, dataURL:async()=> 'data:image/webp;base64,YWJj',shrink:async f=>{if(f.bad)throw Error('bad');return {blob:{size:3},ext:'.webp'};}}, TextEncoder});
+    SHPhotos:{slug, occupiedPaths, photoPath, digest:async()=> 'abc', codecKind:async file=>/\.(heic|tiff?)$/i.test(file.name)?'tiff':'', dataURL:async()=> 'data:image/webp;base64,YWJj',shrink:async f=>{if(f.bad)throw Error('bad');return {blob:{size:3},ext:'.webp'};}}, TextEncoder, setTimeout, clearTimeout});
   vm.runInContext(fs.readFileSync('internal/mcp/apps/photo-picker.js','utf8'),ctx);
   handlers['tool-input']({arguments:{site:'blog'}});handlers['tool-result']({structuredContent:{site:'alice/blog'}});
   return {get,document,handlers,writes,setFiles:value=>files=value,
@@ -98,7 +98,7 @@ test('unconfirmed save retries the reserved path, including a mismatched size', 
  }
 });
 test('failed selections release capacity; unsaved photos can be removed and only saved photos count', async()=>{
- const m=picker({fail:false});await m.add(Array.from({length:30},()=>({name:'bad.heic',bad:true})));
+ const m=picker({fail:false});await m.add(Array.from({length:30},()=>({name:'bad.jpg',bad:true})));
  assert.equal(m.get('add').hidden,false);assert.equal(m.get('finish').disabled,true);
  await m.add([{name:'front.jpg'},{name:'back.jpg'}]);assert.equal(m.get('add').hidden,false);
  const row=m.get('photos').children.at(-1);await row.children.at(-1).events.click();assert.equal(row.removed,true);
@@ -159,4 +159,11 @@ test('bridge pins the parent origin for replies and notifications',async()=>{
  let count=0;app.on('tool-result',()=>count++);
  for(const origin of ['https://other.example','null','https://host.example'])listeners.message({source:parent,origin,data:{jsonrpc:'2.0',method:'ui/notifications/tool-result',params:{}}});
  assert.equal(count,1);
+});
+
+test('blocked codec worker refuses HEIC/TIFF before adding a selection',async()=>{
+ const m=picker({fail:false}); await m.add([{name:'front.heic'},{name:'scan.tiff'}]);
+ assert.equal(m.get('photos').children.length,0); assert.equal(m.get('fallback').hidden,false);
+ assert.equal(m.get('finish').disabled,true); assert.doesNotMatch(m.get('files').accept,/heic|tiff/);
+ await m.add([{name:'front.jpg'}]); await m.save(); assert.equal(m.writes.length,1);
 });

@@ -53,6 +53,9 @@ func (h *SiteHandler) addPhotos(w http.ResponseWriter, r *http.Request) {
 	if !ok || !requireOwnerRole(w, access) {
 		return
 	}
+	if !requireSitePrecondition(w, r, access.Site, false) {
+		return
+	}
 	rc := http.NewResponseController(w)
 	_ = rc.SetReadDeadline(time.Now().Add(60 * time.Second))
 	defer rc.SetReadDeadline(time.Time{})

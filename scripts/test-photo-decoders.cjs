@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const root = path.join(__dirname, '../internal/handler/static/photo-codecs/v2');
+const root = path.join(__dirname, '../internal/handler/static/photo-codecs/v3');
 function environment() {
   const ctx = vm.createContext({console, ArrayBuffer, Uint8Array, Uint8ClampedArray, setTimeout});
   ctx.self = ctx;
@@ -26,6 +26,29 @@ function environment() {
   new DataView(malformed).setUint32(14, 0xffffffff, false);
   assert.throws(() => utif.decode(malformed), /TIFF/);
 
+  const fixture = fs.readFileSync(path.join(__dirname, '../internal/handler/testdata/photos/deflate-overflow.tiff'));
+  const overflow = fixture.buffer.slice(fixture.byteOffset, fixture.byteOffset + fixture.byteLength);
+  const page = utif.decode(overflow)[0];
+  let chunks = 0, largest = 0;
+  const Inflate = ctx.pako.Inflate;
+  ctx.pako.Inflate = function(options) {
+    const stream = new Inflate(options);
+    const push = stream.push;
+    stream.push = function(...args) {
+      const onData = this.onData;
+      this.onData = chunk => { chunks++; largest = Math.max(largest, chunk.length); return onData(chunk); };
+      return push.apply(this, args);
+    };
+    return stream;
+  };
+  assert.throws(() => utif.decodeImage(overflow, page), /Deflate output too large/);
+  assert.equal(chunks, 1); assert.equal(largest, 16384);
+  // A strip must not borrow space from the next strip in the image buffer.
+  const compressed = require('node:zlib').deflateSync(Buffer.alloc(2));
+  const image = {width:1,height:2,t258:[8],t277:[1]};
+  assert.throws(() => utif.decode._decompress(image, [], compressed, 0, compressed.length, 8, new Uint8Array(2), 0, 1, 1), /Deflate output too large/);
+  const target = new Uint8Array(2);
+  utif.decode._decompress(image, [], compressed, 0, compressed.length, 8, target, 0, 1, 2);
   // Exercise the actual adapter: size checks must precede loading codecs and pixels.
   vm.runInContext(fs.readFileSync(path.join(root, 'decoder.js'), 'utf8'), ctx);
   let result, loaded = false, displayed = false;

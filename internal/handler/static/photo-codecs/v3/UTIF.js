@@ -151,7 +151,7 @@ UTIF.decodeImage = function(buff, img, ifds)
 		var rps = img["t278"] ? img["t278"][0] : img.height;   rps = Math.min(rps, img.height);
 		for(var i=0; i<soff.length; i++)
 		{
-			UTIF.decode._decompress(img,ifds, data, soff[i], bcnt[i], cmpr, bytes, Math.ceil(bilen/8)|0, fo);
+			UTIF.decode._decompress(img,ifds, data, soff[i], bcnt[i], cmpr, bytes, Math.ceil(bilen/8)|0, fo, Math.min(rps, img.height-i*rps)*(bipl>>>3));
 			bilen += bipl * rps;
 		}
 		bilen = Math.min(bilen, bytes.length*8);
@@ -159,18 +159,28 @@ UTIF.decodeImage = function(buff, img, ifds)
 	img.data = new Uint8Array(bytes.buffer, 0, Math.ceil(bilen/8)|0);
 }
 
-UTIF.decode._decompress = function(img,ifds, data, off, len, cmpr, tgt, toff, fo)  // fill order
+UTIF.decode._decompress = function(img,ifds, data, off, len, cmpr, tgt, toff, fo, outputLimit)  // fill order
 {
 	//console.log("compression", cmpr);
 	//var time = Date.now();
 	if(false) {}
-	else if(cmpr==1 || (len==tgt.length && cmpr!=32767)) for(var j=0; j<len; j++) tgt[toff+j] = data[off+j];
+	else if(cmpr==1 || (len==tgt.length && cmpr!=32767 && cmpr!=8 && cmpr!=32946)) for(var j=0; j<len; j++) tgt[toff+j] = data[off+j];
 	else if(cmpr==3) UTIF.decode._decodeG3 (data, off, len, tgt, toff, img.width, fo);
 	else if(cmpr==4) UTIF.decode._decodeG4 (data, off, len, tgt, toff, img.width, fo);
 	else if(cmpr==5) UTIF.decode._decodeLZW(data, off, tgt, toff);
 	else if(cmpr==6) UTIF.decode._decodeOldJPEG(img, data, off, len, tgt, toff);
 	else if(cmpr==7) UTIF.decode._decodeNewJPEG(img, data, off, len, tgt, toff);
-	else if(cmpr==8) {  var src = new Uint8Array(data.buffer,off,len);  var bin = pako["inflate"](src);  for(var i=0; i<bin.length; i++) tgt[toff+i]=bin[i];  }
+	else if(cmpr==8 || cmpr==32946) {
+  var limit = Math.min(tgt.length-toff, outputLimit == null ? tgt.length-toff : outputLimit);
+  if (!Number.isSafeInteger(limit) || limit < 0) throw new Error("TIFF strip too large");
+  var written = 0, inflate = new pako.Inflate({chunkSize: 16384});
+  inflate.onData = function(chunk) {
+   if (chunk.length > limit-written) throw new Error("TIFF Deflate output too large");
+   tgt.set(chunk, toff+written); written += chunk.length;
+  };
+  inflate.push(new Uint8Array(data.buffer, data.byteOffset+off, len), true);
+  if (inflate.err || !inflate.ended) throw new Error("Invalid TIFF Deflate stream");
+ }
 	else if(cmpr==32767) UTIF.decode._decodeARW(img, data, off, len, tgt, toff);
 	else if(cmpr==32773) UTIF.decode._decodePackBits(data, off, len, tgt, toff);
 	else if(cmpr==32809) UTIF.decode._decodeThunder (data, off, len, tgt, toff);

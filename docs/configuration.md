@@ -522,13 +522,17 @@ case-sensitive **username** (handle) returned by `get_account`, not the email
 or team name. Whitespace around account entries is ignored. Empty entries
 and other flag shapes refuse startup. Restart after changing configuration.
 All flags stay off until Kubernetes smoke and interactive host validation are verified. With all
-flags off, the previous MCP inventory and results are byte-identical;
+flags off, Apps add no inventory or result changes. The metadata file-list
+improvement applies with flags off too;
 `add_photos` is hidden from that inventory but remains callable by name.
 Its fallback is this instance's `/photos?site=owner/site` address, with an
 account hint that prevents silently selecting a different browser account's
 same-named site. The page uses the existing company session and team rules.
 No new credential type is created. Photo batches create one version and retain
-other files. The picker limits each photo to a share of the inline upload cap.
+other files. The picker limits each photo to a share of the inline upload cap. It checks
+worker and Wasm support before accepting HEIC/TIFF; unsupported frames direct
+people to the photos link. Both screens check native headers against 50 MP,
+apply decode deadlines, and reconcile uncertain saves before retrying.
 The page accepts at most 30 photos, 1,000,000 bytes each, and 1600 pixels per side.
 The bundled decoder versions, source, licenses, and inherited decoder limitations
-are recorded in `/photo-codecs/v2/README.txt`.
+are recorded in `/photo-codecs/v3/README.txt`.

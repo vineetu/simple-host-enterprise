@@ -3,7 +3,9 @@ package handler
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/jpeg"
 	"io/fs"
@@ -16,10 +18,13 @@ import (
 	"github.com/vsriram/simple-host/internal/db"
 )
 
-func photoRequest(w *accessWorld, user, owner string, names []string, data [][]byte, session bool, origin string) *httptest.ResponseRecorder {
+func photoRequest(w *accessWorld, user, owner string, names []string, data [][]byte, session bool, origin string, etags ...string) *httptest.ResponseRecorder {
 	body, kind := photoMultipart(w.t, names, data)
 	r := httptest.NewRequest("POST", "https://"+accessBase+"/v1/sites/demo/photos?owner="+owner, strings.NewReader(body))
 	r.Header.Set("Content-Type", kind)
+	if len(etags) > 0 {
+		r.Header.Set("If-Match", etags[0])
+	}
 	r.Header.Set("X-Simple-Host-Client", "control-ui")
 	if session {
 		r.AddCookie(w.cookie(user, ""))
@@ -152,5 +157,40 @@ func TestPhotosPageOIDCAndCSP(t *testing.T) {
 		if rec.Code != 200 || !strings.Contains(rec.Header().Get("Content-Security-Policy"), "worker-src 'self'") || strings.Contains(rec.Body.String(), "__PHOTO") {
 			t.Fatal("bad photo page")
 		}
+	}
+}
+
+func TestPhotoRetryMetadataAndPrecondition(t *testing.T) {
+	w := newAccessWorld(t)
+	w.deploy("alice", "/api/sites/demo")
+	current := w.api("alice", "GET", "/api/collaboration/sites/alice/demo", nil)
+	var site collaborationSiteResponse
+	if err := json.Unmarshal(current.Body.Bytes(), &site); err != nil {
+		t.Fatal(err)
+	}
+	jpg := photoJPEG(t, 8, 6)
+	if rec := photoRequest(w, "alice", "alice", []string{"front.jpg"}, [][]byte{jpg}, false, "", site.ETag); rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body)
+	}
+	// A stale reservation cannot silently receive a collision suffix.
+	if rec := photoRequest(w, "alice", "alice", []string{"front.jpg"}, [][]byte{jpg}, false, "", site.ETag); rec.Code != 412 {
+		t.Fatal(rec.Code, rec.Body)
+	}
+	path := "/api/collaboration/sites/alice/demo/versions/2/files?sha256=images%2Ffront.jpg"
+	rec := w.api("alice", "GET", path, nil)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), fmt.Sprintf("%x", sha256.Sum256(jpg))) || !strings.Contains(rec.Body.String(), "index.html") {
+		t.Fatal(rec.Code, rec.Body)
+	}
+	for _, actor := range []string{"vera", "root"} {
+		if denied := w.api(actor, "GET", path, nil); denied.Code != 404 {
+			t.Fatal(actor, denied.Code)
+		}
+	}
+	if missing := w.api("alice", "GET", "/api/collaboration/sites/alice/demo/versions/99/files", nil); missing.Code != 404 {
+		t.Fatal(missing.Code)
+	}
+	// Requested hashes never escape the retained version or open arbitrary paths.
+	if safe := w.api("alice", "GET", path+"&sha256=../../outside", nil); safe.Code != 200 || strings.Contains(safe.Body.String(), "outside") {
+		t.Fatal(safe.Code, safe.Body)
 	}
 }

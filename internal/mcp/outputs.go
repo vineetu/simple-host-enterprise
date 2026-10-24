@@ -305,8 +305,9 @@ func outputSchemas() map[string]map[string]any {
 			"version": outInteger("The version listed."),
 			"count":   outInteger("How many files."),
 			"files": outArray("Every file, sorted by path.", outObject(map[string]any{
-				"path": outString("Path from the site root, as deploy_site takes it."),
-				"size": outInteger("Size in bytes."),
+				"path":   outString("Path from the site root, as deploy_site takes it."),
+				"sha256": outString("Requested SHA-256 for a file of at most 1 MB; omitted otherwise."),
+				"size":   outInteger("Size in bytes."),
 			}, "path", "size")),
 		}, "version", "count", "files"),
 		"read_site_file": outObject(map[string]any{

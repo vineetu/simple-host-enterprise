@@ -202,14 +202,20 @@ func TestSiteFilesAreListedAndRead(t *testing.T) {
 		"css/site.css": []byte("p{}"),
 		"big.txt":      bytes.Repeat([]byte("a"), maxFileReadBytes+1),
 	})}
+	archive := up.body
+	up.body = []byte(`{"version":3,"count":3,"files":[{"path":"index.html","size":9}]}`)
 	s := NewServer(up, "simple-host", "0.10.0")
-	listed := callTool(t, s, "list_site_files", map[string]any{"site": "d", "owner": "a", "version": 3})
-	if up.last.URL.Path != "/api/collaboration/sites/a/d/versions/3/archive" {
+	listed := callTool(t, s, "list_site_files", map[string]any{"site": "d", "owner": "a", "version": 3, "sha256_paths": []any{"images/front.webp"}})
+	if up.last.URL.Path != "/api/collaboration/sites/a/d/versions/3/files" {
 		t.Errorf("archive route = %s", up.last.URL.Path)
 	}
 	if structured, _ := listed["structuredContent"].(map[string]any); structured["count"] != float64(3) {
 		t.Errorf("list_site_files = %v, want three files and no directory", listed)
 	}
+	if up.last.URL.Query().Get("sha256") != "images/front.webp" {
+		t.Fatal("hash paths not forwarded")
+	}
+	up.body = archive
 	read := callTool(t, s, "read_site_file", map[string]any{"site": "d", "owner": "a", "version": 3, "path": "./css/site.css"})
 	if structured, _ := read["structuredContent"].(map[string]any); structured["content"] != "p{}" {
 		t.Errorf("read_site_file = %v", read)

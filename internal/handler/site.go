@@ -235,6 +235,7 @@ func (h *SiteHandler) Register(mux *http.ServeMux, authMiddleware, skillVersionM
 	mux.Handle("POST /api/collaboration/sites/{owner}/{sitename}/rollback", browserWrite(ownerMutation(http.HandlerFunc(h.rollbackCollaborationSite))))
 	mux.Handle("GET /api/collaboration/sites/{owner}/{sitename}/versions", ownerMutation(http.HandlerFunc(h.listCollaborationVersions)))
 	mux.Handle("GET /api/collaboration/sites/{owner}/{sitename}/versions/{version}/archive", collaborationArchive(http.HandlerFunc(h.downloadCollaborationVersion)))
+	mux.Handle("GET /api/collaboration/sites/{owner}/{sitename}/versions/{version}/files", collaborationArchive(http.HandlerFunc(h.listCollaborationVersionFiles)))
 	h.registerPersonHome(mux, ownerMutation, browserWrite)
 	h.registerViewerRoutes(mux, ownerMutation, browserWrite)
 	h.registerAssetAdminRoutes(mux, ownerMutation, browserWrite)

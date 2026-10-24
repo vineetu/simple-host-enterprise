@@ -51,7 +51,7 @@ const SiteAPIStorageWritePattern = "HOSTGATE WRITE /api/sites/{site}/storage/...
 var routeKeyAccess = map[string]keyAccess{
 	"POST /v1/sites/{site}/photos":       keyPublish,
 	"GET /photos":                        keyNever,
-	"GET /photo-codecs/v2/{file}":        keyNever,
+	"GET /photo-codecs/v3/{file}":        keyNever,
 	"GET /api/me/home":                   keyNever,
 	"PUT /api/me/home":                   keyNever,
 	"GET /api/me/bio":                    keyNever,
@@ -73,6 +73,7 @@ var routeKeyAccess = map[string]keyAccess{
 	"POST /api/collaboration/sites/{owner}/{sitename}/rollback":                    keyPublish,
 	"GET /api/collaboration/sites/{owner}/{sitename}/versions":                     keyPublish,
 	"GET /api/collaboration/sites/{owner}/{sitename}/versions/{version}/archive":   keyPublish,
+	"GET /api/collaboration/sites/{owner}/{sitename}/versions/{version}/files":     keyPublish,
 	"GET /api/collaboration/sites/{owner}/{sitename}/versions/{version}/preview":   keyPublish,
 	"GET /api/collaboration/sites/{owner}/{sitename}/state-versions":               keyPublish,
 	"GET /api/collaboration/sites/{owner}/{sitename}/state-versions/{id}":          keyPublish,

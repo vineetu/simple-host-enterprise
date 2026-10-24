@@ -4,6 +4,12 @@ function checkDimensions(width, height) {
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1 || width * height > maxPixels) throw new Error('Could not read this photo');
 }
 self.onmessage = async function (event) {
+  if (event.data.kind === 'probe') {
+    let wasm = false;
+    try { await WebAssembly.compile(new Uint8Array([0,97,115,109,1,0,0,0])); wasm = true; } catch (_) {}
+    self.postMessage({ worker: true, wasm });
+    return;
+  }
   try {
     const { buffer, kind } = event.data;
     if (!(buffer instanceof ArrayBuffer) || buffer.byteLength > 80000000) throw new Error('Could not read this photo');
@@ -12,7 +18,7 @@ self.onmessage = async function (event) {
       const base = self.photoCodecBase || '';
       if (self.photoCodecBase) importScripts(base + 'wasm.js');
       importScripts(base + 'libheif.js');
-      const heif = await libheif({ ...(self.photoWasm ? { wasmBinary: Uint8Array.from(atob(self.photoWasm), c => c.charCodeAt(0)) } : {}), stdin: () => null, locateFile: name => '/photo-codecs/v2/' + name });
+      const heif = await libheif({ ...(self.photoWasm ? { wasmBinary: Uint8Array.from(atob(self.photoWasm), c => c.charCodeAt(0)) } : {}), stdin: () => null, locateFile: name => '/photo-codecs/v3/' + name });
       const decoder = new heif.HeifDecoder();
       const images = decoder.decode(new Uint8Array(buffer));
       if (!images.length) throw new Error('Could not read this HEIC photo.');

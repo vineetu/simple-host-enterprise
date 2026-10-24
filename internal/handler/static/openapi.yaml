@@ -80,6 +80,10 @@ paths:
       summary: Add processed photos in one site version
       description: Owner or owning team member only. The browser shrinks photos to 1600 pixels and removes metadata. The server validates JPEG/WebP containers without re-encoding. Other files are kept; quotas, scanning, ETag checks, and audit apply.
       parameters:
+        - in: header
+          name: If-Match
+          description: Optional ETag from get_site. Checked before allocating photo names and again when committing.
+          schema: {type: string}
         - in: path
           name: site
           required: true
@@ -132,7 +136,7 @@ paths:
         '412': {description: Site changed while preparing the photos; nothing was saved.}
         '413': {description: Photo, batch, or storage quota exceeded.}
         '429': {description: Upload concurrency or management rate limit reached.}
-  /photo-codecs/v2/{file}:
+  /photo-codecs/v3/{file}:
     get:
       operationId: photoCodec
       summary: Self-hosted photo decoder assets and licenses
@@ -1175,6 +1179,50 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
+
+  /api/collaboration/sites/{owner}/{sitename}/versions/{version}/files:
+    get:
+      summary: List retained version file metadata without downloading the archive
+      description: Owner/member operation. Returns paths and sizes, capped at 8 MiB. Repeated sha256 parameters request hashes for at most 30 files of at most 1000000 bytes each; larger or absent files have no hash. Uses the same retained-version admission as archive downloads.
+      tags: [Collaboration]
+      security:
+        - apiKey: []
+      parameters:
+        - $ref: '#/components/parameters/SkillVersion'
+        - $ref: '#/components/parameters/SimpleHostClient'
+        - $ref: '#/components/parameters/owner'
+        - $ref: '#/components/parameters/sitename'
+        - $ref: '#/components/parameters/version'
+        - in: query
+          name: sha256
+          schema: {type: array, maxItems: 30, items: {type: string}}
+          style: form
+          explode: true
+      responses:
+        '200':
+          description: Private, no-store file metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, count, files]
+                properties:
+                  version: {type: integer}
+                  count: {type: integer}
+                  files:
+                    type: array
+                    items:
+                      type: object
+                      required: [path, size]
+                      properties:
+                        path: {type: string}
+                        size: {type: integer}
+                        sha256: {type: string, description: Requested SHA-256 in lowercase hex.}
+        '400': {$ref: '#/components/responses/ManagementBadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '413': {description: File metadata exceeds the response cap.}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
 
   /api/collaboration/sites/{owner}/{sitename}/versions/{version}/archive:
     get:

@@ -7,12 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"sort"
 	"unicode/utf8"
 )
 
-// maxArchiveReadBytes bounds a version archive held in memory to list or read
-// it through the connector. The archive route allows two downloads at once,
+// maxArchiveReadBytes bounds a version archive held in memory to read a file
+// through the connector. The archive route allows two downloads at once,
 // so this is also the bound on what the two can hold together, twice over.
 const maxArchiveReadBytes = 64 << 20
 
@@ -30,23 +29,6 @@ func openArchive(archive []byte) (*zip.Reader, error) {
 		return nil, fmt.Errorf("the version archive could not be read: %w", err)
 	}
 	return reader, nil
-}
-
-// listArchive answers list_site_files: every regular file, sorted by path.
-func listArchive(archive []byte, version int) ([]byte, error) {
-	reader, err := openArchive(archive)
-	if err != nil {
-		return nil, err
-	}
-	files := make([]map[string]any, 0, len(reader.File))
-	for _, entry := range reader.File {
-		if entry.FileInfo().IsDir() {
-			continue
-		}
-		files = append(files, map[string]any{"path": entry.Name, "size": entry.UncompressedSize64})
-	}
-	sort.Slice(files, func(i, j int) bool { return files[i]["path"].(string) < files[j]["path"].(string) })
-	return json.Marshal(map[string]any{"version": version, "count": len(files), "files": files})
 }
 
 // readArchiveFile answers read_site_file: one file, as text when it is valid
