@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Add photos</title>
+  <link rel="stylesheet" href="/photos.css">
+</head>
+<body>
+  <main id="photo-page" data-max-bytes="1000000" data-max-dimension="1600">
+    <h1>Add photos</h1>
+    <p>Choose photos from your phone or computer. Small copies are saved to your site.</p>
+    <div id="signin"></div>
+    <section id="editor" hidden>
+      <label for="site">Site</label>
+      <select id="site"></select>
+      <div id="fixed-site"></div>
+      <div id="drop" class="drop">
+        <label class="pick" for="files">Choose photos</label>
+        <input id="files" type="file" multiple accept="image/*,.heic,.heif,.tif,.tiff,.avif,.bmp">
+        <p class="muted">Or drop photos here. Up to 30 at a time.</p>
+      </div>
+      <p class="muted">Camera and location details are removed on this device before saving.</p>
+      <p id="name-hint" class="muted">Give each photo a name, such as kitchen or front.</p>
+      <div id="photos"></div>
+      <button id="save" class="btn btn-primary" disabled>Save to site</button>
+    </section>
+    <p id="status" role="status" aria-live="polite"></p>
+    <section id="done" hidden>
+      <h2>Photos saved</h2>
+      <div id="results"></div>
+      <p>Paste this into your chat:</p>
+      <p id="summary"></p>
+      <button id="copy-summary" class="btn btn-secondary">Copy message</button>
+      <p><a href="/photos" id="again">Add more photos</a></p>
+    </section>
+    <p><a href="/dashboard">Your sites</a></p>
+    <p><small><a href="/photo-codecs/v2/README.txt">Photo decoder licenses and source</a></small></p>
+  </main>
+  <script src="/photo-process.js"></script>
+  <script src="/photos.js"></script>
+</body>
+</html>

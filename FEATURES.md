@@ -143,6 +143,30 @@ Config names are documented in `docs/configuration.md`; schema in
 
 ## 3. MCP server, OAuth connector, plugin.zip
 
+- **MCP Apps screens.** Optional photo picker (`add_photos`), My sites on
+  `list_sites`, and its weekly dashboard use `ui://` resources and the standard
+  host bridge. The dashboard calls `site_activity` with `days: 7` and reads the
+  latest three inbox/records table entries through `storage_list_resources` and
+  `storage_list_rows`. Key-value data and tables remain Postgres rows; files
+  remain bucket objects. All entries render as text. No thumbnails or nested
+  frames. The optional `get_site` preview is an open/copy card because sites
+  refuse framing. Four `MCP_APP_*` flags use off/on/accounts:<usernames>;
+  defaults are off pending Kubernetes smoke and interactive host validation. With every flag off the
+  original tool inventory and results are unchanged. `add_photos` stays callable
+  by name and returns the company sign-in page when the host has no UI.
+- **Add photos page.** `GET /photos` uses the company OIDC browser session.
+  `POST /v1/sites/{site}/photos` accepts at most 30 client-encoded JPEG/WebP
+  images, each at most 1,000,000 bytes and 1600 pixels per side. Optional `owner`
+  selects a team namespace; only the owner or owning team's members can write.
+  The browser strips metadata, using self-hosted HEIF and TIFF workers at
+  `GET /photo-codecs/v2/{file}`. Server validation, collision-safe names under
+  `images/`, and one ordinary versioned update preserve other files and apply
+  ETags, quotas, scanning, and audit. The picker uses `deploy_site` with
+  `keep_other_files`, an ETag, and base64 files through the host session; no
+  credentials enter the frame. Its selection fits one inline update.
+- **Where.** `internal/mcp/apps.go`, `internal/mcp/apps/`,
+  `internal/handler/photos*.go`, and `internal/handler/static/photo*`.
+
 - **What.** `/mcp` is a JSON-RPC MCP server whose tools call the REST routes
   in-process, carrying the caller's own identity. AI apps connect by OAuth:
   protected-resource metadata (RFC 9728), authorization-server metadata

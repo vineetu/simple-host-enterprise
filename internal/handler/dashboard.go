@@ -56,6 +56,7 @@ func (h *DashboardHandler) Register(mux *http.ServeMux, authMiddleware func(http
 	// probe (auth.GetUser after a lightweight optional-auth wrapper) so it
 	// can render either state without two routes.
 	mux.HandleFunc("GET /dashboard", h.dashboard)
+	mux.HandleFunc("GET /photos", h.photos)
 }
 
 func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {

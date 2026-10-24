@@ -60,6 +60,30 @@ spec:
             - configMapRef:
                 name: simple-host-config
           env:
+            - name: MCP_APP_PHOTO_PICKER
+              valueFrom:
+                configMapKeyRef:
+                  name: simple-host-config
+                  key: MCP_APP_PHOTO_PICKER
+                  optional: true
+            - name: MCP_APP_MY_SITES
+              valueFrom:
+                configMapKeyRef:
+                  name: simple-host-config
+                  key: MCP_APP_MY_SITES
+                  optional: true
+            - name: MCP_APP_DASHBOARD
+              valueFrom:
+                configMapKeyRef:
+                  name: simple-host-config
+                  key: MCP_APP_DASHBOARD
+                  optional: true
+            - name: MCP_APP_SITE_PREVIEW
+              valueFrom:
+                configMapKeyRef:
+                  name: simple-host-config
+                  key: MCP_APP_SITE_PREVIEW
+                  optional: true
             # Only the database secrets, one key each: migrate never needs
             # the OIDC, session, bucket or envelope keys. DB_PASSWORD (or a
             # DB_DSN kept in the Secret) is the owning role migrations run

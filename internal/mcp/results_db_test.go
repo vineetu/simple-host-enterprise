@@ -265,6 +265,7 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	call("set_showcase_site", map[string]any{"site": "demo", "pinned": true, "order": float64(10)})
 	call("deploy_site", map[string]any{"site": "other", "owner": "alice", "intent": "create", "files": []any{index}})
 	etag := call("get_site", map[string]any{"site": "demo", "owner": "alice"})["etag"].(string)
+	call("add_photos", map[string]any{"site": "alice/demo"})
 	call("deploy_site", map[string]any{"site": "demo", "owner": "alice", "intent": "update", "etag": etag, "files": []any{index, logo}})
 	call("list_site_versions", map[string]any{"site": "demo"})
 	call("list_site_versions", map[string]any{"site": "demo", "owner": "alice"})

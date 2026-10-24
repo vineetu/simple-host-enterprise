@@ -221,6 +221,7 @@ func (h *SiteHandler) Register(mux *http.ServeMux, authMiddleware, skillVersionM
 	// stay unwrapped: they leak nothing to a cross-origin page that cannot read
 	// the response, and the state routes are not cookie-authenticated at all.
 	browserWrite := cookieOriginCheck(h.hosts, h.publicBaseURL)
+	mux.Handle("POST /v1/sites/{site}/photos", browserWrite(ownerUpload(http.HandlerFunc(h.addPhotos))))
 	mux.Handle("POST /api/sites/{sitename}", browserWrite(ownerUpload(http.HandlerFunc(h.createSite))))
 	mux.Handle("PUT /api/sites/{sitename}", browserWrite(ownerUpload(http.HandlerFunc(h.updateSite))))
 	mux.Handle("DELETE /api/sites/{sitename}", browserWrite(ownerMutation(http.HandlerFunc(h.deleteSite))))

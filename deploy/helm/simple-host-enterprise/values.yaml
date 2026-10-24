@@ -189,3 +189,10 @@ podLabels: {}
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# off, on, or accounts:<username>,<username>.
+mcpApps:
+  photoPicker: "off"
+  mySites: "off"
+  dashboard: "off"
+  sitePreview: "off"

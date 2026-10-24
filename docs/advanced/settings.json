@@ -539,6 +539,46 @@
       "basic": false
     },
     {
+      "name": "MCP_APP_PHOTO_PICKER",
+      "group": "sites",
+      "description": "Photo picker screen: off, on, or accounts: followed by comma-separated usernames.",
+      "type": "string",
+      "default": "off",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "MCP_APP_MY_SITES",
+      "group": "sites",
+      "description": "My sites screen: off, on, or accounts: followed by comma-separated usernames.",
+      "type": "string",
+      "default": "off",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "MCP_APP_DASHBOARD",
+      "group": "sites",
+      "description": "Weekly dashboard screen: off, on, or accounts: followed by comma-separated usernames.",
+      "type": "string",
+      "default": "off",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "MCP_APP_SITE_PREVIEW",
+      "group": "sites",
+      "description": "Site preview screen: off, on, or accounts: followed by comma-separated usernames.",
+      "type": "string",
+      "default": "off",
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
       "name": "SHOWCASE_BIO_MAX_LENGTH",
       "group": "sites",
       "description": "Maximum plain-text bio length on a personal showcase.",

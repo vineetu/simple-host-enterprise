@@ -151,6 +151,7 @@ func ExpandSkillText(path string, body []byte, version, baseURL string) ([]byte,
 // RegisterUIRoutes serves the landing pages and the skill bundle. baseURL is
 // PUBLIC_BASE_URL, written into every served skill file.
 func RegisterUIRoutes(mux *http.ServeMux, baseURL string) {
+	registerPhotoCodecs(mux)
 	sub, _ := fs.Sub(staticFiles, "static")
 	fileServer := http.FileServerFS(sub)
 

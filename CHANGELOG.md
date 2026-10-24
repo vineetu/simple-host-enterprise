@@ -160,6 +160,11 @@ release, commit and schema.
 
 ## Unreleased
 
+- Add optional MCP Apps photo picker, My sites, weekly dashboard, and an
+  open/copy site card. All four flags default off pending Kubernetes smoke and interactive host validation.
+- Add the company-signed-in `/photos` page and versioned photo uploads for
+  personal and team sites, with browser metadata removal and self-hosted decoders.
+
 - **Enterprise setup offers an inspectable Helm download.** The hosted helper packages a wrapper Chart.yaml, selected values under enterprise:, the pinned published dependency and a README for lint/render/dry-run/install/upgrade. The Kubernetes guide distinguishes wrapper and direct-chart values; install.sh is optional.
 
 ### Changed

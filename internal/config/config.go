@@ -114,6 +114,7 @@ type Config struct {
 	// Ingress never expose.
 	MetricsPort   string
 	PublicBaseURL string
+	MCPApps       map[string]string
 	// DBInClusterEvaluation is set by deploy/components/postgres-incluster:
 	// a single unbacked-up Postgres fit only for evaluation.
 	DBInClusterEvaluation bool
@@ -379,9 +380,15 @@ func Load() (Config, error) {
 		MetricsPort:           getEnvOrDefault("METRICS_PORT", defaultMetricsPort),
 		DBInClusterEvaluation: os.Getenv("DB_INCLUSTER_EVALUATION") == "true",
 		PublicBaseURL:         need.require("PUBLIC_BASE_URL"),
-		ReservedLabels:        splitLowerTrimmed(os.Getenv("RESERVED_LABELS")),
-		OwnerCerts:            getEnvOrDefault("OWNER_CERTS", "auto"),
-		SecureMode:            secureMode,
+		MCPApps: map[string]string{
+			"MCP_APP_PHOTO_PICKER": getEnvOrDefault("MCP_APP_PHOTO_PICKER", "off"),
+			"MCP_APP_MY_SITES":     getEnvOrDefault("MCP_APP_MY_SITES", "off"),
+			"MCP_APP_DASHBOARD":    getEnvOrDefault("MCP_APP_DASHBOARD", "off"),
+			"MCP_APP_SITE_PREVIEW": getEnvOrDefault("MCP_APP_SITE_PREVIEW", "off"),
+		},
+		ReservedLabels: splitLowerTrimmed(os.Getenv("RESERVED_LABELS")),
+		OwnerCerts:     getEnvOrDefault("OWNER_CERTS", "auto"),
+		SecureMode:     secureMode,
 		Backup: BackupConfig{
 			Endpoint:        need.require("BACKUP_STORAGE_ENDPOINT"),
 			Region:          getEnvOrDefault("BACKUP_STORAGE_REGION", defaultBackupRegion),
@@ -564,6 +571,11 @@ func Load() (Config, error) {
 		cfg.OIDC.HintDomain = cfg.OIDC.AllowedEmailDomains[0]
 	}
 
+	for name, value := range cfg.MCPApps {
+		if !validAppFlag(value) {
+			return Config{}, fmt.Errorf("%s must be off, on, or accounts:<handle>,<handle>", name)
+		}
+	}
 	publicBaseURL, err := validatePublicBaseURL(cfg.PublicBaseURL, cfg.SecureMode)
 	if err != nil {
 		return Config{}, fmt.Errorf("PUBLIC_BASE_URL: %w", err)
@@ -769,6 +781,7 @@ func serverDatabaseDSN() (string, []string, error) {
 // database: see docs/configuration.md.
 type OwnerHostsConfig struct {
 	PublicBaseURL string
+	MCPApps       map[string]string
 	// Issuer is OWNER_CERT_ISSUER, the cert-manager ClusterIssuer that signs
 	// every "*.<owner>.<base>" certificate.
 	Issuer string
@@ -1226,4 +1239,19 @@ func getEnvOrDefault(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func validAppFlag(value string) bool {
+	if value == "on" || value == "off" {
+		return true
+	}
+	if !strings.HasPrefix(value, "accounts:") {
+		return false
+	}
+	for _, handle := range strings.Split(strings.TrimPrefix(value, "accounts:"), ",") {
+		if strings.TrimSpace(handle) == "" {
+			return false
+		}
+	}
+	return true
 }

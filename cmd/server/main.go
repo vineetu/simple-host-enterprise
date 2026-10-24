@@ -284,7 +284,7 @@ func run() (runErr error) {
 	// being handed the landing page.
 	// Every method needs an API key or an OAuth access token first, so an
 	// unauthenticated client of any method is told where to sign in.
-	mcpServer := mcp.NewServer(mux, "simple-host", pluginVersion)
+	mcpServer := mcp.NewServer(mux, "simple-host", pluginVersion).WithApps(cfg.PublicBaseURL, cfg.MCPApps)
 	protectedMCP := connector.ProtectMCP(authMW, mcpServer)
 	mux.Handle("POST /mcp", protectedMCP)
 	mux.Handle("GET /mcp", protectedMCP)

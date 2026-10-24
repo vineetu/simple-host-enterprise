@@ -115,6 +115,10 @@ func Settings() []Setting {
 	op := oplimits.Defaults()
 	d := ShortDuration
 	all := []Setting{
+		{Name: "MCP_APP_PHOTO_PICKER", Group: "sites", Type: "string", Default: "off", Description: "Photo picker screen: off, on, or accounts: followed by comma-separated usernames."},
+		{Name: "MCP_APP_MY_SITES", Group: "sites", Type: "string", Default: "off", Description: "My sites screen: off, on, or accounts: followed by comma-separated usernames."},
+		{Name: "MCP_APP_DASHBOARD", Group: "sites", Type: "string", Default: "off", Description: "Weekly dashboard screen: off, on, or accounts: followed by comma-separated usernames."},
+		{Name: "MCP_APP_SITE_PREVIEW", Group: "sites", Type: "string", Default: "off", Description: "Site preview screen: off, on, or accounts: followed by comma-separated usernames."},
 		// Server and addresses.
 		{Name: "PUBLIC_BASE_URL", Group: "server", Type: "string", Required: true, Basic: true,
 			Description: "The address people open, like https://sites.example.com: its own registrable domain, never a subdomain of the company's main one. Every site is served at <site>.<owner>.<host>."},

@@ -1,0 +1,29 @@
+:root { --accent:#245f49; --surface:#fff; --text:#222; --text-secondary:#555; --border:#ccc; } body { margin:0; font:16px system-ui; color:var(--text); }
+
+    main { max-width: 800px; margin: 40px auto; padding: 0 20px; }
+    h1 { margin-bottom: 12px; }
+    p { line-height: 1.6; }
+    main a { color: var(--accent); }
+    .btn { padding: 10px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
+    .btn-primary { background: var(--accent); color: var(--on-accent, #fff); }
+    .btn:disabled { opacity: .55; cursor: default; }
+    .muted, small { color: var(--text-secondary); }
+    label { display: block; margin: 12px 0 6px; }
+    input, select, button { font: inherit; }
+    input, select { max-width: 100%; width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); box-sizing: border-box; }
+    button, .pick { min-height: 44px; cursor: pointer; }
+    .drop { margin: 24px 0; padding: 24px 16px; border: 2px dashed var(--border); border-radius: 12px; background: var(--surface); }
+    .drop.drag { border-color: var(--accent); }
+    .drop p { margin-bottom: 0; }
+    .photo { display: grid; grid-template-columns: 88px minmax(0,1fr); gap: 16px; border-bottom: 1px solid var(--border); padding: 16px 0; align-items: start; }
+    .photo img { width: 88px; height: 88px; object-fit: cover; border-radius: 8px; }
+    .photo label { margin-top: 0; }
+    .photo small { display: block; margin: 6px 0; }
+    .photo button { margin-top: 4px; }
+    #status { min-height: 1.5em; }
+    #results a, #summary { overflow-wrap: anywhere; }
+    .result { padding: 16px 0; border-bottom: 1px solid var(--border); }
+    .result a { display: block; margin-bottom: 8px; }
+    [hidden] { display: none !important; }
+    html[data-theme="dark"] .drop { background: var(--surface); }
+    @media (max-width: 480px) { main { margin-top: 24px; padding: 0 16px; } .photo { gap: 12px; grid-template-columns: 72px minmax(0,1fr); } .photo img { width: 72px; height: 72px; } }

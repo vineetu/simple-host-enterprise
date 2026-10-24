@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // siteActivity is site_activity: one site's versions (the primary read, which
@@ -24,6 +25,13 @@ func siteActivity(args map[string]any) (upstream, error) {
 	up.Also = []upstream{
 		{Method: "GET", Path: "/api/audit?" + query},
 		{Method: "GET", Path: "/api/access?owner=" + url.QueryEscape(label) + "&site=" + url.QueryEscape(site) + "&summary=counts"},
+	}
+	if days, present := args["days"]; present {
+		if days != float64(7) {
+			return upstream{}, fmt.Errorf("days must be 7")
+		}
+		from := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -6)
+		up.Also[1].Path += "&from=" + from.Format("2006-01-02")
 	}
 	up.Merge = func(versions []byte, also []partResult) ([]byte, error) {
 		return mergeSiteActivity(owner, site, versions, also[0], also[1])

@@ -507,3 +507,28 @@ services map onto this table.
 
 Personal home choice and showcase curation use the dashboard or OIDC connector;
 see [Your home page](your-home-page.md).
+
+## MCP Apps screens
+
+| Variable | Required | Default | Values and behavior |
+|---|---|---|---|
+| `MCP_APP_PHOTO_PICKER` | No | `off` | Photo picker on `add_photos`. |
+| `MCP_APP_MY_SITES` | No | `off` | My sites on `list_sites`. |
+| `MCP_APP_DASHBOARD` | No | `off` | Weekly drill-in from My sites; enable My sites too. |
+| `MCP_APP_SITE_PREVIEW` | No | `off` | Open/copy card on `get_site`; sites refuse framing. |
+
+Each accepts `off`, `on`, or `accounts:<a>,<b>`. Accounts match the exact,
+case-sensitive **username** (handle) returned by `get_account`, not the email
+or team name. Whitespace around account entries is ignored. Empty entries
+and other flag shapes refuse startup. Restart after changing configuration.
+All flags stay off until Kubernetes smoke and interactive host validation are verified. With all
+flags off, the previous MCP inventory and results are byte-identical;
+`add_photos` is hidden from that inventory but remains callable by name.
+Its fallback is this instance's `/photos?site=owner/site` address, with an
+account hint that prevents silently selecting a different browser account's
+same-named site. The page uses the existing company session and team rules.
+No new credential type is created. Photo batches create one version and retain
+other files. The picker limits each photo to a share of the inline upload cap.
+The page accepts at most 30 photos, 1,000,000 bytes each, and 1600 pixels per side.
+The bundled decoder versions, source, licenses, and inherited decoder limitations
+are recorded in `/photo-codecs/v2/README.txt`.

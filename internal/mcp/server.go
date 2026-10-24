@@ -42,6 +42,8 @@ type Server struct {
 	byName     map[string]Tool
 	serverName string
 	version    string
+	appOrigin  string
+	appFlags   map[string]string
 
 	// siteAPI serves a request addressed to a site's own host, or to its
 	// owner's host before the owner's certificate is ready (the site API
@@ -75,6 +77,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// client can detect the era rather than hang.
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
+		if len(s.enabledScreens(r)) > 0 {
+			writeRPC(w, http.StatusMethodNotAllowed, failure(nil, codeInvalidRequest, "method not allowed", nil))
+			return
+		}
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
@@ -216,6 +222,21 @@ func (s *Server) validate(r *http.Request, req request) (int, *rpcError) {
 		}
 	}
 
+	if req.Method == "resources/read" && len(s.enabledScreens(r)) > 0 {
+		var params struct {
+			URI string `json:"uri"`
+		}
+		if json.Unmarshal(req.Params, &params) != nil {
+			return http.StatusBadRequest, &rpcError{Code: codeInvalidParams, Message: "params could not be read"}
+		}
+		name := strings.TrimSpace(r.Header.Get("Mcp-Name"))
+		if modern && name == "" {
+			return http.StatusBadRequest, &rpcError{Code: codeHeaderMismatch, Message: "Mcp-Name header is required on resources/read"}
+		}
+		if name != "" && decodeHeaderValue(name) != params.URI {
+			return http.StatusBadRequest, &rpcError{Code: codeHeaderMismatch, Message: "Mcp-Name header does not match the resource URI"}
+		}
+	}
 	if modern && !hasClientCapabilities(req.Params) {
 		return http.StatusBadRequest, &rpcError{
 			Code:    codeInvalidParams,
@@ -262,7 +283,7 @@ func (s *Server) dispatch(r *http.Request, req request) (response, bool) {
 		}
 		return result(req.ID, map[string]any{
 			"protocolVersion": negotiate(metaProtocolVersion(req.Params), r.Header.Get("MCP-Protocol-Version")),
-			"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
+			"capabilities":    s.appCapabilities(r),
 			"serverInfo":      map[string]any{"name": s.serverName, "version": s.version},
 			"instructions":    instructions,
 		}), true
@@ -279,7 +300,7 @@ func (s *Server) dispatch(r *http.Request, req request) (response, bool) {
 		return response{JSONRPC: "2.0", ID: req.ID, Result: s.withMeta(map[string]any{
 			"resultType":        "complete",
 			"supportedVersions": supportedVersions,
-			"capabilities":      map[string]any{"tools": map[string]any{"listChanged": false}},
+			"capabilities":      s.appCapabilities(r),
 			"serverInfo":        map[string]any{"name": s.serverName, "version": s.version},
 			"instructions":      instructions,
 			"ttlMs":             cacheTTLMillis,
@@ -289,11 +310,26 @@ func (s *Server) dispatch(r *http.Request, req request) (response, bool) {
 	case "tools/list":
 		return response{JSONRPC: "2.0", ID: req.ID, Result: s.withMeta(map[string]any{
 			"resultType": "complete",
-			"tools":      s.tools,
+			"tools":      s.appTools(r),
 			"ttlMs":      cacheTTLMillis,
 			"cacheScope": "private",
 		})}, true
 
+	case "resources/list":
+		if len(s.enabledScreens(r)) == 0 {
+			return failure(req.ID, codeMethodNotFound, "unknown method: "+req.Method, nil), true
+		}
+		return result(req.ID, s.withMeta(map[string]any{"resultType": "complete", "ttlMs": cacheTTLMillis, "cacheScope": "private", "resources": s.appResources(r)})), true
+	case "resources/templates/list":
+		if len(s.enabledScreens(r)) == 0 {
+			return failure(req.ID, codeMethodNotFound, "unknown method: "+req.Method, nil), true
+		}
+		return result(req.ID, s.withMeta(map[string]any{"resultType": "complete", "ttlMs": cacheTTLMillis, "cacheScope": "private", "resourceTemplates": []any{}})), true
+	case "resources/read":
+		if len(s.enabledScreens(r)) == 0 {
+			return failure(req.ID, codeMethodNotFound, "unknown method: "+req.Method, nil), true
+		}
+		return s.readApp(req, r), true
 	case "tools/call":
 		return s.callTool(r, req), true
 
@@ -376,6 +412,14 @@ func (s *Server) callTool(r *http.Request, req request) response {
 	if !known {
 		return failure(req.ID, codeInvalidParams, "unknown tool: "+params.Name, nil)
 	}
+	if tool.Name == "site_activity" && !s.appEnabled(r, "MCP_APP_DASHBOARD") {
+		for _, listed := range s.appTools(r) {
+			if listed.Name == tool.Name {
+				tool = listed
+				break
+			}
+		}
+	}
 	if params.Arguments == nil {
 		params.Arguments = map[string]any{}
 	}
@@ -393,6 +437,9 @@ func (s *Server) callTool(r *http.Request, req request) response {
 	}
 
 	status, payload, etag, overflow := s.serveUpstream(r, up)
+	if status < 400 && params.Name == "add_photos" {
+		return s.photoLinkResult(r, req, params.Arguments, payload)
+	}
 	// A tool may declare one retry against a different route. Deploying uses
 	// it: the create route answers 409 for a site that already exists, and the
 	// update route answers 404 for one that does not, so neither alone can be
@@ -465,7 +512,7 @@ func (s *Server) callTool(r *http.Request, req request) response {
 	if etag != "" && !strings.Contains(text, etag) {
 		text += "\n\nETag for the next change to this site: " + etag
 	}
-	return toolResult(req.ID, text, structured, false)
+	return s.appResult(r, params.Name, toolResult(req.ID, text, structured, false))
 }
 
 // explainFailure turns an upstream failure into something a model can act on.

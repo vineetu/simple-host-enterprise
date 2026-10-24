@@ -389,3 +389,8 @@ or `{"site":null}`), `GET`/`PUT /api/me/bio` (`{"bio":"My projects"}`), and
 account settings require OIDC identity; CI API keys cannot change them. All
 changes are audited transactionally. Settings live in Postgres; site content
 stays in the bucket and pods remain stateless. No custom domains or short names.
+
+For photos, call `add_photos` with `site` (`owner/site` for teams or ambiguous
+names), or open `{{BASE_URL}}/photos`. The person chooses photos on their device;
+small copies are added in one version with other files kept. Supporting hosts
+can show My sites and a weekly overview through the same connector session.

@@ -18,6 +18,10 @@ the pod's memory with `UPLOAD_CONCURRENCY`: each upload holds its archive and fi
 <!-- settings:group=sites -->
 | Setting | Default | Allowed | What it does |
 |---|---|---|---|
+| `MCP_APP_PHOTO_PICKER` | `off` | text | Photo picker screen: off, on, or accounts: followed by comma-separated usernames. |
+| `MCP_APP_MY_SITES` | `off` | text | My sites screen: off, on, or accounts: followed by comma-separated usernames. |
+| `MCP_APP_DASHBOARD` | `off` | text | Weekly dashboard screen: off, on, or accounts: followed by comma-separated usernames. |
+| `MCP_APP_SITE_PREVIEW` | `off` | text | Site preview screen: off, on, or accounts: followed by comma-separated usernames. |
 | `SHOWCASE_BIO_MAX_LENGTH` | `280` | 1–2000 characters | Maximum plain-text bio length on a personal showcase. |
 | `MAX_ARCHIVE_BYTES` | `104857600` | 1048576–524288000 bytes | The largest archive one deploy may send. Raise the ingress body-size limit with it. |
 | `MAX_FILES_PER_SITE` | `50000` | 1–100000 files | Files one deploy may hold. |

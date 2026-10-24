@@ -64,6 +64,87 @@ servers:
     description: Local development
 
 paths:
+
+  /photos:
+    get:
+      operationId: photosPage
+      summary: Add photos with a company browser session
+      responses:
+        '200':
+          description: Photo page with self-hosted decoders.
+        '303':
+          description: Sign in with the company identity provider.
+  /v1/sites/{site}/photos:
+    post:
+      operationId: addPhotos
+      summary: Add processed photos in one site version
+      description: Owner or owning team member only. The browser shrinks photos to 1600 pixels and removes metadata. The server validates JPEG/WebP containers without re-encoding. Other files are kept; quotas, scanning, ETag checks, and audit apply.
+      parameters:
+        - in: path
+          name: site
+          required: true
+          schema: {type: string}
+        - in: query
+          name: owner
+          description: Optional username or team namespace; defaults to the signed-in person.
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [photos]
+              properties:
+                photos:
+                  type: array
+                  minItems: 1
+                  maxItems: 30
+                  items: {type: string, format: binary}
+                  description: JPEG/WebP files, at most 1000000 bytes each and 1600 pixels per side, with no camera or location metadata.
+      responses:
+        '200':
+          description: One new version and photo paths and URLs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [site, version, photos]
+                properties:
+                  site: {type: string}
+                  version: {type: integer}
+                  photos:
+                    type: array
+                    items:
+                      type: object
+                      required: [path, url, bytes, width, height]
+                      properties:
+                        path: {type: string}
+                        url: {type: string}
+                        bytes: {type: integer}
+                        width: {type: integer}
+                        height: {type: integer}
+        '400': {description: Invalid photo or incomplete multipart body.}
+        '401': {description: Sign-in required.}
+        '403': {description: Origin or scope refused.}
+        '404': {description: No site this person may edit.}
+        '409': {description: A directory conflicts with a photo path.}
+        '412': {description: Site changed while preparing the photos; nothing was saved.}
+        '413': {description: Photo, batch, or storage quota exceeded.}
+        '429': {description: Upload concurrency or management rate limit reached.}
+  /photo-codecs/v2/{file}:
+    get:
+      operationId: photoCodec
+      summary: Self-hosted photo decoder assets and licenses
+      security: []
+      parameters:
+        - in: path
+          name: file
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Immutable decoder asset.}
+        '404': {description: Unknown asset.}
   /.well-known/agent-skills/index.json:
     description: Public, unauthenticated fixed discovery-index path. Methods other than GET and HEAD return 405 Method Not Allowed.
     get:

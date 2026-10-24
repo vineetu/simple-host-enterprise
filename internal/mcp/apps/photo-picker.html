@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Photo picker</title><style>__STYLE__</style></head>
+<body><header class="appbar"><strong>Simple Host</strong><span>Photo picker</span></header>
+<main class="appbody"><div id="selection" class="site-selected"><span id="site"></span><button id="change" class="text-button" disabled>change</button></div>
+<select id="sites" aria-label="Choose a site" hidden></select>
+<p id="status" class="status" role="status"></p>
+<button id="add" class="primary" disabled>Add photos</button><input id="files" type="file" accept="image/*,.heic,.heif,.tif,.tiff" multiple hidden>
+<div id="photos" class="photos"></div><div id="actions" class="actions" hidden><button id="finish" class="primary" disabled>Finish adding photos</button></div>
+<p id="fallback" hidden>Could not read this photo. Use the photos link in the chat.</p>
+<div id="done" class="done" role="status" hidden></div></main>
+<script>window.SHPhotoConfig=__CONFIG__;</script><script>__BRIDGE__</script>
+<script src="__ASSET_ORIGIN__/photo-process.js"></script><script>__SCREEN__</script></body></html>

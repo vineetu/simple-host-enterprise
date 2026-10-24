@@ -49,6 +49,9 @@ const SiteAPIStorageWritePattern = "HOSTGATE WRITE /api/sites/{site}/storage/...
 // route can never become reachable by a publish key without someone
 // deciding it should be.
 var routeKeyAccess = map[string]keyAccess{
+	"POST /v1/sites/{site}/photos":       keyPublish,
+	"GET /photos":                        keyNever,
+	"GET /photo-codecs/v2/{file}":        keyNever,
 	"GET /api/me/home":                   keyNever,
 	"PUT /api/me/home":                   keyNever,
 	"GET /api/me/bio":                    keyNever,

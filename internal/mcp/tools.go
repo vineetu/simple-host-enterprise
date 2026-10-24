@@ -21,6 +21,7 @@ type Tool struct {
 	// error result carries none, so it is not held to it.
 	OutputSchema map[string]any `json:"outputSchema,omitempty"`
 	Annotations  map[string]any `json:"annotations,omitempty"`
+	Meta         map[string]any `json:"_meta,omitempty"`
 
 	call func(args map[string]any) (upstream, error) `json:"-"`
 
@@ -369,6 +370,19 @@ func expandDescriptions(node any) {
 func toolList() []Tool {
 	return []Tool{
 		{
+			Name:        "add_photos",
+			Title:       "Add photos",
+			Description: "Choose photos to shrink on your device and add to an existing site. Returns this instance's signed-in photos page; supporting hosts show a picker. Pass owner/site for a team or an ambiguous name.",
+			InputSchema: object(map[string]any{"site": str("Site name, or owner/site from list_sites.")}, "site"),
+			Annotations: readOnly(), family: familySite,
+			call: func(args map[string]any) (upstream, error) {
+				if _, err := stringArg(args, "site"); err != nil {
+					return upstream{}, err
+				}
+				return upstream{Method: "GET", Path: "/api/collaboration/sites"}, nil
+			},
+		},
+		{
 			Name: "set_home_page", Title: "Set my home page", Description: "Choose one of your personally owned sites for your person address. Its access rules stay in force. Use null to restore your showcase; while your site certificate is pending the showcase remains. Teams keep their index.",
 			InputSchema: object(map[string]any{"site": map[string]any{"type": []string{"string", "null"}, "description": "Owned site name, or null for the showcase."}}, "site"), Annotations: writes(false, true), family: familyAccount,
 			call: func(args map[string]any) (upstream, error) {
@@ -666,6 +680,7 @@ func toolList() []Tool {
 				"Who visited is never listed here. A part this account cannot read is left out with a sentence in `changes_note` or `visits_note` saying why; pass that on rather than retrying. " +
 				"Works for the owner or a member of the owning team. Read-only.",
 			InputSchema: object(map[string]any{
+				"days":  map[string]any{"type": "integer", "enum": []int{7}, "description": "Optional: seven UTC days including today."},
 				"site":  str(siteArgDesc),
 				"owner": str(ownerArgDesc),
 			}, "site", "owner"),

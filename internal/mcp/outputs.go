@@ -216,6 +216,7 @@ func outputSchemas() map[string]map[string]any {
 			}, "owner", "sites", "max_sites", "bytes", "max_bytes")),
 		}, "id", "username", "is_admin", "kind", "teams", "usage"),
 
+		"add_photos": outObject(map[string]any{"site": outString("Owner and site."), "photos_url": outString("Sign in here to add photos.")}, "site", "photos_url"),
 		"list_sites": listOf("Every site this account can act on, then the sites shared with it (access_role viewer).", func() map[string]any {
 			schema := collaborationSiteSchema()
 			schema["properties"].(map[string]any)["shared_via"] = outString("On a viewer entry only: the team the site is shared with, or empty when it is shared with you by name.")
