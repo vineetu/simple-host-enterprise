@@ -9,7 +9,7 @@ cd "$(dirname "$0")/.."
 missing=0
 routes=$(grep -rhoE --include='*.go' --exclude='*_test.go' 'Handle(Func)?\("[A-Z]+ /[^"]*"' cmd internal |
 	sed -E 's/^Handle(Func)?\("//; s/"$//' | sort -u)
-tools=$(grep -hoE '^[[:space:]]*Name:[[:space:]]*"[a-z_]+"' internal/mcp/tools.go internal/mcp/storage_tools.go |
+tools=$(grep -hoE '^[[:space:]]*Name:[[:space:]]*"[a-z_]+"' internal/mcp/tools.go internal/mcp/storage_tools.go internal/mcp/notification_tools.go |
 	sed -E 's/.*"([a-z_]+)"/\1/' | sort -u)
 
 [ -n "$routes" ] || { echo "check-features: found no routes; the pattern needs updating"; exit 1; }

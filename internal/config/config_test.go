@@ -1012,3 +1012,41 @@ func TestLoadServerDatabaseInTheServerContainer(t *testing.T) {
 		t.Fatalf("LoadDatabase without the owner's password = %v, want missing DB_PASSWORD", err)
 	}
 }
+
+func TestNotificationConfiguration(t *testing.T) {
+	completeEnv(t)
+	t.Setenv("NOTIFY_ENC_KEY", "")
+	t.Setenv("NOTIFY_ENC_KEY_FILE", "")
+	t.Setenv("NOTIFY_ALLOW_PRIVATE_CIDRS", "")
+	cfg, err := Load()
+	if err != nil || len(cfg.NotifyEncKey) != 0 {
+		t.Fatal("notifications must default off")
+	}
+	t.Setenv("NOTIFY_ENC_KEY", testBase64Key)
+	t.Setenv("NOTIFY_ALLOW_PRIVATE_CIDRS", "10.20.30.0/24,fd12::/64")
+	cfg, err = Load()
+	if err != nil || len(cfg.NotifyEncKey) != 32 || len(cfg.NotifyAllowPrivateCIDRs) != 2 {
+		t.Fatal("notification configuration rejected", err)
+	}
+	t.Setenv("NOTIFY_ENC_KEY", "invalid")
+	if _, err = Load(); err == nil {
+		t.Fatal("bad key accepted")
+	}
+	path := filepath.Join(t.TempDir(), "notify-key")
+	if err = os.WriteFile(path, []byte(testBase64Key+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NOTIFY_ENC_KEY_FILE", path)
+	if _, err = Load(); err != nil {
+		t.Fatal("key file did not take precedence", err)
+	}
+	t.Setenv("NOTIFY_ALLOW_PRIVATE_CIDRS", "private.example")
+	if _, err = Load(); err == nil {
+		t.Fatal("bad CIDR accepted")
+	}
+	t.Setenv("NOTIFY_ALLOW_PRIVATE_CIDRS", "")
+	t.Setenv("NOTIFY_ENC_KEY_FILE", path+"missing")
+	if _, err = Load(); err == nil {
+		t.Fatal("unreadable key file accepted")
+	}
+}

@@ -103,7 +103,9 @@ const (
 )
 
 type Config struct {
-	DBDSN string
+	NotifyEncKey            []byte
+	NotifyAllowPrivateCIDRs []netip.Prefix
+	DBDSN                   string
 	// CacheDir is the pod-local directory the site store caches versions
 	// and assets in; CacheMaxBytes bounds it (internal/storage cache.go).
 	CacheDir      string
@@ -595,6 +597,17 @@ func Load() (Config, error) {
 	}
 	if (cfg.Backup.AccessKeyID == "") != (cfg.Backup.SecretAccessKey == "") {
 		return Config{}, errors.New("BACKUP_STORAGE_ACCESS_KEY_ID and BACKUP_STORAGE_SECRET_ACCESS_KEY must be set together")
+	}
+	notifyRaw := secretOrEmpty("NOTIFY_ENC_KEY", &secretErr)
+	if notifyRaw != "" {
+		cfg.NotifyEncKey, err = base64.StdEncoding.DecodeString(notifyRaw)
+		if err != nil || len(cfg.NotifyEncKey) != 32 {
+			return Config{}, errors.New("NOTIFY_ENC_KEY must be base64 encoding of 32 bytes")
+		}
+	}
+	cfg.NotifyAllowPrivateCIDRs, err = parseTrustedProxies(os.Getenv("NOTIFY_ALLOW_PRIVATE_CIDRS"))
+	if err != nil {
+		return Config{}, fmt.Errorf("NOTIFY_ALLOW_PRIVATE_CIDRS: %w", err)
 	}
 	envelopeKeys, err := parseEnvelopeKeys(secretOrEmpty("BACKUP_ENVELOPE_KEY", &secretErr))
 	if err != nil {

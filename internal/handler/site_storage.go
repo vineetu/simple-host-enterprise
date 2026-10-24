@@ -319,6 +319,11 @@ func (h *SiteAPIHandler) beginStorageWrite(ctx context.Context, call siteAPICall
 }
 
 func (h *SiteAPIHandler) commitStorage(w http.ResponseWriter, r *http.Request, tx *sql.Tx, call siteAPICall, action string, extra map[string]any) bool {
+	if err := h.queueStorageNotification(r.Context(), tx, call, action, extra); err != nil {
+		storageInternal(w, "queue notification", err)
+		return false
+	}
+
 	if err := h.audit.RecordTx(r.Context(), tx, h.auditEvent(r.Context(), tx, call, action, extra)); err != nil {
 		storageInternal(w, "audit "+action, err)
 		return false
@@ -1336,6 +1341,10 @@ func (h *SiteAPIHandler) putFile(w http.ResponseWriter, r *http.Request, call si
 	}
 	if err := db.AddStorageBytes(r.Context(), tx, call.SiteID, name, delta); err != nil {
 		storageInternal(w, "file bytes", err)
+		return
+	}
+	if err := h.queueStorageNotification(r.Context(), tx, call, action, map[string]any{"resource": name, "kind": "files", "path": path}); err != nil {
+		storageInternal(w, "queue notification", err)
 		return
 	}
 	if err := h.audit.RecordTx(r.Context(), tx, h.auditEvent(r.Context(), tx, call, action, map[string]any{

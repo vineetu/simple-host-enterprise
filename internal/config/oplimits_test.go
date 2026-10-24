@@ -32,6 +32,23 @@ func TestLoadOpLimitsDefaultToTodaysValues(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 	want := oplimits.Values{
+		NotifyMaxPerSite:            10,
+		NotifyPerMinute:             60,
+		NotifyPerDay:                5000,
+		NotifyHistoryDays:           7,
+		NotifyOwnerConcurrency:      5,
+		NotifyPerURLPerMinute:       120,
+		NotifyWorkers:               20,
+		NotifyAttempts:              5,
+		NotifyFieldMaxBytes:         2048,
+		NotifyBodyMaxBytes:          16384,
+		NotifySuspendAttempts:       100,
+		NotifySuspendFailurePercent: 95,
+		NotifyTimeout:               5000 * time.Millisecond,
+		NotifyDefaultTTL:            168 * time.Hour,
+		NotifySuspendWindow:         1 * time.Hour,
+		NotifySuspendAfter:          3 * 24 * time.Hour,
+
 		ShowcaseBioMaxLength: 280,
 		DeletedRetentionDays: 30, IdleGraceDays: 30, IdleMaxEmails: 0,
 		PreviewLinkTTL: time.Hour, ExportLinkTTL: 10 * time.Minute,
@@ -73,6 +90,23 @@ func TestLoadOpLimitsOverrides(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 	want := oplimits.Values{
+		NotifyMaxPerSite:            10,
+		NotifyPerMinute:             60,
+		NotifyPerDay:                5000,
+		NotifyHistoryDays:           7,
+		NotifyOwnerConcurrency:      5,
+		NotifyPerURLPerMinute:       120,
+		NotifyWorkers:               20,
+		NotifyAttempts:              5,
+		NotifyFieldMaxBytes:         2048,
+		NotifyBodyMaxBytes:          16384,
+		NotifySuspendAttempts:       100,
+		NotifySuspendFailurePercent: 95,
+		NotifyTimeout:               5000 * time.Millisecond,
+		NotifyDefaultTTL:            168 * time.Hour,
+		NotifySuspendWindow:         1 * time.Hour,
+		NotifySuspendAfter:          3 * 24 * time.Hour,
+
 		ShowcaseBioMaxLength: 280,
 		DeletedRetentionDays: 7, IdleGraceDays: 14, IdleMaxEmails: 25,
 		PreviewLinkTTL: 30 * time.Minute, ExportLinkTTL: 2 * time.Hour,

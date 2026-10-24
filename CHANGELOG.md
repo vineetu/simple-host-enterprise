@@ -2,6 +2,13 @@
 
 ## Unreleased (v0.9.9)
 
+- Add visitor notifications through MCP Events, signed HTTPS webhooks, and a
+  dashboard Notifications panel. Postgres outbox leases, retries, and shared
+  caps support multiple replicas. Subscription changes are audited.
+- Seal notification signing and custom-header secrets with `NOTIFY_ENC_KEY`.
+  Notifications stay off without it. Operators can allow private receiver CIDRs.
+  Additive migration 0061 adds subscriptions, events, deliveries, and budgets.
+
 - Replace the app and plugin icons with the Rounded Simple Host s.h mark,
   using the hosted exports. Raster exports are opaque cream. Page icon links
   use `?v=c`, brand sources are in `docs/brand/`, and the plugin is 0.16.1.

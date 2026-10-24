@@ -49,6 +49,22 @@ const SiteAPIStorageWritePattern = "HOSTGATE WRITE /api/sites/{site}/storage/...
 // route can never become reachable by a publish key without someone
 // deciding it should be.
 var routeKeyAccess = map[string]keyAccess{
+	"GET /api/notifications":                                                            keyFull,
+	"GET /api/sites/{sitename}/notifications":                                           keyFull,
+	"POST /api/sites/{sitename}/notifications":                                          keyFull,
+	"PATCH /api/sites/{sitename}/notifications/{id}":                                    keyFull,
+	"DELETE /api/sites/{sitename}/notifications/{id}":                                   keyFull,
+	"POST /api/sites/{sitename}/notifications/{id}/test":                                keyFull,
+	"POST /api/sites/{sitename}/notifications/{id}/rotate-secret":                       keyFull,
+	"GET /api/sites/{sitename}/notifications/{id}/deliveries":                           keyFull,
+	"GET /api/collaboration/sites/{owner}/{sitename}/notifications":                     keyFull,
+	"POST /api/collaboration/sites/{owner}/{sitename}/notifications":                    keyFull,
+	"PATCH /api/collaboration/sites/{owner}/{sitename}/notifications/{id}":              keyFull,
+	"DELETE /api/collaboration/sites/{owner}/{sitename}/notifications/{id}":             keyFull,
+	"POST /api/collaboration/sites/{owner}/{sitename}/notifications/{id}/test":          keyFull,
+	"POST /api/collaboration/sites/{owner}/{sitename}/notifications/{id}/rotate-secret": keyFull,
+	"GET /api/collaboration/sites/{owner}/{sitename}/notifications/{id}/deliveries":     keyFull,
+
 	"POST /v1/sites/{site}/photos":       keyPublish,
 	"GET /photos":                        keyNever,
 	"GET /photo-codecs/v2/{file}":        keyNever,

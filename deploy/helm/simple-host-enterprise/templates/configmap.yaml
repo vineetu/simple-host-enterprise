@@ -19,7 +19,7 @@
 {{- if and (eq .Values.certificates.ownerCerts "auto") (not .Values.certificates.issuer) }}{{ fail "certificates.issuer is required with certificates.ownerCerts=auto: the name of a ClusterIssuer already in the cluster (or set certificates.createIssuer to create a DigitalOcean DNS-01 issuer)" }}{{ end }}
 {{- if and (contains "accounts.google.com" .Values.oidc.issuer) (not .Values.oidc.allowedEmailDomains) }}{{ fail "oidc.allowedEmailDomains is required with Google: without it any Google account can sign in" }}{{ end }}
 {{- end }}
-{{- $chartKeys := list "MCP_APP_PHOTO_PICKER" "MCP_APP_MY_SITES" "MCP_APP_DASHBOARD" "MCP_APP_SITE_PREVIEW" "PUBLIC_BASE_URL" "SECURE_MODE" "PORT" "HTTPS_REDIRECT_PORT" "TRUSTED_PROXY_CIDRS" "OWNER_CERTS" "OWNER_CERT_ISSUER" "OWNER_HOSTS_INTERVAL" "OIDC_ISSUER" "OIDC_CLIENT_ID" "OIDC_SCOPES" "ADMIN_EMAILS" "ALLOWED_EMAIL_DOMAINS" "SESSION_TTL" "SESSION_IDLE" "DB_HOST" "DB_PORT" "DB_INCLUSTER_EVALUATION" "DB_NAME" "DB_USER" "DB_SSLMODE" "DB_SSL_ROOT_CERT" "BACKUP_STORAGE_ENDPOINT" "BACKUP_STORAGE_REGION" "BACKUP_STORAGE_BUCKET" "BACKUP_STORAGE_PREFIX" "BACKUP_SSE" "BACKUP_SSE_KEY_ID" }}
+{{- $chartKeys := list "NOTIFY_ALLOW_PRIVATE_CIDRS" "MCP_APP_PHOTO_PICKER" "MCP_APP_MY_SITES" "MCP_APP_DASHBOARD" "MCP_APP_SITE_PREVIEW" "PUBLIC_BASE_URL" "SECURE_MODE" "PORT" "HTTPS_REDIRECT_PORT" "TRUSTED_PROXY_CIDRS" "OWNER_CERTS" "OWNER_CERT_ISSUER" "OWNER_HOSTS_INTERVAL" "OIDC_ISSUER" "OIDC_CLIENT_ID" "OIDC_SCOPES" "ADMIN_EMAILS" "ALLOWED_EMAIL_DOMAINS" "SESSION_TTL" "SESSION_IDLE" "DB_HOST" "DB_PORT" "DB_INCLUSTER_EVALUATION" "DB_NAME" "DB_USER" "DB_SSLMODE" "DB_SSL_ROOT_CERT" "BACKUP_STORAGE_ENDPOINT" "BACKUP_STORAGE_REGION" "BACKUP_STORAGE_BUCKET" "BACKUP_STORAGE_PREFIX" "BACKUP_SSE" "BACKUP_SSE_KEY_ID" }}
 {{- range $k, $v := .Values.extraConfig }}
 {{- if has $k $chartKeys }}{{ fail (printf "extraConfig.%s: set it through the chart's own value instead" $k) }}{{ end }}
 {{- if regexMatch "(SECRET|PASSWORD|_KEY$|_KEY_ID$|DSN|TOKEN|SMTP_URL)" $k }}{{ fail (printf "extraConfig.%s looks like a secret; put it in extraSecrets" $k) }}{{ end }}
@@ -30,6 +30,7 @@ metadata:
   name: simple-host-config
   labels: {{- include "sh.labels" . | nindent 4 }}
 data:
+  NOTIFY_ALLOW_PRIVATE_CIDRS: {{ .Values.notifications.allowPrivateCIDRs | quote }}
   MCP_APP_PHOTO_PICKER: {{ .Values.mcpApps.photoPicker | quote }}
   MCP_APP_MY_SITES: {{ .Values.mcpApps.mySites | quote }}
   MCP_APP_DASHBOARD: {{ .Values.mcpApps.dashboard | quote }}

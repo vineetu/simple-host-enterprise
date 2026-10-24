@@ -1300,6 +1300,52 @@ Config names are documented in `docs/configuration.md`; schema in
 
 ---
 
+### Visitor notifications
+
+- **What.** Visitor KV puts/deletes, table row adds/edits/deletes, and file
+  puts/deletes create a transactional Postgres outbox event. Owner/tool writes
+  and network-open sites emit nothing. Standard Webhooks signatures, optional
+  owner header, delivery history, test send, pause/resume, and secret rotation
+  are available on the dashboard Notifications panel. Off without `NOTIFY_ENC_KEY`.
+- **Access.** REST uses owner/team authorization and full-key scope, with cookie
+  Origin checks for writes. MCP Events binds to a connector grant and checks
+  current ownership/team membership again before delivery. Subscription changes
+  and their audit records commit together. Transfer or revoked membership stops
+  delivery; grant deletion cascades to subscriptions.
+- **Routes.**
+  - `GET /api/notifications`
+  - `GET /api/sites/{sitename}/notifications`
+  - `POST /api/sites/{sitename}/notifications`
+  - `PATCH /api/sites/{sitename}/notifications/{id}`
+  - `DELETE /api/sites/{sitename}/notifications/{id}`
+  - `POST /api/sites/{sitename}/notifications/{id}/test`
+  - `POST /api/sites/{sitename}/notifications/{id}/rotate-secret`
+  - `GET /api/sites/{sitename}/notifications/{id}/deliveries`
+  - `GET /api/collaboration/sites/{owner}/{sitename}/notifications`
+  - `POST /api/collaboration/sites/{owner}/{sitename}/notifications`
+  - `PATCH /api/collaboration/sites/{owner}/{sitename}/notifications/{id}`
+  - `DELETE /api/collaboration/sites/{owner}/{sitename}/notifications/{id}`
+  - `POST /api/collaboration/sites/{owner}/{sitename}/notifications/{id}/test`
+  - `POST /api/collaboration/sites/{owner}/{sitename}/notifications/{id}/rotate-secret`
+  - `GET /api/collaboration/sites/{owner}/{sitename}/notifications/{id}/deliveries`
+- **MCP.** `events/list`, `events/subscribe`, and `events/unsubscribe` expose
+  the Events webhook capability. Tools: `list_notifications`,
+  `create_notification`, `pause_notification`, `remove_notification`,
+  `test_notification`, `rotate_notification_secret`, and `notification_deliveries`.
+  Listing tools redact callback paths and never return stored secrets.
+- **Delivery.** Leases and shared caps use Postgres across replicas, with retry
+  backoff, suspension, bounded history, and receiver deduplication by event ID.
+  Private destinations are refused unless the operator explicitly allows their
+  CIDR. HTTPS, address rechecks at dial, and no redirects apply to every send.
+- **Secrets.** Signing, previous signing, and custom-header values are sealed
+  using AES-256-GCM with subscription/field associated data. Rotation signs with
+  both readable keys for 24 hours. No encryption key means no offered UI,
+  discovery capability, enqueue, delivery, or usable REST routes.
+- **Code/schema.** `internal/handler/notify*.go`, `internal/db/notifications.go`,
+  `internal/mcp/events*.go`, `internal/mcp/notification_tools.go`,
+  `internal/notifyevents/types.go`, and migration `0061_site_notifications.sql`.
+  Hooks in `site_storage.go`; configuration in `docs/configuration.md`.
+
 ## Orphans and dormant surface
 
 - Columns with no reader or writer left in the code: `sites.site_type`,

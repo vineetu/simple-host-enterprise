@@ -196,3 +196,11 @@ mcpApps:
   mySites: "off"
   dashboard: "off"
   sitePreview: "off"
+
+# Off unless an encryption key is supplied. With secrets.existingSecret, put
+# NOTIFY_ENC_KEY there. Keep the same key on every replica and in backups.
+notifications:
+  encryptionKey: "" # base64 encoding of 32 random bytes; a secret
+  allowPrivateCIDRs: "" # narrow HTTPS receiver CIDRs; permits pod access into them
+# Other NOTIFY_* settings use extraConfig. Defaults and ranges are in
+# docs/configuration.md and the setup helper's settings registry.

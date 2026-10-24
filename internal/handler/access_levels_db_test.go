@@ -24,12 +24,14 @@ import (
 // level tests: who can open a site at each level, and the network request
 // flow end to end.
 type accessWorld struct {
-	t        *testing.T
-	database *sql.DB
-	app      http.Handler
-	keys     []auth.SigningKey
-	apiKeys  map[string]string
-	users    map[string]string
+	notifications *SiteHandler
+	siteAPI       *SiteAPIHandler
+	t             *testing.T
+	database      *sql.DB
+	app           http.Handler
+	keys          []auth.SigningKey
+	apiKeys       map[string]string
+	users         map[string]string
 	// files is the site file server, for a test that attaches an access
 	// log writer to it.
 	files *SiteFiles
@@ -92,7 +94,8 @@ func newAccessWorldFull(t *testing.T, approvals int, quota UploadQuota, scanner 
 	limits := NewAbuseLimits()
 	recorder := audit.NewDBRecorder(database)
 	mux := http.NewServeMux()
-	NewSiteHandler(database, store, base, hosts, limits).WithAudit(recorder).WithNetworkAccessApprovals(approvals).WithUploadLimits(quota, scanner).WithSigningKeys(keys).Register(mux, authMW, skillMW)
+	sites := NewSiteHandler(database, store, base, hosts, limits).WithAudit(recorder).WithNetworkAccessApprovals(approvals).WithUploadLimits(quota, scanner).WithSigningKeys(keys)
+	sites.Register(mux, authMW, skillMW)
 	NewUserHandler(database, limits).WithQuota(quota).Register(mux, authMW, skillMW)
 	NewAdminHandler(database, base, hosts, CookiePolicy{Secure: true}, keys, time.Hour, recorder, limits).WithNetworkAccessApprovals(approvals).WithStore(store).WithAuditReader(audit.NewReader(database)).WithOIDCIssuer(accessIssuer).Register(mux, authMW, skillMW)
 	NewAuditHandler(database, audit.NewReader(database), "", limits).Register(mux, authMW, skillMW)
@@ -102,7 +105,7 @@ func newAccessWorldFull(t *testing.T, approvals int, quota UploadQuota, scanner 
 	handoff := NewHandoffHandler(database, keys, hosts, recorder, limits)
 	gate := NewHostGate(hosts, files, database, keys, auth.NewNegativeSessionCache(database, time.Hour), handoff, siteAPI, authMW, base)
 
-	w := &accessWorld{t: t, database: owner, app: gate(mux), keys: keys, apiKeys: map[string]string{}, users: map[string]string{}, files: files, store: store}
+	w := &accessWorld{notifications: sites, siteAPI: siteAPI, t: t, database: owner, app: gate(mux), keys: keys, apiKeys: map[string]string{}, users: map[string]string{}, files: files, store: store}
 	for _, name := range []string{"alice", "vera", "olly", "mo", "root", "ada"} {
 		user, err := db.CreateOIDCUser(context.Background(), database, name, "sub-"+name, name+"@example.com", name == "root" || name == "ada")
 		if err != nil {

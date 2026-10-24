@@ -16,7 +16,23 @@ import (
 // Values is every setting this package carries. Defaults returns what the
 // server used before each one was configurable.
 type Values struct {
-	ShowcaseBioMaxLength int
+	NotifyMaxPerSite            int
+	NotifyPerMinute             int
+	NotifyPerDay                int
+	NotifyHistoryDays           int
+	NotifyOwnerConcurrency      int
+	NotifyPerURLPerMinute       int
+	NotifyWorkers               int
+	NotifyAttempts              int
+	NotifyFieldMaxBytes         int
+	NotifyBodyMaxBytes          int
+	NotifySuspendAttempts       int
+	NotifySuspendFailurePercent int
+	NotifyTimeout               time.Duration
+	NotifyDefaultTTL            time.Duration
+	NotifySuspendWindow         time.Duration
+	NotifySuspendAfter          time.Duration
+	ShowcaseBioMaxLength        int
 	// DeletedRetentionDays is DELETED_RETENTION_DAYS: how long a deleted site
 	// stays in Recently deleted, restorable and counted toward its owner's quota.
 	DeletedRetentionDays int
@@ -77,6 +93,22 @@ type Values struct {
 // Defaults are the values every installation used before they could be set.
 func Defaults() Values {
 	return Values{
+		NotifyMaxPerSite:             10,
+		NotifyPerMinute:              60,
+		NotifyPerDay:                 5000,
+		NotifyHistoryDays:            7,
+		NotifyOwnerConcurrency:       5,
+		NotifyPerURLPerMinute:        120,
+		NotifyWorkers:                20,
+		NotifyAttempts:               5,
+		NotifyFieldMaxBytes:          2048,
+		NotifyBodyMaxBytes:           16384,
+		NotifySuspendAttempts:        100,
+		NotifySuspendFailurePercent:  95,
+		NotifyTimeout:                5000 * time.Millisecond,
+		NotifyDefaultTTL:             168 * time.Hour,
+		NotifySuspendWindow:          1 * time.Hour,
+		NotifySuspendAfter:           3 * 24 * time.Hour,
 		ShowcaseBioMaxLength:         280,
 		DeletedRetentionDays:         30,
 		IdleGraceDays:                30,

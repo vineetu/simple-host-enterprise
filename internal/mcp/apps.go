@@ -66,12 +66,24 @@ func (s *Server) appCapabilities(r *http.Request) map[string]any {
 		caps["resources"] = map[string]any{"listChanged": false, "subscribe": false}
 		caps["extensions"] = map[string]any{"io.modelcontextprotocol/ui": map[string]any{"mimeTypes": []string{appMIME}}}
 	}
+	if s.offersEvents(eventCaller(r)) {
+		caps["events"] = map[string]any{}
+		extensions, _ := caps["extensions"].(map[string]any)
+		if extensions == nil {
+			extensions = map[string]any{}
+		}
+		extensions["io.modelcontextprotocol/events"] = map[string]any{}
+		caps["extensions"] = extensions
+	}
 	return caps
 }
 func (s *Server) appTools(r *http.Request) []Tool {
 	out := make([]Tool, 0, len(s.tools))
 	screens := s.enabledScreens(r)
 	for _, tool := range s.tools {
+		if isNotificationTool(tool.Name) && (s.events == nil || s.eventsAvailability() != nil) {
+			continue
+		}
 		// Preserve the pre-Apps inventory when every screen is off. The fallback
 		// tool remains callable by name, including on hosts without UI support.
 		if tool.Name == "add_photos" && len(screens) == 0 {

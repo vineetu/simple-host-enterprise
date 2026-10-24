@@ -34,6 +34,7 @@ var supportedVersions = []string{"2026-07-28", "2025-11-25", "2025-06-18"}
 const maxRequestBytes = 16 << 20
 
 type Server struct {
+	events EventsBackend
 	// upstream is the application router. Tool calls are served into it in
 	// process, so the protocol is an adapter over the REST surface rather than
 	// a second implementation of it.
@@ -274,6 +275,9 @@ func hasClientCapabilities(params json.RawMessage) bool {
 }
 
 func (s *Server) dispatch(r *http.Request, req request) (response, bool) {
+	if isEventMethod(req.Method) {
+		return s.dispatchEvents(r, req, eventCaller(r), true), true
+	}
 	switch req.Method {
 	// initialize belongs to the older era. It is answered so those clients
 	// work, and it costs one branch.

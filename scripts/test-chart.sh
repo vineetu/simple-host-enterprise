@@ -632,6 +632,23 @@ refuse(
     configured + ["--set", "postgres.mode=rds"],
 )
 
+def notification_default(docs, by):
+    assert "NOTIFY_ENC_KEY" not in one(by, "Secret", "simple-host-secrets")["stringData"]
+    assert cm(by)["NOTIFY_ALLOW_PRIVATE_CIDRS"] == ""
+
+expect("notifications disabled by default", render("notifications-default", configured), notification_default)
+
+def notification_enabled(docs, by):
+    assert one(by, "Secret", "simple-host-secrets")["stringData"]["NOTIFY_ENC_KEY"] == "A" * 43 + "="
+    assert cm(by)["NOTIFY_ALLOW_PRIVATE_CIDRS"] == "10.20.30.0/24"
+    assert cm(by)["NOTIFY_MAX_PER_SITE"] == "20"
+
+expect("notification key and private CIDR wiring", render("notifications-enabled", configured + [
+    "--set-string", "notifications.encryptionKey=" + "A" * 43 + "=",
+    "--set-string", "notifications.allowPrivateCIDRs=10.20.30.0/24",
+    "--set-string", "extraConfig.NOTIFY_MAX_PER_SITE=20",
+]), notification_enabled)
+
 if fail:
     print("test-chart: FAILED")
     sys.exit(1)
