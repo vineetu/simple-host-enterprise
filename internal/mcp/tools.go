@@ -6,6 +6,7 @@ import (
 	"github.com/vsriram/simple-host/internal/oplimits"
 	"math"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -330,8 +331,8 @@ func deploySiteSchema() map[string]any {
 	return schema
 }
 
-// Tools is the callable surface. The order is the order a first-time agent
-// needs them, and it is fixed so clients can cache the list.
+// Tools is the full operational surface in a stable order. NewServer adds
+// discovery wrappers; listedTools selects the core without hiding direct calls.
 //
 // Descriptions may name an installation's operational values as oplimits
 // placeholders ("{{DELETED_RETENTION}}"); they are filled here, so the list
@@ -467,12 +468,28 @@ func toolList() []Tool {
 				"`url` is absolute, and `public_path` is the address to hand out, " +
 				"which may be absolute rather than a path, so use it exactly as returned and never prefix it with the server origin. " +
 				"Call this first when acting on a site that already exists — " +
-				"it is the only way to learn the exact site name and the owner other tools need.",
-			InputSchema: noArgs(),
+				"it gives the exact site name and owner. Optional query matches every word across name, serving domain, and summary. Date bounds and limit/offset filter and page by newest deploy; no filters preserves the full list.",
+			InputSchema: object(map[string]any{
+				"query":          str("Words to find in the site's name, domain, title, description, headings or text; every word must match."),
+				"created_after":  str("Created on or after RFC3339 or YYYY-MM-DD (UTC)."),
+				"created_before": str("Created on or before RFC3339 or YYYY-MM-DD (whole UTC day)."),
+				"updated_after":  str("Updated on or after RFC3339 or YYYY-MM-DD (UTC)."),
+				"updated_before": str("Updated on or before RFC3339 or YYYY-MM-DD (whole UTC day)."),
+				"limit":          map[string]any{"type": "integer", "description": "Maximum results; default 200 with filters, capped at 500."},
+				"offset":         map[string]any{"type": "integer", "description": "Results to skip; default 0."},
+			}),
 			Annotations: readOnly(),
 			family:      familySite,
-			call: func(map[string]any) (upstream, error) {
-				return upstream{Method: "GET", Path: "/api/collaboration/sites?include=shared"}, nil
+			call: func(args map[string]any) (upstream, error) {
+				v := url.Values{"include": {"shared"}}
+				for key, value := range args {
+					if number, ok := value.(float64); ok {
+						v.Set(key, strconv.FormatFloat(number, 'f', -1, 64))
+					} else {
+						v.Set(key, fmt.Sprint(value))
+					}
+				}
+				return upstream{Method: "GET", Path: "/api/collaboration/sites?" + v.Encode()}, nil
 			},
 		},
 		{

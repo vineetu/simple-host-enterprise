@@ -76,14 +76,16 @@ func (h *SiteHandler) WithAudit(recorder audit.Recorder) *SiteHandler {
 }
 
 type siteResponse struct {
-	ID            string    `json:"id"`
-	UserID        string    `json:"user_id"`
-	Name          string    `json:"name"`
-	ActiveVersion int       `json:"active_version"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
-	URL           string    `json:"url,omitempty"`
-	Note          string    `json:"note,omitempty"`
+	Summary       db.SiteSummary `json:"summary"`
+	DeployedAt    *time.Time     `json:"deployed_at,omitempty"`
+	ID            string         `json:"id"`
+	UserID        string         `json:"user_id"`
+	Name          string         `json:"name"`
+	ActiveVersion int            `json:"active_version"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
+	URL           string         `json:"url,omitempty"`
+	Note          string         `json:"note,omitempty"`
 	// NewVersion is set only by a deploy with publish=false: the version it
 	// stored, which is not live.
 	NewVersion int       `json:"new_version,omitempty"`
@@ -523,6 +525,11 @@ func (h *SiteHandler) createSiteForTarget(w http.ResponseWriter, r *http.Request
 		}
 	}()
 
+	summary := ExtractSiteSummary(files)
+	if err := db.SaveVersionSummary(r.Context(), tx, site.ID, versionNumber, summary); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
 	if err := db.ActivateVersion(r.Context(), tx, version.ID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -574,6 +581,8 @@ func (h *SiteHandler) createSiteForTarget(w http.ResponseWriter, r *http.Request
 	keepObject = true
 	refreshSiteManifest(r.Context(), h.database, h.store, site.ID)
 
+	site.Summary = summary
+	site.LastDeployedAt = time.Now().UTC()
 	site.ActiveVersion = versionNumber
 	url := h.siteURL(r.Context(), target.OwnerUsername, siteName, site.ID)
 	setSiteETag(w, site)
@@ -697,6 +706,11 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	summary := ExtractSiteSummary(files)
+	if err := db.SaveVersionSummary(r.Context(), tx, site.ID, versionNumber, summary); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
 	if err := db.ActivateVersion(r.Context(), tx, version.ID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -770,6 +784,10 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 	keepObject = true
 	refreshSiteManifest(r.Context(), h.database, h.store, site.ID)
 
+	if publish {
+		site.Summary = summary
+	}
+	site.LastDeployedAt = time.Now().UTC()
 	site.ActiveVersion = liveVersion
 
 	url := h.siteURL(r.Context(), target.OwnerUsername, siteName, site.ID)
@@ -916,7 +934,12 @@ func (h *SiteHandler) listSites(w http.ResponseWriter, r *http.Request) {
 		response = append(response, toSiteResponse(site, url, "", analyticsBySiteID[site.ID], downloadsBySiteID[site.ID]))
 	}
 
-	writeJSON(w, http.StatusOK, response)
+	filtered, filterErr := filterSiteList(response, r.URL.Query())
+	if filterErr != nil {
+		writeJSON(w, http.StatusBadRequest, filterErr)
+		return
+	}
+	writeJSON(w, http.StatusOK, filtered)
 }
 
 func (h *SiteHandler) deleteSite(w http.ResponseWriter, r *http.Request) {
@@ -1245,6 +1268,8 @@ func toSiteResponse(site db.Site, url, note string, summary db.SiteAnalyticsSumm
 	}
 
 	return siteResponse{
+		Summary:       site.Summary,
+		DeployedAt:    deployedTime(site),
 		ID:            site.ID,
 		UserID:        site.UserID,
 		Name:          site.Name,

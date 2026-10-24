@@ -1,7 +1,7 @@
 #!/bin/sh
 # Fails when a registered HTTP route pattern or an MCP tool name is missing
 # from FEATURES.md. Routes are the literal "METHOD /pattern" strings passed to
-# mux.Handle/HandleFunc; tools are the Name: fields in internal/mcp/*tools.go.
+# mux.Handle/HandleFunc; tools are the Name: fields in internal/mcp/*tools.go and discovery.go.
 # Each must appear in FEATURES.md in backticks.
 set -eu
 cd "$(dirname "$0")/.."
@@ -9,7 +9,7 @@ cd "$(dirname "$0")/.."
 missing=0
 routes=$(grep -rhoE --include='*.go' --exclude='*_test.go' 'Handle(Func)?\("[A-Z]+ /[^"]*"' cmd internal |
 	sed -E 's/^Handle(Func)?\("//; s/"$//' | sort -u)
-tools=$(grep -hoE '^[[:space:]]*Name:[[:space:]]*"[a-z_]+"' internal/mcp/tools.go internal/mcp/storage_tools.go |
+tools=$(grep -hoE '^[[:space:]]*Name:[[:space:]]*"[a-z_]+"' internal/mcp/tools.go internal/mcp/storage_tools.go internal/mcp/discovery.go |
 	sed -E 's/.*"([a-z_]+)"/\1/' | sort -u)
 
 [ -n "$routes" ] || { echo "check-features: found no routes; the pattern needs updating"; exit 1; }

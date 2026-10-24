@@ -2,6 +2,13 @@
 
 ## Unreleased (v0.9.9)
 
+- Search authorized site lists by words, created/updated dates, and page.
+  Deploys save content summaries in Postgres; lists show live summaries.
+  Migration 0061 adds version summaries. Run `site-summary-backfill` once
+  after upgrading to cover existing live versions; reruns skip completed work.
+- List a core of 20 MCP tools. Find other operations with `find_tools` and
+  call them with `run_tool` or directly, with the same scopes and ETag checks.
+
 - Replace the app and plugin icons with the Rounded Simple Host s.h mark,
   using the hosted exports. Raster exports are opaque cream. Page icon links
   use `?v=c`, brand sources are in `docs/brand/`, and the plugin is 0.16.1.

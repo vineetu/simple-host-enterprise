@@ -42,6 +42,8 @@ type User struct {
 func (u User) IsTeam() bool { return u.Kind == "team" }
 
 type Site struct {
+	Summary            SiteSummary
+	LastDeployedAt     time.Time
 	ID                 string
 	UserID             string
 	Name               string

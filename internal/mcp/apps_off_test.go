@@ -9,9 +9,9 @@ import (
 	"testing"
 )
 
-// Snapshot captured from pre-port commit 4671623.
+// Snapshot of the core inventory with Apps disabled.
 // It covers discovery, tools/list, and every existing routing fixture result.
-func TestAppsOffByteIdentical(t *testing.T) {
+func TestAppsOffSnapshot(t *testing.T) {
 	s := NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("ETag", `"v1"`)
 		w.Write([]byte(`{"ok":true}`))
@@ -33,6 +33,15 @@ func TestAppsOffByteIdentical(t *testing.T) {
 			b, _ := json.Marshal(resp)
 			key, _ := json.Marshal([]any{f.tool, i})
 			snapshots[string(key)] = b
+		}
+	}
+	if os.Getenv("UPDATE_MCP_SNAPSHOT") == "1" {
+		b, err := json.MarshalIndent(snapshots, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile("testdata/apps-off.json", append(b, '\n'), 0644); err != nil {
+			t.Fatal(err)
 		}
 	}
 	var expected map[string]json.RawMessage
