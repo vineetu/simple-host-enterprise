@@ -1,5 +1,12 @@
 # Changelog
 
+## Chart 0.2.7 — 2026-10-24
+
+- Pins the published 0.9.9 image digest
+  (`sha256:f3fa20dcaf57d8a8fd139a93f6efe343ef039428512cc3bce178780b04dc7c71`).
+  Migrations 0061, 0062, and 0063 apply; existing sites and saved data are
+  kept.
+
 ## v0.9.9 — 2026-10-24
 
 Schema 0063 (backward-compatible: v0.9.8 runs against it, so a rollback is safe).
