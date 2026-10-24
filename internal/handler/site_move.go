@@ -464,7 +464,7 @@ func (h *SiteHandler) movableSite(w http.ResponseWriter, r *http.Request) (*db.U
 	if owner == "" {
 		owner = user.Username
 	}
-	if decision := h.limits.allow(managementUserPolicy, user.ID); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, managementUserPolicy, user.ID); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return nil, db.SiteAccess{}, false
 	}

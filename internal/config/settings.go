@@ -115,6 +115,8 @@ func Settings() []Setting {
 	op := oplimits.Defaults()
 	d := ShortDuration
 	all := []Setting{
+		{Name: "CREATE_REPLAY_PER_ACCOUNT", Group: "sites", Type: "int", Default: strconv.Itoa(op.CreateReplayPerAccount), Min: 1, Max: 5000, Description: "Create replay keys per person, retained for 24 hours in Postgres."},
+		{Name: "CREATE_REPLAY_TOTAL", Group: "sites", Type: "int", Default: strconv.Itoa(op.CreateReplayTotal), Min: 1, Max: 500000, Description: "Create replay keys across the installation, including pending requests."},
 		{Name: "MCP_APP_PHOTO_PICKER", Group: "sites", Type: "string", Default: "off", Description: "Photo picker screen: off, on, or accounts: followed by comma-separated usernames."},
 		{Name: "MCP_APP_MY_SITES", Group: "sites", Type: "string", Default: "off", Description: "My sites screen: off, on, or accounts: followed by comma-separated usernames."},
 		{Name: "MCP_APP_DASHBOARD", Group: "sites", Type: "string", Default: "off", Description: "Weekly dashboard screen: off, on, or accounts: followed by comma-separated usernames."},

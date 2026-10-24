@@ -226,7 +226,7 @@ func (h *SiteHandler) listCollaborationSites(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
 		return
 	}
-	if decision := h.limits.allow(managementUserPolicy, user.ID); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, managementUserPolicy, user.ID); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -375,7 +375,7 @@ func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
 		return
 	}
-	if decision := h.limits.allow(managementUserPolicy, actor.ID); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, managementUserPolicy, actor.ID); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -538,7 +538,7 @@ func (h *SiteHandler) rollbackCollaborationSite(w http.ResponseWriter, r *http.R
 		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
 		return
 	}
-	if decision := h.limits.allow(managementUserPolicy, actor.ID); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, managementUserPolicy, actor.ID); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}

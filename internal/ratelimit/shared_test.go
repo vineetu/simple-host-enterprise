@@ -134,14 +134,14 @@ func TestSharedBudgetAcrossPodsAndWindowReset(t *testing.T) {
 		if i%2 == 1 {
 			pod = podB
 		}
-		if d := pod.Allow(policy, key); !d.Allowed {
+		if d := pod.Allow(policy, key); !d.Allowed || d.Remaining != 4-i || d.Limit != 5 || d.Reset <= 0 || d.Reset > window {
 			t.Fatalf("request %d denied inside the shared budget", i+1)
 		}
 	}
 	for _, pod := range []*ratelimit.Shared{podA, podB} {
 		d := pod.Allow(policy, key)
-		if d.Allowed {
-			t.Fatal("a second pod doubled the budget")
+		if d.Allowed || d.Remaining != 0 || d.Reset != d.RetryAfter {
+			t.Fatal("a second pod doubled the budget or reported the wrong balance")
 		}
 		if d.RetryAfter < time.Second || d.RetryAfter > window {
 			t.Fatalf("Retry-After %v is not within the window", d.RetryAfter)

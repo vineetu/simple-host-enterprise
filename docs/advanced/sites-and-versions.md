@@ -18,6 +18,8 @@ the pod's memory with `UPLOAD_CONCURRENCY`: each upload holds its archive and fi
 <!-- settings:group=sites -->
 | Setting | Default | Allowed | What it does |
 |---|---|---|---|
+| `CREATE_REPLAY_PER_ACCOUNT` | `500` | 1–5000 | Create replay keys per person, retained for 24 hours in Postgres. |
+| `CREATE_REPLAY_TOTAL` | `50000` | 1–500000 | Create replay keys across the installation, including pending requests. |
 | `MCP_APP_PHOTO_PICKER` | `off` | text | Photo picker screen: off, on, or accounts: followed by comma-separated usernames. |
 | `MCP_APP_MY_SITES` | `off` | text | My sites screen: off, on, or accounts: followed by comma-separated usernames. |
 | `MCP_APP_DASHBOARD` | `off` | text | Weekly dashboard screen: off, on, or accounts: followed by comma-separated usernames. |

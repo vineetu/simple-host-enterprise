@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// Snapshot captured from pre-port commit 4671623.
+// Snapshot captured from pre-port commit 4671623, plus the optional create replay arguments.
 // It covers discovery, tools/list, and every existing routing fixture result.
 func TestAppsOffByteIdentical(t *testing.T) {
 	s := NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

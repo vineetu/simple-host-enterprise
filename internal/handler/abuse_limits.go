@@ -432,3 +432,25 @@ func isMaxBytesError(err error) bool {
 	var maxBytesErr *http.MaxBytesError
 	return errors.As(err, &maxBytesErr)
 }
+
+func (l *AbuseLimits) allowHTTP(w http.ResponseWriter, policy ratelimit.Policy, key string) ratelimit.Decision {
+	d := l.allow(policy, key)
+	rateLimitHeaders(w, policy.Name, d)
+	return d
+}
+func (l *AbuseLimits) allowSearchHTTP(w http.ResponseWriter, policy ratelimit.Policy, key string) ratelimit.Decision {
+	d := l.allowSearch(policy, key)
+	rateLimitHeaders(w, policy.Name, d)
+	return d
+}
+func rateLimitHeaders(w http.ResponseWriter, name string, d ratelimit.Decision) {
+	if d.Limit == 0 {
+		return
+	}
+	reset := int64(math.Ceil(d.Reset.Seconds()))
+	w.Header().Set("RateLimit-Policy", fmt.Sprintf(`"%s";q=%d;w=%d`, name, d.Limit, int64(d.Window.Seconds())))
+	w.Header().Set("RateLimit", fmt.Sprintf(`"%s";r=%d;t=%d`, name, d.Remaining, reset))
+	w.Header().Set("RateLimit-Limit", strconv.Itoa(d.Limit))
+	w.Header().Set("RateLimit-Remaining", strconv.Itoa(d.Remaining))
+	w.Header().Set("RateLimit-Reset", strconv.FormatInt(reset, 10))
+}

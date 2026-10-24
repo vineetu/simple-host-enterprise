@@ -268,7 +268,7 @@ func (h *SiteHandler) limitUploadConcurrency(next http.Handler) http.Handler {
 
 func (h *SiteHandler) limitManagementClient(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if decision := h.limits.allow(managementClientPolicy, clientLimitKey(r)); !decision.Allowed {
+		if decision := h.limits.allowHTTP(w, managementClientPolicy, clientLimitKey(r)); !decision.Allowed {
 			writeRateLimit(w, decision)
 			return
 		}
@@ -434,14 +434,33 @@ func (h *SiteHandler) createSite(w http.ResponseWriter, r *http.Request) {
 // actor is used for the rate limit and versions.uploaded_by, the owner for the
 // locks, the disk paths, the sites row and the reported URL. See mutationTarget.
 func (h *SiteHandler) createSiteForTarget(w http.ResponseWriter, r *http.Request, target mutationTarget, siteName string) {
+	if decision := h.limits.allowHTTP(w, managementUserPolicy, target.ActorID); !decision.Allowed {
+		writeRateLimit(w, decision)
+		return
+	}
+	if r.Header.Get("If-Match") != "" {
+		site, err := db.GetSite(r.Context(), h.database, target.OwnerID, siteName)
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, 412, errorResponse{Error: "site precondition failed"})
+			return
+		}
+		if err != nil {
+			writeJSON(w, 500, errorResponse{Error: "internal server error"})
+			return
+		}
+		if !requireSitePrecondition(w, r, site, false) {
+			return
+		}
+	}
+	replayCreate(w, r, h.database, target.ActorID, target.OwnerID, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.createSiteForTargetOnce(w, r, target, siteName)
+	}))
+}
+func (h *SiteHandler) createSiteForTargetOnce(w http.ResponseWriter, r *http.Request, target mutationTarget, siteName string) {
 	if !validateStoredUsername(w, target.OwnerUsername) {
 		return
 	}
 	if !h.newSiteNameAddressable(w, r, target.OwnerUsername, siteName) {
-		return
-	}
-	if decision := h.limits.allow(managementUserPolicy, target.ActorID); !decision.Allowed {
-		writeRateLimit(w, decision)
 		return
 	}
 
@@ -616,7 +635,7 @@ func (h *SiteHandler) updateSite(w http.ResponseWriter, r *http.Request) {
 	if !validateStoredUsername(w, target.OwnerUsername) {
 		return
 	}
-	if decision := h.limits.allow(managementUserPolicy, target.ActorID); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, managementUserPolicy, target.ActorID); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -860,7 +879,7 @@ func (h *SiteHandler) listSites(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
 		return
 	}
-	if decision := h.limits.allow(managementUserPolicy, user.ID); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, managementUserPolicy, user.ID); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -939,7 +958,7 @@ func (h *SiteHandler) deleteSiteForTarget(w http.ResponseWriter, r *http.Request
 	if !validateStoredUsername(w, target.OwnerUsername) {
 		return
 	}
-	if decision := h.limits.allow(managementUserPolicy, target.ActorID); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, managementUserPolicy, target.ActorID); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -1031,7 +1050,7 @@ func (h *SiteHandler) rollbackSite(w http.ResponseWriter, r *http.Request) {
 	if !validateStoredUsername(w, target.OwnerUsername) {
 		return
 	}
-	if decision := h.limits.allow(managementUserPolicy, target.ActorID); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, managementUserPolicy, target.ActorID); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}

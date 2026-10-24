@@ -50,7 +50,8 @@ type upstream struct {
 	ContentType string
 	// IfMatch carries the caller's ETag so a concurrent deploy is rejected
 	// rather than silently overwritten, exactly as on the REST path.
-	IfMatch string
+	IfMatch        string
+	IdempotencyKey string
 	// Fallback is tried when the first attempt returns FallbackOn. One retry,
 	// no chain: it exists so a single tool can cover create-or-update.
 	FallbackOn int
@@ -340,6 +341,28 @@ func Tools() []Tool {
 	tools := append(toolList(), storageTools()...)
 	schemas := outputSchemas()
 	for i := range tools {
+		if tools[i].Name == "deploy_site" || tools[i].Name == "storage_add_row" || tools[i].Name == "export_site" {
+			tools[i].InputSchema["properties"].(map[string]any)["idempotency_key"] = map[string]any{"type": "string", "maxLength": 255, "description": "Reuse for an identical create retry within 24 hours. A changed body returns 422. Deployment requires intent create."}
+			original := tools[i].call
+			tools[i].call = func(args map[string]any) (upstream, error) {
+				key, err := optionalString(args, "idempotency_key")
+				if err != nil {
+					return upstream{}, err
+				}
+				if len(key) > 255 {
+					return upstream{}, fmt.Errorf("idempotency_key is at most 255 bytes")
+				}
+				up, err := original(args)
+				if err != nil {
+					return up, err
+				}
+				if key != "" && (up.Method != "POST" || up.Fallback != nil) {
+					return upstream{}, fmt.Errorf("idempotency_key needs a create request; for deployment set intent create")
+				}
+				up.IdempotencyKey = key
+				return up, nil
+			}
+		}
 		tools[i].OutputSchema = schemas[tools[i].Name]
 		tools[i].Description = oplimits.Expand(tools[i].Description)
 		expandDescriptions(tools[i].InputSchema)

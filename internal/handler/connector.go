@@ -353,7 +353,7 @@ func (h *ConnectorHandler) normalizeResource(raw string) (string, bool) {
 // ---- dynamic client registration (RFC 7591) ------------------------------------
 
 func (h *ConnectorHandler) register(w http.ResponseWriter, r *http.Request) {
-	if decision := h.limits.allow(oauthRegisterPolicy, clientLimitKey(r)); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, oauthRegisterPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -545,7 +545,7 @@ func (h *ConnectorHandler) errorRedirect(req authzRequest, e *authzError) string
 }
 
 func (h *ConnectorHandler) authorize(w http.ResponseWriter, r *http.Request) {
-	if decision := h.limits.allow(authClientPolicy, clientLimitKey(r)); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, authClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -800,7 +800,7 @@ func (h *ConnectorHandler) authenticateClient(r *http.Request) (db.OAuthClient, 
 }
 
 func (h *ConnectorHandler) parseTokenForm(w http.ResponseWriter, r *http.Request) (db.OAuthClient, bool) {
-	if decision := h.limits.allow(oauthTokenPolicy, clientLimitKey(r)); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, oauthTokenPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return db.OAuthClient{}, false
 	}

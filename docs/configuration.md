@@ -150,6 +150,8 @@ knobs, not secrets, so all three fall back to the defaults below rather than ref
 | `SITE_STORAGE_FILES_MAX_BYTES` | No | `10000000` | Must be 1000 to 1000000000. Files one site's storage may hold; they also count toward `QUOTA_MAX_BYTES`. |
 | `SITE_STORAGE_FILE_MAX_BYTES` | No | `1000000` | Must be 1000 to 1000000000. The largest single stored file. |
 | `SITE_STORAGE_VALUE_MAX_BYTES` | No | `65536` | Must be 1024 to 1048576. The largest key-value value or table row, as JSON. |
+| `CREATE_REPLAY_PER_ACCOUNT` | No | `500` | Must be 1 to 5000. Create replay keys per person, retained in Postgres for 24 hours. |
+| `CREATE_REPLAY_TOTAL` | No | `50000` | Must be 1 to 500000. Create replay keys across the installation, including pending requests. |
 | `SITE_STORAGE_MAX_RESOURCES` | No | `20` | Must be 1 to 200. Storage resources one site may have. |
 
 None of the shipped overlays (`local`, `byo`) set these; they are left at

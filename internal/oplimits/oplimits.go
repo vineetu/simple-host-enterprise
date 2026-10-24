@@ -16,7 +16,9 @@ import (
 // Values is every setting this package carries. Defaults returns what the
 // server used before each one was configurable.
 type Values struct {
-	ShowcaseBioMaxLength int
+	CreateReplayPerAccount int
+	CreateReplayTotal      int
+	ShowcaseBioMaxLength   int
 	// DeletedRetentionDays is DELETED_RETENTION_DAYS: how long a deleted site
 	// stays in Recently deleted, restorable and counted toward its owner's quota.
 	DeletedRetentionDays int
@@ -77,6 +79,8 @@ type Values struct {
 // Defaults are the values every installation used before they could be set.
 func Defaults() Values {
 	return Values{
+		CreateReplayPerAccount:       500,
+		CreateReplayTotal:            50000,
 		ShowcaseBioMaxLength:         280,
 		DeletedRetentionDays:         30,
 		IdleGraceDays:                30,

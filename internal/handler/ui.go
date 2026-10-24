@@ -168,8 +168,20 @@ func RegisterUIRoutes(mux *http.ServeMux, baseURL string) {
 	mux.HandleFunc("GET /skills.zip", serveSkillsZip(baseURL))
 	mux.HandleFunc("GET /skills/version", serveSkillsVersion(baseURL))
 	mux.HandleFunc("GET /skills/sha256/{digest}/skills.zip", serveImmutableSkillsZip(baseURL))
-	mux.HandleFunc("GET /openapi.yaml", serveExpandedStatic("openapi.yaml", "application/yaml; charset=utf-8"))
-	mux.HandleFunc("GET /{$}", serveExpandedStatic("index.html", "text/html; charset=utf-8"))
+	mux.HandleFunc("GET /openapi.json", serveDiscoveryText("openapi.json", "application/json; charset=utf-8", baseURL, 0))
+	mux.HandleFunc("GET /openapi.yaml", serveDiscoveryText("openapi.yaml", "application/yaml; charset=utf-8", baseURL, 0))
+	markdown := homepageMarkdownHandler(baseURL)
+	mux.HandleFunc("GET /index.md", markdown)
+	mux.HandleFunc("GET /llms.txt", serveDiscoveryText("llms.txt", "text/plain; charset=utf-8", baseURL, 0))
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Vary", "Accept")
+		w.Header().Set("Link", homepageLinks)
+		if acceptsMarkdown(r) {
+			markdown(w, r)
+			return
+		}
+		serveExpandedStatic("index.html", "text/html; charset=utf-8")(w, r)
+	})
 	mux.HandleFunc("GET /capabilities.html", serveExpandedStatic("capabilities.html", "text/html; charset=utf-8"))
 	// The product icon, on the app host only. The host gate does not hand
 	// these paths to the mux on an owner host or a site host, so a site

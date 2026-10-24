@@ -2095,6 +2095,11 @@
                 "minItems": 1,
                 "type": "array"
               },
+              "idempotency_key": {
+                "description": "Reuse for an identical create retry within 24 hours. A changed body returns 422. Deployment requires intent create.",
+                "maxLength": 255,
+                "type": "string"
+              },
               "intent": {
                 "description": "Which of the two you are doing: `create` for a site that does not exist in that namespace yet, `update` to publish a new version of one that does. Required whenever owner is given. Settle it with get_site or list_sites before calling — do not send `create` speculatively and read the failure, because a create that lands in the wrong namespace is a second site nobody is looking at.",
                 "enum": [
@@ -2894,6 +2899,11 @@
           "inputSchema": {
             "additionalProperties": false,
             "properties": {
+              "idempotency_key": {
+                "description": "Reuse for an identical create retry within 24 hours. A changed body returns 422. Deployment requires intent create.",
+                "maxLength": 255,
+                "type": "string"
+              },
               "owner": {
                 "description": "Name of the namespace the site belongs to. A namespace is a person or a team: your own username (from get_account), a team you are in (from list_teams), or the owner shown by list_sites. Being in a team grants everything on that team's sites, so a team site is acted on exactly like your own — only the owner differs. A username or team name, never a display name or email.",
                 "type": "string"
@@ -6031,6 +6041,11 @@
           "inputSchema": {
             "additionalProperties": false,
             "properties": {
+              "idempotency_key": {
+                "description": "Reuse for an identical create retry within 24 hours. A changed body returns 422. Deployment requires intent create.",
+                "maxLength": 255,
+                "type": "string"
+              },
               "owner": {
                 "description": "Name of the namespace the site belongs to. A namespace is a person or a team: your own username (from get_account), a team you are in (from list_teams), or the owner shown by list_sites. Being in a team grants everything on that team's sites, so a team site is acted on exactly like your own — only the owner differs. A username or team name, never a display name or email.",
                 "type": "string"

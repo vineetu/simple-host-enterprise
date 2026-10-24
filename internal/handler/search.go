@@ -130,7 +130,7 @@ func (h *SearchHandler) handleSearch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "search unavailable"})
 		return
 	}
-	if decision := h.limits.allowSearch(searchQueryPeerPolicy, clientLimitKey(r)); !decision.Allowed {
+	if decision := h.limits.allowSearchHTTP(w, searchQueryPeerPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -146,7 +146,7 @@ func (h *SearchHandler) handleSearch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "search unavailable"})
 		return
 	}
-	if decision := h.limits.allowSearch(searchQuerySessionPolicy, sessionDigest); !decision.Allowed {
+	if decision := h.limits.allowSearchHTTP(w, searchQuerySessionPolicy, sessionDigest); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -415,7 +415,7 @@ func (h *SearchHandler) handleSearchClick(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusServiceUnavailable, errorResponse{Error: "search unavailable"})
 		return
 	}
-	if decision := h.limits.allowSearch(searchClickPeerPolicy, clientLimitKey(r)); !decision.Allowed {
+	if decision := h.limits.allowSearchHTTP(w, searchClickPeerPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -434,7 +434,7 @@ func (h *SearchHandler) handleSearchClick(w http.ResponseWriter, r *http.Request
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	if decision := h.limits.allowSearch(searchClickSessionPolicy, sessionDigest); !decision.Allowed {
+	if decision := h.limits.allowSearchHTTP(w, searchClickSessionPolicy, sessionDigest); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}

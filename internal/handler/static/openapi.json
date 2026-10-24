@@ -1,18 +1,14 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Simple Host API",
-    "description": "Internal static website hosting. Every site is served at the root of its\nown host, `<sitename>.<owner>.<base>/` (for example\n`todo.alice.example.com/`). The owner host `<owner>.<base>/` serves the\nperson's or team's index page, or a person's selected home site. The authenticated /showcase.json on an owner host has the same viewer-specific visibility as its index, with bio, pins and order. A selected home redirects to the site's existing URL after access checks; content and data keep their site origin. Until the owner's certificate is ready it\nalso serves their sites at `<owner>.<base>/<sitename>/`; after that,\nthose addresses, and `/api/sites/<sitename>/...` on the owner host,\nredirect to each site's own host with path and query kept (`301` for GET\nand HEAD, `308` otherwise). v1.2 addresses of the form\n`<owner>--<sitename>.<base>` only redirect. Always use the `url` from the\nlatest response rather than composing an address. Uploads may\nbe gzip-compressed tar or ZIP archives; nested regular-file downloads such\nas ZIP and DMG artifacts are supported.\n\nA site is owned by a person or a team. Team members change a team's\nsites through owner-qualified collaboration routes with optimistic\n`ETag` / `If-Match` protection.\n\nEvery site has an access level: `only_me` (the owner, or the team's\nmembers; the default for a new site), `specific` (plus named viewers),\n`company` (anyone signed in with the link),\n`listed` (company, plus showcase and search), or `network` (anyone who\ncan reach the server, no sign-in). `network` is requested with a reason\nand applies only once an admin approves it; anonymous visitors can read a\nnetwork site's pages, assets and state, and change nothing.\n\nShared state and uploaded files are served on each site's own host and\nneed a signed-in viewer (or an API key); anyone who may open a site may\nread and write its state. The last 20 versions of each site's state are\nkept and the owner or team can restore one. The control pages and management API live on\nthe base host, never on a site's host. Never store secrets or PII in state\nor uploaded files.\n\nRate-limited operations return `429` with an integer-seconds\n`Retry-After` header. Sign-in, the session hand-off, API key minting and\nthe connector's token and client registration limits are counted in\nPostgres across all replicas; every other limit is per process and\nresets when the process restarts.\n\nAPI-key-authenticated management requests must identify either a supported\nagent skill with `X-Skill-Version: <major.minor.patch>` or an intentional\nnon-skill integration with `X-Simple-Host-Client: api`. The first-party\naccount page uses the reserved `control-ui` value. Missing, malformed, or\nunsupported skill versions return `400 skill_version_required` after valid\nauthentication; invalid keys still return `401`. Accepted management\nresponses advertise latest/minimum/update metadata in headers without\nchanging response bodies.\n\nThe public, unauthenticated `/.well-known/agent-skills/` namespace exposes\nonly the discovery index and three fixed skill archives documented below.\n`GET` or `HEAD` for any other artifact in that namespace returns a fixed\n`404 Not Found`; methods other than `GET` and `HEAD` on a fixed discovery\npath return `405 Method Not Allowed`. The SHA-256 digests are integrity\nchecks over the exact same-origin archive bytes, not signatures.\n",
+    "title": "Simple Host Enterprise API",
+    "description": "Internal static website hosting. Every site is served at the root of its\nown host, `<sitename>.<owner>.<base>/` (for example\n`todo.alice.example.com/`). The owner host `<owner>.<base>/` serves the\nperson's or team's index page, or a person's selected home site. The authenticated /showcase.json on an owner host has the same viewer-specific visibility as its index, with bio, pins and order. A selected home redirects to the site's existing URL after access checks; content and data keep their site origin. Until the owner's certificate is ready it\nalso serves their sites at `<owner>.<base>/<sitename>/`; after that,\nthose addresses, and `/api/sites/<sitename>/...` on the owner host,\nredirect to each site's own host with path and query kept (`301` for GET\nand HEAD, `308` otherwise). v1.2 addresses of the form\n`<owner>--<sitename>.<base>` only redirect. Always use the `url` from the\nlatest response rather than composing an address. Uploads may\nbe gzip-compressed tar or ZIP archives; nested regular-file downloads such\nas ZIP and DMG artifacts are supported.\n\nA site is owned by a person or a team. Team members change a team's\nsites through owner-qualified collaboration routes with optimistic\n`ETag` / `If-Match` protection.\n\nEvery site has an access level: `only_me` (the owner, or the team's\nmembers; the default for a new site), `specific` (plus named viewers),\n`company` (anyone signed in with the link),\n`listed` (company, plus showcase and search), or `network` (anyone who\ncan reach the server, no sign-in). `network` is requested with a reason\nand applies only once an admin approves it; anonymous visitors can read a\nnetwork site's pages, assets and state, and change nothing.\n\nShared state and uploaded files are served on each site's own host and\nneed a signed-in viewer (or an API key); anyone who may open a site may\nread and write its state. The last 20 versions of each site's state are\nkept and the owner or team can restore one. The control pages and management API live on\nthe base host, never on a site's host. Never store secrets or PII in state\nor uploaded files.\n\nUnmatched /api routes return JSON not_found errors (404); unsupported\nmethods return JSON method_not_allowed errors (405) and Allow. MCP\ntransport failures use JSON-RPC; OAuth keeps its own error format.\n\nLimited responses include RateLimit-Policy, RateLimit, and legacy\nRateLimit-Limit, RateLimit-Remaining, and RateLimit-Reset (seconds).\nShared policies report Postgres counters; local policies report token\nbalances and the wait for a token.\n\nCreate POSTs support Idempotency-Key on personal and collaboration site\ncreates, photo uploads, storage row additions on the site host, and export\nlinks. Row additions use POST /api/sites/{site}/storage/db/{name}/tables/{table}/rows\n(or /api/site/storage/db/{name}/tables/{table}/rows) on the site host.\nKeys replay the original status, headers, and body for 24 hours\nacross pods. Identity, route, query, resource, and body hash bind a key.\nA changed body returns 422 idempotency_key_reused. Admission caps return\n429 idempotency_cache_full. Pending requests wait briefly then return\n409 idempotency_in_progress; an interrupted create may stay pending until\nexpiry, so check the resource before using another key. Current access and\nsupplied If-Match checks still apply. Export links also bind the credential;\nreplay does not extend their lifetime or single-use limit.\n\nRate-limited operations return `429` with an integer-seconds\n`Retry-After` header. Sign-in, the session hand-off, API key minting and\nthe connector's token and client registration limits are counted in\nPostgres across all replicas; every other limit is per process and\nresets when the process restarts.\n\nAPI-key-authenticated management requests must identify either a supported\nagent skill with `X-Skill-Version: <major.minor.patch>` or an intentional\nnon-skill integration with `X-Simple-Host-Client: api`. The first-party\naccount page uses the reserved `control-ui` value. Missing, malformed, or\nunsupported skill versions return `400 skill_version_required` after valid\nauthentication; invalid keys still return `401`. Accepted management\nresponses advertise latest/minimum/update metadata in headers without\nchanging response bodies.\n\nThe public, unauthenticated `/.well-known/agent-skills/` namespace exposes\nonly the discovery index and three fixed skill archives documented below.\n`GET` or `HEAD` for any other artifact in that namespace returns a fixed\n`404 Not Found`; methods other than `GET` and `HEAD` on a fixed discovery\npath return `405 Method Not Allowed`. The SHA-256 digests are integrity\nchecks over the exact same-origin archive bytes, not signatures.\n",
     "version": "1.8.0"
   },
   "servers": [
     {
-      "url": "https://simple-host.example.com",
-      "description": "Production"
-    },
-    {
-      "url": "http://localhost:8080",
-      "description": "Local development"
+      "url": "{{BASE_URL}}",
+      "description": "This installation"
     }
   ],
   "paths": {
@@ -386,6 +382,9 @@
         ],
         "parameters": [
           {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
             "$ref": "#/components/parameters/SkillVersion"
           },
           {
@@ -413,6 +412,9 @@
           }
         },
         "responses": {
+          "422": {
+            "description": "Idempotency-Key was used with a different body."
+          },
           "201": {
             "description": "Site created",
             "headers": {
@@ -1524,6 +1526,9 @@
         ],
         "parameters": [
           {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
             "$ref": "#/components/parameters/SkillVersion"
           },
           {
@@ -1554,6 +1559,9 @@
           }
         },
         "responses": {
+          "422": {
+            "description": "Idempotency-Key was used with a different body."
+          },
           "201": {
             "description": "Site created",
             "content": {
@@ -3306,6 +3314,9 @@
         ],
         "parameters": [
           {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
             "$ref": "#/components/parameters/SkillVersion"
           },
           {
@@ -3319,6 +3330,9 @@
           }
         ],
         "responses": {
+          "422": {
+            "description": "Idempotency-Key was used with a different body."
+          },
           "200": {
             "description": "The download address",
             "content": {
@@ -5291,6 +5305,9 @@
         "description": "Owner or owning team member only. The browser shrinks photos to 1600 pixels and removes metadata. The server validates JPEG/WebP containers without re-encoding. Other files are kept; quotas, scanning, ETag checks, and audit apply.",
         "parameters": [
           {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
             "in": "path",
             "name": "site",
             "required": true,
@@ -5333,6 +5350,9 @@
           }
         },
         "responses": {
+          "422": {
+            "description": "Idempotency-Key was used with a different body."
+          },
           "200": {
             "description": "One new version and photo paths and URLs.",
             "content": {
@@ -5436,6 +5456,222 @@
           },
           "404": {
             "description": "Unknown asset."
+          }
+        }
+      }
+    },
+    "/index.md": {
+      "get": {
+        "summary": "Markdown landing page",
+        "description": "Public installation metadata, served only on the app host. HEAD returns headers only.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Markdown landing page.",
+            "content": {
+              "text/markdown": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth.md": {
+      "get": {
+        "summary": "Company sign-in, connector consent, and expiring CI keys",
+        "description": "Public installation metadata, served only on the app host. HEAD returns headers only.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Company sign-in, connector consent, and expiring CI keys.",
+            "content": {
+              "text/markdown": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/llms.txt": {
+      "get": {
+        "summary": "Linked Enterprise quickstart",
+        "description": "Public installation metadata, served only on the app host. HEAD returns headers only.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Linked Enterprise quickstart.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/mcp/server-card.json": {
+      "get": {
+        "summary": "Local MCP server card",
+        "description": "Public installation metadata, served only on the app host. HEAD returns headers only.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Local MCP server card.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/agent-card.json": {
+      "get": {
+        "summary": "Public MCP capability inventory",
+        "description": "Public installation metadata, served only on the app host. HEAD returns headers only.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Public MCP capability inventory.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/ard.json": {
+      "get": {
+        "summary": "Local agent resource discovery",
+        "description": "Public installation metadata, served only on the app host. HEAD returns headers only.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Local agent resource discovery.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/api-catalog": {
+      "get": {
+        "summary": "Links to the local API contract",
+        "description": "Public installation metadata, served only on the app host. HEAD returns headers only.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Links to the local API contract.",
+            "content": {
+              "application/linkset+json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "summary": "Enterprise landing page",
+        "security": [],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Accept",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Explicit text/markdown negotiates Markdown when its quality is at least that of text/html."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Landing copy, with Vary Accept and discovery Link headers.",
+            "headers": {
+              "Link": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Local discovery resources."
+              },
+              "Vary": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Accept."
+              }
+            },
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/markdown": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.yaml": {
+      "get": {
+        "summary": "This installation's API contract in YAML",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Enterprise OpenAPI with local addresses and configured limits.",
+            "content": {
+              "application/yaml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "summary": "This installation's API contract in JSON",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Enterprise OpenAPI with local addresses and configured limits.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
           }
         }
       }
@@ -5631,6 +5867,16 @@
           "type": "string"
         },
         "example": "\"site-4b256b3b-9d15-4ce5-bba7-b04ef26f49e5-v7\""
+      },
+      "IdempotencyKey": {
+        "in": "header",
+        "name": "Idempotency-Key",
+        "required": false,
+        "description": "Reuse with the same body for 24-hour create replay. Changed bodies return 422; pending creates return 409; capacity exhaustion returns 429.",
+        "schema": {
+          "type": "string",
+          "maxLength": 255
+        }
       }
     },
     "schemas": {

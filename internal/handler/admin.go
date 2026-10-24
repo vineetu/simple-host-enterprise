@@ -201,7 +201,7 @@ func (h *AdminHandler) requireAdmin(next http.Handler) http.Handler {
 
 func (h *AdminHandler) limitAdminClient(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if decision := h.limits.allow(adminClientPolicy, clientLimitKey(r)); !decision.Allowed {
+		if decision := h.limits.allowHTTP(w, adminClientPolicy, clientLimitKey(r)); !decision.Allowed {
 			writeRateLimit(w, decision)
 			return
 		}
@@ -216,7 +216,7 @@ func (h *AdminHandler) limitAdminIdentity(next http.Handler) http.Handler {
 			writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
 			return
 		}
-		if decision := h.limits.allow(adminIdentityPolicy, user.ID); !decision.Allowed {
+		if decision := h.limits.allowHTTP(w, adminIdentityPolicy, user.ID); !decision.Allowed {
 			writeRateLimit(w, decision)
 			return
 		}

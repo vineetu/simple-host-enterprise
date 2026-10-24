@@ -539,6 +539,30 @@
       "basic": false
     },
     {
+      "name": "CREATE_REPLAY_PER_ACCOUNT",
+      "group": "sites",
+      "description": "Create replay keys per person, retained for 24 hours in Postgres.",
+      "type": "int",
+      "default": "500",
+      "min": 1,
+      "max": 5000,
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
+      "name": "CREATE_REPLAY_TOTAL",
+      "group": "sites",
+      "description": "Create replay keys across the installation, including pending requests.",
+      "type": "int",
+      "default": "50000",
+      "min": 1,
+      "max": 500000,
+      "security_sensitive": false,
+      "required": false,
+      "basic": false
+    },
+    {
       "name": "MCP_APP_PHOTO_PICKER",
       "group": "sites",
       "description": "Photo picker screen: off, on, or accounts: followed by comma-separated usernames.",
