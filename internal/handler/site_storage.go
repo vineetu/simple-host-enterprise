@@ -94,20 +94,20 @@ func onlyAddedBy(d sp.Decision, c sp.Caller) string {
 func (h *SiteAPIHandler) Storage(w http.ResponseWriter, r *http.Request, call siteAPICall, rest string) {
 	write := r.Method != http.MethodGet && r.Method != http.MethodHead
 	if write {
-		if decision := h.limits.allow(stateClientPolicy, clientLimitKey(r)); !decision.Allowed {
+		if decision := h.limits.allowHTTP(w, stateClientPolicy, clientLimitKey(r)); !decision.Allowed {
 			writeRateLimit(w, decision)
 			return
 		}
-		if decision := h.limits.allow(stateSitePolicy, siteLimitKey(call.Owner, call.SiteName)); !decision.Allowed {
+		if decision := h.limits.allowHTTP(w, stateSitePolicy, siteLimitKey(call.Owner, call.SiteName)); !decision.Allowed {
 			writeRateLimit(w, decision)
 			return
 		}
 	} else {
-		if decision := h.limits.allow(stateReadClientPolicy, clientLimitKey(r)); !decision.Allowed {
+		if decision := h.limits.allowHTTP(w, stateReadClientPolicy, clientLimitKey(r)); !decision.Allowed {
 			writeRateLimit(w, decision)
 			return
 		}
-		if decision := h.limits.allow(stateReadSitePolicy, siteLimitKey(call.Owner, call.SiteName)); !decision.Allowed {
+		if decision := h.limits.allowHTTP(w, stateReadSitePolicy, siteLimitKey(call.Owner, call.SiteName)); !decision.Allowed {
 			writeRateLimit(w, decision)
 			return
 		}
@@ -678,7 +678,13 @@ func (h *SiteAPIHandler) storageRows(w http.ResponseWriter, r *http.Request, cal
 		case http.MethodGet:
 			h.listRows(w, r, call, c, res, table, t)
 		case http.MethodPost:
-			h.addRow(w, r, call, c, res.Name, table)
+			if sp.Decide(t.Access, sp.Add, c) == sp.Refused {
+				refuseStorage(w, c, sp.Add, t.Access.Add)
+				return
+			}
+			replayCreate(w, r, h.database, c.UserID, call.SiteID, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				h.addRow(w, r, call, c, res.Name, table)
+			}))
 		default:
 			methodNotAllowed(w, "GET, POST")
 		}

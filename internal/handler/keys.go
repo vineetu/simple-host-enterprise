@@ -162,7 +162,7 @@ func (h *KeysHandler) mint(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
 		return
 	}
-	if decision := h.limits.allow(apiKeyMintPolicy, user.ID); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, apiKeyMintPolicy, user.ID); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}

@@ -285,6 +285,11 @@ func run() (runErr error) {
 	// Every method needs an API key or an OAuth access token first, so an
 	// unauthenticated client of any method is told where to sign in.
 	mcpServer := mcp.NewServer(mux, "simple-host", pluginVersion).WithApps(cfg.PublicBaseURL, cfg.MCPApps)
+	inventory := []handler.DiscoveryTool{}
+	for _, tool := range mcpServer.ListedTools() {
+		inventory = append(inventory, handler.DiscoveryTool{Name: tool.Name, Description: tool.Description})
+	}
+	handler.RegisterDiscovery(mux, cfg.PublicBaseURL, version, cfg.APIKeyMaxDays, mcp.ProtocolVersion, inventory)
 	protectedMCP := connector.ProtectMCP(authMW, mcpServer)
 	mux.Handle("POST /mcp", protectedMCP)
 	mux.Handle("GET /mcp", protectedMCP)
@@ -302,7 +307,7 @@ func run() (runErr error) {
 	// id and every request, including one the gate refuses, is on record.
 	requestLog := reqlog.Middleware(stdoutLog, reqlog.ProbePaths)
 	hostGate := handler.NewHostGate(hosts, siteFiles, database, signingKeys, negativeSessionCache, handoffHandler, siteAPIHandler, authMW, cfg.PublicBaseURL)
-	gated := hostGate(mux)
+	gated := hostGate(handler.APIErrors(mux, mux))
 	// The state tools reach the site API the way a page does: on the owner's
 	// own host, through the host gate and its access checks.
 	mcpServer.WithSiteAPI(gated, hosts.SiteHostResolver())

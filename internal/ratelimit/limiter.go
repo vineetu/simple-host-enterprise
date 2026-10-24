@@ -17,6 +17,10 @@ type Policy struct {
 
 // Decision is the result of consuming one token.
 type Decision struct {
+	Limit      int
+	Remaining  int
+	Reset      time.Duration
+	Window     time.Duration
 	Allowed    bool
 	RetryAfter time.Duration
 }
@@ -112,7 +116,7 @@ func (l *Limiter) Allow(policy Policy, key string) Decision {
 
 	if b.tokens >= 1 {
 		b.tokens--
-		return Decision{Allowed: true}
+		return bucketDecision(policy, b.tokens, true, 0)
 	}
 
 	waitSeconds := (1 - b.tokens) / policy.RefillPerSecond
@@ -120,7 +124,7 @@ func (l *Limiter) Allow(policy Policy, key string) Decision {
 	if retryAfter < time.Second {
 		retryAfter = time.Second
 	}
-	return Decision{RetryAfter: retryAfter}
+	return bucketDecision(policy, b.tokens, false, retryAfter)
 }
 
 func (l *Limiter) makeRoom(now time.Time) {
@@ -156,4 +160,10 @@ func lessKey(left, right bucketKey) bool {
 		return left.policy < right.policy
 	}
 	return left.value < right.value
+}
+
+func bucketDecision(policy Policy, tokens float64, allowed bool, retry time.Duration) Decision {
+	limit, window := FixedWindow(policy)
+	return Decision{Allowed: allowed, RetryAfter: retry, Limit: limit, Window: window,
+		Remaining: max(0, int(math.Floor(tokens))), Reset: time.Duration(math.Ceil(max(0, 1-tokens)/policy.RefillPerSecond)) * time.Second}
 }

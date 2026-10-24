@@ -147,37 +147,42 @@ func (h *SiteHandler) siteExportLink(w http.ResponseWriter, r *http.Request) {
 	if !ok || !requireOwnerRole(w, access) {
 		return
 	}
+	if r.Header.Get("If-Match") != "" && !requireSitePrecondition(w, r, access.Site, false) {
+		return
+	}
 	credKind, credID := exportCredential(r.Context())
 	if credID == "" {
 		writeJSON(w, http.StatusForbidden, errorResponse{Error: "forbidden"})
 		return
 	}
-	nonce := make([]byte, 16)
-	if _, err := rand.Read(nonce); err != nil {
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	expires := time.Now().Add(oplimits.Get().ExportLinkTTL).UTC().Truncate(time.Second)
-	token, err := signSiteExport(h.signingKeys, siteExportClaims{
-		SiteID: access.Site.ID, ActorID: access.ActorID, Owner: access.OwnerUsername, Site: access.Site.Name, Exp: expires.Unix(),
-		CredKind: credKind, CredID: credID, Nonce: base64.RawURLEncoding.EncodeToString(nonce),
-	})
-	if err != nil {
-		log.Printf("sign export link %s/%s: %v", ownerUsername, siteName, err)
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
-		return
-	}
-	actorKind, keyID := auditActorKind(r.Context())
-	h.audit.Record(r.Context(), audit.Event{
-		ActorID: access.ActorID, ActorKind: actorKind, KeyID: keyID,
-		Action: "site_export_link", OwnerID: access.OwnerID, SiteID: access.Site.ID,
-		RequestID: auditRequestID(r.Context()),
-		Extra:     map[string]any{"credential": credKind, "expires_at": expires},
-	})
-	writeJSON(w, http.StatusOK, siteExportLinkResponse{
-		URL:       strings.TrimRight(h.publicBaseURL, "/") + "/api/site-export/" + token,
-		ExpiresAt: expires,
-	})
+	replayCreate(w, r, h.database, access.ActorID, access.Site.ID+":"+credKind+":"+credID, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nonce := make([]byte, 16)
+		if _, err := rand.Read(nonce); err != nil {
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+			return
+		}
+		expires := time.Now().Add(oplimits.Get().ExportLinkTTL).UTC().Truncate(time.Second)
+		token, err := signSiteExport(h.signingKeys, siteExportClaims{
+			SiteID: access.Site.ID, ActorID: access.ActorID, Owner: access.OwnerUsername, Site: access.Site.Name, Exp: expires.Unix(),
+			CredKind: credKind, CredID: credID, Nonce: base64.RawURLEncoding.EncodeToString(nonce),
+		})
+		if err != nil {
+			log.Printf("sign export link %s/%s: %v", ownerUsername, siteName, err)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+			return
+		}
+		actorKind, keyID := auditActorKind(r.Context())
+		h.audit.Record(r.Context(), audit.Event{
+			ActorID: access.ActorID, ActorKind: actorKind, KeyID: keyID,
+			Action: "site_export_link", OwnerID: access.OwnerID, SiteID: access.Site.ID,
+			RequestID: auditRequestID(r.Context()),
+			Extra:     map[string]any{"credential": credKind, "expires_at": expires},
+		})
+		writeJSON(w, http.StatusOK, siteExportLinkResponse{
+			URL:       strings.TrimRight(h.publicBaseURL, "/") + "/api/site-export/" + token,
+			ExpiresAt: expires,
+		})
+	}))
 }
 
 // downloadSiteExport streams the zip, once per link. The caller named in the

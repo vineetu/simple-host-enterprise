@@ -1,21 +1,417 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Simple Host API",
-    "description": "Internal static website hosting. Every site is served at the root of its\nown host, `<sitename>.<owner>.<base>/` (for example\n`todo.alice.example.com/`). The owner host `<owner>.<base>/` serves the\nperson's or team's index page, or a person's selected home site. The authenticated /showcase.json on an owner host has the same viewer-specific visibility as its index, with bio, pins and order. A selected home redirects to the site's existing URL after access checks; content and data keep their site origin. Until the owner's certificate is ready it\nalso serves their sites at `<owner>.<base>/<sitename>/`; after that,\nthose addresses, and `/api/sites/<sitename>/...` on the owner host,\nredirect to each site's own host with path and query kept (`301` for GET\nand HEAD, `308` otherwise). v1.2 addresses of the form\n`<owner>--<sitename>.<base>` only redirect. Always use the `url` from the\nlatest response rather than composing an address. Uploads may\nbe gzip-compressed tar or ZIP archives; nested regular-file downloads such\nas ZIP and DMG artifacts are supported.\n\nA site is owned by a person or a team. Team members change a team's\nsites through owner-qualified collaboration routes with optimistic\n`ETag` / `If-Match` protection.\n\nEvery site has an access level: `only_me` (the owner, or the team's\nmembers; the default for a new site), `specific` (plus named viewers),\n`company` (anyone signed in with the link),\n`listed` (company, plus showcase and search), or `network` (anyone who\ncan reach the server, no sign-in). `network` is requested with a reason\nand applies only once an admin approves it; anonymous visitors can read a\nnetwork site's pages, assets and state, and change nothing.\n\nShared state and uploaded files are served on each site's own host and\nneed a signed-in viewer (or an API key); anyone who may open a site may\nread and write its state. The last 20 versions of each site's state are\nkept and the owner or team can restore one. The control pages and management API live on\nthe base host, never on a site's host. Never store secrets or PII in state\nor uploaded files.\n\nRate-limited operations return `429` with an integer-seconds\n`Retry-After` header. Sign-in, the session hand-off, API key minting and\nthe connector's token and client registration limits are counted in\nPostgres across all replicas; every other limit is per process and\nresets when the process restarts.\n\nAPI-key-authenticated management requests must identify either a supported\nagent skill with `X-Skill-Version: <major.minor.patch>` or an intentional\nnon-skill integration with `X-Simple-Host-Client: api`. The first-party\naccount page uses the reserved `control-ui` value. Missing, malformed, or\nunsupported skill versions return `400 skill_version_required` after valid\nauthentication; invalid keys still return `401`. Accepted management\nresponses advertise latest/minimum/update metadata in headers without\nchanging response bodies.\n\nThe public, unauthenticated `/.well-known/agent-skills/` namespace exposes\nonly the discovery index and three fixed skill archives documented below.\n`GET` or `HEAD` for any other artifact in that namespace returns a fixed\n`404 Not Found`; methods other than `GET` and `HEAD` on a fixed discovery\npath return `405 Method Not Allowed`. The SHA-256 digests are integrity\nchecks over the exact same-origin archive bytes, not signatures.\n",
+    "title": "Simple Host Enterprise API",
+    "description": "Internal static website hosting. Every site is served at the root of its\nown host, `<sitename>.<owner>.<base>/` (for example\n`todo.alice.example.com/`). The owner host `<owner>.<base>/` serves the\nperson's or team's index page, or a person's selected home site. The authenticated /showcase.json on an owner host has the same viewer-specific visibility as its index, with bio, pins and order. A selected home redirects to the site's existing URL after access checks; content and data keep their site origin. Until the owner's certificate is ready it\nalso serves their sites at `<owner>.<base>/<sitename>/`; after that,\nthose addresses, and `/api/sites/<sitename>/...` on the owner host,\nredirect to each site's own host with path and query kept (`301` for GET\nand HEAD, `308` otherwise). v1.2 addresses of the form\n`<owner>--<sitename>.<base>` only redirect. Always use the `url` from the\nlatest response rather than composing an address. Uploads may\nbe gzip-compressed tar or ZIP archives; nested regular-file downloads such\nas ZIP and DMG artifacts are supported.\n\nA site is owned by a person or a team. Team members change a team's\nsites through owner-qualified collaboration routes with optimistic\n`ETag` / `If-Match` protection.\n\nEvery site has an access level: `only_me` (the owner, or the team's\nmembers; the default for a new site), `specific` (plus named viewers),\n`company` (anyone signed in with the link),\n`listed` (company, plus showcase and search), or `network` (anyone who\ncan reach the server, no sign-in). `network` is requested with a reason\nand applies only once an admin approves it; anonymous visitors can read a\nnetwork site's pages, assets and state, and change nothing.\n\nShared state and uploaded files are served on each site's own host and\nneed a signed-in viewer (or an API key); anyone who may open a site may\nread and write its state. The last 20 versions of each site's state are\nkept and the owner or team can restore one. The control pages and management API live on\nthe base host, never on a site's host. Never store secrets or PII in state\nor uploaded files.\n\nUnmatched /api routes return JSON not_found errors (404); unsupported\nmethods return JSON method_not_allowed errors (405) and Allow. MCP\ntransport failures use JSON-RPC; OAuth keeps its own error format.\n\nLimited responses include RateLimit-Policy, RateLimit, and legacy\nRateLimit-Limit, RateLimit-Remaining, and RateLimit-Reset (seconds).\nShared policies report Postgres counters; local policies report token\nbalances and the wait for a token.\n\nCreate POSTs support Idempotency-Key on personal and collaboration site\ncreates, photo uploads, storage row additions on the site host, and export\nlinks. Row additions use POST /api/sites/{site}/storage/db/{name}/tables/{table}/rows\n(or /api/site/storage/db/{name}/tables/{table}/rows) on the site host.\nKeys replay the original status, headers, and body for 24 hours\nacross pods. Identity, route, query, resource, and body hash bind a key.\nA changed body returns 422 idempotency_key_reused. Admission caps return\n429 idempotency_cache_full. Pending requests wait briefly then return\n409 idempotency_in_progress; an interrupted create may stay pending until\nexpiry, so check the resource before using another key. Current access and\nsupplied If-Match checks still apply. Export links also bind the credential;\nreplay does not extend their lifetime or single-use limit.\n\nRate-limited operations return `429` with an integer-seconds\n`Retry-After` header. Sign-in, the session hand-off, API key minting and\nthe connector's token and client registration limits are counted in\nPostgres across all replicas; every other limit is per process and\nresets when the process restarts.\n\nAPI-key-authenticated management requests must identify either a supported\nagent skill with `X-Skill-Version: <major.minor.patch>` or an intentional\nnon-skill integration with `X-Simple-Host-Client: api`. The first-party\naccount page uses the reserved `control-ui` value. Missing, malformed, or\nunsupported skill versions return `400 skill_version_required` after valid\nauthentication; invalid keys still return `401`. Accepted management\nresponses advertise latest/minimum/update metadata in headers without\nchanging response bodies.\n\nThe public, unauthenticated `/.well-known/agent-skills/` namespace exposes\nonly the discovery index and three fixed skill archives documented below.\n`GET` or `HEAD` for any other artifact in that namespace returns a fixed\n`404 Not Found`; methods other than `GET` and `HEAD` on a fixed discovery\npath return `405 Method Not Allowed`. The SHA-256 digests are integrity\nchecks over the exact same-origin archive bytes, not signatures.\n",
     "version": "1.8.0"
   },
   "servers": [
     {
-      "url": "https://simple-host.example.com",
-      "description": "Production"
-    },
-    {
-      "url": "http://localhost:8080",
-      "description": "Local development"
+      "url": "{{BASE_URL}}",
+      "description": "This installation"
     }
   ],
   "paths": {
+    "/": {
+      "get": {
+        "summary": "Enterprise landing page",
+        "security": [],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Accept",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Explicit text/markdown negotiates Markdown when its quality is at least that of text/html."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Landing copy, with Vary Accept and discovery Link headers.",
+            "headers": {
+              "Link": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Local discovery resources."
+              },
+              "Vary": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Accept."
+              }
+            },
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "text/markdown": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.yaml": {
+      "get": {
+        "summary": "This installation's API contract in YAML",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Enterprise OpenAPI with local addresses and configured limits.",
+            "content": {
+              "application/yaml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "summary": "This installation's API contract in JSON",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Enterprise OpenAPI with local addresses and configured limits.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/index.md": {
+      "get": {
+        "summary": "Markdown landing page",
+        "description": "Public installation metadata, served only on the app host. HEAD returns headers only.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Markdown landing page.",
+            "content": {
+              "text/markdown": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth.md": {
+      "get": {
+        "summary": "Company sign-in, connector consent, and expiring CI keys",
+        "description": "Public installation metadata, served only on the app host. HEAD returns headers only.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Company sign-in, connector consent, and expiring CI keys.",
+            "content": {
+              "text/markdown": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/llms.txt": {
+      "get": {
+        "summary": "Linked Enterprise quickstart",
+        "description": "Public installation metadata, served only on the app host. HEAD returns headers only.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Linked Enterprise quickstart.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/mcp/server-card.json": {
+      "get": {
+        "summary": "Local MCP server card",
+        "description": "Public installation metadata, served only on the app host. HEAD returns headers only.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Local MCP server card.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/agent-card.json": {
+      "get": {
+        "summary": "Public MCP capability inventory",
+        "description": "Public installation metadata, served only on the app host. HEAD returns headers only.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Public MCP capability inventory.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/ard.json": {
+      "get": {
+        "summary": "Local agent resource discovery",
+        "description": "Public installation metadata, served only on the app host. HEAD returns headers only.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Local agent resource discovery.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/api-catalog": {
+      "get": {
+        "summary": "Links to the local API contract",
+        "description": "Public installation metadata, served only on the app host. HEAD returns headers only.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Links to the local API contract.",
+            "content": {
+              "application/linkset+json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/photos": {
+      "get": {
+        "operationId": "photosPage",
+        "summary": "Add photos with a company browser session",
+        "responses": {
+          "200": {
+            "description": "Photo page with self-hosted decoders."
+          },
+          "303": {
+            "description": "Sign in with the company identity provider."
+          }
+        }
+      }
+    },
+    "/v1/sites/{site}/photos": {
+      "post": {
+        "operationId": "addPhotos",
+        "summary": "Add processed photos in one site version",
+        "description": "Owner or owning team member only. The browser shrinks photos to 1600 pixels and removes metadata. The server validates JPEG/WebP containers without re-encoding. Other files are kept; quotas, scanning, ETag checks, and audit apply.",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-Match",
+            "description": "Optional ETag from get_site. Checked before allocating photo names and again when committing.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "in": "path",
+            "name": "site",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "owner",
+            "description": "Optional username or team namespace; defaults to the signed-in person.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "photos"
+                ],
+                "properties": {
+                  "photos": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 30,
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    },
+                    "description": "JPEG/WebP files, at most 1000000 bytes each and 1600 pixels per side, with no camera or location metadata."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "422": {
+            "description": "Idempotency-Key was used with a different body."
+          },
+          "200": {
+            "description": "One new version and photo paths and URLs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "site",
+                    "version",
+                    "photos"
+                  ],
+                  "properties": {
+                    "site": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "integer"
+                    },
+                    "photos": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "path",
+                          "url",
+                          "bytes",
+                          "width",
+                          "height"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "bytes": {
+                            "type": "integer"
+                          },
+                          "width": {
+                            "type": "integer"
+                          },
+                          "height": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid photo or incomplete multipart body."
+          },
+          "401": {
+            "description": "Sign-in required."
+          },
+          "403": {
+            "description": "Origin or scope refused."
+          },
+          "404": {
+            "description": "No site this person may edit."
+          },
+          "409": {
+            "description": "A directory conflicts with a photo path."
+          },
+          "412": {
+            "description": "Site changed while preparing the photos; nothing was saved."
+          },
+          "413": {
+            "description": "Photo",
+            "batch": null,
+            "or storage quota exceeded.": null
+          },
+          "429": {
+            "description": "Upload concurrency or management rate limit reached."
+          }
+        }
+      }
+    },
+    "/photo-codecs/v3/{file}": {
+      "get": {
+        "operationId": "photoCodec",
+        "summary": "Self-hosted photo decoder assets and licenses",
+        "security": [],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Immutable decoder asset."
+          },
+          "404": {
+            "description": "Unknown asset."
+          }
+        }
+      }
+    },
     "/.well-known/agent-skills/index.json": {
       "description": "Public, unauthenticated fixed discovery-index path. Methods other than GET and HEAD return 405 Method Not Allowed.",
       "get": {
@@ -451,6 +847,9 @@
         ],
         "parameters": [
           {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
             "$ref": "#/components/parameters/SkillVersion"
           },
           {
@@ -478,6 +877,9 @@
           }
         },
         "responses": {
+          "422": {
+            "description": "Idempotency-Key was used with a different body."
+          },
           "201": {
             "description": "Site created",
             "headers": {
@@ -1654,6 +2056,9 @@
         ],
         "parameters": [
           {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
             "$ref": "#/components/parameters/SkillVersion"
           },
           {
@@ -1684,6 +2089,9 @@
           }
         },
         "responses": {
+          "422": {
+            "description": "Idempotency-Key was used with a different body."
+          },
           "201": {
             "description": "Site created",
             "content": {
@@ -1837,6 +2245,112 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
+    },
+    "/api/collaboration/sites/{owner}/{sitename}/versions/{version}/files": {
+      "get": {
+        "summary": "List retained version file metadata without downloading the archive",
+        "description": "Owner/member operation. Returns paths and sizes, capped at 8 MiB. Repeated sha256 parameters request hashes for at most 30 files of at most 1000000 bytes each; larger or absent files have no hash. Uses the same retained-version admission as archive downloads.",
+        "tags": [
+          "Collaboration"
+        ],
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/SkillVersion"
+          },
+          {
+            "$ref": "#/components/parameters/SimpleHostClient"
+          },
+          {
+            "$ref": "#/components/parameters/owner"
+          },
+          {
+            "$ref": "#/components/parameters/sitename"
+          },
+          {
+            "$ref": "#/components/parameters/version"
+          },
+          {
+            "in": "query",
+            "name": "sha256",
+            "schema": {
+              "type": "array",
+              "maxItems": 30,
+              "items": {
+                "type": "string"
+              }
+            },
+            "style": "form",
+            "explode": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Private, no-store file metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "version",
+                    "count",
+                    "files"
+                  ],
+                  "properties": {
+                    "version": {
+                      "type": "integer"
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "path",
+                          "size"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "size": {
+                            "type": "integer"
+                          },
+                          "sha256": {
+                            "type": "string",
+                            "description": "Requested SHA-256 in lowercase hex."
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ManagementBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "description": "File metadata exceeds the response cap."
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
@@ -3436,6 +3950,9 @@
         ],
         "parameters": [
           {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
             "$ref": "#/components/parameters/SkillVersion"
           },
           {
@@ -3449,6 +3966,9 @@
           }
         ],
         "responses": {
+          "422": {
+            "description": "Idempotency-Key was used with a different body."
+          },
           "200": {
             "description": "The download address",
             "content": {
@@ -3544,7 +4064,7 @@
     "/api/access": {
       "get": {
         "summary": "Read a site's access log",
-        "description": "A non-admin must pass `owner` (their own username or a team they are\nin). What comes back depends on `ACCESS_LOG_VISIBILITY`: under\n`counts` (the default) a non-admin gets `AccessCounts` — views per\nday and distinct viewers, the last 30 days unless `from`/`to` say\notherwise, never who; under `owner` they get rows with user ids but\nno IP or user agent, or `AccessCounts` with `summary=counts`; under\n`admin` they are refused. Admins get full rows (each with its\n`referrer_domain`, the linking page's domain only), or `AccessCounts`\nwith `owner` and `summary=counts`. `AccessCounts` includes the top\npages and the top referring domains. API-key callers send\n`X-Skill-Version` as on the other management routes.\n",
+        "description": "A non-admin must pass `owner` (their own username or a team they are\nin). What comes back depends on `ACCESS_LOG_VISIBILITY`: under\n`counts` (the default) a non-admin gets `AccessCounts` \u2014 views per\nday and distinct viewers, the last 30 days unless `from`/`to` say\notherwise, never who; under `owner` they get rows with user ids but\nno IP or user agent, or `AccessCounts` with `summary=counts`; under\n`admin` they are refused. Admins get full rows (each with its\n`referrer_domain`, the linking page's domain only), or `AccessCounts`\nwith `owner` and `summary=counts`. `AccessCounts` includes the top\npages and the top referring domains. API-key callers send\n`X-Skill-Version` as on the other management routes.\n",
         "tags": [
           "Audit"
         ],
@@ -3725,7 +4245,7 @@
                     },
                     "label": {
                       "type": "string",
-                      "description": "\"ends …abcd\", or \"earlier key\" for a key minted before its last four were kept"
+                      "description": "\"ends \u2026abcd\", or \"earlier key\" for a key minted before its last four were kept"
                     },
                     "revoked_at": {
                       "type": "string",
@@ -4278,7 +4798,7 @@
             }
           },
           "409": {
-            "description": "Version moved — someone else saved first. Body carries the current version and state; re-merge and retry.",
+            "description": "Version moved \u2014 someone else saved first. Body carries the current version and state; re-merge and retry.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4315,7 +4835,7 @@
             "name": "q",
             "in": "query",
             "required": true,
-            "description": "Web-style full-text query. After whitespace normalization it must contain 1–200 Unicode characters and no NUL.",
+            "description": "Web-style full-text query. After whitespace normalization it must contain 1\u2013200 Unicode characters and no NUL.",
             "schema": {
               "type": "string",
               "minLength": 1,
@@ -4635,7 +5155,7 @@
       },
       "post": {
         "summary": "Create a team",
-        "description": "Body `{\"name\": \"acme\"}` or `{\"name\": \"team-acme\"}` — letters, numbers and hyphens. Both create the team `team-acme`, and the response `name` is `team-acme`. The caller becomes its first member. There is one role: every member may publish to, and delete, any of the team's sites, add and remove members, leave, and delete the team.",
+        "description": "Body `{\"name\": \"acme\"}` or `{\"name\": \"team-acme\"}` \u2014 letters, numbers and hyphens. Both create the team `team-acme`, and the response `name` is `team-acme`. The caller becomes its first member. There is one role: every member may publish to, and delete, any of the team's sites, add and remove members, leave, and delete the team.",
         "tags": [
           "Teams"
         ],
@@ -5399,290 +5919,6 @@
           }
         }
       }
-    },
-    "/photos": {
-      "get": {
-        "operationId": "photosPage",
-        "summary": "Add photos with a company browser session",
-        "responses": {
-          "200": {
-            "description": "Photo page with self-hosted decoders."
-          },
-          "303": {
-            "description": "Sign in with the company identity provider."
-          }
-        }
-      }
-    },
-    "/v1/sites/{site}/photos": {
-      "post": {
-        "operationId": "addPhotos",
-        "summary": "Add processed photos in one site version",
-        "description": "Owner or owning team member only. The browser shrinks photos to 1600 pixels and removes metadata. The server validates JPEG/WebP containers without re-encoding. Other files are kept; quotas, scanning, ETag checks, and audit apply.",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "If-Match",
-            "description": "Optional ETag from get_site. Checked before allocating photo names and again when committing.",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "site",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "owner",
-            "description": "Optional username or team namespace; defaults to the signed-in person.",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "photos"
-                ],
-                "properties": {
-                  "photos": {
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": 30,
-                    "items": {
-                      "type": "string",
-                      "format": "binary"
-                    },
-                    "description": "JPEG/WebP files, at most 1000000 bytes each and 1600 pixels per side, with no camera or location metadata."
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "One new version and photo paths and URLs.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "site",
-                    "version",
-                    "photos"
-                  ],
-                  "properties": {
-                    "site": {
-                      "type": "string"
-                    },
-                    "version": {
-                      "type": "integer"
-                    },
-                    "photos": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "required": [
-                          "path",
-                          "url",
-                          "bytes",
-                          "width",
-                          "height"
-                        ],
-                        "properties": {
-                          "path": {
-                            "type": "string"
-                          },
-                          "url": {
-                            "type": "string"
-                          },
-                          "bytes": {
-                            "type": "integer"
-                          },
-                          "width": {
-                            "type": "integer"
-                          },
-                          "height": {
-                            "type": "integer"
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid photo or incomplete multipart body."
-          },
-          "401": {
-            "description": "Sign-in required."
-          },
-          "403": {
-            "description": "Origin or scope refused."
-          },
-          "404": {
-            "description": "No site this person may edit."
-          },
-          "409": {
-            "description": "A directory conflicts with a photo path."
-          },
-          "412": {
-            "description": "Site changed while preparing the photos; nothing was saved."
-          },
-          "413": {
-            "description": "Photo",
-            "batch": null,
-            "or storage quota exceeded.": null
-          },
-          "429": {
-            "description": "Upload concurrency or management rate limit reached."
-          }
-        }
-      }
-    },
-    "/photo-codecs/v3/{file}": {
-      "get": {
-        "operationId": "photoCodec",
-        "summary": "Self-hosted photo decoder assets and licenses",
-        "security": [],
-        "parameters": [
-          {
-            "in": "path",
-            "name": "file",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Immutable decoder asset."
-          },
-          "404": {
-            "description": "Unknown asset."
-          }
-        }
-      }
-    },
-    "/api/collaboration/sites/{owner}/{sitename}/versions/{version}/files": {
-      "get": {
-        "summary": "List retained version file metadata without downloading the archive",
-        "description": "Owner/member operation. Returns paths and sizes, capped at 8 MiB. Repeated sha256 parameters request hashes for at most 30 files of at most 1000000 bytes each; larger or absent files have no hash. Uses the same retained-version admission as archive downloads.",
-        "tags": [
-          "Collaboration"
-        ],
-        "security": [
-          {
-            "apiKey": []
-          }
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/SkillVersion"
-          },
-          {
-            "$ref": "#/components/parameters/SimpleHostClient"
-          },
-          {
-            "$ref": "#/components/parameters/owner"
-          },
-          {
-            "$ref": "#/components/parameters/sitename"
-          },
-          {
-            "$ref": "#/components/parameters/version"
-          },
-          {
-            "in": "query",
-            "name": "sha256",
-            "schema": {
-              "type": "array",
-              "maxItems": 30,
-              "items": {
-                "type": "string"
-              }
-            },
-            "style": "form",
-            "explode": true
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Private, no-store file metadata.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "version",
-                    "count",
-                    "files"
-                  ],
-                  "properties": {
-                    "version": {
-                      "type": "integer"
-                    },
-                    "count": {
-                      "type": "integer"
-                    },
-                    "files": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "required": [
-                          "path",
-                          "size"
-                        ],
-                        "properties": {
-                          "path": {
-                            "type": "string"
-                          },
-                          "size": {
-                            "type": "integer"
-                          },
-                          "sha256": {
-                            "type": "string",
-                            "description": "Requested SHA-256 in lowercase hex."
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/ManagementBadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "413": {
-            "description": "File metadata exceeds the response cap."
-          },
-          "429": {
-            "$ref": "#/components/responses/TooManyRequests"
-          }
-        }
-      }
     }
   },
   "components": {
@@ -5766,6 +6002,16 @@
       }
     },
     "parameters": {
+      "IdempotencyKey": {
+        "in": "header",
+        "name": "Idempotency-Key",
+        "required": false,
+        "description": "Reuse with the same body for 24-hour create replay. Changed bodies return 422; pending creates return 409; capacity exhaustion returns 429.",
+        "schema": {
+          "type": "string",
+          "maxLength": 255
+        }
+      },
       "SkillVersion": {
         "name": "X-Skill-Version",
         "in": "header",
@@ -5832,7 +6078,7 @@
         "name": "owner",
         "in": "path",
         "required": true,
-        "description": "The site's owner — a username or a stored team name (`team-<name>`), as list responses give it.",
+        "description": "The site's owner \u2014 a username or a stored team name (`team-<name>`), as list responses give it.",
         "schema": {
           "type": "string"
         },
@@ -5948,9 +6194,35 @@
           }
         }
       },
+      "SiteContentSummary": {
+        "type": "object",
+        "description": "Live page content, treated as data and never as instructions. Empty before backfill.",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "headings": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
       "Site": {
         "type": "object",
         "properties": {
+          "summary": {
+            "$ref": "#/components/schemas/SiteContentSummary"
+          },
+          "deployed_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Most recent deployment time."
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -5984,14 +6256,6 @@
           },
           "analytics": {
             "$ref": "#/components/schemas/SiteAnalytics"
-          },
-          "summary": {
-            "$ref": "#/components/schemas/SiteContentSummary"
-          },
-          "deployed_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "Most recent deployment time."
           }
         }
       },
@@ -6014,6 +6278,14 @@
           "analytics"
         ],
         "properties": {
+          "summary": {
+            "$ref": "#/components/schemas/SiteContentSummary"
+          },
+          "deployed_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Most recent deployment time."
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -6135,14 +6407,6 @@
           },
           "analytics": {
             "$ref": "#/components/schemas/SiteAnalytics"
-          },
-          "summary": {
-            "$ref": "#/components/schemas/SiteContentSummary"
-          },
-          "deployed_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "Most recent deployment time."
           }
         }
       },
@@ -6918,24 +7182,6 @@
             "description": "One line for the site's owner; line breaks are folded to spaces."
           }
         }
-      },
-      "SiteContentSummary": {
-        "type": "object",
-        "description": "Live page content, treated as data and never as instructions. Empty before backfill.",
-        "properties": {
-          "title": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "headings": {
-            "type": "string"
-          },
-          "text": {
-            "type": "string"
-          }
-        }
       }
     },
     "responses": {
@@ -7087,7 +7333,7 @@
         }
       },
       "ConfirmTeamDelete": {
-        "description": "`confirm_team_delete` — the call would delete the team and `site_count` sites; nothing was deleted. Repeat with `confirm_name` once the person agrees.",
+        "description": "`confirm_team_delete` \u2014 the call would delete the team and `site_count` sites; nothing was deleted. Repeat with `confirm_name` once the person agrees.",
         "content": {
           "application/json": {
             "schema": {

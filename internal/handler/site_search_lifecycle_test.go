@@ -29,7 +29,7 @@ func TestSiteSearchEnqueueTransactionalPlacementAndFailureGuards(t *testing.T) {
 			// that resolves the namespace and calls this; the owner-qualified
 			// route for team sites calls the same one, so asserting here
 			// covers both and cannot be satisfied by only one of them.
-			function:       "createSiteForTarget",
+			function:       "createSiteForTargetOnce",
 			operation:      "SiteSearchReconcile",
 			orderedCalls:   []string{"PutVersion", "UpdateSiteActiveVersion", "EnqueueSiteSearch", "Commit"},
 			compensationFn: "discardVersion",

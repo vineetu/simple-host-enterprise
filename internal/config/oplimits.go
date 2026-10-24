@@ -79,6 +79,8 @@ func loadOpLimits(apiKeyMaxDays int64) (oplimits.Values, error) {
 		}
 		return d
 	}
+	v.CreateReplayPerAccount = intIn("CREATE_REPLAY_PER_ACCOUNT", v.CreateReplayPerAccount, 1, 5000)
+	v.CreateReplayTotal = intIn("CREATE_REPLAY_TOTAL", v.CreateReplayTotal, 1, 500000)
 	v.DeletedRetentionDays = intIn("DELETED_RETENTION_DAYS", v.DeletedRetentionDays, minDeletedRetentionDays, maxDeletedRetentionDays)
 	v.IdleGraceDays = intIn("IDLE_CLEANUP_GRACE_DAYS", v.IdleGraceDays, minIdleGraceDays, maxIdleGraceDays)
 	v.IdleMaxEmails = intIn("IDLE_CLEANUP_MAX_EMAILS", v.IdleMaxEmails, 0, maxIdleMaxEmails)

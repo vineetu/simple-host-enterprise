@@ -77,7 +77,7 @@ func (h *SiteHandler) setSiteAccessForTarget(w http.ResponseWriter, r *http.Requ
 	if !validateStoredUsername(w, target.OwnerUsername) {
 		return
 	}
-	if decision := h.limits.allow(managementUserPolicy, target.ActorID); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, managementUserPolicy, target.ActorID); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -333,7 +333,7 @@ func (h *SiteHandler) restoreStateVersion(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	if decision := h.limits.allow(managementUserPolicy, user.ID); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, managementUserPolicy, user.ID); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}

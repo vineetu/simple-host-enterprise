@@ -220,7 +220,7 @@ type oauthState struct {
 }
 
 func (h *AuthHandler) login(w http.ResponseWriter, r *http.Request) {
-	if decision := h.limits.allow(authClientPolicy, clientLimitKey(r)); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, authClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -254,7 +254,7 @@ func (h *AuthHandler) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) callback(w http.ResponseWriter, r *http.Request) {
-	if decision := h.limits.allow(authClientPolicy, clientLimitKey(r)); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, authClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}

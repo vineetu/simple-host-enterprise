@@ -211,7 +211,7 @@ func (h *SiteHandler) restoreCollaborationSite(w http.ResponseWriter, r *http.Re
 }
 
 func (h *SiteHandler) restoreSiteForTarget(w http.ResponseWriter, r *http.Request, target mutationTarget, siteName string) {
-	if decision := h.limits.allow(managementUserPolicy, target.ActorID); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, managementUserPolicy, target.ActorID); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}

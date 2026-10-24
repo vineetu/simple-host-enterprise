@@ -1,0 +1,9 @@
+# Simple Host Enterprise
+
+Publish static sites for your organisation. New sites are private to their owner or team. Site storage uses Postgres for data and the configured object bucket for files.
+
+1. Connect to [MCP]({{BASE_URL}}/mcp) and complete company sign-in and consent in the browser.
+2. Read the [skill bundle]({{BASE_URL}}/skills.zip), then publish to your own namespace or a team you belong to.
+3. Use the returned site URL. Read the current ETag before updating an existing site; send it as If-Match.
+
+References: [authentication and CI keys]({{BASE_URL}}/auth.md), [OpenAPI]({{BASE_URL}}/openapi.yaml), [skills index]({{BASE_URL}}/.well-known/agent-skills/index.json), [capabilities]({{BASE_URL}}/.well-known/agent-card.json).

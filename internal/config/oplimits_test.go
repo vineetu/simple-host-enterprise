@@ -10,6 +10,7 @@ import (
 )
 
 var opLimitKeys = []string{
+	"CREATE_REPLAY_PER_ACCOUNT", "CREATE_REPLAY_TOTAL",
 	"DELETED_RETENTION_DAYS", "IDLE_CLEANUP_GRACE_DAYS", "IDLE_CLEANUP_MAX_EMAILS",
 	"PREVIEW_LINK_TTL", "EXPORT_LINK_TTL", "API_KEY_DEFAULT_DAYS", "API_KEY_EXPIRY_WARNING_DAYS",
 	"SHOWCASE_BIO_MAX_LENGTH", "MAX_TEAMS_PER_PERSON", "MAX_TEAM_MEMBERS", "MAX_SITE_VIEWERS", "MAX_ARCHIVE_BYTES",
@@ -32,6 +33,7 @@ func TestLoadOpLimitsDefaultToTodaysValues(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 	want := oplimits.Values{
+		CreateReplayPerAccount: 500, CreateReplayTotal: 50000,
 		ShowcaseBioMaxLength: 280,
 		DeletedRetentionDays: 30, IdleGraceDays: 30, IdleMaxEmails: 0,
 		PreviewLinkTTL: time.Hour, ExportLinkTTL: 10 * time.Minute,
@@ -73,6 +75,7 @@ func TestLoadOpLimitsOverrides(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 	want := oplimits.Values{
+		CreateReplayPerAccount: 500, CreateReplayTotal: 50000,
 		ShowcaseBioMaxLength: 280,
 		DeletedRetentionDays: 7, IdleGraceDays: 14, IdleMaxEmails: 25,
 		PreviewLinkTTL: 30 * time.Minute, ExportLinkTTL: 2 * time.Hour,
@@ -141,6 +144,10 @@ func TestLoadRefusesBadOpLimits(t *testing.T) {
 		{"MAX_FILES_PER_SITE", "100001"},
 		{"UPLOAD_CONCURRENCY", "0"},
 		{"UPLOAD_CONCURRENCY", "65"},
+		{"CREATE_REPLAY_PER_ACCOUNT", "0"},
+		{"CREATE_REPLAY_PER_ACCOUNT", "5001"},
+		{"CREATE_REPLAY_TOTAL", "0"},
+		{"CREATE_REPLAY_TOTAL", "500001"},
 		{"SEARCH_TELEMETRY_RETENTION_DAYS", "0"},
 		{"SEARCH_TELEMETRY_RETENTION_DAYS", "3651"},
 		{"SEARCH_SESSION_MAX_AGE", "30m"},

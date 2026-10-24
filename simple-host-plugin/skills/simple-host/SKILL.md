@@ -396,3 +396,10 @@ For photos, call `add_photos` with `site` (`owner/site` for teams or ambiguous
 names), or open `{{BASE_URL}}/photos`. The person chooses photos on their device;
 small copies are added in one version with other files kept. Supporting hosts
 can show My sites and a weekly overview through the same connector session.
+
+Create retries: use `idempotency_key` on `deploy_site` with intent create,
+`storage_add_row`, or `export_site` (REST: `Idempotency-Key`). Reuse the same
+key and body for 24-hour replay; a changed body returns 422. A pending or
+interrupted create returns 409: check the resource before trying a new key.
+Replayed export links keep their original expiry and single-use limit.
+See [sign-in]({{BASE_URL}}/auth.md) and [quickstart]({{BASE_URL}}/llms.txt).

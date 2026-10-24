@@ -127,7 +127,7 @@ func (h *SiteHandler) mutateSiteViewers(w http.ResponseWriter, r *http.Request, 
 		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
 		return
 	}
-	if decision := h.limits.allow(managementUserPolicy, user.ID); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, managementUserPolicy, user.ID); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}

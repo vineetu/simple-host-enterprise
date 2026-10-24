@@ -98,14 +98,16 @@ func (s *Shared) Allow(policy Policy, key string) Decision {
 		s.logThrottled("ratelimit: shared limiter unavailable, using per-pod limits: %v", err)
 		return s.fallback.Allow(policy, key)
 	}
-	if count <= int64(limit) {
-		return Decision{Allowed: true}
-	}
+
 	retry := time.Duration(math.Ceil(remaining)) * time.Second
 	if retry < time.Second {
 		retry = time.Second
 	}
-	return Decision{RetryAfter: retry}
+	decision := Decision{Allowed: count <= int64(limit), Limit: limit, Remaining: max(0, limit-int(count)), Reset: retry, Window: window}
+	if !decision.Allowed {
+		decision.RetryAfter = retry
+	}
+	return decision
 }
 
 // maybePrune deletes counters whose window is long over, at most once a

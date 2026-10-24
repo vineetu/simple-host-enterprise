@@ -16,6 +16,15 @@
 - List a core of 20 MCP tools. Find other operations with `find_tools` and
   call them with `run_tool` or directly, with the same scopes and ETag checks.
 
+- Add local MCP and agent cards, ARD, API catalog, root discovery links,
+  Markdown landing negotiation, auth.md, and a short llms.txt quickstart.
+  Discovery stays on the app host and describes Enterprise sign-in and tools.
+- Return JSON for API fallback and method errors, and JSON-RPC for MCP
+  transport failures. OAuth and website error formats are unchanged.
+- Report rate-limit balances and reset times, including shared Postgres
+  counters. Add 24-hour create replay in Postgres (migration 0061), with
+  per-person and installation caps, changed-body 422 errors, and matching
+  MCP arguments. Authorization and supplied ETag preconditions stay live.
 - Replace the app and plugin icons with the Rounded Simple Host s.h mark,
   using the hosted exports. Raster exports are opaque cream. Page icon links
   use `?v=c`, brand sources are in `docs/brand/`, and the plugin is 0.16.1.

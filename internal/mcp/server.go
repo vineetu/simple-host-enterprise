@@ -77,11 +77,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// client can detect the era rather than hang.
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
-		if len(s.enabledScreens(r)) > 0 {
-			writeRPC(w, http.StatusMethodNotAllowed, failure(nil, codeInvalidRequest, "method not allowed", nil))
-			return
-		}
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeRPC(w, http.StatusMethodNotAllowed, failure(nil, codeInvalidRequest, "method not allowed", nil))
 		return
 	}
 	if !originAllowed(r) {
@@ -709,6 +705,9 @@ func (s *Server) serveUpstream(r *http.Request, up upstream) (int, []byte, strin
 	if up.ContentType != "" {
 		proxied.Header.Set("Content-Type", up.ContentType)
 	}
+	if up.IdempotencyKey != "" {
+		proxied.Header.Set("Idempotency-Key", up.IdempotencyKey)
+	}
 	if up.IfMatch != "" {
 		proxied.Header.Set("If-Match", up.IfMatch)
 	}
@@ -895,3 +894,8 @@ func writeRPC(w http.ResponseWriter, status int, resp response) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// ListedTools returns the configured public capability inventory.
+func (s *Server) ListedTools() []Tool { return append([]Tool(nil), s.tools...) }
+
+const ProtocolVersion = protocolVersion

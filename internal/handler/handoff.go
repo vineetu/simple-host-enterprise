@@ -100,7 +100,7 @@ func (s *signInRedirectWriter) Write(b []byte) (int, error) {
 // to the target host's own /auth/session. It requires the caller's base
 // session (not an API key: a hand-off exists only for browser navigation).
 func (h *HandoffHandler) handoff(w http.ResponseWriter, r *http.Request) {
-	if decision := h.limits.allow(authClientPolicy, clientLimitKey(r)); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, authClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -188,7 +188,7 @@ func (h *HandoffHandler) validateHandoffTarget(to string) (targetHost, targetPat
 // this handler must trust rather than re-derive from a spoofable Host header
 // read some other way.
 func (h *HandoffHandler) redeemHandoffSession(w http.ResponseWriter, r *http.Request, requestHost string) {
-	if decision := h.limits.allow(authClientPolicy, clientLimitKey(r)); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, authClientPolicy, clientLimitKey(r)); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}

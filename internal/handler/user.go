@@ -31,6 +31,7 @@ func (h *UserHandler) WithQuota(quota UploadQuota) *UserHandler {
 }
 
 type errorResponse struct {
+	Hint  string `json:"hint,omitempty"`
 	Error string `json:"error"`
 	// Code is a stable machine-readable reason, set where a caller has to tell
 	// refusals apart to do the right thing — an agent deciding whether to

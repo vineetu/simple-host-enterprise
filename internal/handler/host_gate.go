@@ -225,7 +225,7 @@ func (g *hostGate) wrap(next http.Handler) http.Handler {
 			// bookmark might still probe, even though nothing has served it
 			// since attribution.go was deleted.
 			if looksLikeSiteFacingAPIPath(r.URL.Path) {
-				http.NotFound(w, r)
+				writeJSON(w, http.StatusNotFound, errorResponse{Error: "API route not found", Code: "not_found", Hint: "Use the site URL for site storage and state; see /openapi.yaml."})
 				return
 			}
 			next.ServeHTTP(w, r)

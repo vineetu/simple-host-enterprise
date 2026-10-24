@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: Simple Host API
+  title: Simple Host Enterprise API
   description: |
     Internal static website hosting. Every site is served at the root of its
     own host, `<sitename>.<owner>.<base>/` (for example
@@ -34,6 +34,28 @@ info:
     the base host, never on a site's host. Never store secrets or PII in state
     or uploaded files.
 
+    Unmatched /api routes return JSON not_found errors (404); unsupported
+    methods return JSON method_not_allowed errors (405) and Allow. MCP
+    transport failures use JSON-RPC; OAuth keeps its own error format.
+
+    Limited responses include RateLimit-Policy, RateLimit, and legacy
+    RateLimit-Limit, RateLimit-Remaining, and RateLimit-Reset (seconds).
+    Shared policies report Postgres counters; local policies report token
+    balances and the wait for a token.
+
+    Create POSTs support Idempotency-Key on personal and collaboration site
+    creates, photo uploads, storage row additions on the site host, and export
+    links. Row additions use POST /api/sites/{site}/storage/db/{name}/tables/{table}/rows
+    (or /api/site/storage/db/{name}/tables/{table}/rows) on the site host.
+    Keys replay the original status, headers, and body for 24 hours
+    across pods. Identity, route, query, resource, and body hash bind a key.
+    A changed body returns 422 idempotency_key_reused. Admission caps return
+    429 idempotency_cache_full. Pending requests wait briefly then return
+    409 idempotency_in_progress; an interrupted create may stay pending until
+    expiry, so check the resource before using another key. Current access and
+    supplied If-Match checks still apply. Export links also bind the credential;
+    replay does not extend their lifetime or single-use limit.
+
     Rate-limited operations return `429` with an integer-seconds
     `Retry-After` header. Sign-in, the session hand-off, API key minting and
     the connector's token and client registration limits are counted in
@@ -58,12 +80,123 @@ info:
   version: 1.8.0
 
 servers:
-  - url: https://simple-host.example.com
-    description: Production
-  - url: http://localhost:8080
-    description: Local development
+  - url: "{{BASE_URL}}"
+    description: This installation
 
 paths:
+  /:
+    get:
+      summary: Enterprise landing page
+      security: []
+      parameters:
+        - in: header
+          name: Accept
+          schema: {type: string}
+          description: Explicit text/markdown negotiates Markdown when its quality is at least that of text/html.
+      responses:
+        '200':
+          description: Landing copy, with Vary Accept and discovery Link headers.
+          headers:
+            Link: {schema: {type: string}, description: Local discovery resources.}
+            Vary: {schema: {type: string}, description: Accept.}
+          content:
+            text/html: {schema: {type: string}}
+            text/markdown: {schema: {type: string}}
+  /openapi.yaml:
+    get:
+      summary: This installation's API contract in YAML
+      security: []
+      responses:
+        '200':
+          description: Enterprise OpenAPI with local addresses and configured limits.
+          content:
+            application/yaml: {schema: {type: string}}
+  /openapi.json:
+    get:
+      summary: This installation's API contract in JSON
+      security: []
+      responses:
+        '200':
+          description: Enterprise OpenAPI with local addresses and configured limits.
+          content:
+            application/json: {schema: {type: object}}
+  /index.md:
+    get:
+      summary: Markdown landing page
+      description: Public installation metadata, served only on the app host. HEAD returns headers only.
+      security: []
+      responses:
+        '200':
+          description: Markdown landing page.
+          content:
+            text/markdown:
+              schema: {type: string}
+  /auth.md:
+    get:
+      summary: Company sign-in, connector consent, and expiring CI keys
+      description: Public installation metadata, served only on the app host. HEAD returns headers only.
+      security: []
+      responses:
+        '200':
+          description: Company sign-in, connector consent, and expiring CI keys.
+          content:
+            text/markdown:
+              schema: {type: string}
+  /llms.txt:
+    get:
+      summary: Linked Enterprise quickstart
+      description: Public installation metadata, served only on the app host. HEAD returns headers only.
+      security: []
+      responses:
+        '200':
+          description: Linked Enterprise quickstart.
+          content:
+            text/plain:
+              schema: {type: string}
+  /.well-known/mcp/server-card.json:
+    get:
+      summary: Local MCP server card
+      description: Public installation metadata, served only on the app host. HEAD returns headers only.
+      security: []
+      responses:
+        '200':
+          description: Local MCP server card.
+          content:
+            application/json:
+              schema: {type: object}
+  /.well-known/agent-card.json:
+    get:
+      summary: Public MCP capability inventory
+      description: Public installation metadata, served only on the app host. HEAD returns headers only.
+      security: []
+      responses:
+        '200':
+          description: Public MCP capability inventory.
+          content:
+            application/json:
+              schema: {type: object}
+  /.well-known/ard.json:
+    get:
+      summary: Local agent resource discovery
+      description: Public installation metadata, served only on the app host. HEAD returns headers only.
+      security: []
+      responses:
+        '200':
+          description: Local agent resource discovery.
+          content:
+            application/json:
+              schema: {type: object}
+  /.well-known/api-catalog:
+    get:
+      summary: Links to the local API contract
+      description: Public installation metadata, served only on the app host. HEAD returns headers only.
+      security: []
+      responses:
+        '200':
+          description: Links to the local API contract.
+          content:
+            application/linkset+json:
+              schema: {type: object}
 
   /photos:
     get:
@@ -84,6 +217,7 @@ paths:
           name: If-Match
           description: Optional ETag from get_site. Checked before allocating photo names and again when committing.
           schema: {type: string}
+        - $ref: '#/components/parameters/IdempotencyKey'
         - in: path
           name: site
           required: true
@@ -107,6 +241,7 @@ paths:
                   items: {type: string, format: binary}
                   description: JPEG/WebP files, at most 1000000 bytes each and 1600 pixels per side, with no camera or location metadata.
       responses:
+        '422': {description: Idempotency-Key was used with a different body.}
         '200':
           description: One new version and photo paths and URLs.
           content:
@@ -447,6 +582,7 @@ paths:
       security:
         - apiKey: []
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/SkillVersion'
         - $ref: '#/components/parameters/SimpleHostClient'
         - $ref: '#/components/parameters/sitename'
@@ -462,6 +598,7 @@ paths:
               type: string
               format: binary
       responses:
+        '422': {description: Idempotency-Key was used with a different body.}
         '201':
           description: Site created
           headers:
@@ -1163,6 +1300,7 @@ paths:
       security:
         - apiKey: []
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/SkillVersion'
         - $ref: '#/components/parameters/SimpleHostClient'
         - $ref: '#/components/parameters/owner'
@@ -1179,6 +1317,7 @@ paths:
               type: string
               format: binary
       responses:
+        '422': {description: Idempotency-Key was used with a different body.}
         '201':
           description: Site created
           content:
@@ -2231,11 +2370,13 @@ paths:
       security:
         - apiKey: []
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/SkillVersion'
         - $ref: '#/components/parameters/SimpleHostClient'
         - $ref: '#/components/parameters/owner'
         - $ref: '#/components/parameters/sitename'
       responses:
+        '422': {description: Idempotency-Key was used with a different body.}
         '200':
           description: The download address
           content:
@@ -3590,6 +3731,12 @@ components:
         `/mcp`.
 
   parameters:
+    IdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: false
+      description: Reuse with the same body for 24-hour create replay. Changed bodies return 422; pending creates return 409; capacity exhaustion returns 429.
+      schema: {type: string, maxLength: 255}
     SkillVersion:
       name: X-Skill-Version
       in: header

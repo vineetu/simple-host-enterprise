@@ -1048,6 +1048,24 @@ Config names are documented in `docs/configuration.md`; schema in
 
 ## 16. Metrics, health, request log, rate limits
 
+- **Retry contracts.** Limited responses include RateLimit-Policy, RateLimit,
+  and the legacy RateLimit-Limit/Remaining/Reset fields. Shared policies
+  report the Postgres counter; other policies report the local token bucket.
+  Create POSTs accept Idempotency-Key: personal and collaboration site creates,
+  storage row additions, photo uploads, and export links. Exact responses replay
+  for 24 hours across replicas; changed bodies return 422 idempotency_key_reused.
+  Account, concrete route/query, resource, and body hash bind the key. Export
+  links also bind the credential; replay does not renew or unspend a link.
+  Authentication, authorization, and supplied If-Match checks run before replay.
+  Pending requests return 409 after waiting; an uncertain interrupted operation
+  stays pending until expiry, preventing a second mutation with that key.
+  Admission caps return 429. `CREATE_REPLAY_PER_ACCOUNT` (500) and
+  `CREATE_REPLAY_TOTAL` (50000) configure the caps. Migration
+  `0061_create_idempotency.sql`, `internal/db/idempotency.go`, and
+  `internal/handler/idempotency.go` hold shared reservations and responses.
+  MCP `deploy_site` (intent create), `storage_add_row`, and `export_site`
+  expose optional `idempotency_key`.
+
 - **What.** `/healthz` (liveness) and `/readyz` (database and schema; bucket is
   reported, not gating) on every host. `/metrics` on its own port, never on
   the Service or Ingress: request counts and latency, `simplehost_bucket_ok`,
@@ -1072,6 +1090,20 @@ Config names are documented in `docs/configuration.md`; schema in
 
 ## 17. Landing and static pages
 
+- **Agent discovery.** Public installation metadata on the base host only:
+  `GET /.well-known/mcp/server-card.json`, `GET /.well-known/agent-card.json`
+  (the real MCP inventory), `GET /.well-known/ard.json`, and
+  `GET /.well-known/api-catalog` (linkset JSON pointing at the local OpenAPI).
+  `GET /index.md` and explicit `Accept: text/markdown` on the root render
+  the landing copy as Markdown. The root has discovery Link headers and
+  `Vary: Accept`. `GET /auth.md` explains company OIDC, connector OAuth
+  consent, and scoped expiring CI keys. `GET /llms.txt` is a linked quickstart.
+  The host gate keeps these off owner, site, and unknown hosts.
+  Implementation: `internal/handler/discovery.go`, `api_errors.go`.
+  Unmatched /api paths and method mismatches return JSON with stable codes;
+  /mcp transport failures return JSON-RPC. OAuth and website errors keep
+  their own formats.
+
 - **What.** The base host serves embedded static pages, the API spec, and
   the product icon (the Rounded Simple Host s.h mark). Every page links it
   with the `?v=c` cache key. Raster exports are flattened to opaque cream;
@@ -1079,7 +1111,7 @@ Config names are documented in `docs/configuration.md`; schema in
   host and a site host do not serve it, so a site keeps its own favicon.
 - **Routes.** `GET /` (file server: `docs.html`, `install.html`,
   `changelog.html`, fonts, CSS); `GET /{$}` (`index.html`),
-  `GET /capabilities.html`, `GET /openapi.yaml`, `GET /favicon.svg`,
+  `GET /capabilities.html`, `GET /openapi.yaml`, `GET /openapi.json`, `GET /favicon.svg`,
   `GET /favicon.ico`, `GET /favicon-32.png`, `GET /apple-touch-icon.png`.
   The pages and the API spec are served with the installation's operational
   values filled in (section 18). The icon routes answer on the app host

@@ -154,7 +154,7 @@ func (h *TeamHandler) createTeam(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
 		return
 	}
-	if decision := h.limits.allow(managementUserPolicy, user.ID); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, managementUserPolicy, user.ID); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -348,7 +348,7 @@ func (h *TeamHandler) addMembers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
 		return
 	}
-	if decision := h.limits.allow(managementUserPolicy, user.ID); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, managementUserPolicy, user.ID); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -428,7 +428,7 @@ func (h *TeamHandler) removeMember(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
 		return
 	}
-	if decision := h.limits.allow(managementUserPolicy, user.ID); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, managementUserPolicy, user.ID); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -540,7 +540,7 @@ func (h *TeamHandler) deleteTeam(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
 		return
 	}
-	if decision := h.limits.allow(managementUserPolicy, user.ID); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, managementUserPolicy, user.ID); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -580,7 +580,7 @@ func (h *TeamHandler) leaveTeam(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, errorResponse{Error: "unauthorized"})
 		return
 	}
-	if decision := h.limits.allow(managementUserPolicy, user.ID); !decision.Allowed {
+	if decision := h.limits.allowHTTP(w, managementUserPolicy, user.ID); !decision.Allowed {
 		writeRateLimit(w, decision)
 		return
 	}
@@ -816,7 +816,7 @@ func (h *TeamHandler) writeMembers(w http.ResponseWriter, r *http.Request, team 
 // routes are bounded, so a loop in an agent cannot walk the member endpoints.
 func (h *TeamHandler) limitManagementClient(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if decision := h.limits.allow(managementClientPolicy, clientLimitKey(r)); !decision.Allowed {
+		if decision := h.limits.allowHTTP(w, managementClientPolicy, clientLimitKey(r)); !decision.Allowed {
 			writeRateLimit(w, decision)
 			return
 		}
