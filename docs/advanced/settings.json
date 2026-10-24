@@ -567,7 +567,7 @@
       "group": "sites",
       "description": "Photo picker screen: off, on, or accounts: followed by comma-separated usernames.",
       "type": "string",
-      "default": "off",
+      "default": "on",
       "security_sensitive": false,
       "required": false,
       "basic": false
@@ -577,7 +577,7 @@
       "group": "sites",
       "description": "My sites screen: off, on, or accounts: followed by comma-separated usernames.",
       "type": "string",
-      "default": "off",
+      "default": "on",
       "security_sensitive": false,
       "required": false,
       "basic": false
@@ -587,7 +587,7 @@
       "group": "sites",
       "description": "Weekly dashboard screen: off, on, or accounts: followed by comma-separated usernames.",
       "type": "string",
-      "default": "off",
+      "default": "on",
       "security_sensitive": false,
       "required": false,
       "basic": false

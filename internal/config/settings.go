@@ -135,9 +135,9 @@ func Settings() []Setting {
 		{Name: "NOTIFY_SUSPEND_AFTER", Group: "data", Type: "duration", Default: ShortDuration(op.NotifySuspendAfter), Min: ShortDuration(24 * time.Hour), Max: ShortDuration(8760 * time.Hour), Description: "Notification suspend after."},
 		{Name: "NOTIFY_ENC_KEY", Group: "data", Type: "secret", Security: true, Description: "Base64 32-byte key sealing notification signing and custom-header secrets. Empty disables notifications."},
 		{Name: "NOTIFY_ALLOW_PRIVATE_CIDRS", Group: "data", Type: "string", Security: true, Description: "Comma-separated destination CIDRs permitted for HTTPS callbacks, including internal addresses. Empty permits public destinations only."},
-		{Name: "MCP_APP_PHOTO_PICKER", Group: "sites", Type: "string", Default: "off", Description: "Photo picker screen: off, on, or accounts: followed by comma-separated usernames."},
-		{Name: "MCP_APP_MY_SITES", Group: "sites", Type: "string", Default: "off", Description: "My sites screen: off, on, or accounts: followed by comma-separated usernames."},
-		{Name: "MCP_APP_DASHBOARD", Group: "sites", Type: "string", Default: "off", Description: "Weekly dashboard screen: off, on, or accounts: followed by comma-separated usernames."},
+		{Name: "MCP_APP_PHOTO_PICKER", Group: "sites", Type: "string", Default: "on", Description: "Photo picker screen: off, on, or accounts: followed by comma-separated usernames."},
+		{Name: "MCP_APP_MY_SITES", Group: "sites", Type: "string", Default: "on", Description: "My sites screen: off, on, or accounts: followed by comma-separated usernames."},
+		{Name: "MCP_APP_DASHBOARD", Group: "sites", Type: "string", Default: "on", Description: "Weekly dashboard screen: off, on, or accounts: followed by comma-separated usernames."},
 		{Name: "MCP_APP_SITE_PREVIEW", Group: "sites", Type: "string", Default: "off", Description: "Site preview screen: off, on, or accounts: followed by comma-separated usernames."},
 		// Server and addresses.
 		{Name: "PUBLIC_BASE_URL", Group: "server", Type: "string", Required: true, Basic: true,

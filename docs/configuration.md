@@ -514,9 +514,9 @@ see [Your home page](your-home-page.md).
 
 | Variable | Required | Default | Values and behavior |
 |---|---|---|---|
-| `MCP_APP_PHOTO_PICKER` | No | `off` | Photo picker on `add_photos`. |
-| `MCP_APP_MY_SITES` | No | `off` | My sites on `list_sites`. |
-| `MCP_APP_DASHBOARD` | No | `off` | Weekly drill-in from My sites; enable My sites too. |
+| `MCP_APP_PHOTO_PICKER` | No | `on` | Photo picker on `add_photos`. |
+| `MCP_APP_MY_SITES` | No | `on` | My sites on `list_sites`. |
+| `MCP_APP_DASHBOARD` | No | `on` | Weekly drill-in from My sites; enable My sites too. |
 | `MCP_APP_SITE_PREVIEW` | No | `off` | Open/copy card on `get_site`; sites refuse framing. |
 
 Each accepts `off`, `on`, or `accounts:<a>,<b>`. Accounts match the exact,

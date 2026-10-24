@@ -20,9 +20,9 @@ the pod's memory with `UPLOAD_CONCURRENCY`: each upload holds its archive and fi
 |---|---|---|---|
 | `CREATE_REPLAY_PER_ACCOUNT` | `500` | 1–5000 | Create replay keys per person, retained for 24 hours in Postgres. |
 | `CREATE_REPLAY_TOTAL` | `50000` | 1–500000 | Create replay keys across the installation, including pending requests. |
-| `MCP_APP_PHOTO_PICKER` | `off` | text | Photo picker screen: off, on, or accounts: followed by comma-separated usernames. |
-| `MCP_APP_MY_SITES` | `off` | text | My sites screen: off, on, or accounts: followed by comma-separated usernames. |
-| `MCP_APP_DASHBOARD` | `off` | text | Weekly dashboard screen: off, on, or accounts: followed by comma-separated usernames. |
+| `MCP_APP_PHOTO_PICKER` | `on` | text | Photo picker screen: off, on, or accounts: followed by comma-separated usernames. |
+| `MCP_APP_MY_SITES` | `on` | text | My sites screen: off, on, or accounts: followed by comma-separated usernames. |
+| `MCP_APP_DASHBOARD` | `on` | text | Weekly dashboard screen: off, on, or accounts: followed by comma-separated usernames. |
 | `MCP_APP_SITE_PREVIEW` | `off` | text | Site preview screen: off, on, or accounts: followed by comma-separated usernames. |
 | `SHOWCASE_BIO_MAX_LENGTH` | `280` | 1–2000 characters | Maximum plain-text bio length on a personal showcase. |
 | `MAX_ARCHIVE_BYTES` | `104857600` | 1048576–524288000 bytes | The largest archive one deploy may send. Raise the ingress body-size limit with it. |

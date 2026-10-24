@@ -151,7 +151,9 @@ Config names are documented in `docs/configuration.md`; schema in
   remain bucket objects. All entries render as text. No thumbnails or nested
   frames. The optional `get_site` preview is an open/copy card because sites
   refuse framing. Four `MCP_APP_*` flags use off/on/accounts:<usernames>;
-  defaults are off pending Kubernetes smoke and interactive host validation. With every flag off the
+  the photo picker, My sites, and the dashboard default on, having passed
+  Kubernetes smoke and MCPJam Apps conformance; the preview card defaults
+  off. With every flag off the
   core tool inventory and non-UI results apply, and the metadata file-list
   improvement applies with flags off too. `add_photos` stays callable
   by name and returns the company sign-in page when the host has no UI.

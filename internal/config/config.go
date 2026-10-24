@@ -383,9 +383,9 @@ func Load() (Config, error) {
 		DBInClusterEvaluation: os.Getenv("DB_INCLUSTER_EVALUATION") == "true",
 		PublicBaseURL:         need.require("PUBLIC_BASE_URL"),
 		MCPApps: map[string]string{
-			"MCP_APP_PHOTO_PICKER": getEnvOrDefault("MCP_APP_PHOTO_PICKER", "off"),
-			"MCP_APP_MY_SITES":     getEnvOrDefault("MCP_APP_MY_SITES", "off"),
-			"MCP_APP_DASHBOARD":    getEnvOrDefault("MCP_APP_DASHBOARD", "off"),
+			"MCP_APP_PHOTO_PICKER": getEnvOrDefault("MCP_APP_PHOTO_PICKER", "on"),
+			"MCP_APP_MY_SITES":     getEnvOrDefault("MCP_APP_MY_SITES", "on"),
+			"MCP_APP_DASHBOARD":    getEnvOrDefault("MCP_APP_DASHBOARD", "on"),
 			"MCP_APP_SITE_PREVIEW": getEnvOrDefault("MCP_APP_SITE_PREVIEW", "off"),
 		},
 		ReservedLabels: splitLowerTrimmed(os.Getenv("RESERVED_LABELS")),

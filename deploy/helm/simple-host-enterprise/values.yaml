@@ -194,9 +194,9 @@ affinity: {}
 
 # off, on, or accounts:<username>,<username>.
 mcpApps:
-  photoPicker: "off"
-  mySites: "off"
-  dashboard: "off"
+  photoPicker: "on"
+  mySites: "on"
+  dashboard: "on"
   sitePreview: "off"
 
 # Off unless an encryption key is supplied. With secrets.existingSecret, put

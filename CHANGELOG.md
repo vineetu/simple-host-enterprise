@@ -1,7 +1,14 @@
 # Changelog
 
-## Unreleased (v0.9.9)
+## v0.9.9 — 2026-10-24
 
+Schema 0063 (backward-compatible: v0.9.8 runs against it, so a rollback is safe).
+
+- Build with Go 1.27.3 and newer `golang.org/x/image` and `golang.org/x/net`,
+  clearing WebP decode and standard-library advisories govulncheck flagged.
+- `MCP_APP_PHOTO_PICKER`, `MCP_APP_MY_SITES`, and `MCP_APP_DASHBOARD` default
+  on, having passed a fresh install, the upgrade from chart 0.2.6, and MCPJam
+  Apps conformance on a local cluster. `MCP_APP_SITE_PREVIEW` stays off.
 - Bound TIFF Deflate output in codec v3, check native image dimensions before
   decoding, and apply decode deadlines. The MCP picker checks worker and Wasm
   support before accepting HEIC/TIFF, with the photos page as its fallback.
