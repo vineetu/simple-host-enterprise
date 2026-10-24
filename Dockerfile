@@ -6,9 +6,9 @@
 # free; without it, building an amd64 image on an arm64 machine runs the whole
 # Go toolchain under QEMU and takes minutes rather than seconds.
 # Base images are pinned by digest so a rebuild uses the same bytes; Dependabot
-# (.github/dependabot.yml) proposes digest bumps. golang:1.27.1 and
-# distroless static:nonroot as of 2026-10-02.
-FROM --platform=$BUILDPLATFORM golang:1.27.1@sha256:e0174e51e81218523251d85d248a90d24c3d5e81543b4f07a5d66229397db190 AS build
+# (.github/dependabot.yml) proposes digest bumps. golang:1.27.3 (go.mod's
+# toolchain line) and distroless static:nonroot as of 2026-10-24.
+FROM --platform=$BUILDPLATFORM golang:1.27.3@sha256:f20d83a83e18dbd2a4714b8ffd4b30b287b6243962dd75608e86abcc63ba4efc AS build
 ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev

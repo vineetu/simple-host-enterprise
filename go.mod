@@ -2,14 +2,16 @@ module github.com/vsriram/simple-host
 
 go 1.27.1
 
+toolchain go1.27.3
+
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.7
 	github.com/aws/aws-sdk-go-v2/config v1.31.14
 	github.com/aws/aws-sdk-go-v2/credentials v1.18.18
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.101.0
 	github.com/lib/pq v1.10.9
-	golang.org/x/image v0.32.0
-	golang.org/x/net v0.57.0
+	golang.org/x/image v0.47.0
+	golang.org/x/net v0.61.0
 )
 
 require (
