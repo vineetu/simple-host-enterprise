@@ -187,7 +187,7 @@ Config names are documented in `docs/configuration.md`; schema in
   `connector_revoke`) on `/auth/sessions`, through two session-only routes.
   `/plugin.zip` is an installable
   plugin (an agent-app plugin manifest and the Agent Plugins manifest, plus the skills) already
-  pointing at `<base>/mcp`. The zip includes the product icon.
+  pointing at `<base>/mcp`. The zip includes the Rounded product icon.
 - **Status.** Built.
 - **Routes.** `POST /mcp`, `GET /mcp`, `DELETE /mcp`,
   `GET /.well-known/oauth-protected-resource`,
@@ -1042,7 +1042,9 @@ Config names are documented in `docs/configuration.md`; schema in
 ## 17. Landing and static pages
 
 - **What.** The base host serves embedded static pages, the API spec, and
-  the product icon (the Simple Host mark). Every page links it. An owner
+  the product icon (the Rounded Simple Host s.h mark). Every page links it
+  with the `?v=c` cache key. Raster exports are flattened to opaque cream;
+  the SVG keeps transparent rounded corners. Sources are in `docs/brand/`. An owner
   host and a site host do not serve it, so a site keeps its own favicon.
 - **Routes.** `GET /` (file server: `docs.html`, `install.html`,
   `changelog.html`, fonts, CSS); `GET /{$}` (`index.html`),

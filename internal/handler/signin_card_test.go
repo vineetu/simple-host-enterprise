@@ -29,7 +29,7 @@ func TestWriteAuthErrorCard(t *testing.T) {
 			`<p class="lead">` + html.EscapeString(message) + `</p>`,
 			`<a class="primary" href="/auth/login">Sign in again</a>`,
 			`<p class="fine">If this keeps happening, ask your IT team.</p>`,
-			`href="/favicon.svg?v=b"`,
+			`href="/favicon.svg?v=c"`,
 		} {
 			if !strings.Contains(body, want) {
 				t.Errorf("status %d page lacks %q\n%s", status, want, body)
@@ -47,7 +47,7 @@ func TestRenderNoAccessCard(t *testing.T) {
 		`<p class="who">You're signed in as <strong>` + html.EscapeString(name) + `</strong>.</p>`,
 		`<p class="lead">Ask the person who sent you the link to share it with you.</p>`,
 		`<a class="primary" href="` + switchAccountPath + `">Switch account</a>`,
-		`href="https://foo.example/favicon.svg?v=b"`,
+		`href="https://foo.example/favicon.svg?v=c"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("no-access page lacks %q\n%s", want, body)

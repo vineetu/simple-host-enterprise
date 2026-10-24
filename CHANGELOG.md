@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased (v0.9.9)
+
+- Replace the app and plugin icons with the Rounded Simple Host s.h mark,
+  using the hosted exports. Raster exports are opaque cream. Page icon links
+  use `?v=c`, brand sources are in `docs/brand/`, and the plugin is 0.16.1.
+
 ## Chart 0.2.6 — 2026-10-20
 
 - Pins the published 0.9.8 image digest
