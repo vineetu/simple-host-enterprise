@@ -30,7 +30,8 @@ const (
 	skillBundleName      = "simple-host-skills"
 	skillBundleURL       = "/skills.zip"
 	// skillReleaseType is hand-set, so it has to move with the version above
-	// it. 0.16.0 adds site storage with access presets (references/storage.md);
+	// it. 0.16.1 updates the product icon to Rounded;
+	// 0.16.0 adds site storage with access presets (references/storage.md);
 	// 0.15.6 adds personal home and showcase curation; 0.15.5 says only the uploader, owner or team deletes an uploaded
 	// file from the site's own address, and drops a vendor's name from the
 	// builder skill; 0.15.4 says a renamed person's old page of sites is not found and
@@ -60,7 +61,7 @@ const (
 	// approval; 0.11.0 stays the minimum
 	// (notice_middleware.go), since no route an 0.11.0 skill calls went
 	// away. An agent reads this to decide how loudly to mention the update.
-	skillReleaseType     = "minor"
+	skillReleaseType     = "patch"
 	skillReleaseNotesURL = "/changelog.html"
 
 	agentSkillsDiscoverySchema = "https://schemas.agentskills.io/discovery/0.2.0/schema.json"
@@ -183,12 +184,12 @@ func RegisterUIRoutes(mux *http.ServeMux, baseURL string) {
 }
 
 // productIconLinksHTML is the four versioned icon addresses, root-relative,
-// for a page served on the app host. ?v=b is the cache-buster: a future
+// for a page served on the app host. ?v=c is the cache-buster: a future
 // icon change is picked up by bumping that letter.
-const productIconLinksHTML = `<link rel="icon" href="/favicon.svg?v=b" type="image/svg+xml">
-<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=b">
-<link rel="icon" href="/favicon.ico?v=b" sizes="any">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=b">
+const productIconLinksHTML = `<link rel="icon" href="/favicon.svg?v=c" type="image/svg+xml">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=c">
+<link rel="icon" href="/favicon.ico?v=c" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=c">
 `
 
 // productIconLinks is productIconLinksHTML. prefix is empty on the app host.

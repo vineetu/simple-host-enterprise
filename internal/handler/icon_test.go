@@ -28,10 +28,10 @@ var productIconFiles = []struct {
 
 // Root-relative links, as a page on the app host writes them.
 var productIconHrefs = []string{
-	`href="/favicon.svg?v=b"`,
-	`href="/favicon-32.png?v=b"`,
-	`href="/favicon.ico?v=b"`,
-	`href="/apple-touch-icon.png?v=b"`,
+	`href="/favicon.svg?v=c"`,
+	`href="/favicon-32.png?v=c"`,
+	`href="/favicon.ico?v=c"`,
+	`href="/apple-touch-icon.png?v=c"`,
 }
 
 func productIconBytes(t *testing.T) map[string][]byte {
@@ -51,7 +51,7 @@ func productIconBytes(t *testing.T) map[string][]byte {
 }
 
 func iconResponse(handler http.Handler, host, iconPath string, credential bool) *httptest.ResponseRecorder {
-	request := httptest.NewRequest(http.MethodGet, "https://"+host+iconPath+"?v=b", nil)
+	request := httptest.NewRequest(http.MethodGet, "https://"+host+iconPath+"?v=c", nil)
 	request.Host = host
 	if credential {
 		request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "not-a-session"})
