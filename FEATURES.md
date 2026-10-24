@@ -1363,7 +1363,7 @@ Config names are documented in `docs/configuration.md`; schema in
 
 ---
 
-### Visitor notifications
+## 21. Visitor notifications
 
 - **What.** Visitor KV puts/deletes, table row adds/edits/deletes, and file
   puts/deletes create a transactional Postgres outbox event. Owner/tool writes
