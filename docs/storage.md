@@ -545,3 +545,17 @@ What comes back and what does not:
 Your person address can open a selected home site; its showcase has a signed-in
 feed, bio, pins and manual order. Access and site origins stay in force. See
 [Your home page](your-home-page.md).
+
+## Backfill site-list summaries
+
+After migration 0061, run `simple-host site-summary-backfill` with the usual
+server database and bucket configuration. `-limit N` bounds one run; zero
+(the default) processes all eligible live versions. It reads each live
+`index.html` through `storage.OpenVersion` using a separate temporary cache
+and writes title, description, headings, and an excerpt to `versions.summary`.
+It skips summaries already present, including those written by deploys.
+Failures leave the version eligible for a retry; rerunning is safe.
+New deploys save summaries in their existing transaction. Lists read the
+active version's summary, so held content stays out of viewer results and
+rollback selects the corresponding summary. Older retained versions that
+were not live during backfill are filled if made live and backfilled later.

@@ -14,6 +14,8 @@ Deployed files are retained as immutable versions.
 (`list_sites`, `get_site`, `deploy_site`, ...) are available in this session,
 use them instead of the REST calls below: they sign in through the company's
 sign-in, so no API key is needed. The rules in this skill apply either way.
+For a tool named here but absent from the list, use `find_tools`, then
+`run_tool` with its name and arguments.
 
 ## 1. Check the skill version first
 

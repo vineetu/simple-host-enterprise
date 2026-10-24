@@ -25,9 +25,11 @@ import (
 )
 
 type collaborationSiteResponse struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	OwnerUsername string `json:"owner_username"`
+	Summary       db.SiteSummary `json:"summary"`
+	DeployedAt    *time.Time     `json:"deployed_at,omitempty"`
+	ID            string         `json:"id"`
+	Name          string         `json:"name"`
+	OwnerUsername string         `json:"owner_username"`
 	// OwnerID is the namespace's immutable id. A project marker records it so
 	// an agent can tell "the same namespace" from "a name that changed hands"
 	// — a team deleted and its name re-registered resolves to a different id.
@@ -204,6 +206,8 @@ func (h *SiteHandler) collaborationSiteResponse(r *http.Request, site db.Site, o
 		}
 	}
 	return collaborationSiteResponse{
+		Summary:        site.Summary,
+		DeployedAt:     deployedTime(site),
 		ID:             site.ID,
 		Name:           site.Name,
 		OwnerUsername:  ownerUsername,
@@ -287,7 +291,12 @@ func (h *SiteHandler) listCollaborationSites(w http.ResponseWriter, r *http.Requ
 			response = append(response, entry)
 		}
 	}
-	writeJSON(w, http.StatusOK, response)
+	filtered, filterErr := filterSiteList(response, r.URL.Query())
+	if filterErr != nil {
+		writeJSON(w, http.StatusBadRequest, filterErr)
+		return
+	}
+	writeJSON(w, http.StatusOK, filtered)
 }
 
 func (h *SiteHandler) getCollaborationSite(w http.ResponseWriter, r *http.Request) {
@@ -454,6 +463,11 @@ func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Req
 			h.discardVersion(access.Site.ID, versionNumber)
 		}
 	}()
+	summary := ExtractSiteSummary(files)
+	if err := db.SaveVersionSummary(r.Context(), tx, access.Site.ID, versionNumber, summary); err != nil {
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
+		return
+	}
 	if err := db.ActivateVersion(r.Context(), tx, version.ID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})
 		return
@@ -521,6 +535,10 @@ func (h *SiteHandler) updateCollaborationSite(w http.ResponseWriter, r *http.Req
 	}
 	keepObject = true
 	refreshSiteManifest(r.Context(), h.database, h.store, access.Site.ID)
+	if publish {
+		access.Site.Summary = summary
+	}
+	access.Site.LastDeployedAt = time.Now().UTC()
 	access.Site.ActiveVersion = liveVersion
 	access.Site.UpdatedAt = time.Now().UTC()
 	setSiteETag(w, access.Site)

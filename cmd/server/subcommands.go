@@ -47,6 +47,8 @@ func runSubcommand(name string, args []string) error {
 		return runOwnerHosts(args)
 	case "verify-storage":
 		return runVerifyStorage(args)
+	case "site-summary-backfill":
+		return runSiteSummaryBackfill(args)
 	case "rebuild-index":
 		return runRebuildIndex(args)
 	case "version":
@@ -55,7 +57,7 @@ func runSubcommand(name string, args []string) error {
 	case "settings":
 		return runSettings(args)
 	default:
-		return fmt.Errorf("unknown subcommand %q (expected: migrate, restore, migrate-storage, reencrypt, prune, audit-verify, owner-hosts, verify-storage, settings, rebuild-index, version)", name)
+		return fmt.Errorf("unknown subcommand %q (expected: migrate, restore, migrate-storage, reencrypt, prune, audit-verify, owner-hosts, verify-storage, settings, rebuild-index, site-summary-backfill, version)", name)
 	}
 }
 

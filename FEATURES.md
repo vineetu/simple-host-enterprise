@@ -15,7 +15,7 @@ answers them itself on owner hosts (`<owner>.<base>`: the owner's index page,
 the fallback `/<site>/` addresses until the owner's certificate is ready, then
 redirects of them), site hosts (`<site>.<owner>.<base>`, every site at every
 access level, served from the root) and v1.2 `<owner>--<site>.<base>` hosts
-(redirect only); the base host refuses them. MCP tools live in
+(redirect only); the base host refuses them. Operational MCP tools live in
 `internal/mcp/tools.go` and each resolves to one of the REST routes below
 (`go test ./internal/mcp/` asserts it). The skill is
 `simple-host-plugin/skills/simple-host/` (`SKILL.md` plus `references/`).
@@ -152,8 +152,8 @@ Config names are documented in `docs/configuration.md`; schema in
   frames. The optional `get_site` preview is an open/copy card because sites
   refuse framing. Four `MCP_APP_*` flags use off/on/accounts:<usernames>;
   defaults are off pending Kubernetes smoke and interactive host validation. With every flag off the
-  Apps add no tool inventory or result changes; the metadata file-list improvement
-  applies with flags off too. `add_photos` stays callable
+  core tool inventory and non-UI results apply, and the metadata file-list
+  improvement applies with flags off too. `add_photos` stays callable
   by name and returns the company sign-in page when the host has no UI.
 - **Add photos page.** `GET /photos` uses the company OIDC browser session.
   `POST /v1/sites/{site}/photos` accepts at most 30 client-encoded JPEG/WebP
@@ -204,8 +204,13 @@ Config names are documented in `docs/configuration.md`; schema in
   `GET /oauth/authorize`, `POST /oauth/authorize`, `POST /oauth/token`,
   `POST /oauth/revoke`, `GET /plugin.zip`, `GET /api/me/connections`,
   `DELETE /api/me/connections/{id}` (both browser session only).
-- **MCP.** Every tool below, sections 1–12; the full list is in
-  `internal/mcp/tools.go` `toolList()`.
+- **MCP.** `tools/list` shows 18 building and sharing tools plus `find_tools`
+  and `run_tool`. Enabled Apps add `add_photos`. The full operational
+  inventory remains callable by name. `find_tools` ranks that inventory and
+  returns schemas and annotations; `run_tool` dispatches through the same
+  argument validation, authorization, scopes, ETags, and Apps result handling.
+  Instructions are tested below 2,000 characters in configured instances.
+  Implementation: `internal/mcp/discovery.go`, `tools.go`, and `storage_tools.go`.
 - **Skill.** `SKILL.md` (Service); plugin manifests
   `simple-host-plugin/plugin.json`, `mcp.json`.
 - **Pages.** `/oauth/authorize` consent page (rendered by `connector.go`);
@@ -422,6 +427,23 @@ Config names are documented in `docs/configuration.md`; schema in
   without analytics, network request or admin decision. It is a listing
   only: no management route resolves a viewer. MCP `list_sites` always asks
   for them.
+- **Inventory search.** `list_sites`, `GET /api/collaboration/sites`, and
+  `GET /api/sites` accept `query`, `created_after`, `created_before`,
+  `updated_after`, `updated_before`, `limit`, and `offset`. Every query word
+  matches case-insensitively across the name, serving domain, and live content
+  summary. Dates are inclusive RFC3339 timestamps or UTC calendar days.
+  Filters sort by newest deployment, default to 200 results, cap at 500,
+  and allow a zero limit. Without filters, the existing full order remains.
+  Authorization precedes filtering; owner, member, and viewer roles stay intact.
+  Listed/network `search_sites` discovery is unchanged.
+  Migration `0061_site_summary.sql` adds `versions.summary` in Postgres.
+  Each deploy extracts title, description, headings, and a text excerpt;
+  lists return `summary` and `deployed_at`. Held versions keep their own
+  summaries, and lists use only the live version, including after rollback.
+  `site-summary-backfill [-limit N]` reads live versions from the bucket through
+  `storage.OpenVersion`, filling only unset summaries; safe to rerun.
+  Code: `internal/handler/sitesearch.go`, `sitesummary.go`,
+  `internal/db/site_summary.go`, and `cmd/server/sitesummary.go`.
 - **Status.** Built.
 - **Routes.** `POST /api/sites/{sitename}`, `PUT /api/sites/{sitename}`,
   `DELETE /api/sites/{sitename}`, `POST /api/sites/{sitename}/rollback`,

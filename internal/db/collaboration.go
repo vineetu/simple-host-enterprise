@@ -157,7 +157,9 @@ const listAccessibleSitesQuery = `
 		 WHERE a.site_id = s.id AND a.requested_at = s.network_requested_at),
 		COALESCE(s.access_decision, ''),
 		s.access_decision_at,
-		COALESCE(s.access_decision_reason, '')
+		COALESCE(s.access_decision_reason, ''),
+ (SELECT summary FROM versions v WHERE v.site_id = s.id AND v.version_number = s.active_version),
+ COALESCE((SELECT max(created_at) FROM versions v WHERE v.site_id = s.id), s.updated_at)
 	FROM sites s
 	INNER JOIN users owner ON owner.id = s.user_id
 	LEFT JOIN team_members tm
@@ -203,6 +205,7 @@ func ListAccessibleSites(ctx context.Context, q Querier, actorID string) ([]Acce
 			&accessible.Site.AccessDecision,
 			&accessible.Site.AccessDecisionAt,
 			&accessible.Site.AccessDecisionReason,
+			&accessible.Site.Summary, &accessible.Site.LastDeployedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -287,7 +290,9 @@ const listSharedSitesQuery = `
 		ORDER BY sv.site_id, (sv.principal_id = $1::uuid) DESC, via.username
 	)
 	SELECT s.id::text, s.user_id::text, s.name, s.active_version, s.public,
-		s.created_at, s.updated_at, owner.username, s.access, g.via
+		s.created_at, s.updated_at, owner.username, s.access, g.via,
+ (SELECT summary FROM versions v WHERE v.site_id = s.id AND v.version_number = s.active_version),
+ COALESCE((SELECT max(created_at) FROM versions v WHERE v.site_id = s.id), s.updated_at)
 	FROM grants g
 	JOIN sites s ON s.id = g.site_id
 	JOIN users owner ON owner.id = s.user_id
@@ -311,7 +316,7 @@ func ListSharedSites(ctx context.Context, q Querier, actorID string) ([]SharedSi
 	for rows.Next() {
 		var s SharedSite
 		if err := rows.Scan(&s.Site.ID, &s.Site.UserID, &s.Site.Name, &s.Site.ActiveVersion, &s.Site.Public,
-			&s.Site.CreatedAt, &s.Site.UpdatedAt, &s.OwnerUsername, &s.Site.Access, &s.SharedVia); err != nil {
+			&s.Site.CreatedAt, &s.Site.UpdatedAt, &s.OwnerUsername, &s.Site.Access, &s.SharedVia, &s.Site.Summary, &s.Site.LastDeployedAt); err != nil {
 			return nil, err
 		}
 		sites = append(sites, s)
