@@ -228,6 +228,965 @@
         }
       }
     },
+    "/api/notifications": {
+      "get": {
+        "summary": "List notifications",
+        "description": "Requires notifications enabled and ownership or team membership. Full API keys are accepted; publish keys are refused. Cookie-authenticated writes require the base Origin. Stored secrets are never returned. MCP-created subscriptions use the connected grant and cannot be tested or rotated here.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "notifications": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "limits": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Site or subscription not found"
+          },
+          "409": {
+            "description": "Notifications disabled or subscription conflict"
+          }
+        }
+      }
+    },
+    "/api/sites/{sitename}/notifications": {
+      "get": {
+        "summary": "List notifications",
+        "description": "Requires notifications enabled and ownership or team membership. Full API keys are accepted; publish keys are refused. Cookie-authenticated writes require the base Origin. Stored secrets are never returned. MCP-created subscriptions use the connected grant and cannot be tested or rotated here.",
+        "parameters": [
+          {
+            "name": "sitename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "notifications": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "limits": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Site or subscription not found"
+          },
+          "409": {
+            "description": "Notifications disabled or subscription conflict"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create notification",
+        "description": "Requires notifications enabled and ownership or team membership. Full API keys are accepted; publish keys are refused. Cookie-authenticated writes require the base Origin. Stored secrets are never returned. MCP-created subscriptions use the connected grant and cannot be tested or rotated here.",
+        "parameters": [
+          {
+            "name": "sitename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "notification": {
+                      "type": "object"
+                    },
+                    "secret": {
+                      "type": "string",
+                      "description": "Shown only on creation or rotation."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Site or subscription not found"
+          },
+          "409": {
+            "description": "Notifications disabled or subscription conflict"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url",
+                  "events"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "events": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 4,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "record.added",
+                        "record.changed",
+                        "file.uploaded",
+                        "file.deleted"
+                      ]
+                    }
+                  },
+                  "storage": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "secret": {
+                    "type": "string",
+                    "description": "Optional whsec_ signing secret; generated when omitted."
+                  },
+                  "auth_header": {
+                    "type": "object",
+                    "required": [
+                      "name",
+                      "value"
+                    ],
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string",
+                        "writeOnly": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sites/{sitename}/notifications/{id}": {
+      "patch": {
+        "summary": "Pause or resume notification",
+        "description": "Requires notifications enabled and ownership or team membership. Full API keys are accepted; publish keys are refused. Cookie-authenticated writes require the base Origin. Stored secrets are never returned. MCP-created subscriptions use the connected grant and cannot be tested or rotated here.",
+        "parameters": [
+          {
+            "name": "sitename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "notification": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Site or subscription not found"
+          },
+          "409": {
+            "description": "Notifications disabled or subscription conflict"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "paused"
+                ],
+                "properties": {
+                  "paused": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove notification",
+        "description": "Requires notifications enabled and ownership or team membership. Full API keys are accepted; publish keys are refused. Cookie-authenticated writes require the base Origin. Stored secrets are never returned. MCP-created subscriptions use the connected grant and cannot be tested or rotated here.",
+        "parameters": [
+          {
+            "name": "sitename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Site or subscription not found"
+          },
+          "409": {
+            "description": "Notifications disabled or subscription conflict"
+          }
+        }
+      }
+    },
+    "/api/sites/{sitename}/notifications/{id}/test": {
+      "post": {
+        "summary": "Send a signed test event",
+        "description": "Requires notifications enabled and ownership or team membership. Full API keys are accepted; publish keys are refused. Cookie-authenticated writes require the base Origin. Stored secrets are never returned. MCP-created subscriptions use the connected grant and cannot be tested or rotated here.",
+        "parameters": [
+          {
+            "name": "sitename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "delivered": {
+                      "type": "boolean"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "result": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Site or subscription not found"
+          },
+          "409": {
+            "description": "Notifications disabled or subscription conflict"
+          }
+        }
+      }
+    },
+    "/api/sites/{sitename}/notifications/{id}/rotate-secret": {
+      "post": {
+        "summary": "Rotate an owner webhook signing secret",
+        "description": "Requires notifications enabled and ownership or team membership. Full API keys are accepted; publish keys are refused. Cookie-authenticated writes require the base Origin. Stored secrets are never returned. MCP-created subscriptions use the connected grant and cannot be tested or rotated here.",
+        "parameters": [
+          {
+            "name": "sitename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "secret": {
+                      "type": "string"
+                    },
+                    "previous_valid_until": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Site or subscription not found"
+          },
+          "409": {
+            "description": "Notifications disabled or subscription conflict"
+          }
+        }
+      }
+    },
+    "/api/sites/{sitename}/notifications/{id}/deliveries": {
+      "get": {
+        "summary": "Read recent delivery history",
+        "description": "Requires notifications enabled and ownership or team membership. Full API keys are accepted; publish keys are refused. Cookie-authenticated writes require the base Origin. Stored secrets are never returned. MCP-created subscriptions use the connected grant and cannot be tested or rotated here.",
+        "parameters": [
+          {
+            "name": "sitename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deliveries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Site or subscription not found"
+          },
+          "409": {
+            "description": "Notifications disabled or subscription conflict"
+          }
+        }
+      }
+    },
+    "/api/collaboration/sites/{owner}/{sitename}/notifications": {
+      "get": {
+        "summary": "List notifications",
+        "description": "Requires notifications enabled and ownership or team membership. Full API keys are accepted; publish keys are refused. Cookie-authenticated writes require the base Origin. Stored secrets are never returned. MCP-created subscriptions use the connected grant and cannot be tested or rotated here.",
+        "parameters": [
+          {
+            "name": "owner",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sitename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "notifications": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "limits": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Site or subscription not found"
+          },
+          "409": {
+            "description": "Notifications disabled or subscription conflict"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create notification",
+        "description": "Requires notifications enabled and ownership or team membership. Full API keys are accepted; publish keys are refused. Cookie-authenticated writes require the base Origin. Stored secrets are never returned. MCP-created subscriptions use the connected grant and cannot be tested or rotated here.",
+        "parameters": [
+          {
+            "name": "owner",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sitename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "notification": {
+                      "type": "object"
+                    },
+                    "secret": {
+                      "type": "string",
+                      "description": "Shown only on creation or rotation."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Site or subscription not found"
+          },
+          "409": {
+            "description": "Notifications disabled or subscription conflict"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url",
+                  "events"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "events": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 4,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "record.added",
+                        "record.changed",
+                        "file.uploaded",
+                        "file.deleted"
+                      ]
+                    }
+                  },
+                  "storage": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "secret": {
+                    "type": "string",
+                    "description": "Optional whsec_ signing secret; generated when omitted."
+                  },
+                  "auth_header": {
+                    "type": "object",
+                    "required": [
+                      "name",
+                      "value"
+                    ],
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string",
+                        "writeOnly": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/collaboration/sites/{owner}/{sitename}/notifications/{id}": {
+      "patch": {
+        "summary": "Pause or resume notification",
+        "description": "Requires notifications enabled and ownership or team membership. Full API keys are accepted; publish keys are refused. Cookie-authenticated writes require the base Origin. Stored secrets are never returned. MCP-created subscriptions use the connected grant and cannot be tested or rotated here.",
+        "parameters": [
+          {
+            "name": "owner",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sitename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "notification": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Site or subscription not found"
+          },
+          "409": {
+            "description": "Notifications disabled or subscription conflict"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "paused"
+                ],
+                "properties": {
+                  "paused": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove notification",
+        "description": "Requires notifications enabled and ownership or team membership. Full API keys are accepted; publish keys are refused. Cookie-authenticated writes require the base Origin. Stored secrets are never returned. MCP-created subscriptions use the connected grant and cannot be tested or rotated here.",
+        "parameters": [
+          {
+            "name": "owner",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sitename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Site or subscription not found"
+          },
+          "409": {
+            "description": "Notifications disabled or subscription conflict"
+          }
+        }
+      }
+    },
+    "/api/collaboration/sites/{owner}/{sitename}/notifications/{id}/test": {
+      "post": {
+        "summary": "Send a signed test event",
+        "description": "Requires notifications enabled and ownership or team membership. Full API keys are accepted; publish keys are refused. Cookie-authenticated writes require the base Origin. Stored secrets are never returned. MCP-created subscriptions use the connected grant and cannot be tested or rotated here.",
+        "parameters": [
+          {
+            "name": "owner",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sitename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "delivered": {
+                      "type": "boolean"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "result": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Site or subscription not found"
+          },
+          "409": {
+            "description": "Notifications disabled or subscription conflict"
+          }
+        }
+      }
+    },
+    "/api/collaboration/sites/{owner}/{sitename}/notifications/{id}/rotate-secret": {
+      "post": {
+        "summary": "Rotate an owner webhook signing secret",
+        "description": "Requires notifications enabled and ownership or team membership. Full API keys are accepted; publish keys are refused. Cookie-authenticated writes require the base Origin. Stored secrets are never returned. MCP-created subscriptions use the connected grant and cannot be tested or rotated here.",
+        "parameters": [
+          {
+            "name": "owner",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sitename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "secret": {
+                      "type": "string"
+                    },
+                    "previous_valid_until": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Site or subscription not found"
+          },
+          "409": {
+            "description": "Notifications disabled or subscription conflict"
+          }
+        }
+      }
+    },
+    "/api/collaboration/sites/{owner}/{sitename}/notifications/{id}/deliveries": {
+      "get": {
+        "summary": "Read recent delivery history",
+        "description": "Requires notifications enabled and ownership or team membership. Full API keys are accepted; publish keys are refused. Cookie-authenticated writes require the base Origin. Stored secrets are never returned. MCP-created subscriptions use the connected grant and cannot be tested or rotated here.",
+        "parameters": [
+          {
+            "name": "owner",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sitename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deliveries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Site or subscription not found"
+          },
+          "409": {
+            "description": "Notifications disabled or subscription conflict"
+          }
+        }
+      }
+    },
     "/photos": {
       "get": {
         "operationId": "photosPage",

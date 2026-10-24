@@ -28,12 +28,13 @@ import (
 // re-checks viewerAllowed/writerAllowed itself; the gate's job stops at
 // "who is calling and which site."
 type SiteAPIHandler struct {
-	database    *sql.DB
-	store       *storage.Store
-	assetLimits storage.AssetLimits
-	audit       audit.Recorder
-	hosts       HostModel
-	limits      *AbuseLimits
+	notifications *SiteHandler
+	database      *sql.DB
+	store         *storage.Store
+	assetLimits   storage.AssetLimits
+	audit         audit.Recorder
+	hosts         HostModel
+	limits        *AbuseLimits
 	// stateUsage is SiteHandler's own uses_state/uses_versioned_state
 	// dashboard-badge marker (state_usage_marker.go), duplicated here as a
 	// separate instance rather than shared: the two handlers already have

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"os"
 	"sort"
@@ -115,7 +116,8 @@ func realApp(t *testing.T, database *sql.DB) (*Server, *http.ServeMux, func(http
 
 	mux := http.NewServeMux()
 	handler.NewUserHandler(database, limits).Register(mux, authMW, skillMW)
-	handler.NewSiteHandler(database, disk, base, hosts, limits).WithAudit(recorder).WithSigningKeys(keys).Register(mux, authMW, skillMW)
+	sites := handler.NewSiteHandler(database, disk, base, hosts, limits).WithAudit(recorder).WithSigningKeys(keys).WithNotifications([]byte(strings.Repeat("n", 32)), []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")})
+	sites.Register(mux, authMW, skillMW)
 	handler.NewTeamHandler(database, limits).WithAudit(recorder).Register(mux, authMW, skillMW, hosts, base)
 	handler.NewAuditHandler(database, audit.NewReader(database), "", limits).Register(mux, authMW, skillMW)
 	backend, err := search.NewPostgreSQLPublicBackend(database)
@@ -140,7 +142,7 @@ func realApp(t *testing.T, database *sql.DB) (*Server, *http.ServeMux, func(http
 	handoff := handler.NewHandoffHandler(database, keys, hosts, recorder, limits)
 	negCache := auth.NewNegativeSessionCache(database, time.Hour)
 	gate := handler.NewHostGate(hosts, files, database, keys, negCache, handoff, siteAPI, authMW, base)
-	return NewServer(mux, "simple-host", version).WithSiteAPI(gate(mux), hosts.SiteHostResolver()), mux, authMW
+	return NewServer(mux, "simple-host", version).WithEvents(sites.EventsBackend()).WithSiteAPI(gate(mux), hosts.SiteHostResolver()), mux, authMW
 }
 
 func createPerson(t *testing.T, database *sql.DB, username string) string {
@@ -549,6 +551,16 @@ func TestOutputSchemasMatchRealResults(t *testing.T) {
 	}
 	dv("storage_delete_file", st(map[string]any{"resource": "photos", "path": "cake.png"}))
 	dv("storage_delete_resource", st(map[string]any{"resource": "contact"}))
+
+	createdNotification := dv("create_notification", map[string]any{"site": "shop", "url": "https://127.0.0.1:1/receiver", "events": []any{"record.added"}})
+	notificationID := createdNotification["notification"].(map[string]any)["id"].(string)
+	notificationArgs := map[string]any{"site": "shop", "id": notificationID}
+	dv("list_notifications", map[string]any{"site": "shop"})
+	dv("pause_notification", map[string]any{"site": "shop", "id": notificationID, "paused": true})
+	dv("notification_deliveries", notificationArgs)
+	dv("test_notification", notificationArgs)
+	dv("rotate_notification_secret", notificationArgs)
+	dv("remove_notification", notificationArgs)
 
 	// Properties that a single-account fixture cannot produce: download
 	// counts need a real browser download, and admin/team kinds are never the

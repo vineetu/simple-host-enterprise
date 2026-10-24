@@ -11,7 +11,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/netip"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vsriram/simple-host/internal/audit"
@@ -26,6 +28,10 @@ import (
 const maxSiteStateSize = 1 << 20
 
 type SiteHandler struct {
+	notifyOnce    sync.Once
+	notifications *notificationEngine
+	notifyCipher  notificationCipher
+	notifyAllowed []netip.Prefix
 	database      *sql.DB
 	store         *storage.Store
 	publicBaseURL string
@@ -242,6 +248,7 @@ func (h *SiteHandler) Register(mux *http.ServeMux, authMiddleware, skillVersionM
 	h.registerViewerRoutes(mux, ownerMutation, browserWrite)
 	h.registerAssetAdminRoutes(mux, ownerMutation, browserWrite)
 	h.registerStorageAdminRoutes(mux, ownerMutation, browserWrite)
+	h.registerNotifications(mux, ownerMutation, browserWrite)
 	h.registerStateHistoryRoutes(mux, ownerMutation, browserWrite)
 	h.registerMoveRoutes(mux, ownerMutation, browserWrite)
 	h.registerPreviewRoutes(mux, ownerMutation)

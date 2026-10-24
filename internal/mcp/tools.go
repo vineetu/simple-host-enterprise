@@ -340,6 +340,7 @@ func deploySiteSchema() map[string]any {
 // states the values this server enforces.
 func Tools() []Tool {
 	tools := append(toolList(), storageTools()...)
+	tools = append(tools, notificationTools()...)
 	schemas := outputSchemas()
 	for i := range tools {
 		if tools[i].Name == "deploy_site" || tools[i].Name == "storage_add_row" || tools[i].Name == "export_site" {
@@ -364,7 +365,9 @@ func Tools() []Tool {
 				return up, nil
 			}
 		}
-		tools[i].OutputSchema = schemas[tools[i].Name]
+		if tools[i].OutputSchema == nil {
+			tools[i].OutputSchema = schemas[tools[i].Name]
+		}
 		tools[i].Description = oplimits.Expand(tools[i].Description)
 		expandDescriptions(tools[i].InputSchema)
 		expandDescriptions(tools[i].OutputSchema)

@@ -22,9 +22,16 @@
 - Return JSON for API fallback and method errors, and JSON-RPC for MCP
   transport failures. OAuth and website error formats are unchanged.
 - Report rate-limit balances and reset times, including shared Postgres
-  counters. Add 24-hour create replay in Postgres (migration 0061), with
+  counters. Add 24-hour create replay in Postgres (migration 0062), with
   per-person and installation caps, changed-body 422 errors, and matching
   MCP arguments. Authorization and supplied ETag preconditions stay live.
+- Add visitor notifications through MCP Events, signed HTTPS webhooks, and a
+  dashboard Notifications panel. Postgres outbox leases, retries, and shared
+  caps support multiple replicas. Subscription changes are audited.
+- Seal notification signing and custom-header secrets with `NOTIFY_ENC_KEY`.
+  Notifications stay off without it. Operators can allow private receiver CIDRs.
+  Additive migration 0063 adds subscriptions, events, deliveries, and budgets.
+
 - Replace the app and plugin icons with the Rounded Simple Host s.h mark,
   using the hosted exports. Raster exports are opaque cream. Page icon links
   use `?v=c`, brand sources are in `docs/brand/`, and the plugin is 0.16.1.

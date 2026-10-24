@@ -127,6 +127,40 @@ func TestCredentialsThroughMCP(t *testing.T) {
 		t.Fatalf("delete_site by a full key failed: %s", text)
 	}
 
+	// Events discovery uses the authenticated connector grant, never a key or
+	// metadata supplied in the JSON body.
+	eventCall := func(headers map[string]string, method string) map[string]any {
+		t.Helper()
+		body := `{"jsonrpc":"2.0","id":1,"method":"` + method + `","params":{` + meta + `}}`
+		req := httptest.NewRequest("POST", "https://hosting.corp.test/mcp", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range modern(method, "") {
+			req.Header.Set(k, v)
+		}
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return decode(t, rec)
+	}
+	discovered := eventCall(bearer, "server/discover")["result"].(map[string]any)["capabilities"].(map[string]any)
+	if _, ok := discovered["events"]; !ok {
+		t.Fatal("connector events not advertised")
+	}
+	for _, headers := range []map[string]string{publish, {"X-API-Key": fullKey}} {
+		caps := eventCall(headers, "server/discover")["result"].(map[string]any)["capabilities"].(map[string]any)
+		if _, ok := caps["events"]; ok {
+			t.Fatal("key advertised grant-bound events")
+		}
+		if eventCall(headers, "events/list")["error"] == nil {
+			t.Fatal("key admitted to events")
+		}
+	}
+	if eventCall(bearer, "events/list")["error"] != nil {
+		t.Fatal("connector events list refused")
+	}
+
 	// Straight to the REST route, the same token is refused.
 	req := httptest.NewRequest(http.MethodGet, "https://hosting.corp.test/api/me", nil)
 	req.Header.Set("Authorization", "Bearer "+token)

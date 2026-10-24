@@ -25,12 +25,18 @@ var dashboardHeadHTML = strings.Replace(adminHeadHTML, "Simple Host · Admin", "
 // The sessions page is a separate route, GET /auth/sessions (auth.go),
 // linked from here.
 type DashboardHandler struct {
-	database    *sql.DB
-	signingKeys []auth.SigningKey
-	sessionIdle time.Duration
-	quota       UploadQuota
+	notificationsEnabled bool
+	database             *sql.DB
+	signingKeys          []auth.SigningKey
+	sessionIdle          time.Duration
+	quota                UploadQuota
 	// hosts validates ?switch= (a site's "Switch account" link).
 	hosts HostModel
+}
+
+func (h *DashboardHandler) WithNotifications(enabled bool) *DashboardHandler {
+	h.notificationsEnabled = enabled
+	return h
 }
 
 // WithHosts sets the host model the switch-account notice checks its
@@ -188,8 +194,11 @@ func (h *DashboardHandler) dashboard(w http.ResponseWriter, r *http.Request) {
   <h2 class="section-title">Recently deleted</h2>
   <p class="login-copy">A deleted site stays here for {{DELETED_RETENTION}}, and its name stays yours. Restore brings it back as it was: its files, saved data, who can open it, its viewers and uploaded files.</p>
   <div id="deleted-list" class="rank-list" role="region" aria-label="Recently deleted sites"></div>
-</section>
-</main>`))
+</section>`))
+	if h.notificationsEnabled {
+		b.WriteString(notificationsPanel)
+	}
+	b.WriteString(`</main>`)
 	b.WriteString(oplimits.Expand(dashboardScript))
 	b.WriteString(`</body></html>`)
 

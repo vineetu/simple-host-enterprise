@@ -33,7 +33,7 @@ startup rather than silently leaving backups without their envelope.
 
 Applies to `OIDC_CLIENT_SECRET`, `SESSION_SIGNING_KEY`, `DB_PASSWORD`,
 `DB_APP_PASSWORD`, `BACKUP_STORAGE_ACCESS_KEY_ID`,
-`BACKUP_STORAGE_SECRET_ACCESS_KEY` and `BACKUP_ENVELOPE_KEY`.
+`BACKUP_STORAGE_SECRET_ACCESS_KEY`, `BACKUP_ENVELOPE_KEY`, and `NOTIFY_ENC_KEY`.
 
 **This is the cloud-neutral way to get a credential into the pod.** Each
 cloud has its own workload-identity flow and they agree on nothing — the AWS
@@ -538,3 +538,61 @@ apply decode deadlines, and reconcile uncertain saves before retrying.
 The page accepts at most 30 photos, 1,000,000 bytes each, and 1600 pixels per side.
 The bundled decoder versions, source, licenses, and inherited decoder limitations
 are recorded in `/photo-codecs/v3/README.txt`.
+
+## Visitor notifications
+
+Notifications are disabled until `NOTIFY_ENC_KEY` is set. Every replica must use
+that same key. It is separate from bucket encryption and seals current and
+previous signing secrets and custom-header values in Postgres with AES-256-GCM.
+The associated data binds ciphertext to its subscription and field. Back up the
+key in the organisation's secret store alongside database backups.
+
+| Variable | Required | Default | Refusal it triggers when set wrong |
+|---|---|---|---|
+| `NOTIFY_MAX_PER_SITE` | No | `10` | Notification max per site. Range 1 to 1000. Invalid values refuse startup. |
+| `NOTIFY_PER_MINUTE` | No | `60` | Notification per minute. Range 1 to 100000. Invalid values refuse startup. |
+| `NOTIFY_PER_DAY` | No | `5000` | Notification per day. Range 1 to 10000000. Invalid values refuse startup. |
+| `NOTIFY_HISTORY_DAYS` | No | `7` | Notification history days. Range 1 to 365. Invalid values refuse startup. |
+| `NOTIFY_OWNER_CONCURRENCY` | No | `5` | Notification owner concurrency. Range 1 to 200. Invalid values refuse startup. |
+| `NOTIFY_PER_URL_PER_MINUTE` | No | `120` | Notification per url per minute. Range 1 to 100000. Invalid values refuse startup. |
+| `NOTIFY_WORKERS` | No | `20` | Notification workers. Range 1 to 200. Invalid values refuse startup. |
+| `NOTIFY_ATTEMPTS` | No | `5` | Notification attempts. Range 1 to 20. Invalid values refuse startup. |
+| `NOTIFY_FIELD_MAX_BYTES` | No | `2048` | Notification field max bytes. Range 1 to 65536. Invalid values refuse startup. |
+| `NOTIFY_BODY_MAX_BYTES` | No | `16384` | Notification body max bytes. Range 4096 to 262144. Invalid values refuse startup. |
+| `NOTIFY_SUSPEND_ATTEMPTS` | No | `100` | Notification suspend attempts. Range 1 to 100000. Invalid values refuse startup. |
+| `NOTIFY_SUSPEND_FAILURE_PERCENT` | No | `95` | Notification suspend failure percent. Range 1 to 100. Invalid values refuse startup. |
+| `NOTIFY_TIMEOUT` | No | `5s` | Notification timeout. Range 1ms to 30s. Invalid values refuse startup. |
+| `NOTIFY_DEFAULT_TTL` | No | `168h` | Notification default ttl. Range 1h to 8760h. Invalid values refuse startup. |
+| `NOTIFY_SUSPEND_WINDOW` | No | `1h` | Notification suspend window. Range 1h to 168h. Invalid values refuse startup. |
+| `NOTIFY_SUSPEND_AFTER` | No | `72h` | Notification suspend after. Range 24h to 8760h. Invalid values refuse startup. |
+| `NOTIFY_ENC_KEY` | No | none (empty) | Base64 32-byte key sealing notification signing and custom-header secrets. Empty disables notifications. Set directly or with NOTIFY_ENC_KEY_FILE. A malformed key refuses startup. Helm accepts notifications.encryptionKey or NOTIFY_ENC_KEY in secrets.existingSecret; it never generates this opt-in key. |
+| `NOTIFY_ALLOW_PRIVATE_CIDRS` | No | none (empty) | Comma-separated destination CIDRs permitted for HTTPS callbacks, including internal addresses. Empty permits public destinations only. Malformed entries refuse startup. Addresses are checked at lookup and dial, redirects are refused, HTTPS and certificate checks remain required. Allowing internal ranges lets site owners send requests from the pod into those networks, including any reachable service in the range. Use narrow receiver CIDRs and network policy; do not allow metadata ranges. |
+
+The minute and day event caps apply per site at enqueue and per subscription at
+delivery, across replicas. Retry attempts consume the delivery caps. History is
+kept for the configured number of days. Workers lease outbox rows in Postgres;
+a crash after a receiver accepts an event can cause a repeat with the same
+`webhook-id`. Receivers must deduplicate that ID. Backoff is 30 seconds, two,
+five, and seven minutes, then seven minutes for additional attempts. HTTP 410,
+413, and refused destinations are permanent failures. Repeated delivery
+failures suspend the subscription; resume it from Notifications after fixing
+the receiver. Delivery history contains status, timings, and attempts, without
+payloads or remote response bodies.
+
+Signing-secret rotation is separate from changing `NOTIFY_ENC_KEY`. Use the
+Notifications panel or `POST .../notifications/{id}/rotate-secret`: the new
+secret is returned once and both readable signing keys sign for 24 hours.
+For an MCP subscription, the connected app refreshes with a new secret.
+Changing the encryption key does not reencrypt existing rows: delivery reports
+`secret_unreadable`. Restore the original key, or rotate each owner webhook's
+signing secret and refresh each MCP subscription. Rotation discards an unreadable
+previous signing key. Recreate a webhook with a custom header when its header
+secret is unreadable. Keep the original key until recovery is complete. To turn
+notifications off, remove the key from all replicas; pending rows remain until
+notifications resume and the history sweep runs.
+
+MCP subscriptions are bound to a live connector grant and expire no later than
+its current token lifetime. Refresh extends them only within that grant's live
+token lifetime. Revoking the grant deletes its subscriptions. Delivery rechecks
+that the creator still owns the site or belongs to its team. A transfer stops
+existing subscriptions; create new ones under the receiving namespace.

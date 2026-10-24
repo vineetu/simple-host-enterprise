@@ -226,7 +226,8 @@ func run() (runErr error) {
 		log.Printf("malware scan: uploads are scanned by clamd at %s", cfg.Clamd.Addr)
 	}
 	handler.NewUserHandler(database, abuseLimits).WithQuota(quota).Register(mux, authMW, skillVersionMW)
-	handler.NewSiteHandler(database, siteStore, cfg.PublicBaseURL, hosts, abuseLimits).WithAudit(auditRecorder).WithNetworkAccessApprovals(cfg.NetworkAccessApprovals).WithUploadLimits(quota, scanner).WithAllowedEmailDomains(cfg.OIDC.AllowedEmailDomains).WithSigningKeys(signingKeys).Register(mux, authMW, skillVersionMW)
+	siteHandler := handler.NewSiteHandler(database, siteStore, cfg.PublicBaseURL, hosts, abuseLimits).WithNotifications(cfg.NotifyEncKey, cfg.NotifyAllowPrivateCIDRs).WithAudit(auditRecorder).WithNetworkAccessApprovals(cfg.NetworkAccessApprovals).WithUploadLimits(quota, scanner).WithAllowedEmailDomains(cfg.OIDC.AllowedEmailDomains).WithSigningKeys(signingKeys)
+	siteHandler.Register(mux, authMW, skillVersionMW)
 	handler.NewTeamHandler(database, abuseLimits).WithAudit(auditRecorder).WithAllowedEmailDomains(cfg.OIDC.AllowedEmailDomains).Register(mux, authMW, skillVersionMW, hosts, cfg.PublicBaseURL)
 	// Held rather than registered inline: the classification worker starts
 	// after the routes are wired, and the handler is given it once it exists.
@@ -249,7 +250,7 @@ func run() (runErr error) {
 	handler.NewShowcaseHandler(database, hosts, signingKeys, cfg.Session.Idle).Register(mux)
 	handler.NewAuthHandler(database, oidcProvider, oidcClaims, signingKeys, cfg.Session.TTL, cfg.Session.Idle, auditRecorder, hosts, cfg.PublicBaseURL, abuseLimits).Register(mux, authMW)
 	handler.NewKeysHandler(database, auditRecorder, hosts, cfg.PublicBaseURL, abuseLimits).WithMaxKeyDays(int(cfg.APIKeyMaxDays)).Register(mux, authMW)
-	handler.NewDashboardHandler(database, signingKeys, cfg.Session.Idle).WithQuota(quota).WithHosts(hosts).Register(mux, authMW)
+	handler.NewDashboardHandler(database, signingKeys, cfg.Session.Idle).WithNotifications(siteHandler.NotificationsReady()).WithQuota(quota).WithHosts(hosts).Register(mux, authMW)
 	handoffHandler := handler.NewHandoffHandler(database, signingKeys, hosts, auditRecorder, abuseLimits)
 	handoffHandler.Register(mux, authMW)
 	handler.RegisterUIRoutes(mux, cfg.PublicBaseURL)
@@ -264,7 +265,7 @@ func run() (runErr error) {
 		MaxFileBytes: cfg.Assets.MaxFileBytes,
 		MaxSiteBytes: cfg.Assets.MaxSiteBytes,
 		MaxSiteCount: cfg.Assets.MaxSiteCount,
-	}, auditRecorder, hosts, abuseLimits).WithUploadLimits(quota, scanner)
+	}, auditRecorder, hosts, abuseLimits).WithUploadLimits(quota, scanner).WithNotifications(siteHandler)
 
 	// The negative session cache is hosted content's substitute for a
 	// per-request read of the sessions table: it refreshes every 60
@@ -284,7 +285,7 @@ func run() (runErr error) {
 	// being handed the landing page.
 	// Every method needs an API key or an OAuth access token first, so an
 	// unauthenticated client of any method is told where to sign in.
-	mcpServer := mcp.NewServer(mux, "simple-host", pluginVersion).WithApps(cfg.PublicBaseURL, cfg.MCPApps)
+	mcpServer := mcp.NewServer(mux, "simple-host", pluginVersion).WithApps(cfg.PublicBaseURL, cfg.MCPApps).WithEvents(siteHandler.EventsBackend())
 	inventory := []handler.DiscoveryTool{}
 	for _, tool := range mcpServer.ListedTools() {
 		inventory = append(inventory, handler.DiscoveryTool{Name: tool.Name, Description: tool.Description})
@@ -340,6 +341,7 @@ func run() (runErr error) {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	connector.StartSweep(ctx)
+	siteHandler.StartNotifications(ctx)
 	// Indexed pages carry whatever address SiteURL gives, so the index
 	// follows the cutover; existing documents are reindexed by hand after the
 	// flip.

@@ -24,7 +24,7 @@ func TestAppsOffSnapshot(t *testing.T) {
 		snapshots[method] = b
 	}
 	for _, f := range fixtures {
-		if f.tool == "add_photos" {
+		if f.tool == "add_photos" || isNotificationTool(f.tool) {
 			continue
 		}
 		for i, args := range f.args {

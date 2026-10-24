@@ -11,6 +11,10 @@ import (
 
 var opLimitKeys = []string{
 	"CREATE_REPLAY_PER_ACCOUNT", "CREATE_REPLAY_TOTAL",
+	"NOTIFY_MAX_PER_SITE", "NOTIFY_PER_MINUTE", "NOTIFY_PER_DAY", "NOTIFY_HISTORY_DAYS",
+	"NOTIFY_OWNER_CONCURRENCY", "NOTIFY_PER_URL_PER_MINUTE", "NOTIFY_WORKERS", "NOTIFY_ATTEMPTS",
+	"NOTIFY_FIELD_MAX_BYTES", "NOTIFY_BODY_MAX_BYTES", "NOTIFY_SUSPEND_ATTEMPTS", "NOTIFY_SUSPEND_FAILURE_PERCENT",
+	"NOTIFY_TIMEOUT", "NOTIFY_DEFAULT_TTL", "NOTIFY_SUSPEND_WINDOW", "NOTIFY_SUSPEND_AFTER",
 	"DELETED_RETENTION_DAYS", "IDLE_CLEANUP_GRACE_DAYS", "IDLE_CLEANUP_MAX_EMAILS",
 	"PREVIEW_LINK_TTL", "EXPORT_LINK_TTL", "API_KEY_DEFAULT_DAYS", "API_KEY_EXPIRY_WARNING_DAYS",
 	"SHOWCASE_BIO_MAX_LENGTH", "MAX_TEAMS_PER_PERSON", "MAX_TEAM_MEMBERS", "MAX_SITE_VIEWERS", "MAX_ARCHIVE_BYTES",
@@ -34,6 +38,23 @@ func TestLoadOpLimitsDefaultToTodaysValues(t *testing.T) {
 	}
 	want := oplimits.Values{
 		CreateReplayPerAccount: 500, CreateReplayTotal: 50000,
+		NotifyMaxPerSite:            10,
+		NotifyPerMinute:             60,
+		NotifyPerDay:                5000,
+		NotifyHistoryDays:           7,
+		NotifyOwnerConcurrency:      5,
+		NotifyPerURLPerMinute:       120,
+		NotifyWorkers:               20,
+		NotifyAttempts:              5,
+		NotifyFieldMaxBytes:         2048,
+		NotifyBodyMaxBytes:          16384,
+		NotifySuspendAttempts:       100,
+		NotifySuspendFailurePercent: 95,
+		NotifyTimeout:               5000 * time.Millisecond,
+		NotifyDefaultTTL:            168 * time.Hour,
+		NotifySuspendWindow:         1 * time.Hour,
+		NotifySuspendAfter:          3 * 24 * time.Hour,
+
 		ShowcaseBioMaxLength: 280,
 		DeletedRetentionDays: 30, IdleGraceDays: 30, IdleMaxEmails: 0,
 		PreviewLinkTTL: time.Hour, ExportLinkTTL: 10 * time.Minute,
@@ -76,6 +97,23 @@ func TestLoadOpLimitsOverrides(t *testing.T) {
 	}
 	want := oplimits.Values{
 		CreateReplayPerAccount: 500, CreateReplayTotal: 50000,
+		NotifyMaxPerSite:            10,
+		NotifyPerMinute:             60,
+		NotifyPerDay:                5000,
+		NotifyHistoryDays:           7,
+		NotifyOwnerConcurrency:      5,
+		NotifyPerURLPerMinute:       120,
+		NotifyWorkers:               20,
+		NotifyAttempts:              5,
+		NotifyFieldMaxBytes:         2048,
+		NotifyBodyMaxBytes:          16384,
+		NotifySuspendAttempts:       100,
+		NotifySuspendFailurePercent: 95,
+		NotifyTimeout:               5000 * time.Millisecond,
+		NotifyDefaultTTL:            168 * time.Hour,
+		NotifySuspendWindow:         1 * time.Hour,
+		NotifySuspendAfter:          3 * 24 * time.Hour,
+
 		ShowcaseBioMaxLength: 280,
 		DeletedRetentionDays: 7, IdleGraceDays: 14, IdleMaxEmails: 25,
 		PreviewLinkTTL: 30 * time.Minute, ExportLinkTTL: 2 * time.Hour,
