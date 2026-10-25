@@ -13,7 +13,9 @@ lives under its author's own name, it is theirs, and it stays theirs alone until
 otherwise.
 
 The result is closer to a portfolio than to a web host. The unit is the person, not the
-artifact.
+artifact. The pitch is hosting: the agent builds the thing wherever the person already works,
+and publishes it here through the connector; Enterprise's job is keeping it online under that
+person's name, not building it.
 
 ## Who uses it, and in what situation
 
@@ -74,6 +76,12 @@ artifact.
 - Apache 2.0.
 
 ## Decisions already made
+
+- **2026-10-25 — The pitch is hosting, not building.** Enterprise's main pitch is keeping
+  what a person's agent already made online under that person's own name; publishing happens
+  through the connector, and the building happens wherever the person already works. Reason:
+  owner correction 2026-10-25, carried over from the same framing decision in the hosted
+  Simple Host INTENT.
 
 - **2026-10-05 — Home-page parity follows Enterprise identity and access.**
   Bring personal home selection, a signed-in showcase feed, bio, pins and order
