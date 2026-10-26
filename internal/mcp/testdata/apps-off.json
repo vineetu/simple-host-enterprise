@@ -3843,7 +3843,7 @@
         {
           "name": "storage_add_row",
           "title": "Add a row",
-          "description": "Add a row to a table: `values` maps columns to values of their declared types. The server sets id, added_by (you) and created_at.",
+          "description": "Add a row to a table: `values` maps columns to values of their declared types. The server sets id, added_by (you) and created_at. A refusal names the column and what it needs (`unknown_column`, `invalid_value`, `required_missing`, `invalid_reference`): fix that value and send again.",
           "inputSchema": {
             "additionalProperties": false,
             "properties": {

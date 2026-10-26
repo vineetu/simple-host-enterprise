@@ -379,41 +379,53 @@ func CheckColumns(table string, cols map[string]Column, tables map[string]bool) 
 	return nil
 }
 
+// RequiredError is a required column with no value (left out, or null).
+type RequiredError struct{ Name string }
+
+func (e *RequiredError) Error() string {
+	return e.Name + " needs a value (required): include it, and do not send null for it"
+}
+
+// TypeWants says, per column type, what a value of that type looks like.
+var TypeWants = map[string]string{
+	TypeText:    `text in quotes, such as "bread"`,
+	TypeInteger: "a whole number such as 42, without quotes",
+	TypeNumber:  "a number such as 4.5, without quotes",
+	TypeBoolean: "true or false, without quotes",
+	TypeJSON:    "any JSON value",
+}
+
 // CheckValue validates one value against its column's type. JSON null is
-// accepted for any column that is not required.
+// accepted for any column that is not required (*RequiredError otherwise).
+// name is how the message names the column (the handler passes
+// table.column).
 func CheckValue(name string, col Column, raw json.RawMessage) error {
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "null" {
 		if col.Required {
-			return fmt.Errorf("%s is required", name)
+			return &RequiredError{Name: name}
 		}
 		return nil
 	}
+	ok := true
 	switch col.Type {
 	case TypeText:
 		var s string
-		if json.Unmarshal(raw, &s) != nil {
-			return fmt.Errorf("%s must be text", name)
-		}
+		ok = json.Unmarshal(raw, &s) == nil
 	case TypeInteger:
 		var f float64
-		if json.Unmarshal(raw, &f) != nil || f != math.Trunc(f) || math.Abs(f) > 1<<53 || strings.ContainsAny(trimmed, ".eE") {
-			return fmt.Errorf("%s must be a whole number", name)
-		}
+		ok = json.Unmarshal(raw, &f) == nil && f == math.Trunc(f) && math.Abs(f) <= 1<<53 && !strings.ContainsAny(trimmed, ".eE")
 	case TypeNumber:
 		var f float64
-		if json.Unmarshal(raw, &f) != nil {
-			return fmt.Errorf("%s must be a number", name)
-		}
+		ok = json.Unmarshal(raw, &f) == nil
 	case TypeBoolean:
 		var b bool
-		if json.Unmarshal(raw, &b) != nil {
-			return fmt.Errorf("%s must be true or false", name)
-		}
+		ok = json.Unmarshal(raw, &b) == nil
 	case TypeJSON:
-		if !json.Valid(raw) {
-			return fmt.Errorf("%s must be JSON", name)
-		}
+		ok = json.Valid(raw)
+	}
+	if !ok {
+		return fmt.Errorf("%s is %s: send %s", name, col.Type, TypeWants[col.Type])
 	}
 	return nil
 }
@@ -430,14 +442,14 @@ func FilterValue(name string, col Column, s string) (json.RawMessage, error) {
 		raw = json.RawMessage(s)
 	case TypeBoolean:
 		if s != "true" && s != "false" {
-			return nil, fmt.Errorf("where.%s must be true or false", name)
+			return nil, fmt.Errorf("where.%s: %s is boolean, so the value must be true or false", name, name)
 		}
 		raw = json.RawMessage(s)
 	default:
-		return nil, fmt.Errorf("where.%s: a json column cannot be filtered", name)
+		return nil, fmt.Errorf("where.%s: %s is a json column, which cannot be filtered; filter on a text, integer, number, or boolean column", name, name)
 	}
-	if err := CheckValue(name, col, raw); err != nil {
-		return nil, fmt.Errorf("where.%s: %v", name, err)
+	if CheckValue(name, col, raw) != nil {
+		return nil, fmt.Errorf("where.%s: %s is %s, and %q is not a valid %s value", name, name, col.Type, s, col.Type)
 	}
 	// Numbers compare as jsonb numbers, so 7, 7.0 and 70e-1 match alike.
 	return raw, nil

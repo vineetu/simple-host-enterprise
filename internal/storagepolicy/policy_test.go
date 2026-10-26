@@ -2,6 +2,7 @@ package storagepolicy
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 )
 
@@ -246,7 +247,23 @@ func TestColumnsAndValues(t *testing.T) {
 			t.Errorf("CheckValue(%s, %s) = %v", tc.typ, tc.raw, err)
 		}
 	}
-	if err := CheckValue("c", Column{Type: "text", Required: true}, json.RawMessage(`null`)); err == nil {
-		t.Error("required null accepted")
+	var required *RequiredError
+	if err := CheckValue("t.c", Column{Type: "text", Required: true}, json.RawMessage(`null`)); !errors.As(err, &required) || err.Error() != "t.c needs a value (required): include it, and do not send null for it" {
+		t.Errorf("required null = %v", err)
+	}
+	// A wrong type names the column and the type it expects.
+	for typ, want := range map[string]string{
+		"text":    `t.c is text: send text in quotes, such as "bread"`,
+		"integer": "t.c is integer: send a whole number such as 42, without quotes",
+		"number":  "t.c is number: send a number such as 4.5, without quotes",
+		"boolean": "t.c is boolean: send true or false, without quotes",
+	} {
+		raw := `{}`
+		if err := CheckValue("t.c", Column{Type: typ}, json.RawMessage(raw)); err == nil || err.Error() != want {
+			t.Errorf("CheckValue(%s, %s) = %v, want %q", typ, raw, err, want)
+		}
+	}
+	if _, err := FilterValue("qty", Column{Type: "integer"}, "two"); err == nil || err.Error() != `where.qty: qty is integer, and "two" is not a valid integer value` {
+		t.Errorf("FilterValue = %v", err)
 	}
 }

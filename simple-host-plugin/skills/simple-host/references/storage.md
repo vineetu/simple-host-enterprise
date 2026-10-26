@@ -79,6 +79,8 @@ storage_set_resource {"site": "bakery", "owner": "ana", "resource": "shop", "kin
 Write the site name into the page and call root-relative paths, as for state.
 Every answer is JSON. A `401` means the session expired: `location.reload()`.
 A `403` means this person may not do that; say so in plain words.
+Every refusal has a `code` and an `error` that says what was wrong and what
+to send instead: read it and fix that one thing.
 
 ```js
 const site = 'bakery'; // written in at build time

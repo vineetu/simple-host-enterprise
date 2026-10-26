@@ -528,7 +528,11 @@ func (s *Server) callTool(r *http.Request, req request) response {
 // delete_team. A hint aimed at the wrong one is worse than no hint, because a
 // model acts on it.
 func explainFailure(status int, body string, tool Tool) string {
-	hint := codeHint(failureCode(body), tool)
+	code := failureCode(body)
+	if selfExplained(code, tool) {
+		return fmt.Sprintf("%s failed (HTTP %d): %s", tool.Name, status, body)
+	}
+	hint := codeHint(code, tool)
 	if hint == "" {
 		hint = statusHint(status, tool)
 	}
@@ -537,6 +541,35 @@ func explainFailure(status int, body string, tool Tool) string {
 		return fmt.Sprintf("%s failed (HTTP %d): %s", tool.Name, status, body)
 	}
 	return fmt.Sprintf("%s failed (HTTP %d): %s\n\n%s", tool.Name, status, body, hint)
+}
+
+// selfExplainedCodes are the site storage codes whose message already says
+// what happened and what to do (internal/handler/site_storage.go and
+// site_storage_admin.go). A generic hint after one is noise at best: a 404
+// no_table read as "no such site" sends the model to list_sites.
+var selfExplainedCodes = map[string]bool{
+	"no_resource": true, "no_table": true, "unknown_column": true, "invalid_value": true,
+	"required_missing": true, "server_column": true, "invalid_reference": true, "referenced": true,
+	"not_found": true, "forbidden": true, "sign_in_required": true, "key_taken": true, "path_taken": true,
+	"invalid_body": true, "invalid_query": true, "invalid_key": true, "invalid_path": true, "invalid_number": true,
+	"too_large": true, "storage_full": true, "type_not_allowed": true, "file_unavailable": true,
+	"invalid_access": true, "invalid_name": true, "invalid_kind": true, "kind_mismatch": true,
+	"too_many_resources": true, "invalid_tables": true, "invalid_columns": true,
+}
+
+// selfExplained reports whether a storage tool's failure is passed through
+// as the server wrote it. The settings tools go through the collaboration
+// routes, where not_found and forbidden are about the namespace and keep
+// their hint.
+func selfExplained(code string, tool Tool) bool {
+	if !strings.HasPrefix(tool.Name, "storage_") || !selfExplainedCodes[code] {
+		return false
+	}
+	switch tool.Name {
+	case "storage_list_resources", "storage_set_resource", "storage_delete_resource":
+		return code != "not_found" && code != "forbidden"
+	}
+	return true
 }
 
 // failureCode reads the machine-readable code the REST layer sets on an error

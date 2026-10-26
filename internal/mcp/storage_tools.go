@@ -381,9 +381,10 @@ func storageTools() []Tool {
 			},
 		},
 		{
-			Name:        "storage_add_row",
-			Title:       "Add a row",
-			Description: "Add a row to a table: `values` maps columns to values of their declared types. The server sets id, added_by (you) and created_at.",
+			Name:  "storage_add_row",
+			Title: "Add a row",
+			Description: "Add a row to a table: `values` maps columns to values of their declared types. The server sets id, added_by (you) and created_at. " +
+				"A refusal names the column and what it needs (`unknown_column`, `invalid_value`, `required_missing`, `invalid_reference`): fix that value and send again.",
 			InputSchema: storageResourceArgs(map[string]any{"table": str("The table."), "values": map[string]any{"type": "object", "description": "{column: value}."}}, "table", "values"),
 			Annotations: writes(false, false),
 			family:      familySite,

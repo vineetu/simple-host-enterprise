@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Site storage refusals say what happened and what to do, each with a stable
+  `code`. The owner sees the declared tables (`no_table`), columns
+  (`unknown_column`), and storage names (`no_resource`); a visitor never
+  sees the names of tables they cannot read. A wrong type names the column
+  and the type it needs (`invalid_value`); a missing required value is now
+  `required_missing` (was `invalid_value`); an unknown `where.` column is
+  `unknown_column` (was `invalid_query`). References name the column and,
+  to a reader, the table (`invalid_reference`, `referenced`). Refusals name
+  the rule and its value, for example "the add rule of table orders is
+  owner". Body, size, and not-found answers say what to send instead. A file
+  that cannot be read right now is JSON `503 file_unavailable`. The MCP
+  storage tools pass these messages through without a generic hint.
+
 ## Chart 0.2.7 — 2026-10-24
 
 - Pins the published 0.9.9 image digest

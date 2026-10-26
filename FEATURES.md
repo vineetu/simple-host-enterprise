@@ -1317,7 +1317,15 @@ Config names are documented in `docs/configuration.md`; schema in
   statement; `id`, `added_by`, `created_at`, `updated_at` are the server's;
   a reference must name a row the caller may read (else `404
   invalid_reference`); a referenced row cannot be deleted (`409
-  referenced`). A key-value or file `PUT` is an add or an edit, decided by
+  referenced`). Every refusal has a stable `code` and says what happened
+  and what to do: `no_resource`, `no_table`, `unknown_column` (the owner
+  sees the declared names; a visitor sees a table's columns only if they may
+  read it), `invalid_value` (names the column and its type),
+  `required_missing`, `server_column`, `invalid_reference`, `referenced`,
+  `not_found`, `forbidden` and `sign_in_required` (name the action's rule
+  and value), `invalid_body`, `invalid_query`, `too_large`, `storage_full`,
+  `file_unavailable`. The MCP storage tools pass them through without a
+  generic hint (`selfExplainedCodes`). A key-value or file `PUT` is an add or an edit, decided by
   the server under the site's storage lock. Visitors see `mine`; owners also
   see `added_by` (a username). Tables are rows in Postgres (JSONB, no
   per-site DDL); files are bucket objects written through the asset code

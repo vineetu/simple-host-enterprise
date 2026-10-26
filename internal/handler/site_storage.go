@@ -67,18 +67,96 @@ func (h *SiteAPIHandler) storageCaller(ctx context.Context, call siteAPICall) (s
 	return sp.Caller{UserID: call.ActorUserID, Owner: owner, Tool: call.SessionID == ""}, nil
 }
 
-// refuse writes the answer for an action the caller may not take at all.
-func refuseStorage(w http.ResponseWriter, c sp.Caller, a sp.Action, who sp.Who) {
+// refuseStorage writes the answer for an action the caller may not take at
+// all. It names the rule that refused (the action and its value) and where
+// (what the caller addressed), never rows or other tables.
+func refuseStorage(w http.ResponseWriter, c sp.Caller, a sp.Action, who sp.Who, where string) {
+	rule := "the " + string(a) + " rule of " + where + " is " + string(who)
 	if c.UserID == "" {
-		writeStorageError(w, http.StatusUnauthorized, "sign_in_required", "sign in to "+string(a)+" here: open the site with ?signin")
+		writeStorageError(w, http.StatusUnauthorized, "sign_in_required", "sign in to "+string(a)+" here: "+rule+", and visitors who are not signed in only read what is open to anyone. Open the site with ?signin")
 		return
 	}
 	switch who {
 	case sp.Nobody:
-		writeStorageError(w, http.StatusForbidden, "forbidden", "pages cannot "+string(a)+" here; only the owner's own tools can")
+		writeStorageError(w, http.StatusForbidden, "forbidden", rule+": pages cannot "+string(a)+" here, only the owner's own tools (a key or the connector) can")
+	case sp.Owner:
+		writeStorageError(w, http.StatusForbidden, "forbidden", rule+": only the site's owner or its team can "+string(a)+" here")
 	default:
-		writeStorageError(w, http.StatusForbidden, "forbidden", "only the site's owner can "+string(a)+" here")
+		writeStorageError(w, http.StatusForbidden, "forbidden", rule+": you cannot "+string(a)+" here")
 	}
+}
+
+// Where a refusal happened, as the caller addressed it.
+func kvWhere(name string) string     { return "key-value storage " + name }
+func filesWhere(name string) string  { return "file storage " + name }
+func tableWhere(table string) string { return "table " + table }
+
+// noResource is the answer for a resource name the site does not have. The
+// owner also sees the names (and kinds) the site does have; a visitor does
+// not, so a refusal never maps the site's storage for them.
+func (h *SiteAPIHandler) noResource(w http.ResponseWriter, r *http.Request, call siteAPICall, c sp.Caller, kind, name string) {
+	msg := "this site has no " + kind + " storage named " + name
+	if !c.Owner {
+		writeStorageError(w, http.StatusNotFound, "no_resource", msg+"; its owner creates it first")
+		return
+	}
+	list, err := db.ListStorageResources(r.Context(), h.database, call.SiteID)
+	if err != nil {
+		storageInternal(w, "list resources", err)
+		return
+	}
+	names := make([]string, 0, len(list))
+	for _, res := range list {
+		names = append(names, res.Name+" ("+res.Kind+")")
+	}
+	if len(names) == 0 {
+		msg += ", and no storage yet"
+	} else {
+		msg += ". Storage here: " + strings.Join(names, ", ")
+	}
+	writeStorageError(w, http.StatusNotFound, "no_resource", msg+". Create it with storage_set_resource, or use one of these names")
+}
+
+// noTable is the answer for a table the database does not have. Only the
+// owner sees the tables it does have.
+func noTable(w http.ResponseWriter, c sp.Caller, res db.StorageResource, table string) {
+	msg := "database " + res.Name + " has no table named " + table
+	if c.Owner {
+		msg += ". Tables here: " + strings.Join(sp.SortedKeys(res.Settings.Tables), ", ") + ". Use one of these, or add the table with storage_set_resource"
+	} else {
+		msg += ". GET .../storage lists the tables you may use"
+	}
+	writeStorageError(w, http.StatusNotFound, "no_table", msg)
+}
+
+// columnsShown reports whether c may see the column names of t: the owner,
+// and anyone who may read its rows (which carry every column).
+func columnsShown(t db.StorageTable, c sp.Caller) bool {
+	return c.Owner || sp.Decide(t.Access, sp.Read, c) != sp.Refused
+}
+
+func columnList(table string, t db.StorageTable) string {
+	return "Columns in " + table + ": " + strings.Join(sp.SortedKeys(t.Columns), ", ")
+}
+
+const storageRoutesText = "no such storage route: use kv/{name}/keys/{key}, db/{name}/tables/{table}/rows/{id}, or files/{name}/objects/{path}"
+
+// Entries that do not exist, or that the caller may not see (the same
+// answer, so a hidden entry looks like none).
+func noKey(w http.ResponseWriter, name, key string) {
+	writeStorageError(w, http.StatusNotFound, "not_found", name+" has no key "+strconv.Quote(key)+" that you can see: list its keys for the ones there are")
+}
+
+func noRow(w http.ResponseWriter, table string, id int64) {
+	writeStorageError(w, http.StatusNotFound, "not_found", table+" has no row "+strconv.FormatInt(id, 10)+" that you can see: list its rows for the ids there are")
+}
+
+func noFile(w http.ResponseWriter, name, path string) {
+	writeStorageError(w, http.StatusNotFound, "not_found", name+" has no file "+strconv.Quote(path)+" that you can see: list its files for the paths there are")
+}
+
+func storageRemoved(w http.ResponseWriter, name string) {
+	writeStorageError(w, http.StatusNotFound, "no_resource", "storage "+name+" was removed while this request ran; its owner deleted it")
 }
 
 // onlyAddedBy is the person an own decision limits the statement to.
@@ -127,7 +205,7 @@ func (h *SiteAPIHandler) Storage(w http.ResponseWriter, r *http.Request, call si
 	}
 	parts := strings.SplitN(strings.TrimPrefix(rest, "/"), "/", 4)
 	if len(parts) < 3 || !sp.ResourceNamePattern.MatchString(parts[1]) {
-		writeStorageError(w, http.StatusNotFound, "not_found", "no such storage route")
+		writeStorageError(w, http.StatusNotFound, "not_found", storageRoutesText)
 		return
 	}
 	kind, name, sub := parts[0], parts[1], parts[2]
@@ -137,7 +215,7 @@ func (h *SiteAPIHandler) Storage(w http.ResponseWriter, r *http.Request, call si
 	}
 	res, err := db.GetStorageResource(r.Context(), h.database, call.SiteID, name)
 	if errors.Is(err, db.ErrStorageNotFound) || (err == nil && res.Kind != kind) {
-		writeStorageError(w, http.StatusNotFound, "no_resource", "this site has no "+kind+" storage named "+name+"; its owner creates it first")
+		h.noResource(w, r, call, caller, kind, name)
 		return
 	}
 	if err != nil {
@@ -153,13 +231,17 @@ func (h *SiteAPIHandler) Storage(w http.ResponseWriter, r *http.Request, call si
 		table, rowsPart, _ := strings.Cut(tail, "/")
 		rowsSeg, id, hasID := strings.Cut(rowsPart, "/")
 		t, ok := res.Settings.Tables[table]
-		if rowsSeg != "rows" || !ok || (hasID && id == "") {
-			writeStorageError(w, http.StatusNotFound, "no_table", "database "+name+" has no table named "+table)
+		if !ok {
+			noTable(w, caller, res, table)
+			return
+		}
+		if rowsSeg != "rows" || (hasID && id == "") {
+			writeStorageError(w, http.StatusNotFound, "not_found", storageRoutesText)
 			return
 		}
 		h.storageRows(w, r, call, caller, res, table, t, id, hasID)
 	default:
-		writeStorageError(w, http.StatusNotFound, "not_found", "no such storage route")
+		writeStorageError(w, http.StatusNotFound, "not_found", storageRoutesText)
 	}
 }
 
@@ -349,7 +431,7 @@ func checkDataRoom(ctx context.Context, w http.ResponseWriter, tx *sql.Tx, siteI
 	}
 	limit := int64(oplimits.Get().SiteStorageMaxBytes)
 	if data+delta > limit {
-		writeStorageError(w, http.StatusRequestEntityTooLarge, "storage_full", "this site's saved data would pass its "+oplimits.Count(int(limit))+"-byte limit")
+		writeStorageError(w, http.StatusRequestEntityTooLarge, "storage_full", "this site's saved data would pass its "+oplimits.Count(int(limit))+"-byte limit: delete entries it no longer needs, or ask an administrator to raise the limit")
 		return false
 	}
 	return true
@@ -362,7 +444,7 @@ func tooLargeStored(w http.ResponseWriter, stored int64) bool {
 	if stored <= int64(oplimits.Get().SiteStorageValueMaxBytes)+storageKeyMaxBytes {
 		return false
 	}
-	writeStorageError(w, http.StatusRequestEntityTooLarge, "too_large", "the value is larger than "+oplimits.Count(oplimits.Get().SiteStorageValueMaxBytes)+" bytes as stored")
+	writeStorageError(w, http.StatusRequestEntityTooLarge, "too_large", "the value or row is larger than "+oplimits.Count(oplimits.Get().SiteStorageValueMaxBytes)+" bytes as stored: store less in one entry, or split it across several")
 	return true
 }
 
@@ -394,7 +476,7 @@ func (h *SiteAPIHandler) storageKV(w http.ResponseWriter, r *http.Request, call 
 		}
 		d := sp.Decide(res.Access, sp.Read, c)
 		if d == sp.Refused {
-			refuseStorage(w, c, sp.Read, res.Access.Read)
+			refuseStorage(w, c, sp.Read, res.Access.Read, kvWhere(res.Name))
 			return
 		}
 		page, msg, ok := listPage(r)
@@ -420,19 +502,19 @@ func (h *SiteAPIHandler) storageKV(w http.ResponseWriter, r *http.Request, call 
 		return
 	}
 	if !validKVKey(key) {
-		writeStorageError(w, http.StatusBadRequest, "invalid_key", "a key is 1 to 256 bytes of text with no / or control characters")
+		writeStorageError(w, http.StatusBadRequest, "invalid_key", "a key is 1 to 256 bytes of text with no / or control characters: pick another key")
 		return
 	}
 	switch r.Method {
 	case http.MethodGet:
 		d := sp.Decide(res.Access, sp.Read, c)
 		if d == sp.Refused {
-			refuseStorage(w, c, sp.Read, res.Access.Read)
+			refuseStorage(w, c, sp.Read, res.Access.Read, kvWhere(res.Name))
 			return
 		}
 		e, err := db.GetStorageKV(r.Context(), h.database, call.SiteID, res.Name, key)
 		if errors.Is(err, db.ErrStorageNotFound) || (err == nil && d == sp.OwnOnly && e.AddedBy != c.UserID) {
-			writeStorageError(w, http.StatusNotFound, "not_found", "no such key")
+			noKey(w, res.Name, key)
 			return
 		}
 		if err != nil {
@@ -490,23 +572,37 @@ func boundedNumbers(raw []byte) bool {
 	}
 }
 
-func readStorageJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+// Body shapes, for the message that refuses another.
+const (
+	kvBodyShape  = `{"value": <any JSON>}`
+	rowBodyShape = `one JSON object of column values, such as {"name": "bread", "qty": 2}`
+)
+
+func readStorageJSON(w http.ResponseWriter, r *http.Request, v any, shape string) bool {
 	limit := int64(oplimits.Get().SiteStorageValueMaxBytes) + 1024
 	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			writeStorageError(w, http.StatusRequestEntityTooLarge, "too_large", "the value is larger than "+oplimits.Count(oplimits.Get().SiteStorageValueMaxBytes)+" bytes")
+			writeStorageError(w, http.StatusRequestEntityTooLarge, "too_large", "the body is larger than "+oplimits.Count(oplimits.Get().SiteStorageValueMaxBytes)+" bytes: store less in one entry, or split it across several")
 			return false
 		}
-		writeStorageError(w, http.StatusBadRequest, "invalid_body", "invalid request body")
+		writeStorageError(w, http.StatusBadRequest, "invalid_body", "the request body could not be read: send it again")
 		return false
 	}
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.UseNumber()
 	if err := dec.Decode(v); err != nil || dec.More() {
-		writeStorageError(w, http.StatusBadRequest, "invalid_body", "the body must be one JSON object")
+		var syntax *json.SyntaxError
+		switch {
+		case len(bytes.TrimSpace(body)) == 0:
+			writeStorageError(w, http.StatusBadRequest, "invalid_body", "the body is empty: send "+shape)
+		case errors.As(err, &syntax):
+			writeStorageError(w, http.StatusBadRequest, "invalid_body", "the body is not valid JSON (at byte "+strconv.FormatInt(syntax.Offset, 10)+"): send "+shape)
+		default:
+			writeStorageError(w, http.StatusBadRequest, "invalid_body", "the body must be "+shape+", and nothing after it")
+		}
 		return false
 	}
 	if !boundedNumbers(body) {
@@ -520,27 +616,27 @@ func (h *SiteAPIHandler) putKV(w http.ResponseWriter, r *http.Request, call site
 	var body struct {
 		Value json.RawMessage `json:"value"`
 	}
-	if !readStorageJSON(w, r, &body) {
+	if !readStorageJSON(w, r, &body, kvBodyShape) {
 		return
 	}
 	if len(body.Value) == 0 {
-		writeStorageError(w, http.StatusBadRequest, "invalid_body", `send {"value": <any JSON>}`)
+		writeStorageError(w, http.StatusBadRequest, "invalid_body", "the body has no value: send "+kvBodyShape)
 		return
 	}
 	var compact bytes.Buffer
 	if err := json.Compact(&compact, body.Value); err != nil {
-		writeStorageError(w, http.StatusBadRequest, "invalid_body", "value must be JSON")
+		writeStorageError(w, http.StatusBadRequest, "invalid_body", "value is not valid JSON: send "+kvBodyShape)
 		return
 	}
 	value := json.RawMessage(compact.Bytes())
 	if len(value) > oplimits.Get().SiteStorageValueMaxBytes {
-		writeStorageError(w, http.StatusRequestEntityTooLarge, "too_large", "the value is larger than "+oplimits.Count(oplimits.Get().SiteStorageValueMaxBytes)+" bytes")
+		writeStorageError(w, http.StatusRequestEntityTooLarge, "too_large", "the value is larger than "+oplimits.Count(oplimits.Get().SiteStorageValueMaxBytes)+" bytes: store less under one key, or split it across several keys")
 		return
 	}
 	tx, res, _, err := h.beginStorageWrite(r.Context(), call, name, "kv", false)
 	if err != nil {
 		if errors.Is(err, db.ErrStorageNotFound) {
-			writeStorageError(w, http.StatusNotFound, "no_resource", "this storage was just removed")
+			storageRemoved(w, name)
 			return
 		}
 		storageInternal(w, "begin kv put", err)
@@ -549,7 +645,7 @@ func (h *SiteAPIHandler) putKV(w http.ResponseWriter, r *http.Request, call site
 	defer audit.Rollback(tx)
 	// A caller who may neither add nor edit learns nothing about the key.
 	if sp.Decide(res.Access, sp.Add, c) == sp.Refused && sp.Decide(res.Access, sp.Edit, c) == sp.Refused {
-		refuseStorage(w, c, sp.Add, res.Access.Add)
+		refuseStorage(w, c, sp.Add, res.Access.Add, kvWhere(name))
 		return
 	}
 	existing, err := db.GetStorageKV(r.Context(), tx, call.SiteID, name, key)
@@ -560,7 +656,7 @@ func (h *SiteAPIHandler) putKV(w http.ResponseWriter, r *http.Request, call site
 	}
 	if !exists {
 		if d := sp.Decide(res.Access, sp.Add, c); d == sp.Refused {
-			refuseStorage(w, c, sp.Add, res.Access.Add)
+			refuseStorage(w, c, sp.Add, res.Access.Add, kvWhere(name))
 			return
 		}
 		stored, err := db.InsertStorageKV(r.Context(), tx, call.SiteID, name, key, value, c.UserID)
@@ -587,17 +683,17 @@ func (h *SiteAPIHandler) putKV(w http.ResponseWriter, r *http.Request, call site
 	d := sp.Decide(res.Access, sp.Edit, c)
 	if read == sp.Refused || (read == sp.OwnOnly && existing.AddedBy != c.UserID) {
 		// A key the caller cannot see is taken all the same.
-		writeStorageError(w, http.StatusConflict, "key_taken", "this key is already used; pick another (random keys avoid this)")
+		writeStorageError(w, http.StatusConflict, "key_taken", "this key is already used by someone else: pick another (random keys, such as crypto.randomUUID(), avoid this)")
 		return
 	}
 	if d == sp.Refused {
-		refuseStorage(w, c, sp.Edit, res.Access.Edit)
+		refuseStorage(w, c, sp.Edit, res.Access.Edit, kvWhere(name))
 		return
 	}
 	stored, err := db.UpdateStorageKV(r.Context(), tx, call.SiteID, name, key, value, onlyAddedBy(d, c))
 	if err != nil {
 		if errors.Is(err, db.ErrStorageNotFound) {
-			writeStorageError(w, http.StatusNotFound, "not_found", "no such key")
+			noKey(w, name, key)
 			return
 		}
 		storageInternal(w, "kv update", err)
@@ -621,7 +717,7 @@ func (h *SiteAPIHandler) deleteKV(w http.ResponseWriter, r *http.Request, call s
 	tx, res, _, err := h.beginStorageWrite(r.Context(), call, name, "kv", false)
 	if err != nil {
 		if errors.Is(err, db.ErrStorageNotFound) {
-			writeStorageError(w, http.StatusNotFound, "no_resource", "this storage was just removed")
+			storageRemoved(w, name)
 			return
 		}
 		storageInternal(w, "begin kv delete", err)
@@ -630,12 +726,12 @@ func (h *SiteAPIHandler) deleteKV(w http.ResponseWriter, r *http.Request, call s
 	defer audit.Rollback(tx)
 	d := sp.Decide(res.Access, sp.Delete, c)
 	if d == sp.Refused {
-		refuseStorage(w, c, sp.Delete, res.Access.Delete)
+		refuseStorage(w, c, sp.Delete, res.Access.Delete, kvWhere(name))
 		return
 	}
 	existing, err := db.GetStorageKV(r.Context(), tx, call.SiteID, name, key)
 	if errors.Is(err, db.ErrStorageNotFound) {
-		writeStorageError(w, http.StatusNotFound, "not_found", "no such key")
+		noKey(w, name, key)
 		return
 	}
 	if err != nil {
@@ -644,7 +740,7 @@ func (h *SiteAPIHandler) deleteKV(w http.ResponseWriter, r *http.Request, call s
 	}
 	if err := db.DeleteStorageKV(r.Context(), tx, call.SiteID, name, key, onlyAddedBy(d, c)); err != nil {
 		if errors.Is(err, db.ErrStorageNotFound) {
-			writeStorageError(w, http.StatusNotFound, "not_found", "no such key")
+			noKey(w, name, key)
 			return
 		}
 		storageInternal(w, "kv delete", err)
@@ -684,7 +780,7 @@ func (h *SiteAPIHandler) storageRows(w http.ResponseWriter, r *http.Request, cal
 			h.listRows(w, r, call, c, res, table, t)
 		case http.MethodPost:
 			if sp.Decide(t.Access, sp.Add, c) == sp.Refused {
-				refuseStorage(w, c, sp.Add, t.Access.Add)
+				refuseStorage(w, c, sp.Add, t.Access.Add, tableWhere(table))
 				return
 			}
 			replayCreate(w, r, h.database, c.UserID, call.SiteID, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -697,19 +793,19 @@ func (h *SiteAPIHandler) storageRows(w http.ResponseWriter, r *http.Request, cal
 	}
 	id, err := strconv.ParseInt(idText, 10, 64)
 	if err != nil || id < 1 || strconv.FormatInt(id, 10) != idText {
-		writeStorageError(w, http.StatusNotFound, "not_found", "no such row")
+		writeStorageError(w, http.StatusNotFound, "not_found", "a row id is a whole number from 1, as the row listing shows it; "+strconv.Quote(idText)+" is not one")
 		return
 	}
 	switch r.Method {
 	case http.MethodGet:
 		d := sp.Decide(t.Access, sp.Read, c)
 		if d == sp.Refused {
-			refuseStorage(w, c, sp.Read, t.Access.Read)
+			refuseStorage(w, c, sp.Read, t.Access.Read, tableWhere(table))
 			return
 		}
 		row, err := db.GetStorageRow(r.Context(), h.database, call.SiteID, res.Name, table, id)
 		if errors.Is(err, db.ErrStorageNotFound) || (err == nil && d == sp.OwnOnly && row.AddedBy != c.UserID) {
-			writeStorageError(w, http.StatusNotFound, "not_found", "no such row")
+			noRow(w, table, id)
 			return
 		}
 		if err != nil {
@@ -729,7 +825,7 @@ func (h *SiteAPIHandler) storageRows(w http.ResponseWriter, r *http.Request, cal
 func (h *SiteAPIHandler) listRows(w http.ResponseWriter, r *http.Request, call siteAPICall, c sp.Caller, res db.StorageResource, table string, t db.StorageTable) {
 	d := sp.Decide(t.Access, sp.Read, c)
 	if d == sp.Refused {
-		refuseStorage(w, c, sp.Read, t.Access.Read)
+		refuseStorage(w, c, sp.Read, t.Access.Read, tableWhere(table))
 		return
 	}
 	q := r.URL.Query()
@@ -739,7 +835,7 @@ func (h *SiteAPIHandler) listRows(w http.ResponseWriter, r *http.Request, call s
 		case "order":
 			o := values[0]
 			if _, declared := t.Columns[o]; !declared && o != "id" && o != "created_at" && o != "updated_at" {
-				writeStorageError(w, http.StatusBadRequest, "invalid_query", "order must be id, created_at, updated_at or a column of "+table)
+				writeStorageError(w, http.StatusBadRequest, "invalid_query", "order must be id, created_at, updated_at, or a column of "+table+". "+columnList(table, t))
 				return
 			}
 			rq.Order = o
@@ -762,12 +858,14 @@ func (h *SiteAPIHandler) listRows(w http.ResponseWriter, r *http.Request, call s
 		default:
 			col, ok := strings.CutPrefix(key, "where.")
 			if !ok {
-				writeStorageError(w, http.StatusBadRequest, "invalid_query", "unknown query parameter "+key)
+				writeStorageError(w, http.StatusBadRequest, "invalid_query", "unknown query parameter "+key+": use where.<column>, order, desc, limit, or offset")
 				return
 			}
 			spec, declared := t.Columns[col]
 			if !declared {
-				writeStorageError(w, http.StatusBadRequest, "invalid_query", "where."+col+": "+table+" has no such column")
+				// The caller may read this table, whose rows carry every
+				// column, so the list tells them nothing new.
+				writeStorageError(w, http.StatusBadRequest, "unknown_column", "where."+col+": "+table+" has no column named "+col+". "+columnList(table, t))
 				return
 			}
 			v, err := sp.FilterValue(col, spec, values[0])
@@ -779,7 +877,7 @@ func (h *SiteAPIHandler) listRows(w http.ResponseWriter, r *http.Request, call s
 		}
 	}
 	if len(rq.Filters) > storageMaxFilters {
-		writeStorageError(w, http.StatusBadRequest, "invalid_query", "at most three where filters")
+		writeStorageError(w, http.StatusBadRequest, "invalid_query", "at most three where filters: drop one and filter the rest on the page")
 		return
 	}
 	rows, err := db.ListStorageRows(r.Context(), h.database, call.SiteID, res.Name, table, rq)
@@ -802,38 +900,51 @@ func (h *SiteAPIHandler) listRows(w http.ResponseWriter, r *http.Request, call s
 // so a slow body never holds the site's storage lock or a connection.
 func readRowBody(w http.ResponseWriter, r *http.Request) (map[string]json.RawMessage, bool) {
 	var values map[string]json.RawMessage
-	if !readStorageJSON(w, r, &values) {
+	if !readStorageJSON(w, r, &values, rowBodyShape) {
 		return nil, false
 	}
 	if values == nil {
-		writeStorageError(w, http.StatusBadRequest, "invalid_body", "the body must be one JSON object of column values")
+		writeStorageError(w, http.StatusBadRequest, "invalid_body", "the body must be "+rowBodyShape)
 		return nil, false
 	}
 	return values, true
 }
 
 // rowValues checks a row body against the table's columns, as read under the
-// lock. With partial, required columns may be missing (an edit).
-func rowValues(w http.ResponseWriter, values map[string]json.RawMessage, t db.StorageTable, partial bool) (map[string]json.RawMessage, bool) {
-	for col, raw := range values {
+// lock. With partial, required columns may be missing (an edit). Columns are
+// checked in name order, so the same body always gets the same answer.
+func rowValues(w http.ResponseWriter, values map[string]json.RawMessage, table string, t db.StorageTable, c sp.Caller, partial bool) (map[string]json.RawMessage, bool) {
+	for _, col := range sp.SortedKeys(values) {
+		raw := values[col]
 		if sp.ServerColumns[col] {
 			writeStorageError(w, http.StatusBadRequest, "server_column", col+" is set by the server; leave it out")
 			return nil, false
 		}
 		spec, ok := t.Columns[col]
 		if !ok {
-			writeStorageError(w, http.StatusBadRequest, "unknown_column", "the table has no column named "+col)
+			msg := table + " has no column named " + col + "; leave it out"
+			if columnsShown(t, c) {
+				msg += ". " + columnList(table, t)
+			} else {
+				msg += ", or ask the site's owner to declare it"
+			}
+			writeStorageError(w, http.StatusBadRequest, "unknown_column", msg)
 			return nil, false
 		}
-		if err := sp.CheckValue(col, spec, raw); err != nil {
+		if err := sp.CheckValue(table+"."+col, spec, raw); err != nil {
+			var required *sp.RequiredError
+			if errors.As(err, &required) {
+				writeStorageError(w, http.StatusBadRequest, "required_missing", err.Error())
+				return nil, false
+			}
 			writeStorageError(w, http.StatusBadRequest, "invalid_value", err.Error())
 			return nil, false
 		}
 	}
 	if !partial {
-		for col, spec := range t.Columns {
-			if _, ok := values[col]; spec.Required && !ok {
-				writeStorageError(w, http.StatusBadRequest, "invalid_value", col+" is required")
+		for _, col := range sp.SortedKeys(t.Columns) {
+			if _, ok := values[col]; t.Columns[col].Required && !ok {
+				writeStorageError(w, http.StatusBadRequest, "required_missing", (&sp.RequiredError{Name: table + "." + col}).Error())
 				return nil, false
 			}
 		}
@@ -843,18 +954,30 @@ func rowValues(w http.ResponseWriter, values map[string]json.RawMessage, t db.St
 
 // checkReferences makes sure every referenced row exists and the caller may
 // read it under its own table's read value; otherwise 404 invalid_reference,
-// the same answer for a row that is missing and one that is hidden.
-func (h *SiteAPIHandler) checkReferences(w http.ResponseWriter, r *http.Request, tx *sql.Tx, call siteAPICall, c sp.Caller, res db.StorageResource, t db.StorageTable, values map[string]json.RawMessage) bool {
-	for col, raw := range values {
+// the same answer for a row that is missing and one that is hidden. The
+// referenced table is named only to a caller who may read it (the storage
+// listing hides a reference to a table a visitor cannot use, too).
+func (h *SiteAPIHandler) checkReferences(w http.ResponseWriter, r *http.Request, tx *sql.Tx, call siteAPICall, c sp.Caller, res db.StorageResource, table string, t db.StorageTable, values map[string]json.RawMessage) bool {
+	for _, col := range sp.SortedKeys(values) {
+		raw := values[col]
 		spec := t.Columns[col]
 		if spec.References == "" || strings.TrimSpace(string(raw)) == "null" {
 			continue
 		}
 		parentID, err := strconv.ParseInt(strings.TrimSpace(string(raw)), 10, 64)
 		parent, ok := res.Settings.Tables[spec.References]
-		if err != nil || !ok {
-			writeStorageError(w, http.StatusNotFound, "invalid_reference", col+" names no row of "+spec.References)
+		refused := func() bool {
+			msg := table + "." + col + " must be the id of an existing row"
+			if ok && columnsShown(parent, c) {
+				msg += " of " + spec.References + " that you can read. Add that row first, or use an id the rows of " + spec.References + " list"
+			} else {
+				msg += " that you can read. Add that row first, or use an id that exists"
+			}
+			writeStorageError(w, http.StatusNotFound, "invalid_reference", msg)
 			return false
+		}
+		if err != nil || !ok {
+			return refused()
 		}
 		row, err := db.GetStorageRow(r.Context(), tx, call.SiteID, res.Name, spec.References, parentID)
 		if err != nil && !errors.Is(err, db.ErrStorageNotFound) {
@@ -863,8 +986,7 @@ func (h *SiteAPIHandler) checkReferences(w http.ResponseWriter, r *http.Request,
 		}
 		d := sp.Decide(parent.Access, sp.Read, c)
 		if err != nil || d == sp.Refused || (d == sp.OwnOnly && row.AddedBy != c.UserID) {
-			writeStorageError(w, http.StatusNotFound, "invalid_reference", col+" names no row of "+spec.References)
-			return false
+			return refused()
 		}
 	}
 	return true
@@ -893,7 +1015,7 @@ func (h *SiteAPIHandler) addRow(w http.ResponseWriter, r *http.Request, call sit
 	tx, res, _, err := h.beginStorageWrite(r.Context(), call, name, "db", false)
 	if err != nil {
 		if errors.Is(err, db.ErrStorageNotFound) {
-			writeStorageError(w, http.StatusNotFound, "no_resource", "this storage was just removed")
+			storageRemoved(w, name)
 			return
 		}
 		storageInternal(w, "begin add row", err)
@@ -902,24 +1024,24 @@ func (h *SiteAPIHandler) addRow(w http.ResponseWriter, r *http.Request, call sit
 	defer audit.Rollback(tx)
 	t, ok := res.Settings.Tables[table]
 	if !ok {
-		writeStorageError(w, http.StatusNotFound, "no_table", "database "+name+" has no table named "+table)
+		noTable(w, c, res, table)
 		return
 	}
 	if d := sp.Decide(t.Access, sp.Add, c); d == sp.Refused {
-		refuseStorage(w, c, sp.Add, t.Access.Add)
+		refuseStorage(w, c, sp.Add, t.Access.Add, tableWhere(table))
 		return
 	}
-	values, ok := rowValues(w, body, t, false)
-	if !ok || !h.checkReferences(w, r, tx, call, c, res, t, values) {
+	values, ok := rowValues(w, body, table, t, c, false)
+	if !ok || !h.checkReferences(w, r, tx, call, c, res, table, t, values) {
 		return
 	}
 	data, err := encodeRow(values)
 	if err != nil {
-		writeStorageError(w, http.StatusBadRequest, "invalid_body", "invalid JSON")
+		writeStorageError(w, http.StatusBadRequest, "invalid_body", "a column value is not valid JSON: send "+rowBodyShape)
 		return
 	}
 	if len(data) > oplimits.Get().SiteStorageValueMaxBytes {
-		writeStorageError(w, http.StatusRequestEntityTooLarge, "too_large", "the row is larger than "+oplimits.Count(oplimits.Get().SiteStorageValueMaxBytes)+" bytes")
+		writeStorageError(w, http.StatusRequestEntityTooLarge, "too_large", "the row is larger than "+oplimits.Count(oplimits.Get().SiteStorageValueMaxBytes)+" bytes: shorten its values, or split them across rows")
 		return
 	}
 	row, err := db.InsertStorageRow(r.Context(), tx, call.SiteID, name, table, data, c.UserID)
@@ -948,7 +1070,7 @@ func (h *SiteAPIHandler) editRow(w http.ResponseWriter, r *http.Request, call si
 	tx, res, _, err := h.beginStorageWrite(r.Context(), call, name, "db", false)
 	if err != nil {
 		if errors.Is(err, db.ErrStorageNotFound) {
-			writeStorageError(w, http.StatusNotFound, "no_resource", "this storage was just removed")
+			storageRemoved(w, name)
 			return
 		}
 		storageInternal(w, "begin edit row", err)
@@ -957,25 +1079,25 @@ func (h *SiteAPIHandler) editRow(w http.ResponseWriter, r *http.Request, call si
 	defer audit.Rollback(tx)
 	t, ok := res.Settings.Tables[table]
 	if !ok {
-		writeStorageError(w, http.StatusNotFound, "no_table", "database "+name+" has no table named "+table)
+		noTable(w, c, res, table)
 		return
 	}
 	d := sp.Decide(t.Access, sp.Edit, c)
 	if d == sp.Refused {
-		refuseStorage(w, c, sp.Edit, t.Access.Edit)
+		refuseStorage(w, c, sp.Edit, t.Access.Edit, tableWhere(table))
 		return
 	}
 	row, err := db.GetStorageRow(r.Context(), tx, call.SiteID, name, table, id)
 	if errors.Is(err, db.ErrStorageNotFound) || (err == nil && d == sp.OwnOnly && row.AddedBy != c.UserID) {
-		writeStorageError(w, http.StatusNotFound, "not_found", "no such row")
+		noRow(w, table, id)
 		return
 	}
 	if err != nil {
 		storageInternal(w, "row lookup", err)
 		return
 	}
-	values, ok := rowValues(w, body, t, true)
-	if !ok || !h.checkReferences(w, r, tx, call, c, res, t, values) {
+	values, ok := rowValues(w, body, table, t, c, true)
+	if !ok || !h.checkReferences(w, r, tx, call, c, res, table, t, values) {
 		return
 	}
 	merged := map[string]json.RawMessage{}
@@ -988,17 +1110,17 @@ func (h *SiteAPIHandler) editRow(w http.ResponseWriter, r *http.Request, call si
 	}
 	data, err := encodeRow(merged)
 	if err != nil {
-		writeStorageError(w, http.StatusBadRequest, "invalid_body", "invalid JSON")
+		writeStorageError(w, http.StatusBadRequest, "invalid_body", "a column value is not valid JSON: send "+rowBodyShape)
 		return
 	}
 	if len(data) > oplimits.Get().SiteStorageValueMaxBytes {
-		writeStorageError(w, http.StatusRequestEntityTooLarge, "too_large", "the row is larger than "+oplimits.Count(oplimits.Get().SiteStorageValueMaxBytes)+" bytes")
+		writeStorageError(w, http.StatusRequestEntityTooLarge, "too_large", "the row is larger than "+oplimits.Count(oplimits.Get().SiteStorageValueMaxBytes)+" bytes: shorten its values, or split them across rows")
 		return
 	}
 	stored, err := db.UpdateStorageRow(r.Context(), tx, call.SiteID, name, table, id, data, onlyAddedBy(d, c))
 	if err != nil {
 		if errors.Is(err, db.ErrStorageNotFound) {
-			writeStorageError(w, http.StatusNotFound, "not_found", "no such row")
+			noRow(w, table, id)
 			return
 		}
 		storageInternal(w, "update row", err)
@@ -1027,7 +1149,7 @@ func (h *SiteAPIHandler) deleteRow(w http.ResponseWriter, r *http.Request, call 
 	tx, res, _, err := h.beginStorageWrite(r.Context(), call, name, "db", false)
 	if err != nil {
 		if errors.Is(err, db.ErrStorageNotFound) {
-			writeStorageError(w, http.StatusNotFound, "no_resource", "this storage was just removed")
+			storageRemoved(w, name)
 			return
 		}
 		storageInternal(w, "begin delete row", err)
@@ -1036,17 +1158,17 @@ func (h *SiteAPIHandler) deleteRow(w http.ResponseWriter, r *http.Request, call 
 	defer audit.Rollback(tx)
 	t, ok := res.Settings.Tables[table]
 	if !ok {
-		writeStorageError(w, http.StatusNotFound, "no_table", "database "+name+" has no table named "+table)
+		noTable(w, c, res, table)
 		return
 	}
 	d := sp.Decide(t.Access, sp.Delete, c)
 	if d == sp.Refused {
-		refuseStorage(w, c, sp.Delete, t.Access.Delete)
+		refuseStorage(w, c, sp.Delete, t.Access.Delete, tableWhere(table))
 		return
 	}
 	row, err := db.GetStorageRow(r.Context(), tx, call.SiteID, name, table, id)
 	if errors.Is(err, db.ErrStorageNotFound) || (err == nil && d == sp.OwnOnly && row.AddedBy != c.UserID) {
-		writeStorageError(w, http.StatusNotFound, "not_found", "no such row")
+		noRow(w, table, id)
 		return
 	}
 	if err != nil {
@@ -1064,14 +1186,20 @@ func (h *SiteAPIHandler) deleteRow(w http.ResponseWriter, r *http.Request, call 
 				return
 			}
 			if referenced {
-				writeStorageError(w, http.StatusConflict, "referenced", "rows of "+child+" still point at this row; delete them first")
+				// The pointing table is named only to a caller who may
+				// read it.
+				msg := "other rows still point at this row"
+				if columnsShown(res.Settings.Tables[child], c) {
+					msg += " (" + child + "." + col + " holds its id)"
+				}
+				writeStorageError(w, http.StatusConflict, "referenced", msg+": delete or change those rows first")
 				return
 			}
 		}
 	}
 	if err := db.DeleteStorageRow(r.Context(), tx, call.SiteID, name, table, id, onlyAddedBy(d, c)); err != nil {
 		if errors.Is(err, db.ErrStorageNotFound) {
-			writeStorageError(w, http.StatusNotFound, "not_found", "no such row")
+			noRow(w, table, id)
 			return
 		}
 		storageInternal(w, "delete row", err)
@@ -1131,7 +1259,7 @@ func (h *SiteAPIHandler) storageFiles(w http.ResponseWriter, r *http.Request, ca
 		}
 		d := sp.Decide(res.Access, sp.Read, c)
 		if d == sp.Refused {
-			refuseStorage(w, c, sp.Read, res.Access.Read)
+			refuseStorage(w, c, sp.Read, res.Access.Read, filesWhere(res.Name))
 			return
 		}
 		page, msg, ok := listPage(r)
@@ -1157,7 +1285,7 @@ func (h *SiteAPIHandler) storageFiles(w http.ResponseWriter, r *http.Request, ca
 		return
 	}
 	if !validStoragePath(path) {
-		writeStorageError(w, http.StatusBadRequest, "invalid_path", "a path is up to 512 bytes of /-separated names, none empty, . or ..")
+		writeStorageError(w, http.StatusBadRequest, "invalid_path", "a path is up to 512 bytes of /-separated names, none of them empty, . or ..: pick another path")
 		return
 	}
 	switch r.Method {
@@ -1175,12 +1303,12 @@ func (h *SiteAPIHandler) storageFiles(w http.ResponseWriter, r *http.Request, ca
 func (h *SiteAPIHandler) serveStorageFile(w http.ResponseWriter, r *http.Request, call siteAPICall, c sp.Caller, res db.StorageResource, path string) {
 	d := sp.Decide(res.Access, sp.Read, c)
 	if d == sp.Refused {
-		refuseStorage(w, c, sp.Read, res.Access.Read)
+		refuseStorage(w, c, sp.Read, res.Access.Read, filesWhere(res.Name))
 		return
 	}
 	f, err := db.GetStorageFile(r.Context(), h.database, call.SiteID, res.Name, path)
 	if errors.Is(err, db.ErrStorageNotFound) || (err == nil && d == sp.OwnOnly && f.AddedBy != c.UserID) {
-		writeStorageError(w, http.StatusNotFound, "not_found", "no such file")
+		noFile(w, res.Name, path)
 		return
 	}
 	if err != nil {
@@ -1192,11 +1320,11 @@ func (h *SiteAPIHandler) serveStorageFile(w http.ResponseWriter, r *http.Request
 	lease, err := h.store.OpenAsset(openCtx, call.SiteID, f.ObjectID, max(f.Size, int64(oplimits.Get().SiteStorageFileMaxBytes)), f.SHA256)
 	if err != nil {
 		if errors.Is(err, storage.ErrAssetNotFound) {
-			writeStorageError(w, http.StatusNotFound, "not_found", "no such file")
+			noFile(w, res.Name, path)
 			return
 		}
 		log.Printf("site storage: open file %s/%s %s/%s: %v", call.Owner, call.SiteName, res.Name, path, err)
-		http.Error(w, "file temporarily unavailable", http.StatusServiceUnavailable)
+		writeStorageError(w, http.StatusServiceUnavailable, "file_unavailable", "this file cannot be read right now: try again in a minute")
 		return
 	}
 	defer lease.Close()
@@ -1220,24 +1348,24 @@ func (h *SiteAPIHandler) putFile(w http.ResponseWriter, r *http.Request, call si
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			writeStorageError(w, http.StatusRequestEntityTooLarge, "too_large", "a file is at most "+oplimits.Count(int(maxFile))+" bytes")
+			writeStorageError(w, http.StatusRequestEntityTooLarge, "too_large", "a file is at most "+oplimits.Count(int(maxFile))+" bytes: send a smaller file")
 			return
 		}
-		writeStorageError(w, http.StatusBadRequest, "invalid_body", "invalid request body")
+		writeStorageError(w, http.StatusBadRequest, "invalid_body", "the file could not be read from the request: send it again as the body")
 		return
 	}
 	// Refuse what the caller may not do before touching the bucket.
 	res, err := db.GetStorageResource(r.Context(), h.database, call.SiteID, name)
 	if err != nil {
 		if errors.Is(err, db.ErrStorageNotFound) {
-			writeStorageError(w, http.StatusNotFound, "no_resource", "this storage was just removed")
+			storageRemoved(w, name)
 			return
 		}
 		storageInternal(w, "file resource", err)
 		return
 	}
 	if sp.Decide(res.Access, sp.Add, c) == sp.Refused && sp.Decide(res.Access, sp.Edit, c) == sp.Refused {
-		refuseStorage(w, c, sp.Add, res.Access.Add)
+		refuseStorage(w, c, sp.Add, res.Access.Add, filesWhere(name))
 		return
 	}
 	if h.scanner != nil {
@@ -1251,7 +1379,7 @@ func (h *SiteAPIHandler) putFile(w http.ResponseWriter, r *http.Request, call si
 	if err != nil {
 		switch {
 		case errors.Is(err, storage.ErrAssetTooLarge):
-			writeStorageError(w, http.StatusRequestEntityTooLarge, "too_large", "a file is at most "+oplimits.Count(int(maxFile))+" bytes")
+			writeStorageError(w, http.StatusRequestEntityTooLarge, "too_large", "a file is at most "+oplimits.Count(int(maxFile))+" bytes: send a smaller file")
 		case errors.Is(err, storage.ErrAssetTypeNotAllowed):
 			writeStorageError(w, http.StatusUnsupportedMediaType, "type_not_allowed", "this kind of file cannot be stored: images, audio, video, PDF, text, CSV, JSON, ZIP and gzip can")
 		default:
@@ -1272,7 +1400,7 @@ func (h *SiteAPIHandler) putFile(w http.ResponseWriter, r *http.Request, call si
 	tx, res, ownerID, err := h.beginStorageWrite(r.Context(), call, name, "files", true)
 	if err != nil {
 		if errors.Is(err, db.ErrStorageNotFound) {
-			writeStorageError(w, http.StatusNotFound, "no_resource", "this storage was just removed")
+			storageRemoved(w, name)
 			return
 		}
 		storageInternal(w, "begin file put", err)
@@ -1291,17 +1419,17 @@ func (h *SiteAPIHandler) putFile(w http.ResponseWriter, r *http.Request, call si
 	if exists {
 		read := sp.Decide(res.Access, sp.Read, c)
 		if read == sp.Refused || (read == sp.OwnOnly && existing.AddedBy != c.UserID) {
-			writeStorageError(w, http.StatusConflict, "path_taken", "this path is already used; pick another (random names avoid this)")
+			writeStorageError(w, http.StatusConflict, "path_taken", "this path is already used by someone else: pick another (random names, such as crypto.randomUUID(), avoid this)")
 			return
 		}
 		d = sp.Decide(res.Access, sp.Edit, c)
 		if d == sp.Refused {
-			refuseStorage(w, c, sp.Edit, res.Access.Edit)
+			refuseStorage(w, c, sp.Edit, res.Access.Edit, filesWhere(name))
 			return
 		}
 		delta -= existing.Size
 	} else if sp.Decide(res.Access, sp.Add, c) == sp.Refused {
-		refuseStorage(w, c, sp.Add, res.Access.Add)
+		refuseStorage(w, c, sp.Add, res.Access.Add, filesWhere(name))
 		return
 	}
 	if delta > 0 {
@@ -1311,7 +1439,7 @@ func (h *SiteAPIHandler) putFile(w http.ResponseWriter, r *http.Request, call si
 			return
 		}
 		if files+delta > int64(oplimits.Get().SiteStorageFilesMaxBytes) {
-			writeStorageError(w, http.StatusRequestEntityTooLarge, "storage_full", "this site's files would pass their "+oplimits.Count(oplimits.Get().SiteStorageFilesMaxBytes)+"-byte limit")
+			writeStorageError(w, http.StatusRequestEntityTooLarge, "storage_full", "this site's files would pass their "+oplimits.Count(oplimits.Get().SiteStorageFilesMaxBytes)+"-byte limit: delete files it no longer needs, or ask an administrator to raise the limit")
 			return
 		}
 		if h.quota.MaxBytes > 0 {
@@ -1331,7 +1459,7 @@ func (h *SiteAPIHandler) putFile(w http.ResponseWriter, r *http.Request, call si
 		action = "storage_edit"
 		if err := db.UpdateStorageFile(r.Context(), tx, call.SiteID, name, f, onlyAddedBy(d, c)); err != nil {
 			if errors.Is(err, db.ErrStorageNotFound) {
-				writeStorageError(w, http.StatusNotFound, "not_found", "no such file")
+				noFile(w, name, path)
 				return
 			}
 			storageInternal(w, "update file", err)
@@ -1377,7 +1505,7 @@ func (h *SiteAPIHandler) deleteFile(w http.ResponseWriter, r *http.Request, call
 	tx, res, _, err := h.beginStorageWrite(r.Context(), call, name, "files", false)
 	if err != nil {
 		if errors.Is(err, db.ErrStorageNotFound) {
-			writeStorageError(w, http.StatusNotFound, "no_resource", "this storage was just removed")
+			storageRemoved(w, name)
 			return
 		}
 		storageInternal(w, "begin file delete", err)
@@ -1386,12 +1514,12 @@ func (h *SiteAPIHandler) deleteFile(w http.ResponseWriter, r *http.Request, call
 	defer audit.Rollback(tx)
 	d := sp.Decide(res.Access, sp.Delete, c)
 	if d == sp.Refused {
-		refuseStorage(w, c, sp.Delete, res.Access.Delete)
+		refuseStorage(w, c, sp.Delete, res.Access.Delete, filesWhere(name))
 		return
 	}
 	existing, err := db.GetStorageFile(r.Context(), tx, call.SiteID, name, path)
 	if errors.Is(err, db.ErrStorageNotFound) {
-		writeStorageError(w, http.StatusNotFound, "not_found", "no such file")
+		noFile(w, name, path)
 		return
 	}
 	if err != nil {
@@ -1400,7 +1528,7 @@ func (h *SiteAPIHandler) deleteFile(w http.ResponseWriter, r *http.Request, call
 	}
 	if err := db.DeleteStorageFile(r.Context(), tx, call.SiteID, name, path, onlyAddedBy(d, c)); err != nil {
 		if errors.Is(err, db.ErrStorageNotFound) {
-			writeStorageError(w, http.StatusNotFound, "not_found", "no such file")
+			noFile(w, name, path)
 			return
 		}
 		storageInternal(w, "delete file", err)

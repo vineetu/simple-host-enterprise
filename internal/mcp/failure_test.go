@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -134,5 +135,47 @@ func TestExplainFailureSteersByCodeThenFamily(t *testing.T) {
 				t.Errorf("the upstream body must survive into the explanation:\n%s", got)
 			}
 		})
+	}
+}
+
+// A storage refusal already says what happened and what to do, so it reaches
+// the model as the server wrote it, with nothing appended. A 404 no_table on
+// a storage tool once read "No such site for this account", and a row's
+// not_found read as a namespace problem.
+func TestStorageFailuresPassThroughWithoutHint(t *testing.T) {
+	for _, tc := range []struct {
+		tool   string
+		status int
+		body   string
+	}{
+		{"storage_list_rows", http.StatusNotFound, `{"error":"database shop has no table named orders. Tables here: customers","code":"no_table"}`},
+		{"storage_add_row", http.StatusBadRequest, `{"error":"customers has no column named phone; leave it out. Columns in customers: email, name","code":"unknown_column"}`},
+		{"storage_add_row", http.StatusBadRequest, `{"error":"customers.age is integer: send a whole number such as 42, without quotes","code":"invalid_value"}`},
+		{"storage_add_row", http.StatusBadRequest, `{"error":"customers.name needs a value (required): include it, and do not send null for it","code":"required_missing"}`},
+		{"storage_add_row", http.StatusNotFound, `{"error":"customers.parent_id must be the id of an existing row of parents that you can read","code":"invalid_reference"}`},
+		{"storage_delete_row", http.StatusConflict, `{"error":"other rows still point at this row: delete or change those rows first","code":"referenced"}`},
+		{"storage_get_row", http.StatusNotFound, `{"error":"customers has no row 7 that you can see: list its rows for the ids there are","code":"not_found"}`},
+		{"storage_list_kv_keys", http.StatusForbidden, `{"error":"the read rule of key-value storage vault is nobody","code":"forbidden"}`},
+		{"storage_put_kv", http.StatusRequestEntityTooLarge, `{"error":"the value is larger than 100 bytes: store less under one key","code":"too_large"}`},
+		{"storage_set_resource", http.StatusBadRequest, `{"error":"edit and delete cannot be anyone","code":"invalid_access","rule":"anonymous_change"}`},
+	} {
+		tool, known := byName(tc.tool)
+		if !known {
+			t.Fatalf("tool %q is not registered", tc.tool)
+		}
+		got := explainFailure(tc.status, tc.body, tool)
+		if want := fmt.Sprintf("%s failed (HTTP %d): %s", tc.tool, tc.status, tc.body); got != want {
+			t.Errorf("%s %s:\n got %s\nwant %s", tc.tool, tc.body, got, want)
+		}
+	}
+	// On the settings tools not_found is about the namespace and keeps its
+	// hint; a code outside storage keeps its hint on a storage tool too.
+	tool, _ := byName("storage_set_resource")
+	if got := explainFailure(http.StatusNotFound, `{"error":"namespace not found","code":"not_found"}`, tool); !strings.Contains(got, "namespace") || !strings.Contains(got, "list_teams") {
+		t.Errorf("settings not_found lost its hint:\n%s", got)
+	}
+	tool, _ = byName("storage_list_rows")
+	if got := explainFailure(http.StatusTooManyRequests, `{"error":"rate limit exceeded"}`, tool); !strings.Contains(got, "Rate limited") {
+		t.Errorf("rate limit lost its hint:\n%s", got)
 	}
 }
