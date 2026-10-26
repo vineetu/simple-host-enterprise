@@ -8,7 +8,7 @@ and `postgres.mode: incluster`. With `ownerCerts: manual` and an existing
 It does not create a cluster, VPC, or cloud account resources.
 
 ```sh
-helm install simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.2.7 -n simple-host --create-namespace -f my-values.yaml
+helm install simple-host-enterprise oci://ghcr.io/vineetu/charts/simple-host-enterprise --version 0.2.8 -n simple-host --create-namespace -f my-values.yaml
 ```
 
 - Every value, with its default and what it does: [values.yaml](values.yaml).
@@ -68,6 +68,9 @@ Chart 0.2.1 pins release 0.9.3: personal home selection, signed-in showcase
 feed, bio, pins and manual order. Site access and origins remain in force. Set
 `extraConfig.SHOWCASE_BIO_MAX_LENGTH` to change the default 280-character bio
 limit. [Home-page behavior](../../../docs/your-home-page.md).
+
+Chart 0.2.8 pins release 0.9.10: site storage refusals say what happened and what to do,
+each with a stable `code`. No schema change, so rolling back to 0.2.7 is safe.
 
 Chart 0.2.7 pins release 0.9.9: the photo picker, My sites, and the weekly dashboard MCP
 Apps default on. Schema 0063 (backward-compatible: chart 0.2.6 runs against it, so a

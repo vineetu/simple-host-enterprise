@@ -18,8 +18,8 @@ host: ""
 
 image:
   repository: ghcr.io/vineetu/simple-host-enterprise
-  # The v0.9.9 release. Pulled by digest only; a tag is never used.
-  digest: sha256:f3fa20dcaf57d8a8fd139a93f6efe343ef039428512cc3bce178780b04dc7c71
+  # The v0.9.10 release. Pulled by digest only; a tag is never used.
+  digest: sha256:a8abea6246abe362a199ace3d1c29e82cfcf381ecb51c533067980cc3819badf
   pullPolicy: IfNotPresent
   # Names of docker-registry Secrets in this namespace, for a private mirror.
   pullSecrets: []

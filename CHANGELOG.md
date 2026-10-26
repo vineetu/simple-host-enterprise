@@ -1,5 +1,11 @@
 # Changelog
 
+## Chart 0.2.8 — 2026-10-26
+
+- Pins the published 0.9.10 image digest
+  (`sha256:a8abea6246abe362a199ace3d1c29e82cfcf381ecb51c533067980cc3819badf`).
+  No schema change; existing sites and saved data are kept.
+
 ## v0.9.10 — 2026-10-26
 
 No schema change (still 0063), so rolling back to v0.9.9 is safe.
