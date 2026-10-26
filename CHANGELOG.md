@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v0.9.10 — 2026-10-26
+
+No schema change (still 0063), so rolling back to v0.9.9 is safe.
 
 - Site storage refusals say what happened and what to do, each with a stable
   `code`. The owner sees the declared tables (`no_table`), columns
