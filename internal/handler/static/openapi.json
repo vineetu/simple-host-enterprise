@@ -1676,7 +1676,7 @@
     "/api/sites": {
       "get": {
         "summary": "List sites",
-        "description": "Returns the authenticated user's sites with daily server-side analytics. Admins see all sites. Filters order by newest deployment; no filters preserves the full list.",
+        "description": "Returns the authenticated user's own sites with daily server-side analytics, newest edited first (updated_at desc, then created_at desc). all=1 widens an admin's list to every account's sites; refused (403) for a non-admin.",
         "tags": [
           "Sites"
         ],
@@ -1756,6 +1756,32 @@
               "type": "integer",
               "minimum": 0
             }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "description": "Sort key; default updated (last edited first).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "updated",
+                "created",
+                "name"
+              ]
+            }
+          },
+          {
+            "name": "all",
+            "in": "query",
+            "required": false,
+            "description": "Admin only: every account's sites instead of just this one. 403 for a non-admin.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
           }
         ],
         "responses": {
@@ -1788,6 +1814,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         }
       }

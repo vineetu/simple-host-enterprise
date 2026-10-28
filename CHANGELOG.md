@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Site listing scope and order parity fix (SIM-329, hosted parity). `GET /api/sites` returns
+  only the caller's own sites by default, even for the admin; `?all=1` is an admin-only switch
+  to every account's sites, refused with 403 for anyone else. The default order is newest
+  edited first (`updated_at` descending, then `created_at`), replacing the old
+  first-created-first order; an explicit `order` parameter (`updated`, `created`, or `name`)
+  picks another. Existing date/query filters and paging are unchanged. MCP `list_sites` is
+  unaffected: it lists `/api/collaboration/sites`, a team/share-based listing, not this
+  admin-only path.
+
 ## Chart 0.2.8 — 2026-10-26
 
 - Pins the published 0.9.10 image digest

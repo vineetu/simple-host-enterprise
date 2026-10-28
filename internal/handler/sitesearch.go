@@ -10,14 +10,21 @@ import (
 	"github.com/vsriram/simple-host/internal/db"
 )
 
-// filterSiteList leaves the existing no-argument order and size untouched.
+// filterSiteList always sorts (default: newest edited first), and additionally
+// filters and pages the result when a query, date bound, limit or offset
+// parameter is present; the no-argument size is otherwise untouched.
 func filterSiteList[T siteListItem](sites []T, params url.Values) ([]T, *errorResponse) {
+	sorted, orderErr := orderSites(sites, params.Get("order"))
+	if orderErr != nil {
+		return nil, orderErr
+	}
+
 	active := false
 	for _, key := range []string{"query", "created_after", "created_before", "updated_after", "updated_before", "limit", "offset"} {
 		active = active || params.Has(key)
 	}
 	if !active {
-		return sites, nil
+		return sorted, nil
 	}
 	type dateBound struct {
 		key string
@@ -58,8 +65,8 @@ func filterSiteList[T siteListItem](sites []T, params url.Values) ([]T, *errorRe
 		limit = 500
 	}
 	words := strings.Fields(strings.ToLower(params.Get("query")))
-	matches := make([]T, 0, len(sites))
-	for _, item := range sites {
+	matches := make([]T, 0, len(sorted))
+	for _, item := range sorted {
 		site, domain := item.searchFields()
 		haystack := strings.ToLower(strings.Join([]string{site.Name, domain, site.Summary.Title, site.Summary.Description, site.Summary.Headings, site.Summary.Text}, " "))
 		match := true
@@ -86,14 +93,8 @@ func filterSiteList[T siteListItem](sites []T, params url.Values) ([]T, *errorRe
 			matches = append(matches, item)
 		}
 	}
-	deployedAt := func(item T) time.Time {
-		s, _ := item.searchFields()
-		if !s.LastDeployedAt.IsZero() {
-			return s.LastDeployedAt
-		}
-		return s.UpdatedAt
-	}
-	sort.SliceStable(matches, func(i, j int) bool { return deployedAt(matches[i]).After(deployedAt(matches[j])) })
+	// matches is already in `sorted`'s order (the loop above only drops
+	// entries, never reorders), so no further sort is needed here.
 	if offset >= len(matches) {
 		return matches[:0], nil
 	}
@@ -102,6 +103,41 @@ func filterSiteList[T siteListItem](sites []T, params url.Values) ([]T, *errorRe
 		matches = matches[:limit]
 	}
 	return matches, nil
+}
+
+// orderSites sorts a copy of sites by the requested key: "updated" (default,
+// last edited first, ties broken by created descending), "created" (newest
+// created first), or "name" (alphabetical). The input is never mutated.
+func orderSites[T siteListItem](sites []T, order string) ([]T, *errorResponse) {
+	sorted := make([]T, len(sites))
+	copy(sorted, sites)
+	key := func(item T) db.Site { s, _ := item.searchFields(); return s }
+	switch order {
+	case "", "updated":
+		sort.SliceStable(sorted, func(i, j int) bool {
+			a, b := key(sorted[i]), key(sorted[j])
+			if !a.UpdatedAt.Equal(b.UpdatedAt) {
+				return a.UpdatedAt.After(b.UpdatedAt)
+			}
+			return a.CreatedAt.After(b.CreatedAt)
+		})
+	case "created":
+		sort.SliceStable(sorted, func(i, j int) bool {
+			a, b := key(sorted[i]), key(sorted[j])
+			if !a.CreatedAt.Equal(b.CreatedAt) {
+				return a.CreatedAt.After(b.CreatedAt)
+			}
+			return strings.ToLower(a.Name) < strings.ToLower(b.Name)
+		})
+	case "name":
+		sort.SliceStable(sorted, func(i, j int) bool {
+			a, b := key(sorted[i]), key(sorted[j])
+			return strings.ToLower(a.Name) < strings.ToLower(b.Name)
+		})
+	default:
+		return nil, &errorResponse{Error: "order must be updated, created, or name", Code: "bad_order"}
+	}
+	return sorted, nil
 }
 
 // Filtering runs only after authorization and projection, including shared

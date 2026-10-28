@@ -24,8 +24,8 @@ func TestSiteListFilters(t *testing.T) {
 		want  []string
 		code  string
 	}{
-		{"", []string{"homes", "survey", "empty"}, ""},
-		{"ignored=1", []string{"homes", "survey", "empty"}, ""},
+		{"", []string{"empty", "survey", "homes"}, ""},
+		{"ignored=1", []string{"empty", "survey", "homes"}, ""},
 		{"query=", []string{"empty", "survey", "homes"}, ""},
 		{"query=REAL+coastal", []string{"homes"}, ""},
 		{"query=real+tuesday+apartments", []string{}, ""},
@@ -43,6 +43,9 @@ func TestSiteListFilters(t *testing.T) {
 		{"limit=word", nil, "bad_pagination"},
 		{"created_after=Tuesday", nil, "bad_date"},
 		{"updated_before=", nil, "bad_date"},
+		{"order=name", []string{"empty", "homes", "survey"}, ""},
+		{"order=created", []string{"empty", "survey", "homes"}, ""},
+		{"order=bogus", nil, "bad_order"},
 	} {
 		t.Run(tc.query, func(t *testing.T) {
 			params, _ := url.ParseQuery(tc.query)
