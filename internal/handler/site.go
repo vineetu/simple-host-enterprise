@@ -203,7 +203,8 @@ func (h *SiteHandler) Register(mux *http.ServeMux, authMiddleware, skillVersionM
 	// users.is_admin, checked per handler (listSites below, /admin,
 	// /api/admin/*), never in a separate credential.
 	// listSites intentionally skips RequireRealUser: it has its own IsAdmin
-	// branch that returns all sites (god-mode listing is unambiguous).
+	// check, gating the ?all=1 branch that returns every account's sites
+	// (SIM-329 — the default, even for an admin, is the caller's own).
 	owner := func(next http.Handler) http.Handler {
 		return authMiddleware(skillVersionMiddleware(auth.RequireRealUser(next)))
 	}
@@ -899,6 +900,10 @@ func siteVersionPrefix(username, siteName string, versionNumber int) string {
 	return strings.Join([]string{username, siteName, fmt.Sprintf("v%d", versionNumber)}, "/") + "/"
 }
 
+// listSites serves GET /v1/sites?[query, created_*, updated_*, limit, offset,
+// order, all]. Every caller, including the admin, sees only their own sites
+// by default, newest edited first; ?all=1 is an admin-only switch to every
+// account's sites (SIM-329 parity).
 func (h *SiteHandler) listSites(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r.Context())
 	if user == nil {
@@ -910,10 +915,18 @@ func (h *SiteHandler) listSites(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Silently narrowing a non-admin's all=1 to their own sites would be a
+	// lie about what was returned; refuse it instead.
+	allAccounts := r.URL.Query().Get("all") == "1"
+	if allAccounts && !user.IsAdmin {
+		writeJSON(w, http.StatusForbidden, errorResponse{Error: "admin only"})
+		return
+	}
+
 	var sites []db.Site
 	var err error
 
-	if user.IsAdmin {
+	if allAccounts {
 		sites, err = db.ListAllSites(r.Context(), h.database)
 	} else {
 		sites, err = db.ListSitesByUser(r.Context(), h.database, user.ID)
@@ -941,7 +954,7 @@ func (h *SiteHandler) listSites(w http.ResponseWriter, r *http.Request) {
 	}
 
 	usernameByID := map[string]string{user.ID: user.Username}
-	if user.IsAdmin {
+	if allAccounts {
 		allUsers, err := db.ListAllUsers(r.Context(), h.database)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal server error"})

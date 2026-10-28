@@ -342,7 +342,7 @@ func ListAllSites(ctx context.Context, db *sql.DB) ([]Site, error) {
  COALESCE((SELECT max(created_at) FROM versions v WHERE v.site_id = sites.id), sites.updated_at)
 		FROM sites
 		WHERE deleted_at IS NULL
-		ORDER BY created_at ASC, name ASC
+		ORDER BY updated_at DESC, created_at DESC, name ASC
 	`
 
 	rows, err := db.QueryContext(ctx, query)
@@ -360,7 +360,7 @@ func ListSitesByUser(ctx context.Context, db *sql.DB, userID string) ([]Site, er
  COALESCE((SELECT max(created_at) FROM versions v WHERE v.site_id = sites.id), sites.updated_at)
 		FROM sites
 		WHERE user_id = $1 AND deleted_at IS NULL
-		ORDER BY created_at ASC, name ASC
+		ORDER BY updated_at DESC, created_at DESC, name ASC
 	`
 
 	rows, err := db.QueryContext(ctx, query, userID)

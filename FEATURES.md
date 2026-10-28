@@ -431,11 +431,14 @@ Config names are documented in `docs/configuration.md`; schema in
   for them.
 - **Inventory search.** `list_sites`, `GET /api/collaboration/sites`, and
   `GET /api/sites` accept `query`, `created_after`, `created_before`,
-  `updated_after`, `updated_before`, `limit`, and `offset`. Every query word
-  matches case-insensitively across the name, serving domain, and live content
-  summary. Dates are inclusive RFC3339 timestamps or UTC calendar days.
-  Filters sort by newest deployment, default to 200 results, cap at 500,
-  and allow a zero limit. Without filters, the existing full order remains.
+  `updated_after`, `updated_before`, `order`, `limit`, and `offset`. Every
+  query word matches case-insensitively across the name, serving domain, and
+  live content summary. Dates are inclusive RFC3339 timestamps or UTC calendar
+  days. Default order is newest edited first (`updated_at` desc, then
+  `created_at` desc); `order=created` or `order=name` picks another. Filters
+  default to 200 results, cap at 500, and allow a zero limit. `GET /api/sites`
+  returns the caller's own sites, even for an admin; `?all=1` is an admin-only
+  switch to every account's (403 for anyone else). SIM-329 parity.
   Authorization precedes filtering; owner, member, and viewer roles stay intact.
   Listed/network `search_sites` discovery is unchanged.
   Migration `0061_site_summary.sql` adds `versions.summary` in Postgres.
